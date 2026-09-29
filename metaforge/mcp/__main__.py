@@ -1346,8 +1346,23 @@ async def _bootstrap(
         )
     except Exception as exc:  # noqa: BLE001 — degrade; record_component_selection just absent
         logger.warning("mcp_component_recorder_init_failed", error=str(exc))
+    # FORGE-337: without this the sidecar registers no project resources at
+    # all -- resources/list came back empty while /metaforge:use, :status and
+    # :new all tell the agent to read metaforge://twin/brief/<project_id>.
+    # Registration is conditional on the provider, so the absence was silent:
+    # the resources did not fail, they were never there.
+    brief_provider = None
+    try:
+        from api_gateway.projects.brief_provider import make_brief_provider
+        from api_gateway.projects.routes import get_project_backend
+
+        brief_provider = make_brief_provider(twin, get_project_backend())
+    except Exception as exc:  # noqa: BLE001 — degrade to no resources, loudly
+        logger.warning("mcp_brief_provider_unavailable", error=str(exc))
+
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
+        brief_provider=brief_provider,
         knowledge_service=knowledge_service,
         twin=twin,
         constraint_engine=twin.constraints,

@@ -257,3 +257,75 @@ def test_the_session_scope_is_shown_when_the_call_names_none() -> None:
     project = uuid.uuid4()
     with with_context(context_from_headers({"X-MetaForge-Project": str(project)})):
         assert _effective_project({}) == str(project)
+
+
+# ---------------------------------------------------------------------------
+# Being briefed, rather than being offered a brief (FORGE-337)
+# ---------------------------------------------------------------------------
+
+
+def test_open_returns_the_brief_inline() -> None:
+    """`/metaforge:use` told the agent to read the brief resource, so being
+    briefed depended on the client supporting resources *and* the agent
+    choosing to follow the instruction. An agent that skipped it looked
+    exactly like one that had opened an empty project."""
+    from tool_registry.tools.project.adapter import ProjectServer
+
+    async def provider(kind: str, project_id: str) -> str:
+        assert kind == "brief"
+        return f"# {project_id}\n\nNewest work first."
+
+    server = ProjectServer(brief_provider=provider)
+    server.set_backend(_Backend(_projects()))
+    out = asyncio.run(server.handle_open({"query": "Gimbal"}))
+    assert "Newest work first." in out["brief"]
+
+
+def test_a_deployment_without_a_brief_provider_still_opens() -> None:
+    """No brief is a missing key, not a failed open — and not an empty
+    string, which would read as a project with nothing in it."""
+    server = _server(_projects())
+    out = asyncio.run(server.handle_open({"query": "Gimbal"}))
+    assert "brief" not in out
+    assert out["project"]["name"] == "Gimbal"
+
+
+def test_a_failing_brief_does_not_fail_the_open() -> None:
+    from tool_registry.tools.project.adapter import ProjectServer
+
+    async def provider(kind: str, project_id: str) -> str:
+        raise RuntimeError("twin unreachable")
+
+    server = ProjectServer(brief_provider=provider)
+    server.set_backend(_Backend(_projects()))
+    out = asyncio.run(server.handle_open({"query": "Gimbal"}))
+    assert "brief" not in out
+    assert out["project"]["name"] == "Gimbal"
+
+
+def test_a_blank_brief_is_treated_as_none() -> None:
+    from tool_registry.tools.project.adapter import ProjectServer
+
+    async def provider(kind: str, project_id: str) -> str:
+        return "   "
+
+    server = ProjectServer(brief_provider=provider)
+    server.set_backend(_Backend(_projects()))
+    assert "brief" not in asyncio.run(server.handle_open({"query": "Gimbal"}))
+
+
+def test_the_sidecar_bootstrap_passes_a_brief_provider() -> None:
+    """The ratchet. The sidecar served *no* resources because
+    build_unified_server never forwarded one, and registration is
+    conditional on the provider — so nothing failed, the resources were
+    simply never there."""
+    import inspect
+
+    from metaforge.mcp import server as unified
+
+    assert "brief_provider" in inspect.signature(unified.build_unified_server).parameters
+    entry = inspect.getsource(
+        __import__("metaforge.mcp.__main__", fromlist=["_bootstrap"])._bootstrap
+    )
+    assert "make_brief_provider" in entry
+    assert "brief_provider=brief_provider" in entry
