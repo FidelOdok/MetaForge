@@ -53,6 +53,58 @@ its ceiling is a decision about what to drop, and silently dropping it is
 the failure profiles exist to prevent. An unknown profile name stops the
 server rather than falling back to serving everything.
 
+### "No data" is not a pass
+
+A cross-domain check reports one of three things, not two:
+
+| Status | Meaning |
+|---|---|
+| `pass` | The check ran and the design satisfies it |
+| `fail` | The check ran and the design does not |
+| `no_data` | The check could not run — the thing it inspects is not recorded |
+
+`CrossDomainCheck.passed` is true only for `pass`, so a gate reading it
+treats `no_data` as unsatisfied rather than as success. Whether missing
+data should block is the gate's decision; it cannot make that decision if
+the check has already claimed to pass.
+
+This replaced nine checks that returned `passed=True` whenever the thing
+they inspected was absent (FORGE-361). A project with no work products,
+no mounting holes, no thermal zones, no connectors, no weight budget and
+no power figures scored a clean cross-domain sweep — the emptiest project
+looked like the best one.
+
+Two of them computed a verdict from absence rather than skipping: a PCB
+with no recorded dimensions became 0×0mm and fitted inside any enclosure,
+and components with no recorded weight contributed nothing to the budget
+they were being checked against. A `no_data` result now names the fields
+it is missing, because "no data" is only useful if it says which.
+
+### Grounding: citing what actually happened
+
+Every `tools/call` response carries a reference in `_meta`:
+
+```json
+{
+  "content": [{"type": "text", "text": "{\"node\": \"n-1\"}"}],
+  "isError": false,
+  "_meta": {"callId": "7a619373979b4216"}
+}
+```
+
+The same id is recorded against the action in the agent session, so a
+reply claiming *"I committed the geometry"* can name a call id — and that
+id either appears in the session timeline or the claim is unsupported.
+Without it, a grounded answer and an invented one read identically: both
+are prose, and a reviewer has no way to tell which is which.
+
+Failed calls get a reference too. An agent claiming it *tried* something
+is as worth checking as one claiming it succeeded.
+
+The id lives in `_meta`, not inside the text payload — the text is the
+tool's own output, and burying a protocol-level id in it would make every
+adapter's result schema wrong.
+
 ### Approval-held writes
 
 A tool that writes is held for a human when the request comes from a

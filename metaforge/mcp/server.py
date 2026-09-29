@@ -27,6 +27,7 @@ import re
 import time
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import structlog
 
@@ -424,12 +425,19 @@ class UnifiedMcpServer:
         """
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {}) or {}
+        # FORGE-362: every call gets a reference the reply can cite. The same
+        # id goes into the session record, so "I committed the geometry" can
+        # be checked against something that actually happened rather than
+        # taken on the model's word.
+        call_id = uuid4().hex[:16]
         try:
             # Forward under ``arguments`` (not ``parameters``) — that's
             # the key ``tool_registry.mcp_server.handlers.handle_tool_call``
             # reads. Sending ``parameters`` silently dropped every arg
             # and broke every spec-compliant client (Claude Code etc.).
-            result = await self._tool_call({"tool_id": tool_name, "arguments": arguments})
+            result = await self._tool_call(
+                {"tool_id": tool_name, "arguments": arguments, "_call_id": call_id}
+            )
         except (ToolNotFoundError, ToolHandlerError):
             # Re-raise so the outer handler emits a JSON-RPC error
             # envelope. The MCP spec also accepts isError=true content
@@ -449,6 +457,11 @@ class UnifiedMcpServer:
                 }
             ],
             "isError": False,
+            # The reference lives in `_meta` rather than inside the text
+            # payload: the text is the tool's own output and belongs to the
+            # tool, and burying a protocol-level id in it would make every
+            # adapter's schema wrong.
+            "_meta": {"callId": call_id},
         }
 
     # ------------------------------------------------------------------
@@ -527,6 +540,7 @@ class UnifiedMcpServer:
 
         tool_id = params.get("tool_id", "")
         arguments = params.get("arguments", {}) or {}
+        call_id = params.get("_call_id") or uuid4().hex[:16]
         t0 = time.monotonic()
         try:
             result = await self._dispatch_tool_call(params)
@@ -537,6 +551,7 @@ class UnifiedMcpServer:
                 status="error",
                 duration_ms=(time.monotonic() - t0) * 1000,
                 error=exc.details,
+                call_id=call_id,
             )
             raise
         await self._capture.on_tool_call(
@@ -545,6 +560,7 @@ class UnifiedMcpServer:
             status="ok",
             duration_ms=(time.monotonic() - t0) * 1000,
             result=result,
+            call_id=call_id,
         )
         return result
 
@@ -659,7 +675,11 @@ class UnifiedMcpServer:
         """Route ``tool/call`` to the adapter that owns ``tool_id``."""
         tool_id = self._resolve_tool_id(params.get("tool_id", ""))
         adapter = self._tool_index[tool_id]
-        params = {**params, "tool_id": tool_id}
+        # `_call_id` is protocol bookkeeping, not an argument. Adapters
+        # validate what they are given, and an unexpected key is exactly the
+        # kind of thing a strict schema rejects.
+        params = {k: v for k, v in params.items() if k != "_call_id"}
+        params["tool_id"] = tool_id
         await self._authorise(tool_id, params.get("arguments") or {})
 
         # Commit-by-reference: fill a commit_geometry call's step_base64 from the
