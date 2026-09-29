@@ -70,6 +70,8 @@ class TwinServer(McpToolServer):
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
         parameter_optimizer: Any = None,
+        device_instance_registrar: Any = None,
+        measurement_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -249,6 +251,18 @@ class TwinServer(McpToolServer):
         # keeps tool_registry free of twin_core.prediction/tool_registry.
         # tools.cadquery imports.
         self._parameter_optimizer = parameter_optimizer
+        # FORGE-321: an injected async ``register(...)``
+        # (make_device_instance_registrar) -- persists a DeviceInstance and
+        # an optional INSTANCE_OF edge to the design revision it was built
+        # from. Same injection seam as every recorder above.
+        self._device_instance_registrar = device_instance_registrar
+        # FORGE-321: an injected async ``record(...)``
+        # (make_measurement_recorder) -- appends a real measurement to an
+        # interface quantity, links the measuring DeviceInstance via
+        # MEASURED_BY, and (when a predicted value is available) records
+        # the residual for calibration. Same injection seam as every
+        # recorder above.
+        self._measurement_recorder = measurement_recorder
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -300,6 +314,10 @@ class TwinServer(McpToolServer):
             self._register_attempt_promotion()
         if parameter_optimizer is not None:
             self._register_optimize_parameter()
+        if device_instance_registrar is not None:
+            self._register_device_instance_registrar()
+        if measurement_recorder is not None:
+            self._register_measurement_recorder()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4007,4 +4025,204 @@ class TwinServer(McpToolServer):
                 [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
             ),
             record_decision=bool(record_decision),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.register_device_instance (FORGE-321)
+    # ------------------------------------------------------------------
+
+    def _register_device_instance_registrar(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.register_device_instance",
+                adapter_id="twin",
+                name="Register Device Instance",
+                description=(
+                    "Register a specific manufactured unit (serial-number-level) of a "
+                    "product as a DeviceInstance (target lifecycle spec App. B REALISE, "
+                    "step 11). Optionally links it via an INSTANCE_OF edge to the design "
+                    "revision (a WorkProduct -- CAD assembly, robot_description, ...) it "
+                    "was built from, when 'design_revision_ref' resolves to one. "
+                    "'product_id' is a free-text identifier, not assumed to be a graph ref."
+                ),
+                capability="twin_device_instance",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "serial_number": {"type": "string"},
+                        "product_id": {"type": "string"},
+                        "firmware_version": {"type": "string"},
+                        "hardware_revision": {"type": "string"},
+                        "manufactured_at": {
+                            "type": "string",
+                            "description": "ISO-8601 timestamp.",
+                        },
+                        "provisioned_at": {
+                            "type": "string",
+                            "description": "ISO-8601 timestamp.",
+                        },
+                        "design_revision_ref": {
+                            "type": "string",
+                            "description": (
+                                "Name or id of the WorkProduct this unit was built from. "
+                                "Optional -- omit when no born-digital design record exists."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "metadata": {"type": "object"},
+                    },
+                    "required": ["serial_number", "product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "serial_number": {"type": "string"},
+                        "product_id": {"type": "string"},
+                        "global_asset_id": {"type": "string"},
+                        "design_revision_id": {"type": ["string", "null"]},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=30),
+            ),
+            handler=self.register_device_instance,
+        )
+
+    async def register_device_instance(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        serial_number = arguments.get("serial_number")
+        if not serial_number or not isinstance(serial_number, str):
+            raise ValueError("twin.register_device_instance: 'serial_number' is required")
+        product_id = arguments.get("product_id")
+        if not product_id or not isinstance(product_id, str):
+            raise ValueError("twin.register_device_instance: 'product_id' is required")
+        metadata = arguments.get("metadata")
+        return await self._device_instance_registrar(
+            serial_number=serial_number,
+            product_id=product_id,
+            firmware_version=arguments.get("firmware_version", ""),
+            hardware_revision=arguments.get("hardware_revision", ""),
+            manufactured_at=arguments.get("manufactured_at"),
+            provisioned_at=arguments.get("provisioned_at"),
+            design_revision_ref=arguments.get("design_revision_ref"),
+            project_id=arguments.get("project_id"),
+            metadata=metadata if isinstance(metadata, dict) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.record_measurement (FORGE-321)
+    # ------------------------------------------------------------------
+
+    def _register_measurement_recorder(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_measurement",
+                adapter_id="twin",
+                name="Record Measurement",
+                description=(
+                    "Record a real-world measurement against an interface quantity "
+                    "(target lifecycle spec App. B REALISE/LEARN, step 11) -- e.g. a "
+                    "measured tip deflection on a built unit. Appends the measurement to "
+                    "the named metric on the {from_component, to_component} interface of "
+                    "a system_architecture work product (explicit 'work_product_id', or "
+                    "the project's one such document), and links the measuring "
+                    "DeviceInstance via a MEASURED_BY edge. When 'predicted_value' is "
+                    "supplied (e.g. from a prior twin.evaluate_metric call), also records "
+                    "the residual for calibration -- future twin.evaluate_metric calls for "
+                    "that metric/tier use the resulting calibrated band once enough "
+                    "measurements exist, narrowing it over the fixed prior."
+                ),
+                capability="twin_measurement",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "device_instance_id": {"type": "string"},
+                        "from_component": {"type": "string"},
+                        "to_component": {"type": "string"},
+                        "metric": {"type": "string"},
+                        "value": {"type": "number"},
+                        "unit": {"type": "string", "description": "Default 'mm'."},
+                        "source": {"type": "string"},
+                        "timestamp": {"type": "string", "description": "ISO-8601 timestamp."},
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "system_architecture work product id.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": (
+                                "Used to find the project's system_architecture document "
+                                "when 'work_product_id' is omitted."
+                            ),
+                        },
+                        "predicted_value": {
+                            "type": "number",
+                            "description": (
+                                "The predicted value this measurement should be compared "
+                                "against (e.g. from twin.evaluate_metric). Omit to record "
+                                "the measurement without computing a calibration residual."
+                            ),
+                        },
+                        "predicted_tier": {
+                            "type": "integer",
+                            "description": "Tier the prediction came from. Default 0.",
+                        },
+                    },
+                    "required": [
+                        "device_instance_id",
+                        "from_component",
+                        "to_component",
+                        "metric",
+                        "value",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {"type": "string"},
+                        "interface": {"type": "string"},
+                        "metric": {"type": "string"},
+                        "value": {"type": "number"},
+                        "residual": {"type": "number"},
+                        "evidence_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=30),
+            ),
+            handler=self.record_measurement,
+        )
+
+    async def record_measurement(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        device_instance_id = arguments.get("device_instance_id")
+        if not device_instance_id or not isinstance(device_instance_id, str):
+            raise ValueError("twin.record_measurement: 'device_instance_id' is required")
+        from_component = arguments.get("from_component")
+        to_component = arguments.get("to_component")
+        if not from_component or not to_component:
+            raise ValueError(
+                "twin.record_measurement: 'from_component' and 'to_component' are required"
+            )
+        metric = arguments.get("metric")
+        if not metric or not isinstance(metric, str):
+            raise ValueError("twin.record_measurement: 'metric' is required")
+        value = arguments.get("value")
+        if not isinstance(value, (int, float)):
+            raise ValueError("twin.record_measurement: 'value' is required (number)")
+        predicted_value = arguments.get("predicted_value")
+        return await self._measurement_recorder(
+            device_instance_id=device_instance_id,
+            from_component=from_component,
+            to_component=to_component,
+            metric=metric,
+            value=float(value),
+            unit=arguments.get("unit", "mm"),
+            source=arguments.get("source", ""),
+            timestamp=arguments.get("timestamp", ""),
+            work_product_id=arguments.get("work_product_id"),
+            project_id=arguments.get("project_id"),
+            predicted_value=(
+                float(predicted_value) if isinstance(predicted_value, (int, float)) else None
+            ),
+            predicted_tier=int(arguments.get("predicted_tier", 0)),
         )

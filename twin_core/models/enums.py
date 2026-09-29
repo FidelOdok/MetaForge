@@ -236,3 +236,12 @@ class EdgeType(StrEnum):
     # record, not a duplicate of it. How MANY of this instance the parent
     # uses is the parent's own CONTAINS edge quantity, not this edge.
     INSTANCE_OF = "instance_of"
+    # FORGE-321: DeviceInstance --MEASURED_BY--> the WorkProduct (a
+    # SYSTEM_ARCHITECTURE doc today) whose InterfaceQuantity.measured list
+    # a real-world measurement from this unit was appended to. An
+    # InterfaceQuantity has no node id of its own to point at directly
+    # (embedded in ArchInterface.quantities, per that module's own
+    # docstring), so the edge names the document that holds it; the
+    # measurement's own metadata (interface/metric) disambiguates which
+    # quantity within it.
+    MEASURED_BY = "measured_by"

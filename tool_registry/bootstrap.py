@@ -275,6 +275,8 @@ async def bootstrap_tool_registry(
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
     parameter_optimizer: Any = None,
+    device_instance_registrar: Any = None,
+    measurement_recorder: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -404,6 +406,14 @@ async def bootstrap_tool_registry(
             factor constraints, against a CAD work product's real geometry.
             ``None`` skips registration (same pattern as
             ``document_recorder``).
+        device_instance_registrar: Optional async ``register(...)``
+            (make_device_instance_registrar, FORGE-321). When supplied,
+            registers ``twin.register_device_instance``. ``None`` skips
+            registration (same pattern as ``document_recorder``).
+        measurement_recorder: Optional async ``record(...)``
+            (make_measurement_recorder, FORGE-321). When supplied,
+            registers ``twin.record_measurement``. ``None`` skips
+            registration (same pattern as ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -583,6 +593,8 @@ async def bootstrap_tool_registry(
                     sensitivity_ranker=sensitivity_ranker,
                     promotion_attempter=promotion_attempter,
                     parameter_optimizer=parameter_optimizer,
+                    device_instance_registrar=device_instance_registrar,
+                    measurement_recorder=measurement_recorder,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
