@@ -19,6 +19,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from api_gateway.requirement_intelligence.linter import RequirementLinter
+from api_gateway.requirement_intelligence.matrix import (
+    RequirementMatrixRow,
+    build_requirement_matrix,
+)
 from api_gateway.requirement_intelligence.requirement_author import RequirementAuthorAgent
 from api_gateway.requirement_intelligence.set_quality import (
     RequirementSetQualityReport,
@@ -54,6 +58,24 @@ async def get_requirement_quality(
     with tracer.start_as_current_span("requirements.quality") as span:
         span.set_attribute("requirements.product_type", product_type)
         return await build_requirement_set_quality_report(_twin, pid, product_type)
+
+
+class RequirementMatrixResponse(BaseModel):
+    rows: list[RequirementMatrixRow]
+
+
+@router.get("/matrix", response_model=RequirementMatrixResponse)
+async def get_requirement_matrix(project_id: str) -> RequirementMatrixResponse:
+    """FORGE-318: requirements x claims x evidence, one row per real
+    requirement -- status (pass/uncertain/fail/no_data/stale) derived live
+    from current claim + evidence staleness state, never cached."""
+    try:
+        pid = UUID(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid project_id") from exc
+    with tracer.start_as_current_span("requirements.matrix"):
+        rows = await build_requirement_matrix(_twin, pid)
+        return RequirementMatrixResponse(rows=rows)
 
 
 class FixRequirementResponse(BaseModel):

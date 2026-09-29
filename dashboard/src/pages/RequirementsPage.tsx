@@ -1,10 +1,21 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
 import { useToast } from '../components/ui/Toast';
 import { useActiveProject } from '../hooks/use-active-project';
-import { useRequirementQuality, useProposeRequirementFix } from '../hooks/use-requirements';
-import type { PassFail, RequirementRecord } from '../types/requirements';
+import {
+  useRequirementMatrix,
+  useRequirementQuality,
+  useProposeRequirementFix,
+} from '../hooks/use-requirements';
+import type {
+  EvidenceSummary,
+  PassFail,
+  RequirementMatrixRow,
+  RequirementMatrixStatus,
+  RequirementRecord,
+} from '../types/requirements';
 
 const PRODUCT_TYPES = [
   { value: 'generic', label: 'Generic' },
@@ -102,6 +113,185 @@ function RequirementRow({ requirement }: { requirement: RequirementRecord }) {
   );
 }
 
+const STATUS_VARIANT: Record<RequirementMatrixStatus, 'success' | 'warning' | 'error' | 'default' | 'info'> = {
+  pass: 'success',
+  uncertain: 'warning',
+  fail: 'error',
+  no_data: 'default',
+  stale: 'info',
+};
+
+function formatNumber(n: number | null): string {
+  return n === null ? '—' : n.toFixed(3).replace(/\.?0+$/, '') || '0';
+}
+
+function EvidenceDetail({ evidence }: { evidence: EvidenceSummary }) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-3 rounded px-2 py-1 text-xs"
+      style={{ background: 'var(--mf-c-191b22)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <span className="font-mono text-on-surface-variant">{evidence.method || 'unknown method'}</span>
+      {evidence.tier !== null && <span className="text-on-surface-variant">tier {evidence.tier}</span>}
+      <span className="text-on-surface">
+        value {formatNumber(evidence.value)} / limit {formatNumber(evidence.limit)}
+      </span>
+      {evidence.margin !== null && (
+        <span className="text-on-surface-variant">margin {formatNumber(evidence.margin)}</span>
+      )}
+      <Badge variant={evidence.staleness === 'current' || evidence.staleness === 'revalidated' ? 'success' : 'warning'}>
+        {evidence.staleness}
+      </Badge>
+    </div>
+  );
+}
+
+function MatrixRow({ row }: { row: RequirementMatrixRow }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <tr
+        className="hover:bg-[var(--mf-c-282a30)] cursor-default"
+        style={{ borderBottom: expanded ? 'none' : '1px solid var(--mf-r-65-72-90-0p1)' }}
+      >
+        <td className="px-3 py-2 text-xs text-on-surface" style={{ maxWidth: '320px' }}>
+          <div className="font-medium">{row.requirementName}</div>
+          <div className="text-on-surface-variant" style={{ fontSize: '11px' }}>
+            {row.limitText}
+          </div>
+        </td>
+        <td className="px-2 text-center">
+          <Badge variant={STATUS_VARIANT[row.status]}>{row.status}</Badge>
+        </td>
+        <td className="px-3 py-2 text-xs text-on-surface-variant">{row.detail}</td>
+        <td className="px-2 text-center">
+          {row.evidence.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+            >
+              {row.evidence.length} evidence {expanded ? '▲' : '▼'}
+            </button>
+          ) : (
+            <span className="text-on-surface-variant text-xs">—</span>
+          )}
+        </td>
+        <td className="px-3 text-right">
+          <Link to="/twin" className="text-xs text-tertiary hover:underline">
+            Structure
+          </Link>
+        </td>
+      </tr>
+      {expanded && (
+        <tr style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p1)' }}>
+          <td colSpan={5} className="px-3 pb-2">
+            <div className="flex flex-col gap-1">
+              {row.evidence.map((e) => (
+                <EvidenceDetail key={e.id} evidence={e} />
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function exportMatrixCsv(rows: RequirementMatrixRow[]) {
+  const header = ['Requirement', 'Limit', 'Status', 'Detail', 'Evidence Count'];
+  const csvRows = rows.map((r) => [r.requirementName, r.limitText, r.status, r.detail, String(r.evidence.length)]);
+  const csv = [header, ...csvRows].map((r) => r.map((v) => `"${v}"`).join(',')).join('\n');
+  downloadFile(csv, 'requirement-matrix.csv', 'text/csv');
+}
+
+function exportMatrixMd(rows: RequirementMatrixRow[]) {
+  const header = '| Requirement | Limit | Status | Detail |\n|---|---|---|---|';
+  const body = rows
+    .map((r) => `| ${r.requirementName} | ${r.limitText} | ${r.status} | ${r.detail} |`)
+    .join('\n');
+  downloadFile(`${header}\n${body}\n`, 'requirement-matrix.md', 'text/markdown');
+}
+
+function downloadFile(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function RequirementMatrixSection({ projectId }: { projectId?: string }) {
+  const { data: matrix, isLoading } = useRequirementMatrix(projectId);
+  const rows = matrix?.rows ?? [];
+
+  if (!isLoading && rows.length === 0) return null;
+
+  return (
+    <div className="mb-6" data-testid="requirements-matrix">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+          Evidence matrix
+        </h2>
+        {rows.length > 0 && (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => exportMatrixCsv(rows)}
+              className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+            >
+              Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => exportMatrixMd(rows)}
+              className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+            >
+              Export MD
+            </button>
+          </div>
+        )}
+      </div>
+      {!isLoading && (
+        <div
+          className="rounded-lg overflow-hidden overflow-x-auto"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                <th className="px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-left" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  Requirement
+                </th>
+                <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-center" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  Status
+                </th>
+                <th className="px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-left" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  Detail
+                </th>
+                <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-center" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  Evidence
+                </th>
+                <th style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }} aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <MatrixRow key={row.requirementId} row={row} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RequirementsPage() {
   const { activeProjectId } = useActiveProject();
   const [productType, setProductType] = useState('generic');
@@ -139,6 +329,8 @@ export function RequirementsPage() {
           ))}
         </select>
       </div>
+
+      <RequirementMatrixSection projectId={activeProjectId ?? undefined} />
 
       {completeness && (
         <div

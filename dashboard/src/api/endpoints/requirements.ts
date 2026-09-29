@@ -1,11 +1,17 @@
 import apiClient from '../client';
-import type { RequirementFixProposal, RequirementSetQualityReport } from '../../types/requirements';
+import type {
+  RequirementFixProposal,
+  RequirementMatrixReport,
+  RequirementSetQualityReport,
+} from '../../types/requirements';
 
 const EMPTY_REPORT: RequirementSetQualityReport = {
   requirements: [],
   conflicts: [],
   completeness: { productType: 'generic', covered: [], missing: [] },
 };
+
+const EMPTY_MATRIX: RequirementMatrixReport = { rows: [] };
 
 export async function getRequirementQuality(
   projectId?: string,
@@ -19,6 +25,18 @@ export async function getRequirementQuality(
     return data;
   } catch {
     return EMPTY_REPORT;
+  }
+}
+
+export async function getRequirementMatrix(projectId?: string): Promise<RequirementMatrixReport> {
+  if (!projectId) return EMPTY_MATRIX;
+  try {
+    const { data } = await apiClient.get<RequirementMatrixReport>('/requirements/matrix', {
+      params: { project_id: projectId },
+    });
+    return data;
+  } catch {
+    return EMPTY_MATRIX;
   }
 }
 

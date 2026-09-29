@@ -40,3 +40,32 @@ export interface RequirementFixProposal {
   rationale: string;
   conclusions: string[];
 }
+
+/** One piece of evidence cited by a claim against a requirement (FORGE-318). */
+export interface EvidenceSummary {
+  id: string;
+  method: string;
+  tier: number | null;
+  value: number | null;
+  limit: number | null;
+  margin: number | null;
+  staleness: string;
+}
+
+export type RequirementMatrixStatus = 'pass' | 'uncertain' | 'fail' | 'no_data' | 'stale';
+
+/** One requirement's evidence-backed status (FORGE-318): requirements x
+ * claims x evidence, derived live -- never a stored, driftable status. */
+export interface RequirementMatrixRow {
+  requirementId: string;
+  requirementName: string;
+  limitText: string;
+  status: RequirementMatrixStatus;
+  detail: string;
+  artefactIds: string[];
+  evidence: EvidenceSummary[];
+}
+
+export interface RequirementMatrixReport {
+  rows: RequirementMatrixRow[];
+}

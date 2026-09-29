@@ -5,6 +5,7 @@ import { render, screen } from '../../test/test-utils';
 const mockUseProposeRequirementFix = vi.fn();
 vi.mock('../../hooks/use-requirements', () => ({
   useRequirementQuality: vi.fn(),
+  useRequirementMatrix: vi.fn(),
   useProposeRequirementFix: () => mockUseProposeRequirementFix(),
 }));
 
@@ -19,9 +20,10 @@ vi.mock('../../hooks/use-active-project', () => ({
 }));
 
 import { RequirementsPage } from '../RequirementsPage';
-import { useRequirementQuality } from '../../hooks/use-requirements';
+import { useRequirementMatrix, useRequirementQuality } from '../../hooks/use-requirements';
 
 const mockUseRequirementQuality = vi.mocked(useRequirementQuality);
+const mockUseRequirementMatrix = vi.mocked(useRequirementMatrix);
 
 const REPORT = {
   requirements: [
@@ -56,12 +58,59 @@ const REPORT = {
   completeness: { productType: 'generic', covered: ['mechanical'], missing: ['safety'] },
 };
 
+const MATRIX_REPORT = {
+  rows: [
+    {
+      requirementId: 'r1',
+      requirementName: 'moving_mass_budget',
+      limitText: '<= 4.5 kg',
+      status: 'fail' as const,
+      detail: 'value 6.78 exceeds limit 4.5 (margin -2.28)',
+      artefactIds: ['a1'],
+      evidence: [
+        {
+          id: 'e1',
+          method: 'twin.rank_sensitivity',
+          tier: null,
+          value: 6.78,
+          limit: 4.5,
+          margin: -2.28,
+          staleness: 'current',
+        },
+      ],
+    },
+    {
+      requirementId: 'r2',
+      requirementName: 'deflection',
+      limitText: '<= 0.5mm',
+      status: 'pass' as const,
+      detail: 'value 0.05 within limit 0.5 (margin 0.45)',
+      artefactIds: ['a2'],
+      evidence: [
+        {
+          id: 'e2',
+          method: 'twin.evaluate_metric',
+          tier: 0,
+          value: 0.05,
+          limit: 0.5,
+          margin: 0.45,
+          staleness: 'current',
+        },
+      ],
+    },
+  ],
+};
+
 describe('RequirementsPage', () => {
   beforeEach(() => {
     mockUseProposeRequirementFix.mockReturnValue({
       mutate: vi.fn(),
       isPending: false,
     });
+    mockUseRequirementMatrix.mockReturnValue({
+      data: { rows: [] },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementMatrix>);
   });
 
   it('shows loading state', () => {
@@ -141,5 +190,66 @@ describe('RequirementsPage', () => {
 
     expect(mutate).toHaveBeenCalledWith('r2', expect.anything());
     expect(screen.getByText(/at least 0.5 m\/s/)).toBeInTheDocument();
+  });
+
+  it('renders the evidence matrix with status badges', () => {
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    mockUseRequirementMatrix.mockReturnValue({
+      data: MATRIX_REPORT,
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementMatrix>);
+    render(<RequirementsPage />);
+    const matrix = screen.getByTestId('requirements-matrix');
+    expect(matrix).toHaveTextContent('moving_mass_budget');
+    expect(matrix).toHaveTextContent('fail');
+    expect(matrix).toHaveTextContent('deflection');
+    expect(matrix).toHaveTextContent('pass');
+  });
+
+  it('expands evidence details on click', async () => {
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    mockUseRequirementMatrix.mockReturnValue({
+      data: MATRIX_REPORT,
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementMatrix>);
+    const user = userEvent.setup();
+    render(<RequirementsPage />);
+
+    expect(screen.queryByText('twin.rank_sensitivity')).not.toBeInTheDocument();
+    // Both matrix rows have exactly 1 evidence entry -- the first button is
+    // moving_mass_budget's (declared first in MATRIX_REPORT).
+    const evidenceButtons = screen.getAllByRole('button', { name: /1 evidence/ });
+    await user.click(evidenceButtons[0]!);
+    expect(screen.getByText('twin.rank_sensitivity')).toBeInTheDocument();
+  });
+
+  it('links each matrix row to the Structure tab', () => {
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    mockUseRequirementMatrix.mockReturnValue({
+      data: MATRIX_REPORT,
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementMatrix>);
+    render(<RequirementsPage />);
+    const links = screen.getAllByRole('link', { name: 'Structure' });
+    expect(links.length).toBe(2);
+    expect(links[0]).toHaveAttribute('href', '/twin');
+  });
+
+  it('does not render the matrix section when there are no rows', () => {
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    render(<RequirementsPage />);
+    expect(screen.queryByTestId('requirements-matrix')).not.toBeInTheDocument();
   });
 });

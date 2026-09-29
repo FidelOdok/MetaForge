@@ -12,8 +12,8 @@ from api_gateway.twin.claim_recorder import make_claim_recorder
 from api_gateway.twin.evidence_recorder import make_evidence_recorder
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
-from twin_core.consistency.claims import ClaimStatus, evaluate_claim
-from twin_core.consistency.staleness import StalenessEngine
+from twin_core.consistency.claims import ClaimStatus, evaluate_claim, list_claims_for_requirement
+from twin_core.consistency.staleness import StalenessEngine, StalenessStatus
 from twin_core.models.constraint import Constraint
 from twin_core.models.enums import ConstraintSeverity, EdgeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
@@ -233,6 +233,81 @@ class TestClaimStatus:
         edges = await twin.get_edges(UUID(fresh_ev["node_id"]), edge_type=EdgeType.SUPERSEDES)
         assert len(edges) == 1
         assert edges[0].target_id == UUID(stale_ev["node_id"])
+
+
+class TestListClaimsForRequirement:
+    """FORGE-318: the one piece genuinely missing for a requirement matrix
+    -- "what claims exist for this requirement", not just "evaluate this
+    one known (artefact, requirement) pair"."""
+
+    async def test_no_claims_returns_empty_list(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id)
+        claims = await list_claims_for_requirement(twin, req.id)
+        assert claims == []
+
+    async def test_finds_a_single_recorded_claim(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id)
+        artefact = await _seed_artefact(twin, project_id)
+        record_claim = make_claim_recorder(twin)
+        await record_claim(
+            requirement_ref=req.name, artefact_ref=artefact.name, project_id=project_id
+        )
+        claims = await list_claims_for_requirement(twin, req.id)
+        assert len(claims) == 1
+        assert claims[0].artefact_id == artefact.id
+        assert claims[0].requirement_id == req.id
+
+    async def test_finds_multiple_claims_from_different_artefacts(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id)
+        artefact_a = await _seed_artefact(twin, project_id, name="leg_a")
+        artefact_b = await _seed_artefact(twin, project_id, name="leg_b")
+        record_claim = make_claim_recorder(twin)
+        await record_claim(
+            requirement_ref=req.name, artefact_ref=artefact_a.name, project_id=project_id
+        )
+        await record_claim(
+            requirement_ref=req.name, artefact_ref=artefact_b.name, project_id=project_id
+        )
+        claims = await list_claims_for_requirement(twin, req.id)
+        assert {c.artefact_id for c in claims} == {artefact_a.id, artefact_b.id}
+
+    async def test_status_reflects_live_evidence_state(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id)
+        artefact = await _seed_artefact(twin, project_id)
+        record_evidence = make_evidence_recorder(twin)
+        ev = await record_evidence(
+            evidence_type="calculation",
+            producer={"tool": "x"},
+            inputs={},
+            result={"a": 1},
+            project_id=project_id,
+        )
+        record_claim = make_claim_recorder(twin)
+        await record_claim(
+            requirement_ref=req.name,
+            artefact_ref=artefact.name,
+            evidence_refs=[ev["node_id"]],
+            project_id=project_id,
+        )
+        claims = await list_claims_for_requirement(twin, req.id)
+        assert claims[0].status == ClaimStatus.SUPPORTED
+
+        await StalenessEngine(twin).set_status(
+            "engineering_entity", UUID(ev["node_id"]), StalenessStatus.STALE
+        )
+        claims = await list_claims_for_requirement(twin, req.id)
+        assert claims[0].status == ClaimStatus.UNSUPPORTED
+
+    async def test_ignores_edges_from_unrelated_requirements(self, twin, project_id):
+        req_a = await _seed_requirement(twin, project_id, name="req_a")
+        req_b = await _seed_requirement(twin, project_id, name="req_b")
+        artefact = await _seed_artefact(twin, project_id)
+        record_claim = make_claim_recorder(twin)
+        await record_claim(
+            requirement_ref=req_a.name, artefact_ref=artefact.name, project_id=project_id
+        )
+        claims_b = await list_claims_for_requirement(twin, req_b.id)
+        assert claims_b == []
 
 
 class TestAdapterHandler:

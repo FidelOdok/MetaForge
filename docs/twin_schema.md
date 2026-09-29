@@ -642,6 +642,44 @@ Every ranking is recorded as `twin.record_evidence` (`evidence_type="calculation
 
 *Source: `twin_core/prediction/sensitivity.py`, `api_gateway/twin/sensitivity.py`*
 
+### 2.15 Evidence-Backed Requirement Matrix (FORGE-318)
+
+Not a node type -- a join, computed live via `GET /v1/requirements/matrix`, over requirements (Constraint), claims (`twin_core.consistency.claims`, FORGE-65), and the Evidence those claims cite.
+
+```python
+class EvidenceSummary(BaseModel):
+    id: str
+    method: str          # producer.tool
+    tier: int | None
+    value: float | None
+    limit: float | None
+    margin: float | None
+    staleness: str        # current/stale/superseded/invalid/revalidated
+
+class RequirementMatrixRow(BaseModel):
+    requirementId: str
+    requirementName: str
+    limitText: str         # the requirement's own recorded text, e.g. "<= 4.5 kg"
+    status: str            # "pass" | "uncertain" | "fail" | "no_data" | "stale"
+    detail: str
+    artefactIds: list[str]
+    evidence: list[EvidenceSummary]
+```
+
+`twin_core.consistency.claims.list_claims_for_requirement` (new) is the one piece that was genuinely missing: `evaluate_claim` (FORGE-65) only ever evaluated a single KNOWN `(artefact, requirement)` pair; the matrix needs "what claims exist for this requirement" as its own lookup, which it gets by walking `requirement_id`'s incoming `CLAIM_EDGE_KIND` edges and re-using `evaluate_claim` per match (same live-computed status, no parallel logic).
+
+Status is derived fresh on every call, same "never a stored, driftable boolean" discipline as `evaluate_claim` itself:
+
+- `no_data` -- no claim recorded against the requirement at all.
+- `stale` -- a claim's cited evidence includes at least one entity whose current staleness is STALE/SUPERSEDED/INVALID, flagged even when the claim itself is still SUPPORTED by other current evidence (the ticket's own "flags stale evidence after a change" wording).
+- `fail` / `uncertain` / `pass` -- claim SUPPORTED, no stale evidence; derived from the most current evidence's own margin. Reads either evidence result shape this codebase produces: FORGE-315's tier-0/tier-2 (`value_mm`/`limit_mm`/`margin_mm`/`escalated`) or FORGE-317's sensitivity ranking (`baseline_value`/`limit`/`baseline_margin`, no `escalated` concept of its own). Negative margin is `fail`; a tier-0 result with `escalated=true` is `uncertain` (too close to call without a higher-fidelity check, FORGE-315's own semantics); otherwise `pass`.
+
+FORGE-318 also closed a small gap in FORGE-315's own tier-2 evidence: the raw `calculix.run_fea` output had no `tier` key of its own (only inferable from `producer.tool` string matching) -- `api_gateway/twin/metric_evaluator.py` now persists `{"tier": 2, "metric": ..., **fea_result}` for tier-2 Evidence, so the matrix (and any future consumer) reads `tier` directly rather than guessing.
+
+Dashboard: `RequirementsPage.tsx` gained an "Evidence matrix" section (below the existing FORGE-257 quality table, not a new page) with per-row status badges, an expandable evidence-detail row (method/tier/value/limit/margin/staleness), a client-side CSV/MD export (mirrors `BomPage.tsx`'s own `handleExportCsv` pattern -- no backend export route needed), and a Structure-tab link per row. That link is a plain `/twin` link, not a per-node deep-link: `TwinViewerPage.tsx` does support one (`?node=<hierarchy_node_id>`), but the matrix's own `artefactIds` are WorkProduct ids, not HierarchyNode ids -- no Constraint-to-HierarchyNode mapping exists yet to resolve one from the other, so this ticket does not fabricate that link; a real one is a separable follow-up.
+
+*Source: `twin_core/consistency/claims.py`, `api_gateway/requirement_intelligence/matrix.py`, `api_gateway/requirement_intelligence/routes.py`, `dashboard/src/pages/RequirementsPage.tsx`*
+
 ---
 
 ## 3. Edge Types
