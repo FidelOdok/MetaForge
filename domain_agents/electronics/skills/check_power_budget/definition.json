@@ -1,1 +1,19 @@
-{}
+{
+  "name": "check_power_budget",
+  "version": "0.1.0",
+  "domain": "electronics",
+  "agent": "electronics",
+  "description": "Check a design's power budget: verify the supply rails can meet the aggregate load with margin, and flag any rail that is over budget.",
+  "phase": 1,
+  "tools_required": [],
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": true,
+  "tags": [
+    "power",
+    "budget",
+    "rails",
+    "electronics",
+    "validation"
+  ]
+}

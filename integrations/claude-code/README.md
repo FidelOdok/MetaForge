@@ -20,6 +20,10 @@ Claude Code asks for your gateway URL on first enable. The default suits a gatew
 - `/metaforge:gate`
 - `/metaforge:doctor`
 
+## Skills
+
+29 engineering skills are bundled — the same procedures the MetaForge agents follow, with their metadata taken from each skill's `definition.json`.
+
 ## Writes wait for a human
 
 A tool that writes is held for approval when the gateway sees you as a remote caller. Held calls appear on the dashboard's Approvals page. A refusal comes back naming which happened — `rejected`, `timed_out` or `not_configured` — and none is worth retrying without a person doing something first.

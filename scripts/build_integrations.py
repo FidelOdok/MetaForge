@@ -143,6 +143,77 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
     }
 
 
+def write_skills(root: Path) -> list[str]:
+    """Copy the domain skills in, with the frontmatter a harness needs.
+
+    The frontmatter is *generated from* ``definition.json`` rather than added
+    to the source ``SKILL.md`` files, which matters more than it looks.
+    ``skill_registry.skill_context.load_skill_cards`` reads ``SKILL.md`` as
+    raw body text with no frontmatter parsing, and injects it as procedural
+    context. Writing ``---\nname: ...`` into those files would put the
+    frontmatter into the model's prompt as if it were part of the procedure.
+
+    The metadata is already in ``definition.json``. Two copies would be the
+    usual problem; this reads the one that exists.
+    """
+    skills_root = root / "skills"
+    written: list[str] = []
+    for definition_path in sorted(REPO.glob("domain_agents/*/skills/*/definition.json")):
+        try:
+            definition = json.loads(definition_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            # A malformed definition is a real problem, but it is the skill
+            # registry's problem to report -- silently shipping the skill
+            # without its metadata would be worse than leaving it out.
+            print(f"  skipped {definition_path.parent.name}: unreadable definition.json")
+            continue
+
+        body_path = definition_path.parent / "SKILL.md"
+        if not body_path.exists():
+            print(f"  skipped {definition_path.parent.name}: no SKILL.md")
+            continue
+
+        name = str(definition.get("name") or definition_path.parent.name)
+        description = str(definition.get("description") or "").strip()
+        if not description:
+            print(f"  skipped {name}: definition.json has no description")
+            continue
+
+        domain = str(definition.get("domain") or "").strip()
+        tools = [
+            t.get("tool_id") for t in definition.get("tools_required") or [] if t.get("tool_id")
+        ]
+
+        front = [f"name: {name}", f"description: {_one_line(description)}"]
+        if tools:
+            front.append("tools: [" + ", ".join(sorted(tools)) + "]")
+        if domain:
+            front.append(f"domain: {domain}")
+
+        target = skills_root / name
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "SKILL.md").write_text(
+            "---\n"
+            + "\n".join(front)
+            + "\n---\n\n"
+            + body_path.read_text(encoding="utf-8").strip()
+            + "\n"
+        )
+        written.append(name)
+    return written
+
+
+def _one_line(text: str) -> str:
+    """Collapse to one line; YAML scalars here are deliberately plain."""
+    collapsed = " ".join(text.split())
+    # A colon-space in a plain scalar ends the key, so quote when present.
+    return (
+        f'"{collapsed}"'
+        if ": " in collapsed or collapsed.startswith(("[", "{", "&", "*"))
+        else collapsed
+    )
+
+
 def write_commands(root: Path) -> list[str]:
     commands = root / "commands"
     commands.mkdir(parents=True, exist_ok=True)
@@ -163,6 +234,8 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
     manifest = plugin_manifest(default_gateway_url=default_gateway_url)
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
     commands = write_commands(root)
+    skills = write_skills(root)
+    print(f"  {len(skills)} skill(s), {len(commands)} command(s)")
 
     (root / "README.md").write_text(
         "# MetaForge for Claude Code\n\n"
@@ -174,6 +247,9 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
         "suits a gateway running on your own machine; a team or hosted gateway "
         "is the same package with a different URL.\n\n"
         "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
+        f"## Skills\n\n{len(skills)} engineering skills are bundled — the same "
+        "procedures the MetaForge agents follow, with their metadata taken "
+        "from each skill's `definition.json`.\n\n"
         "## Writes wait for a human\n\n"
         "A tool that writes is held for approval when the gateway sees you as a "
         "remote caller. Held calls appear on the dashboard's Approvals page. A "
