@@ -130,6 +130,17 @@ def bolt_pattern_entities(
             "sketch_ref": "sk_hole",
             # Through-hole: pocket the full plate thickness.
             "depth": plate_thickness_mm,
+            # FORGE-269 fix, confirmed live against a real FreeCAD adapter
+            # (fidel-dev): with reversed=False (PocketEntity's own default),
+            # PartDesign::Pocket cuts AWAY from the pad's extrusion
+            # direction -- for a sketch on the same plane the plate's own
+            # pad started from, that means into empty space below the
+            # plate, not into the plate itself. Live-measured proof: pad
+            # alone -> 10000.0mm^3, pocket with reversed=False ->
+            # UNCHANGED 10000.0mm^3 (no material removed at all), pocket
+            # with reversed=True -> 9971.73mm^3 (exactly one hole's
+            # pi*r^2*depth = 28.27mm^3 removed, as expected).
+            "reversed": True,
         },
         {
             "id": "holes",

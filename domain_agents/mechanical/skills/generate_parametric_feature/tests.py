@@ -40,6 +40,25 @@ class TestBoltPatternEntities:
         assert entities[-1]["source_ref"] == "hole1"
         assert entities[-1]["count"] == 4
 
+    def test_hole_pocket_is_reversed_to_actually_cut_the_plate(self) -> None:
+        # Regression test for a real bug, confirmed live against a real
+        # FreeCAD adapter (fidel-dev): reversed=False (PocketEntity's own
+        # default) cuts AWAY from the plate's own pad direction -- into
+        # empty space below the plate, removing no material at all. Live
+        # measurement: pad alone -> 10000.0mm^3, pocket reversed=False ->
+        # UNCHANGED 10000.0mm^3, pocket reversed=True -> 9971.73mm^3
+        # (exactly one hole's volume removed, as expected).
+        entities = bolt_pattern_entities(
+            plate_length_mm=60.0,
+            plate_width_mm=40.0,
+            plate_thickness_mm=5.0,
+            hole_diameter_mm=4.0,
+            hole_count=4,
+            pattern_radius_mm=15.0,
+        )
+        pocket = next(e for e in entities if e["op"] == "pocket")
+        assert pocket["reversed"] is True
+
     def test_rejects_non_positive_dimensions(self) -> None:
         with pytest.raises(ValueError, match="plate dimensions"):
             bolt_pattern_entities(
