@@ -229,6 +229,38 @@ there is nothing to report, so seeing it at all means something is worth
 looking at — `python -m metaforge.mcp --transport http` with no
 adapters down and no profile set returns none.
 
+## Writes wait for a human
+
+A tool that writes is held for approval when Codex reaches the
+gateway as a remote caller. The check runs on the server's dispatch path,
+so it applies whatever client asks and cannot be skipped by a client that
+does not implement it.
+
+A held call appears on the dashboard's **Approvals** page, tagged with
+the caller and `source: mcp`. Approve it there and the tool runs;
+reject it and it does not.
+
+If it is not approved, the call comes back as a JSON-RPC error naming
+which happened:
+
+```json
+{
+  "code": -32001,
+  "message": "twin.commit_geometry was not run: a reviewer rejected it.",
+  "data": {"tool_id": "twin.commit_geometry", "code": "approval_required",
+            "outcome": "rejected", "retryable": false}
+}
+```
+
+`outcome` is `rejected`, `timed_out` (nobody answered within 180s) or
+`not_configured` (the server holds writes but has no approval gate wired
+— refused rather than run). None is worth retrying without a person
+doing something first.
+
+Running over **stdio on your own machine**, writes are not held by
+default: there is nowhere to answer an approval in that transport yet.
+That changes when a deployment sets `exempt_local_writes=False`.
+
 ## Tool annotations and unknown-tool errors
 
 Every tool on `tools/list` carries the MCP annotation hints, so Codex

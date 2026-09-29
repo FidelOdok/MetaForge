@@ -53,6 +53,54 @@ its ceiling is a decision about what to drop, and silently dropping it is
 the failure profiles exist to prevent. An unknown profile name stops the
 server rather than falling back to serving everything.
 
+### Approval-held writes
+
+A tool that writes is held for a human when the request comes from a
+remote caller, whatever client asked. The gate is on the MCP dispatch
+path itself, not in any client — a harness cannot opt out of it by not
+implementing it.
+
+Until FORGE-359 this existed only on the chat path: `HarnessRuntime`
+paused on `requires_approval`, and the MCP path consulted nothing. The
+same `twin.commit_geometry` was gated when a person asked in the
+dashboard and ungated when an external harness asked over MCP.
+
+What is held is decided from the same annotations the client is shown
+(see above), so a tool cannot advertise `readOnlyHint: true` and be
+treated as a write, or the reverse. A tool nobody has classified is
+held.
+
+| Caller | Read | Write |
+|---|---|---|
+| Local stdio | runs | runs (see below) |
+| Remote (OAuth identity) | runs | **held** |
+| Untrusted (tunnel, no identity) | runs | **held** |
+
+Held calls land in the same queue as chat approvals and appear on the
+dashboard's Approvals page, recorded with `caller` and `source: mcp` —
+the same write from a remote harness and from the dashboard are not the
+same request to whoever is deciding.
+
+Every outcome other than an approval stops the call:
+
+| Outcome | Meaning |
+|---|---|
+| `not_configured` | The server was told to hold writes and given no gate. Refused, never run. |
+| `rejected` | A reviewer said no. |
+| `timed_out` | Nobody answered inside the window (180s). |
+
+`rejected` and `timed_out` stay distinct because "a person said no" and
+"nobody was looking" need different words to an agent; all three carry
+`retryable: false`.
+
+**Local stdio writes are exempt by default.** Not because local is
+trusted — the chat path holds local writes today — but because a stdio
+session has nowhere to answer: no dashboard is necessarily open and the
+MCP client cannot render a prompt until elicitation lands (F2). Holding
+there with no way to approve is an outage, not a guardrail. Set
+`exempt_local_writes=False` in any deployment where a reviewer is
+watching the dashboard.
+
 ### When the list is short
 
 `tools/list` never drops an adapter quietly. If an adapter cannot answer
