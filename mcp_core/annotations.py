@@ -63,6 +63,17 @@ READ_ONLY: frozenset[str] = frozenset(
         "constraint.validate",
         "project.get",
         "project.list",
+        # FORGE-335. Deliberate, and the reasoning matters because the
+        # instinct is to call it a write: it persists nothing, changes only
+        # this session's own view of which project it is in, is undone by
+        # calling it again, and cannot touch another session. Classifying it
+        # as a write would put project *selection* behind a human approval —
+        # so the guardrail's cost would fall on the one action that makes
+        # every later call more correctly scoped, and the pressure would be
+        # to switch gating off. What it does change is which project a later
+        # write lands in, so the approval prompt names the effective project
+        # (see mcp_core.elicitation.approval_request).
+        "project.open",
         "run.get_status",
         "twin.analyze_engineering_change",
         "twin.compute_hierarchy_rollup",

@@ -207,6 +207,33 @@ def bound_project(session_id: UUID | None) -> UUID | None:
     return _session_projects.get(session_id)
 
 
+def bind_current_session_to(project_id: str | UUID | None) -> bool:
+    """Scope the active session to ``project_id``. Returns whether it stuck.
+
+    FORGE-335: shared by ``session.start`` and ``project.open``/``create``,
+    because the honest part of this is easy to get wrong twice. It returns
+    False, and binds nothing, when the caller presented no session identity
+    -- a binding keyed on an invented session id can never be matched by a
+    later call, and reporting success for one is what makes a client stop
+    passing ``project_id`` explicitly.
+
+    Never raises: scoping is a convenience on top of whatever the caller was
+    actually doing, and failing ``session.start`` because a scope could not
+    be applied would lose the capture as well.
+    """
+    if not project_id:
+        return False
+    try:
+        parsed = project_id if isinstance(project_id, UUID) else UUID(str(project_id))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    ctx = current_context()
+    if not ctx.session_is_stable:
+        return False
+    bind_session_project(ctx.session_id, parsed)
+    return True
+
+
 def clear_session_project(session_id: UUID) -> None:
     """Drop a session's binding (called when the session completes)."""
     _session_projects.pop(session_id, None)

@@ -139,6 +139,13 @@ class ApprovalAsk:
     caller: Caller
     reason: str
     session_id: str | None = None
+    #: The project this call will actually land in, when it comes from the
+    #: session scope rather than the arguments. FORGE-335 made that the
+    #: normal case -- ``project.open`` sets it once and later calls carry no
+    #: project at all -- so without this a reviewer approving
+    #: ``twin.commit_geometry`` is told everything except which project it
+    #: writes to.
+    project: str | None = None
 
 
 class ApprovalGate(Protocol):
