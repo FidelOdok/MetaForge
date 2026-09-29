@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -206,3 +206,55 @@ class InMemoryRunStore:
 
     def cancel(self, run_id: str) -> Run:
         return self._transition(run_id, RunStatus.CANCELED)
+
+
+# ---------------------------------------------------------------------------
+# Waiting on a decision
+# ---------------------------------------------------------------------------
+
+
+class ApprovalWait(StrEnum):
+    """How a wait for a human ended."""
+
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    TIMED_OUT = "timed_out"
+
+
+async def await_approval_decision(
+    store: InMemoryRunStore,
+    run_id: str,
+    *,
+    timeout_seconds: float,
+    poll_interval: float,
+    sleep: Callable[[float], Awaitable[None]],
+    monotonic: Callable[[], float] = time.monotonic,
+) -> ApprovalWait:
+    """Block until a paused run is approved, rejected, or the window closes.
+
+    Extracted from ``HarnessRuntime._await_approval`` (FORGE-359) so the MCP
+    path can hold a call the same way the chat path does. A second copy of
+    this loop would be a second copy of the race fix below, and the copy that
+    loses it is the one that drops an approval a human actually gave.
+
+    Fails closed on every path that is not an explicit approval.
+    """
+    deadline = monotonic() + timeout_seconds
+    while monotonic() < deadline:
+        status = store.get(run_id).status
+        if status is RunStatus.RUNNING:
+            return ApprovalWait.APPROVED
+        if status is RunStatus.REJECTED:
+            return ApprovalWait.REJECTED
+        await sleep(poll_interval)
+
+    # Timed out. Deny by default -- but a decision landing in the exact
+    # instant between the last poll and here is still honoured rather than
+    # clobbered by the race with submit_approval.
+    try:
+        store.submit_approval(run_id, ApprovalDecision.REJECT)
+    except (InvalidTransition, RunNotFoundError):
+        pass
+    if store.get(run_id).status is RunStatus.RUNNING:
+        return ApprovalWait.APPROVED
+    return ApprovalWait.TIMED_OUT
