@@ -154,6 +154,49 @@ in any CAD viewer to confirm.
 Routes through `calculix.run_fea`. Captures the run via the MET-331
 `SimulationCapture` layer when wired into the gateway path.
 
+## Install as a plugin
+
+The MCP config below is the manual route. There is also a generated plugin
+that brings the MCP server, the 29 engineering skills and the slash
+commands in one install:
+
+```
+/plugin marketplace add FidelOdok/MetaForge
+/plugin install metaforge
+```
+
+Claude Code asks for your **gateway URL** the first time you enable it. The
+default suits a gateway on your own machine; a team or hosted gateway is the
+same package with a different URL — the endpoint is a value you supply, not
+something compiled into the package. An API token field is there for a
+gateway that needs one; a local gateway started without auth does not.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `/metaforge:use` | Pick the project for this session and summarise where it stands |
+| `/metaforge:status` | What is built, and which requirements are unverified |
+| `/metaforge:design` | Design or revise a part, committed to the twin |
+| `/metaforge:fea` | Run a load case and record the evidence against the revision it came from |
+| `/metaforge:gate` | Review whether the project can be promoted |
+| `/metaforge:doctor` | Check the connection, and what is unreachable |
+
+### Regenerating the package
+
+`integrations/claude-code/` is build output. Edit the generator, not the
+output:
+
+```bash
+python scripts/build_integrations.py
+claude plugin validate --strict integrations/claude-code
+```
+
+Skill frontmatter is generated from each skill's `definition.json` rather
+than written into the source `SKILL.md` files. Those files are read as raw
+body text and injected as procedural context, so frontmatter added there
+would appear in the model's prompt as part of the procedure.
+
 ## Keeping the tool list a size Claude Code can use
 
 All 97 tools are served by default. If that is more than you want in
