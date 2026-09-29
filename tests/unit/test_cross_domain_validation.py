@@ -8,6 +8,7 @@ import pytest
 
 from twin_core.api import InMemoryTwinAPI
 from twin_core.constraint_engine.cross_domain import (
+    CheckStatus,
     CrossDomainCheck,
     CrossDomainValidator,
 )
@@ -105,7 +106,7 @@ class TestCrossDomainCheck:
             name="test_check",
             domain_a="mechanical",
             domain_b="electronics",
-            passed=True,
+            status=CheckStatus.PASS,
             message="All good",
         )
         assert check.name == "test_check"
@@ -121,7 +122,7 @@ class TestCrossDomainCheck:
                 name="test",
                 domain_a="a",
                 domain_b="b",
-                passed=False,
+                status=CheckStatus.FAIL,
                 message="msg",
                 severity=sev,
             )
@@ -132,7 +133,7 @@ class TestCrossDomainCheck:
             name="test",
             domain_a="a",
             domain_b="b",
-            passed=True,
+            status=CheckStatus.PASS,
             message="ok",
             details={"key": "value", "num": 42},
         )
@@ -158,7 +159,7 @@ class TestCrossDomainValidatorInit:
                 name="custom",
                 domain_a="a",
                 domain_b="b",
-                passed=True,
+                status=CheckStatus.PASS,
                 message="custom ok",
             )
 
@@ -198,11 +199,14 @@ class TestValidateAll:
         assert results[0].domain_a == "unknown"
 
     async def test_with_no_artifacts(self, twin, validator):
-        """Checks should pass (skip) when no work_products exist."""
+        """A project with nothing in it reports four checks that could not run."""
         results = await validator.validate_all(uuid4())
         assert len(results) == 4
-        # All should pass with "skipping" messages since no work_products found
-        assert all(r.passed is True for r in results)
+        # FORGE-361: this used to assert four passes. An empty project
+        # scoring a clean cross-domain sweep is the exact thing F3 forbids —
+        # missing data shown as "pass".
+        assert all(r.status is CheckStatus.NO_DATA for r in results)
+        assert not any(r.passed for r in results)
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +260,10 @@ class TestPcbEnclosureFit:
         await twin.create_work_product(enc)
 
         result = await validator.check_pcb_enclosure_fit(uuid4(), "main")
-        assert result.passed is True
+        # FORGE-361: the docstring always said 'skip'. It now says so in
+        # the type instead of borrowing 'pass' to mean it.
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
         assert result.severity == "info"
         assert "skipping" in result.message.lower()
 
@@ -332,7 +339,10 @@ class TestMountingHoleAlignment:
         await twin.create_work_product(enc)
 
         result = await validator.check_mounting_hole_alignment(pcb.id, "main")
-        assert result.passed is True
+        # FORGE-361: the docstring always said 'skip'. It now says so in
+        # the type instead of borrowing 'pass' to mean it.
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
         assert result.severity == "info"
 
     async def test_holes_within_tolerance(self, twin, validator):
@@ -450,7 +460,10 @@ class TestThermalZones:
         await twin.create_work_product(enc)
 
         result = await validator.check_thermal_zones(pcb.id, "main")
-        assert result.passed is True
+        # FORGE-361: the docstring always said 'skip'. It now says so in
+        # the type instead of borrowing 'pass' to mean it.
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
         assert result.severity == "info"
 
 
@@ -514,7 +527,10 @@ class TestConnectorClearances:
         await twin.create_work_product(enc)
 
         result = await validator.check_connector_clearances(pcb.id, "main")
-        assert result.passed is True
+        # FORGE-361: the docstring always said 'skip'. It now says so in
+        # the type instead of borrowing 'pass' to mean it.
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
         assert result.severity == "info"
 
     async def test_multiple_connectors_mixed(self, twin, validator):
@@ -547,20 +563,32 @@ class TestConnectorClearances:
 class TestMissingArtifacts:
     async def test_pcb_enclosure_fit_no_artifacts(self, twin, validator):
         result = await validator.check_pcb_enclosure_fit(uuid4(), "main")
-        assert result.passed is True
+        # FORGE-361: the docstring always said 'skip'. It now says so in
+        # the type instead of borrowing 'pass' to mean it.
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
         assert result.severity == "info"
 
     async def test_mounting_holes_no_artifacts(self, twin, validator):
         result = await validator.check_mounting_hole_alignment(uuid4(), "main")
-        assert result.passed is True
+        # FORGE-361: the docstring always said 'skip'. It now says so in
+        # the type instead of borrowing 'pass' to mean it.
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
         assert result.severity == "info"
 
     async def test_thermal_zones_no_artifacts(self, twin, validator):
         result = await validator.check_thermal_zones(uuid4(), "main")
-        assert result.passed is True
+        # FORGE-361: the docstring always said 'skip'. It now says so in
+        # the type instead of borrowing 'pass' to mean it.
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
         assert result.severity == "info"
 
     async def test_connector_clearances_no_artifacts(self, twin, validator):
         result = await validator.check_connector_clearances(uuid4(), "main")
-        assert result.passed is True
+        # FORGE-361: the docstring always said 'skip'. It now says so in
+        # the type instead of borrowing 'pass' to mean it.
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
         assert result.severity == "info"
