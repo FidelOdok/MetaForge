@@ -68,6 +68,7 @@ class TwinServer(McpToolServer):
         metric_evaluator: Any = None,
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
+        promotion_attempter: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -231,6 +232,14 @@ class TwinServer(McpToolServer):
         # every recorder above; None keeps tool_registry free of
         # twin_core.prediction/tool_registry.tools.cadquery imports.
         self._sensitivity_ranker = sensitivity_ranker
+        # FORGE-319: an injected async ``attempt_promotion(...)``
+        # (api_gateway.requirement_intelligence.promotion) -- the first
+        # gate in this codebase that actually REFUSES rather than only
+        # reports, checking required claims against FORGE-318's own live
+        # requirement matrix and an approved-waiver override. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of api_gateway imports.
+        self._promotion_attempter = promotion_attempter
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -278,6 +287,8 @@ class TwinServer(McpToolServer):
             self._register_execute_revalidation_plan()
         if sensitivity_ranker is not None:
             self._register_rank_sensitivity()
+        if promotion_attempter is not None:
+            self._register_attempt_promotion()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -3768,4 +3779,101 @@ class TwinServer(McpToolServer):
                 candidate_materials if isinstance(candidate_materials, list) else None
             ),
             delta_fraction=float(delta_fraction),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.attempt_promotion (FORGE-319)
+    # ------------------------------------------------------------------
+
+    def _register_attempt_promotion(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.attempt_promotion",
+                adapter_id="twin",
+                name="Attempt Maturity Gate Promotion",
+                description=(
+                    "Attempt to promote a project to a maturity level (target lifecycle "
+                    "spec §29: concept -> sim_validated -> physically_validated -> "
+                    "released), spec step 17. Checks each 'required_claim_id' "
+                    "(a requirement/Constraint id) against the live requirement matrix "
+                    "(twin.rank_sensitivity/twin.evaluate_metric evidence, FORGE-318) -- "
+                    "every one must be 'pass', or 'fail' covered by an approved waiver "
+                    "(twin.record_engineering_entity entity_type='waiver' + "
+                    "twin.approve_engineering_entity) naming that requirement. This is a "
+                    "REAL gate: with any required claim unsatisfied, or with no "
+                    "'decided_by' human authority supplied, promotion is REFUSED -- the "
+                    "attempt is still persisted (with exactly why it was blocked), "
+                    "'promoted' is just false."
+                ),
+                capability="twin_promotion",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "level": {
+                            "type": "string",
+                            "enum": [
+                                "concept",
+                                "sim_validated",
+                                "physically_validated",
+                                "released",
+                            ],
+                        },
+                        "required_claim_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Requirement (Constraint) ids that must all pass.",
+                        },
+                        "k": {
+                            "type": "number",
+                            "description": (
+                                "Recorded for this attempt (band multiplier context). Default 1.0."
+                            ),
+                        },
+                        "decided_by": {
+                            "type": "string",
+                            "description": (
+                                "Human authority signoff -- omit to get a dry-run "
+                                "('all satisfied, awaiting authority') without promoting."
+                            ),
+                        },
+                    },
+                    "required": ["project_id", "level", "required_claim_ids"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "gate_id": {"type": "string"},
+                        "level": {"type": "string"},
+                        "promoted": {"type": "boolean"},
+                        "blocked_reason": {"type": ["string", "null"]},
+                        "results": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.attempt_promotion,
+        )
+
+    async def attempt_promotion(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = arguments.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("twin.attempt_promotion: 'project_id' is required")
+        level = arguments.get("level")
+        if not isinstance(level, str):
+            raise ValueError("twin.attempt_promotion: 'level' is required")
+        required_claim_ids = arguments.get("required_claim_ids")
+        if not isinstance(required_claim_ids, list) or not required_claim_ids:
+            raise ValueError(
+                "twin.attempt_promotion: 'required_claim_ids' is required (non-empty array)"
+            )
+        k = arguments.get("k", 1.0)
+        decided_by = arguments.get("decided_by")
+        return await self._promotion_attempter(
+            project_id=project_id,
+            level=level,
+            required_claim_ids=[str(c) for c in required_claim_ids],
+            k=float(k),
+            decided_by=decided_by if isinstance(decided_by, str) else None,
         )

@@ -29,6 +29,7 @@ from twin_core.models.engineering_change_transaction import EngineeringChangeTra
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
 from twin_core.models.hierarchy_node import HierarchyNode
+from twin_core.models.maturity_gate import MaturityGate
 from twin_core.models.relationship import SubGraph
 from twin_core.models.revision_snapshot import RevisionSnapshot
 from twin_core.models.version import Version, VersionDiff
@@ -410,6 +411,25 @@ class TwinAPI(ABC):
     async def list_ects(
         self, project_id: UUID | None = None, status: str | None = None
     ) -> list[EngineeringChangeTransaction]: ...
+
+    # --- Maturity Gates (FORGE-319) ---
+
+    @abstractmethod
+    async def create_maturity_gate(self, gate: MaturityGate) -> MaturityGate:
+        """Persist one promotion attempt's record. Callers should go
+        through ``api_gateway.requirement_intelligence.promotion.
+        attempt_promotion`` rather than calling this directly -- same
+        "compositional wrapper, not a bare CRUD call" precedent as
+        ``create_ect``."""
+        ...
+
+    @abstractmethod
+    async def get_maturity_gate(self, gate_id: UUID) -> MaturityGate | None: ...
+
+    @abstractmethod
+    async def list_maturity_gates(
+        self, project_id: UUID | None = None, level: str | None = None
+    ) -> list[MaturityGate]: ...
 
     # --- Components ---
 
@@ -1075,6 +1095,35 @@ class InMemoryTwinAPI(TwinAPI):
             filters["status"] = status
         nodes = await self._graph.list_nodes(
             node_type=NodeType.ENGINEERING_CHANGE_TRANSACTION,
+            filters=filters if filters else None,
+        )
+        return nodes  # type: ignore[return-value]
+
+    # --- Maturity Gates (FORGE-319) ---
+
+    async def create_maturity_gate(self, gate: MaturityGate) -> MaturityGate:
+        existing = await self._graph.get_node(gate.id)
+        if existing is not None:
+            raise ValueError(f"MaturityGate with ID {gate.id} already exists")
+        result = await self._graph.add_node(gate)
+        return result  # type: ignore[return-value]
+
+    async def get_maturity_gate(self, gate_id: UUID) -> MaturityGate | None:
+        node = await self._graph.get_node(gate_id)
+        if node is not None and isinstance(node, MaturityGate):
+            return node
+        return None
+
+    async def list_maturity_gates(
+        self, project_id: UUID | None = None, level: str | None = None
+    ) -> list[MaturityGate]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        if level is not None:
+            filters["level"] = level
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.MATURITY_GATE,
             filters=filters if filters else None,
         )
         return nodes  # type: ignore[return-value]

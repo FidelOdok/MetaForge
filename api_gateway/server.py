@@ -760,6 +760,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.apply import make_apply_executor
     from api_gateway.assistant.proposal_recorder import make_proposal_recorder
     from api_gateway.assistant.routes import workflow as approval_workflow
+    from api_gateway.requirement_intelligence.promotion import attempt_promotion
     from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.blob_stager import make_blob_stager
     from api_gateway.twin.claim_recorder import make_claim_recorder
@@ -823,6 +824,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin, tool_dispatch={"twin.evaluate_metric": metric_evaluator_fn}
     )
     sensitivity_ranker_fn = make_sensitivity_ranker(twin, evidence_recorder=evidence_recorder_fn)
+
+    # FORGE-319: attempt_promotion is a plain function (twin, ...) -- bind
+    # twin once here, same injected-callable shape as every make_X(twin,
+    # ...) factory above.
+    async def promotion_attempter_fn(**kwargs: Any) -> dict[str, Any]:
+        return await attempt_promotion(twin, **kwargs)
 
     # MET-740: robot-description (URDF/SDF/USD) persistence for the
     # dashboard's cad-export routes. REST-route-triggered, not agent/MCP-
@@ -928,6 +935,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         revalidation_executor=revalidation_executor_fn,
         # FORGE-317: one-at-a-time finite-difference sensitivity ranking.
         sensitivity_ranker=sensitivity_ranker_fn,
+        # FORGE-319: the first real gate that refuses, not just reports.
+        promotion_attempter=promotion_attempter_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

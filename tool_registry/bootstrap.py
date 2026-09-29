@@ -273,6 +273,7 @@ async def bootstrap_tool_registry(
     metric_evaluator: Any = None,
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
+    promotion_attempter: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -388,6 +389,13 @@ async def bootstrap_tool_registry(
             sensitivity of a metric's margin against named parameters,
             against a CAD work product's real geometry. ``None`` skips
             registration (same pattern as ``document_recorder``).
+        promotion_attempter: Optional async ``attempt_promotion(...)``
+            (api_gateway.requirement_intelligence.promotion, FORGE-319).
+            When supplied, registers ``twin.attempt_promotion`` -- the
+            first gate in this codebase that actually refuses when its
+            required claims aren't satisfied (or approved-waived), rather
+            than only reporting. ``None`` skips registration (same
+            pattern as ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -565,6 +573,7 @@ async def bootstrap_tool_registry(
                     metric_evaluator=metric_evaluator,
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,
+                    promotion_attempter=promotion_attempter,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

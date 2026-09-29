@@ -955,7 +955,10 @@ async def _evaluate_stale_evidence_check(twin: TwinAPI, project_id: UUID) -> Gat
     )
 
 
-_APPROVED_AUTHORITY = (AuthorityState.APPROVED, AuthorityState.BASELINED)
+# Public (FORGE-319): also used by api_gateway.requirement_intelligence.
+# promotion's own waiver-approval check -- one place decides what
+# "approved" means for a waiver/release_approval entity's authority.
+APPROVED_AUTHORITY = (AuthorityState.APPROVED, AuthorityState.BASELINED)
 
 
 async def _evaluate_waivers_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
@@ -974,7 +977,7 @@ async def _evaluate_waivers_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
             status=GateCheckStatus.PASS,
             detail="no waivers recorded for this project -- nothing outstanding",
         )
-    unapproved = [w for w in entities if w.authority not in _APPROVED_AUTHORITY]
+    unapproved = [w for w in entities if w.authority not in APPROVED_AUTHORITY]
     return GateCheck(
         id="waivers_approved",
         label="Waivers approved",
@@ -999,7 +1002,7 @@ async def _evaluate_release_approval_check(twin: TwinAPI, project_id: UUID) -> G
     entities = await twin.list_engineering_entities(
         project_id=project_id, entity_type="release_approval"
     )
-    approved = [r for r in entities if r.authority in _APPROVED_AUTHORITY]
+    approved = [r for r in entities if r.authority in APPROVED_AUTHORITY]
     return GateCheck(
         id="release_approved",
         label="Build/manufacturing release approved",
