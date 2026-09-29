@@ -143,6 +143,15 @@ services:
       # caught (MET-10): a selection set minutes earlier was gone by the next
       # chat turn.
       - metaforge-home:/root/.metaforge
+      # FORGE-292: GET /v1/evals reads evals/reports/<ts>/report*.json for
+      # the "pass rate per scenario" eval dashboard. evals/ is deliberately
+      # NOT copied into the image (it's a standalone, stdlib-only tool
+      # directory, not app code -- see Dockerfile), and the reports
+      # themselves are gitignored, host-local artifacts nightly.sh writes
+      # when it runs ON the box (not inside this container) -- a bind mount
+      # is the only way this container can see them. Read-only: the route
+      # only ever reads.
+      - ./evals/reports:/app/evals/reports:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -723,7 +723,7 @@ This is what lets a constraint expression like
 `wp.metadata.get('mass_kg', 0) <= 4.5` read a real measured value instead of
 always the vacuous-pass default (FORGE-100).
 
-## Dashboard routes (13)
+## Dashboard routes (14)
 
 Served by Vite under `dashboard/` — boot with
 `docker compose up gateway dashboard` and open `localhost:5173`.
@@ -743,6 +743,7 @@ Served by Vite under `dashboard/` — boot with
 | `/knowledge` | Ingested-sources table (sortable, filterable) | `GET /api/v1/knowledge/sources` |
 | `/knowledge/sources/:id` | Per-source drill-in (placeholder in v1) | _stub_ |
 | `/assistant` | Chat panel (gateway → orchestrator) | `POST /v1/chat` |
+| `/evals` | Eval dashboard (FORGE-292, gap G-G6): pass rate per scenario over recorded nightly runs — "over releases" (the ticket's own wording) is aspirational, since `evals/nightly.sh` runs on a timestamp, not a CI release tag. Reads `evals/reports/*/report*.json` directly (a read-only bind mount in Docker, since `evals/` itself is deliberately not copied into the gateway image); shows the new outcome-graded `design_loop_rubric.py` scenario alongside the pre-existing keyword-graded ones | `GET /v1/evals` |
 
 ## CLI commands (8)
 

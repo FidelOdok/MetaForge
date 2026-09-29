@@ -891,6 +891,43 @@ const SAMPLE_WORKSPACE_SEED = {
       },
     ],
   } as Record<string, SampleDecision[]>,
+  // FORGE-292 (gap G-G6): illustrative eval report -- mirrors
+  // GET /v1/evals's own real shape (api_gateway/evals/routes.py), including
+  // a design_loop_v1 row proving the new outcome grader ran, not just the
+  // pre-existing keyword-based rubrics.
+  evals: {
+    scenarios: [
+      {
+        scenario_id: 'design_loop_wall_thickness',
+        suite: 'design_loop_v1',
+        run: '20260928-020000',
+        runs: 3,
+        completed_rate: 1.0,
+        avg_completeness: 1.0,
+      },
+      {
+        scenario_id: 'l0_bracket',
+        suite: 'runs_v1',
+        run: '20260928-020000',
+        runs: 3,
+        completed_rate: 0.667,
+        avg_completeness: 0.8,
+      },
+      {
+        scenario_id: 'mech_cantilever',
+        suite: 'runs_v1',
+        run: '20260928-020000',
+        runs: 3,
+        completed_rate: 1.0,
+        avg_completeness: 1.0,
+      },
+    ],
+    history: [
+      { run: '20260926-020000', suite: 'runs_v1', scenarios: 6, completed_rate: 0.72 },
+      { run: '20260927-020000', suite: 'runs_v1', scenarios: 6, completed_rate: 0.78 },
+      { run: '20260928-020000', suite: 'runs_v1', scenarios: 6, completed_rate: 0.83 },
+    ],
+  },
   // FORGE-313: a small product hierarchy for the Structure tab -- mirrors
   // the ticket's own acceptance example (an "upper_arm"/"shoulder"
   // interface with a tip_deflection quantity, a mass allocation with an
@@ -1150,6 +1187,7 @@ function route(
       const relatedTo = String(params.related_to ?? '');
       return { related_to: relatedTo, decisions: s.decisions[relatedTo] ?? [] };
     }
+    if (path === '/evals') return s.evals;
     return undefined;
   }
   if (method === 'post') {
