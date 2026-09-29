@@ -21,6 +21,7 @@ than inheritance.
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import json
 import re
@@ -914,28 +915,93 @@ class UnifiedMcpServer:
                 )
         return result
 
+    #: How long an adapter gets to answer a health probe. Short on purpose:
+    #: orchestrators poll this endpoint for readiness, and a probe that can
+    #: hang turns one sick adapter into a sick gateway.
+    _PROBE_TIMEOUT_SECONDS = 3.0
+
+    async def _probe_adapter(self, adapter: McpToolServer) -> dict[str, Any]:
+        """Ask one adapter whether it is actually there."""
+        entry: dict[str, Any] = {
+            "adapter_id": str(getattr(adapter, "adapter_id", "?")),
+            "version": str(getattr(adapter, "version", "?")),
+            "tools_registered": len(getattr(adapter, "tool_ids", []) or []),
+        }
+        request = json.dumps(
+            {"jsonrpc": "2.0", "id": "unified-health", "method": "health/check", "params": {}}
+        )
+        try:
+            raw = await asyncio.wait_for(
+                adapter.handle_request(request), timeout=self._PROBE_TIMEOUT_SECONDS
+            )
+            payload = json.loads(raw)
+        except TimeoutError:
+            entry["reachable"] = False
+            entry["error"] = f"no answer within {self._PROBE_TIMEOUT_SECONDS:g}s"
+            return entry
+        except Exception as exc:
+            entry["reachable"] = False
+            entry["error"] = str(exc)
+            return entry
+
+        if "error" in payload:
+            entry["reachable"] = False
+            entry["error"] = payload["error"].get("message", "health/check returned an error")
+            return entry
+        entry["reachable"] = True
+        return entry
+
     async def _health_check(self) -> dict[str, Any]:
-        """Aggregate health across every adapter into one report."""
+        """Aggregate health across every adapter into one report.
+
+        FORGE-332: this used to return ``status: "healthy"`` unconditionally
+        and list each adapter's tool count *from registration* -- so a gateway
+        with every CAD container down answered "healthy" with a full adapter
+        list. Nothing here had asked an adapter anything.
+
+        That is worse than the tools/list problem it resembles (FORGE-339),
+        where the tool count at least shrank. A health report that cannot say
+        unhealthy is the one thing a doctor reads, and /metaforge:doctor is
+        built on this.
+
+        The service stays ``healthy`` only when every adapter answers;
+        otherwise ``degraded``, naming the ones that did not. The HTTP status
+        stays 200 either way -- the MCP server *is* up, and an orchestrator
+        restarting the gateway because an optional CAD container is down
+        would be the wrong cure.
+        """
         now = datetime.now(UTC)
         uptime = (now - self._start_time).total_seconds()
-        adapter_health: list[dict[str, Any]] = []
-        for adapter in self._adapters:
-            adapter_health.append(
-                {
-                    "adapter_id": adapter.adapter_id,
-                    "version": adapter.version,
-                    "tools_available": len(adapter.tool_ids),
-                }
-            )
-        return {
+
+        adapter_health = list(
+            await asyncio.gather(*(self._probe_adapter(a) for a in self._adapters))
+        )
+        unreachable = [a["adapter_id"] for a in adapter_health if not a["reachable"]]
+
+        report: dict[str, Any] = {
             "service": "metaforge-mcp",
             "version": self._version,
-            "status": "healthy",
+            "status": "degraded" if unreachable else "healthy",
             "uptime_seconds": round(uptime, 1),
             "adapter_count": len(self._adapters),
             "tool_count": len(self._tool_index),
             "adapters": adapter_health,
         }
+        if unreachable:
+            # Named at the top level as well as per-adapter: a caller that
+            # reads only `status` still gets told what to look at.
+            report["unreachable_adapters"] = unreachable
+            report["detail"] = (
+                f"{len(unreachable)} of {len(self._adapters)} adapters did not answer: "
+                f"{', '.join(unreachable)}. Their tools are registered but calls to them "
+                "will fail."
+            )
+            logger.warning(
+                "unified_mcp_health_degraded",
+                unreachable=unreachable,
+                adapter_count=len(self._adapters),
+            )
+        return report
 
 
 # ---------------------------------------------------------------------------
