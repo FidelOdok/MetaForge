@@ -65,6 +65,7 @@ class TwinServer(McpToolServer):
         ect_bridge: Any = None,
         hierarchy_node_recorder: Any = None,
         hierarchy_rollup_fn: Any = None,
+        metric_evaluator: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -204,6 +205,14 @@ class TwinServer(McpToolServer):
         # wrapping ``twin_core.consistency.hierarchy_rollup.
         # compute_hierarchy_rollup`` -- same injection seam, same reason.
         self._hierarchy_rollup_fn = hierarchy_rollup_fn
+        # FORGE-315: an injected async ``evaluate_tip_deflection(...)``
+        # (make_metric_evaluator) -- a tier-0 closed-form hand-calc against
+        # a CAD work product's own recorded geometry, escalating to a real
+        # tier-2 calculix.run_fea call (via a lazily-bound MCP bridge) when
+        # the tier-0 estimate falls within its error band of the limit.
+        # Same injection seam as every recorder above; None keeps
+        # tool_registry free of twin_core.prediction imports.
+        self._metric_evaluator = metric_evaluator
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -245,6 +254,8 @@ class TwinServer(McpToolServer):
             self._register_record_hierarchy_node()
         if hierarchy_rollup_fn is not None:
             self._register_compute_hierarchy_rollup()
+        if metric_evaluator is not None:
+            self._register_evaluate_metric()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -3402,3 +3413,148 @@ class TwinServer(McpToolServer):
                 "twin.compute_hierarchy_rollup: 'root_id' is required (non-empty string)"
             )
         return await self._hierarchy_rollup_fn(root_id)
+
+    # ------------------------------------------------------------------
+    # twin.evaluate_metric (FORGE-315)
+    # ------------------------------------------------------------------
+
+    def _register_evaluate_metric(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.evaluate_metric",
+                adapter_id="twin",
+                name="Evaluate Metric (Tiered)",
+                description=(
+                    "Tier-0 closed-form estimate for a metric against a CAD work "
+                    "product's own recorded geometry (MET-630 bounding box), "
+                    "escalating to a real tier-2 calculix.run_fea call when the "
+                    "estimate falls within its error band of 'limit_mm' -- the "
+                    "minimum-sufficient-fidelity guardrail (spec §30): only escalate "
+                    "when the cheap tier's evidence quality demands it. Only "
+                    "metric='tip_deflection' (cantilever beam) is implemented. "
+                    "Every tier's result is recorded as Evidence, pinned to the "
+                    "work product's current revision."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "metric": {
+                            "type": "string",
+                            "enum": ["tip_deflection"],
+                            "description": "Which tier-0 hand-calc to run.",
+                        },
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "CAD_MODEL work product id -- its recorded bounding "
+                                "box supplies the beam's length/width/height."
+                            ),
+                        },
+                        "project_id": {"type": "string"},
+                        "load_n": {
+                            "type": "number",
+                            "description": "Tip load, Newtons.",
+                        },
+                        "youngs_modulus_mpa": {
+                            "type": "number",
+                            "description": "Material Young's modulus, MPa (N/mm^2).",
+                        },
+                        "limit_mm": {
+                            "type": "number",
+                            "description": (
+                                "The requirement/interface-quantity limit to check "
+                                "against (e.g. the HierarchyNode interface's own "
+                                "tip_deflection <= 0.5mm, FORGE-313). Omit to get "
+                                "just the raw tier-0 estimate with no escalation."
+                            ),
+                        },
+                        "band_fraction": {
+                            "type": "number",
+                            "description": (
+                                "Error band as a fraction of limit_mm -- a fixed "
+                                "prior for now (calibrated bands are Step 11 scope). "
+                                "Default 0.2."
+                            ),
+                        },
+                        "escalation_k": {
+                            "type": "number",
+                            "description": "Escalate when |margin| < k * band. Default 1.0.",
+                        },
+                        "tier2": {
+                            "type": "object",
+                            "description": (
+                                "Tier-2 FEA inputs, used only if escalation triggers. "
+                                "Requires an already-generated mesh (freecad."
+                                "generate_mesh) for this part -- this tool does not "
+                                "derive node sets on its own. Omit to get a "
+                                "tier-0-only result even when escalation triggers."
+                            ),
+                            "properties": {
+                                "mesh_file": {"type": "string"},
+                                "fixed_node_set": {"type": "string"},
+                                "load_node_set": {"type": "string"},
+                                "load_force_n": {
+                                    "type": "array",
+                                    "items": {"type": "number"},
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                },
+                                "material": {"type": "object"},
+                                "load_case": {"type": "string"},
+                            },
+                        },
+                    },
+                    "required": ["metric", "work_product_id", "load_n", "youngs_modulus_mpa"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string"},
+                        "tier": {"type": "integer"},
+                        "value_mm": {"type": "number"},
+                        "band_mm": {"type": "number"},
+                        "limit_mm": {"type": ["number", "null"]},
+                        "margin_mm": {"type": ["number", "null"]},
+                        "escalated": {"type": "boolean"},
+                        "evidence_node_id": {"type": "string"},
+                        "tier2": {"type": "object"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.evaluate_metric,
+        )
+
+    async def evaluate_metric(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        metric = arguments.get("metric")
+        if metric != "tip_deflection":
+            raise ValueError(
+                "twin.evaluate_metric: 'metric' must be 'tip_deflection' -- no other "
+                "metric has a tier-0 hand-calc implemented yet"
+            )
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.evaluate_metric: 'work_product_id' is required")
+        load_n = arguments.get("load_n")
+        youngs_modulus_mpa = arguments.get("youngs_modulus_mpa")
+        if not isinstance(load_n, (int, float)) or not isinstance(youngs_modulus_mpa, (int, float)):
+            raise ValueError(
+                "twin.evaluate_metric: 'load_n' and 'youngs_modulus_mpa' are required numbers"
+            )
+        project_id = arguments.get("project_id")
+        limit_mm = arguments.get("limit_mm")
+        band_fraction = arguments.get("band_fraction", 0.2)
+        escalation_k = arguments.get("escalation_k", 1.0)
+        tier2 = arguments.get("tier2")
+        return await self._metric_evaluator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+            load_n=float(load_n),
+            youngs_modulus_mpa=float(youngs_modulus_mpa),
+            limit_mm=float(limit_mm) if isinstance(limit_mm, (int, float)) else None,
+            band_fraction=float(band_fraction),
+            escalation_k=float(escalation_k),
+            tier2=tier2 if isinstance(tier2, dict) else None,
+        )

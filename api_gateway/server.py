@@ -144,6 +144,31 @@ class _LazyBridgeAssemblyInfo:
         return {"parts": parts, "joints": joints.get("joints") or []}
 
 
+class _LazyBridge:
+    """FORGE-315: a duck-typed McpBridge (``async invoke(tool_id, params)``)
+    whose backing bridge is bound AFTER construction -- same seam as
+    ``_LazyBridgeMeasure``/``_LazyBridgeAssemblyInfo`` (see their docstrings
+    for the circular-dependency reason: the real bridge is built FROM the
+    registry ``bootstrap_tool_registry`` itself populates, so a caller
+    handed to that same call can't receive a real bridge yet), generalized
+    to a plain passthrough for a caller that needs to invoke a DIFFERENT
+    tool by id (``twin.evaluate_metric``'s tier-2 escalation calling
+    ``calculix.run_fea``) rather than one fixed tool of its own.
+    """
+
+    def __init__(self) -> None:
+        self.bridge: Any = None
+
+    async def invoke(
+        self, tool_id: str, params: dict[str, Any], timeout: int | None = None
+    ) -> dict[str, Any]:
+        if self.bridge is None:
+            raise RuntimeError(
+                f"_LazyBridge: no backing MCP bridge bound yet (tool_id={tool_id!r})"
+            )
+        return await self.bridge.invoke(tool_id, params, timeout=timeout)
+
+
 # ---------------------------------------------------------------------------
 # OTel bootstrap (module-level so providers are active before first request)
 # ---------------------------------------------------------------------------
@@ -756,6 +781,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_hierarchy_node_recorder,
         make_hierarchy_rollup_fn,
     )
+    from api_gateway.twin.metric_evaluator import make_metric_evaluator
     from api_gateway.twin.robot_description_recorder import (
         make_robot_description_recorder,
         make_robot_description_updater,
@@ -780,6 +806,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-245: same lazy-bridge seam, for a live FreeCAD session's
     # assembly structure (parts + joints) at commit time.
     assembly_info_tool = _LazyBridgeAssemblyInfo()
+    # FORGE-315: same lazy-bridge seam, for twin.evaluate_metric's tier-2
+    # escalation (a real calculix.run_fea call).
+    metric_evaluator_bridge = _LazyBridge()
+    evidence_recorder_fn = make_evidence_recorder(twin, project_backend)
+    metric_evaluator_fn = make_metric_evaluator(
+        twin, evidence_recorder=evidence_recorder_fn, mcp_bridge=metric_evaluator_bridge
+    )
 
     # MET-740: robot-description (URDF/SDF/USD) persistence for the
     # dashboard's cad-export routes. REST-route-triggered, not agent/MCP-
@@ -861,7 +894,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # tool-generated Evidence entities -- the constructive fix for
         # "requirement satisfaction claims" being LLM assertion instead of a
         # real, checkable graph fact.
-        evidence_recorder=make_evidence_recorder(twin, project_backend),
+        evidence_recorder=evidence_recorder_fn,
         # FORGE-65: the requirement-satisfaction claim this whole phase is
         # named for -- an artefact's real edge to the requirement it
         # satisfies, citing evidence, with status always computed live.
@@ -876,6 +909,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # from the twin's other "by type" views.
         hierarchy_node_recorder=make_hierarchy_node_recorder(twin, project_backend),
         hierarchy_rollup_fn=make_hierarchy_rollup_fn(twin),
+        # FORGE-315: tier-0 closed-form hand-calc + tier-2 FEA escalation
+        # (spec §30, minimum sufficient fidelity). metric_evaluator_bridge
+        # is bound to the real active_bridge below, once it exists.
+        metric_evaluator=metric_evaluator_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -901,6 +938,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     measure_tool.bridge = active_bridge
     # FORGE-245: same for assembly_info_tool.
     assembly_info_tool.bridge = active_bridge
+    # FORGE-315: same for metric_evaluator_bridge (twin.evaluate_metric's
+    # tier-2 escalation to calculix.run_fea).
+    metric_evaluator_bridge.bridge = active_bridge
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
