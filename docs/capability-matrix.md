@@ -80,6 +80,32 @@ and components with no recorded weight contributed nothing to the budget
 they were being checked against. A `no_data` result now names the fields
 it is missing, because "no data" is only useful if it says which.
 
+### Asking the thread a question
+
+Two tools name the questions engineers actually ask:
+
+| Tool | Question |
+|---|---|
+| `twin.what_verifies` | What evidence, tests or claims support this requirement? |
+| `twin.where_used` | Which assemblies or designs depend on this part? |
+
+`twin.thread_for` can answer both — but only if you know which way to walk.
+Traceability edges point child-to-parent (evidence *satisfies* a
+requirement), so a requirement is usually an edge **target**, and
+`thread_for`'s default `direction="outgoing"` returns nothing for it. An
+empty subgraph reads as *"nothing verifies this requirement"* when the
+traversal simply went the wrong way.
+
+These two encode the direction, because it is a property of the question
+rather than something the asker should have to know. Each restricts to its
+own edge types, so "what verifies this" does not also return everything
+that merely contains it.
+
+An empty answer says so explicitly — `verified: false`, `related_count: 0`
+and a note naming the edges walked and the direction — so it reads as
+"nothing is recorded" rather than "the tool did not work". `thread_for`
+stays available for an arbitrary walk.
+
 ### MCP prompts
 
 Six curated workflows are served through `prompts/list` and `prompts/get`:
