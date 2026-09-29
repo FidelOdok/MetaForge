@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
+import { DecisionList } from '../components/shared/DecisionList';
 import { useToast } from '../components/ui/Toast';
 import { useActiveProject } from '../hooks/use-active-project';
 import {
@@ -818,6 +819,8 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
           )}
         </div>
       )}
+
+      {winner && <DecisionList nodeId={winner.id} heading="Decision" />}
     </div>
   );
 }

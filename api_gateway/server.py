@@ -41,6 +41,7 @@ from api_gateway.requirement_intelligence.routes import router as requirements_r
 from api_gateway.runs.routes import router as runs_router
 from api_gateway.sessions.routes import router as sessions_router
 from api_gateway.simulation.routes import router as simulation_router
+from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
 from api_gateway.twin.routes import router as twin_router
 from domain_agents.electronics.agent import ElectronicsAgent
@@ -1115,6 +1116,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.promotion.routes import init_twin as init_promotion_twin
     from api_gateway.requirement_intelligence.routes import init_twin as init_requirements_twin
     from api_gateway.simulation.routes import init_twin as init_simulation_twin
+    from api_gateway.twin.decision_routes import init_twin as init_decisions_twin
     from api_gateway.twin.hierarchy_routes import init_twin as init_hierarchy_twin
     from api_gateway.twin.routes import init_design_sketch_approver
     from api_gateway.twin.routes import init_twin as init_twin_viewer
@@ -1211,6 +1213,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_design_loop_twin(twin)
     init_promotion_twin(twin)
     init_features_twin(twin)
+    init_decisions_twin(twin)
     # FORGE-287: the dashboard's "start closed design loop" action reuses
     # the SAME bound optimizer callable wired into bootstrap_tool_registry
     # above (design_loop_starter_fn), so Evidence/Decision recording isn't
@@ -1691,6 +1694,7 @@ def create_app(
     app.include_router(design_loop_router)
     app.include_router(promotion_router)
     app.include_router(features_router)
+    app.include_router(decisions_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

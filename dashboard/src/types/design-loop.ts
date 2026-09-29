@@ -10,6 +10,7 @@
 export type DesignLoopStatus = 'optimal' | 'infeasible' | 'already_feasible_at_min';
 
 export interface DesignLoopIteration {
+  id: string;
   iteration_number: number;
   parameter_name: string;
   parameter_value: number;

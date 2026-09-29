@@ -47,6 +47,12 @@ reproducing this session's own live-validated numbers unchanged) -- a
 second real optimizer, ``make_tube_height_optimizer`` (sweeps ``height_mm``
 with wall thickness fixed, same real hollow-tube physics), proves the
 generalization is real, not a rename.
+
+FORGE-289 (gap G-G3): ``start()`` now links the Decision the optimizer
+recorded (when it recorded one) to the winning ``DesignLoopIteration`` via
+``EdgeType.GENERATED_FROM`` -- so a reader can walk from a converged loop's
+winner straight to the Decision it produced, not just infer the connection
+from both existing.
 """
 
 from __future__ import annotations
@@ -194,6 +200,20 @@ def make_design_loop_starter(
                     req_uuid = UUID(req_id)
                     for iteration in iterations:
                         await twin.add_edge(iteration.id, req_uuid, EdgeType.CONSTRAINED_BY)
+
+            # FORGE-289 (gap G-G3): the optimizer records a Decision for the
+            # winning candidate (when one exists) -- link it to the real
+            # DesignLoopIteration node that won, not just the implicit
+            # "same call" relationship. GENERATED_FROM (previously declared,
+            # never used) reads correctly either direction: this Decision
+            # was generated from this iteration.
+            decision_node_id = out.get("decision_node_id")
+            if decision_node_id is not None and winner_index is not None:
+                await twin.add_edge(
+                    UUID(decision_node_id),
+                    iterations[winner_index].id,
+                    EdgeType.GENERATED_FROM,
+                )
 
             logger.info(
                 "design_loop_started",

@@ -917,6 +917,22 @@ The dashboard's "objective vs iteration chart" (its own Jira wording) is a small
 
 *Source: `twin_core/models/design_loop_iteration.py`, `twin_core/prediction/optimizer.py`, `api_gateway/twin/design_loop.py`, `api_gateway/twin/optimizer.py`, `api_gateway/design_loop/routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/pages/RequirementsPage.tsx`*
 
+### 2.20 Decision records: evidence links + dashboard cards (FORGE-289, gap G-G3)
+
+`twin.record_decision` (MET-495) already persisted a `WorkProductType.DESIGN_DECISION` work product with real `alternatives` (structured option/reason-rejected pairs, never prose) and real `parent_refs` edges (FORGE-61) -- the ticket's actual gap ("Current state: Weak (decisions exist, often without evidence links)") was that nothing connected a Decision to the Evidence that backed it: the rationale string could *mention* a calculation, but no graph edge let a reader or a gate evaluator walk from one to the other.
+
+`record_decision` gained an `evidence_refs: list[str] | None` parameter, resolved through the same `_ref_resolver.py` every other recorder in this package uses and linked via `EdgeType.SUPPORTED_BY` (previously declared, never used) -- a distinct relation from `parent_refs`' own `satisfies`, since "supported by evidence" and "satisfies a requirement" are different facts. `make_wall_thickness_optimizer`/`make_tube_height_optimizer` (section 2.17) now pass `evidence_refs=[out["evidence_node_id"]]` into their existing `decision_recorder(...)` call, so every design-loop-produced Decision links to its own Evidence for free.
+
+The design loop itself (section 2.19) gained one more edge: when `start()` produces both a winning `DesignLoopIteration` and a Decision, it links them via `EdgeType.GENERATED_FROM` (also previously declared, never used) -- `decision -[GENERATED_FROM]-> winning_iteration`. A reader can now walk a converged loop's winner straight to the Decision it produced.
+
+`GET /v1/decisions?related_to=<node_id>` (`api_gateway/twin/decision_routes.py`) answers "what decisions touch this node" for any node with an *incoming* edge from a Decision -- a hierarchy node (via `parent_refs`), an Evidence entity (via `evidence_refs`), or a `DesignLoopIteration` (via the new `GENERATED_FROM` link). It walks `twin.get_edges(node_id, direction="incoming")` and keeps only edges whose source resolves to a `DESIGN_DECISION` work product, filtering by source type rather than by a fixed edge-type allowlist -- `parent_refs`' own `relation` is caller-configurable (default `satisfies`, not fixed), so an edge-type filter would silently miss a Decision linked with a non-default relation. No new twin_core method was needed.
+
+Dashboard: a shared `DecisionList`/`DecisionCard` component (`dashboard/src/components/shared/DecisionList.tsx`, no new dependency) renders at both places the gap's own dashboard-interaction line named -- "Decision cards linked from hierarchy nodes and iterations": the Structure tab (`StructureView.tsx`) shows decisions related to the selected hierarchy node in a local panel (tracked independently of the tab's existing selectedNode/inspector plumbing, which assumes a WorkProduct/CAD node shape a HierarchyNode doesn't have), and the Requirements page's Design Loop section (section 2.19) shows decisions related to a converged loop's winning iteration.
+
+**Deliberately out of scope**: auto-linking a Decision to a HierarchyNode from the design-loop flow itself -- the loop has no `hierarchy_node_id` input today, and wiring one through is a separate, larger change to its signature. The generic `twin.record_decision(parent_refs=[hierarchy_node_id])` path already supports manual/agent-driven linking, sufficient to demonstrate on the arm project per this ticket's own definition of done.
+
+*Source: `api_gateway/twin/decision_recorder.py`, `api_gateway/twin/optimizer.py`, `api_gateway/twin/design_loop.py`, `api_gateway/twin/decision_routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/components/shared/DecisionList.tsx`, `dashboard/src/components/viewer/StructureView.tsx`, `dashboard/src/pages/RequirementsPage.tsx`*
+
 ---
 
 ## 3. Edge Types
