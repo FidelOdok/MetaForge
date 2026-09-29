@@ -92,6 +92,7 @@ class SessionCapture:
         duration_ms: float,
         result: Any = None,
         error: Any = None,
+        call_id: str | None = None,
     ) -> None:
         """Record one tool call. Never raises — capture must not break the call."""
         try:
@@ -102,6 +103,7 @@ class SessionCapture:
                 duration_ms=duration_ms,
                 result=result,
                 error=error,
+                call_id=call_id,
             )
         except Exception as exc:  # noqa: BLE001 — capture is best-effort, never fatal
             logger.warning("session_capture_failed", tool_id=tool_id, error=str(exc))
@@ -115,6 +117,7 @@ class SessionCapture:
         duration_ms: float,
         result: Any,
         error: Any,
+        call_id: str | None = None,
     ) -> None:
         now = self._clock()
 
@@ -144,6 +147,13 @@ class SessionCapture:
             "args": _summarize_args(arguments),
             "captured_by": "mcp-server",
         }
+        # FORGE-362: the same reference the caller got back in `_meta.callId`.
+        # A reply claiming "I committed the geometry" can name a call id, and
+        # that id either appears in this timeline or the claim is unsupported.
+        # Without it, a grounded-looking answer and an invented one read
+        # identically.
+        if call_id is not None:
+            data["call_id"] = call_id
         if error is not None:
             data["error"] = str(error)[:_MAX_ARG_SUMMARY]
         await self._store.append_event(session_id, type=event_type, message=message, data=data)
