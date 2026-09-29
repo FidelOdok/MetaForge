@@ -23,6 +23,14 @@ recorded via ``evidence_refs`` (a real ``EdgeType.SUPPORTED_BY`` graph edge)
 -- previously the rationale string mentioned the calculation but nothing
 connected the two nodes.
 
+FORGE-291 (gap G-G5): both ``optimize(...)`` functions now accept
+``max_iterations`` (forwarded to the underlying bisection, default 60
+unchanged) and echo it back in the response as ``max_iterations`` --
+alongside the already-present ``iteration_count``, this is the real,
+honestly-measurable "budget" a dashboard can show. "Tokens" (the ticket's
+own dashboard wording) is dropped rather than implemented: this loop makes
+zero LLM calls, so there is no real per-loop token cost to attribute.
+
 Deliberately out of scope (see ``twin_core/prediction/optimizer.py``'s own
 docstring for the full rationale): proposing the winning wall thickness as
 an actual geometry change via ECT (``ControlledEntityKind`` only supports
@@ -70,6 +78,7 @@ def make_wall_thickness_optimizer(
         material: str = "aluminum_6061",
         wall_min_mm: float = 0.5,
         wall_max_mm: float | None = None,
+        max_iterations: int = 60,
         project_id: str | None = None,
         requirement_ids: list[str] | None = None,
         record_decision: bool = True,
@@ -100,9 +109,16 @@ def make_wall_thickness_optimizer(
                 sf_limit=sf_limit,
                 wall_min_mm=wall_min_mm,
                 wall_max_mm=wall_max_mm,
+                max_iterations=max_iterations,
             )
             out: dict[str, Any] = result.model_dump()
             out["material"] = material
+            # FORGE-291: the honest iteration budget -- "tokens" (the
+            # ticket's own dashboard wording) doesn't correspond to
+            # anything real here (zero LLM calls, pure bisection math);
+            # max_iterations vs. the already-present iteration_count is
+            # the real, measurable budget a dashboard can show.
+            out["max_iterations"] = max_iterations
             span.set_attribute("optimizer.status", result.status)
 
             if evidence_recorder is not None:
@@ -202,6 +218,7 @@ def make_tube_height_optimizer(
         material: str = "aluminum_6061",
         height_min_mm: float = 1.0,
         height_max_mm: float | None = None,
+        max_iterations: int = 60,
         project_id: str | None = None,
         requirement_ids: list[str] | None = None,
         record_decision: bool = True,
@@ -232,9 +249,11 @@ def make_tube_height_optimizer(
                 sf_limit=sf_limit,
                 height_min_mm=height_min_mm,
                 height_max_mm=height_max_mm,
+                max_iterations=max_iterations,
             )
             out: dict[str, Any] = result.model_dump()
             out["material"] = material
+            out["max_iterations"] = max_iterations
             span.set_attribute("optimizer.status", result.status)
 
             if evidence_recorder is not None:

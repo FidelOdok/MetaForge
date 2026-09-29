@@ -4304,6 +4304,14 @@ class TwinServer(McpToolServer):
                             "type": "boolean",
                             "description": "Record a Decision when feasible. Default true.",
                         },
+                        "max_iterations": {
+                            "type": "integer",
+                            "description": (
+                                "Bisection iteration budget. Default 60 -- the real, "
+                                "measurable budget for this loop (FORGE-291); it makes "
+                                "zero LLM calls, so there is no token cost to report."
+                            ),
+                        },
                     },
                     "required": ["work_product_id", "load_n", "deflection_limit_mm"],
                 },
@@ -4317,6 +4325,7 @@ class TwinServer(McpToolServer):
                         "material": {"type": "string"},
                         "evidence_node_id": {"type": "string"},
                         "decision_node_id": {"type": "string"},
+                        "max_iterations": {"type": "integer"},
                     },
                 },
                 phase=1,
@@ -4342,6 +4351,7 @@ class TwinServer(McpToolServer):
         project_id = arguments.get("project_id")
         requirement_ids = arguments.get("requirement_ids")
         record_decision = arguments.get("record_decision", True)
+        max_iterations = arguments.get("max_iterations", 60)
         return await self._parameter_optimizer(
             work_product_id=work_product_id,
             load_n=float(load_n),
@@ -4350,6 +4360,7 @@ class TwinServer(McpToolServer):
             material=material if isinstance(material, str) else "aluminum_6061",
             wall_min_mm=float(wall_min_mm),
             wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
+            max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
             project_id=project_id if isinstance(project_id, str) else None,
             requirement_ids=(
                 [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
@@ -4418,6 +4429,10 @@ class TwinServer(McpToolServer):
                                 "against -- linked to every iteration via CONSTRAINED_BY."
                             ),
                         },
+                        "max_iterations": {
+                            "type": "integer",
+                            "description": "Bisection iteration budget. Default 60.",
+                        },
                     },
                     "required": ["work_product_id", "load_n", "deflection_limit_mm"],
                 },
@@ -4430,6 +4445,15 @@ class TwinServer(McpToolServer):
                         "winner": {"type": ["object", "null"]},
                         "iteration_count": {"type": "integer"},
                         "iteration_ids": {"type": "array", "items": {"type": "string"}},
+                        "max_iterations": {"type": "integer"},
+                        "duplicate": {
+                            "type": "boolean",
+                            "description": (
+                                "FORGE-291: true when this call had identical inputs to an "
+                                "earlier run -- loop_id/iteration_ids/winner are that prior "
+                                "run's, and nothing new was written."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -4454,6 +4478,7 @@ class TwinServer(McpToolServer):
         wall_max_mm = arguments.get("wall_max_mm")
         project_id = arguments.get("project_id")
         requirement_ids = arguments.get("requirement_ids")
+        max_iterations = arguments.get("max_iterations", 60)
         return await self._design_loop_starter(
             work_product_id=work_product_id,
             load_n=float(load_n),
@@ -4462,6 +4487,7 @@ class TwinServer(McpToolServer):
             material=material if isinstance(material, str) else "aluminum_6061",
             wall_min_mm=float(wall_min_mm),
             wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
+            max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
             project_id=project_id if isinstance(project_id, str) else None,
             requirement_ids=(
                 [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
@@ -4530,6 +4556,10 @@ class TwinServer(McpToolServer):
                                 "against -- linked to every iteration via CONSTRAINED_BY."
                             ),
                         },
+                        "max_iterations": {
+                            "type": "integer",
+                            "description": "Bisection iteration budget. Default 60.",
+                        },
                     },
                     "required": [
                         "work_product_id",
@@ -4547,6 +4577,15 @@ class TwinServer(McpToolServer):
                         "winner": {"type": ["object", "null"]},
                         "iteration_count": {"type": "integer"},
                         "iteration_ids": {"type": "array", "items": {"type": "string"}},
+                        "max_iterations": {"type": "integer"},
+                        "duplicate": {
+                            "type": "boolean",
+                            "description": (
+                                "FORGE-291: true when this call had identical inputs to an "
+                                "earlier run -- loop_id/iteration_ids/winner are that prior "
+                                "run's, and nothing new was written."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -4578,6 +4617,7 @@ class TwinServer(McpToolServer):
         height_max_mm = arguments.get("height_max_mm")
         project_id = arguments.get("project_id")
         requirement_ids = arguments.get("requirement_ids")
+        max_iterations = arguments.get("max_iterations", 60)
         return await self._tube_height_design_loop_starter(
             work_product_id=work_product_id,
             wall_thickness_mm=float(wall_thickness_mm),
@@ -4587,6 +4627,7 @@ class TwinServer(McpToolServer):
             material=material if isinstance(material, str) else "aluminum_6061",
             height_min_mm=float(height_min_mm),
             height_max_mm=float(height_max_mm) if isinstance(height_max_mm, (int, float)) else None,
+            max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
             project_id=project_id if isinstance(project_id, str) else None,
             requirement_ids=(
                 [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None

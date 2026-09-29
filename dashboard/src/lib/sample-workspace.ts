@@ -858,6 +858,11 @@ const SAMPLE_WORKSPACE_SEED = {
   // loop_id -- empty until the dashboard's "Start design loop" action
   // creates one (see the POST /design-loop/start handler below).
   designLoops: {} as Record<string, SampleDesignLoop>,
+  // FORGE-291 (gap G-G5): illustrative duplicate-commit guard -- maps a
+  // JSON-stringified request body to the loop_id it already produced, so
+  // resubmitting the exact same form mirrors the real guard's
+  // duplicate=true response instead of silently narrating a second run.
+  designLoopInputsSeen: {} as Record<string, string>,
   // FORGE-290 (gap G-G4): gate-review attempts, newest first -- empty
   // until the "Attempt promotion" action records one.
   promotionGates: [] as SampleMaturityGate[],
@@ -1211,6 +1216,28 @@ function route(
       };
     }
     if (path === '/design-loop/start') {
+      // FORGE-291: duplicate-commit guard -- identical inputs (excluding
+      // nothing here, since this mock has no record_decision-equivalent
+      // toggle) return the prior loop untouched, same shape as the real
+      // guard's response.
+      const inputsHash = JSON.stringify(body, Object.keys(body).sort());
+      const priorLoopId = s.designLoopInputsSeen[inputsHash];
+      if (priorLoopId) {
+        const priorLoop = s.designLoops[priorLoopId];
+        const priorWinner = priorLoop?.iterations.find((it) => it.is_winner) ?? null;
+        return {
+          loop_id: priorLoopId,
+          status: priorLoop?.status ?? 'optimal',
+          detail: `duplicate of an earlier run with identical inputs (loop_id=${priorLoopId})`,
+          winner: priorWinner,
+          candidates: priorLoop?.iterations ?? [],
+          iteration_count: priorLoop?.iterations.length ?? 0,
+          iteration_ids: priorLoop?.iterations.map((it) => it.id) ?? [],
+          max_iterations: (body.maxIterations as number) ?? 60,
+          duplicate: true,
+        };
+      }
+
       // FORGE-287: a small, illustrative bisection-like trace -- narrows
       // toward a converged winner exactly like the real
       // twin.start_design_loop tool's own bisection search, just without
@@ -1239,6 +1266,7 @@ function route(
         };
       });
       s.designLoops[loopId] = { loop_id: loopId, status: 'optimal', iterations };
+      s.designLoopInputsSeen[inputsHash] = loopId;
       // FORGE-289: the real optimizer records a Decision (with evidence
       // link) for a converged winner -- mirror that here so the Design
       // Loop section's own DecisionList has something to show.
@@ -1269,6 +1297,8 @@ function route(
         candidates: iterations,
         iteration_count: iterations.length,
         iteration_ids: iterations.map((it) => it.id),
+        max_iterations: (body.maxIterations as number) ?? 60,
+        duplicate: false,
       };
     }
     if (path === '/promotion/attempt') {

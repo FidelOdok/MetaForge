@@ -34,6 +34,7 @@ export interface StartDesignLoopPayload {
   wallMaxMm?: number;
   projectId?: string;
   requirementIds?: string[];
+  maxIterations?: number;
 }
 
 export interface StartDesignLoopResult {
@@ -44,6 +45,13 @@ export interface StartDesignLoopResult {
   candidates: DesignLoopIteration[];
   iteration_count: number;
   iteration_ids: string[];
+  /** FORGE-291 (gap G-G5): the real, honest iteration budget -- "tokens"
+   * (the ticket's own dashboard wording) doesn't apply here, this loop
+   * makes zero LLM calls. */
+  max_iterations: number;
+  /** FORGE-291: true when this call had identical inputs to an earlier
+   * run -- loop_id/iteration_ids/winner are that prior run's. */
+  duplicate: boolean;
 }
 
 export interface DesignLoopReport {

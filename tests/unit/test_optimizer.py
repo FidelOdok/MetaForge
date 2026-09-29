@@ -414,6 +414,42 @@ class TestMakeWallThicknessOptimizer:
         assert decision_wp is not None
         assert decision_wp.metadata.get("evidence_refs", []) == []
 
+    async def test_max_iterations_defaults_to_60_and_is_echoed_back(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        wp = await _seed_cad(twin)
+        optimize = make_wall_thickness_optimizer(twin)
+        out = await optimize(
+            work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        assert out["max_iterations"] == 60
+
+    async def test_max_iterations_is_forwarded_to_the_bisection(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        """FORGE-291: a too-small budget must surface as a real, honest
+        effect on the search -- not a silently-ignored kwarg."""
+        wp = await _seed_cad(twin)
+        optimize = make_wall_thickness_optimizer(twin)
+        # load_n=100.0 is the same "optimal" (bisecting) case
+        # test_optimal_result_against_real_geometry already covers --
+        # an infeasible search short-circuits after evaluating just its two
+        # bounds and never enters the bisection loop at all, so it
+        # wouldn't distinguish a real max_iterations effect from a no-op.
+        out = await optimize(
+            work_product_id=str(wp.id),
+            load_n=100.0,
+            deflection_limit_mm=0.5,
+            sf_limit=2.0,
+            max_iterations=1,
+        )
+        assert out["max_iterations"] == 1
+        assert out["status"] == "optimal"
+        default_out = await optimize(
+            work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        assert len(out["candidates"]) < len(default_out["candidates"])
+
 
 class TestMakeTubeHeightOptimizerDecisionEvidenceLink:
     """FORGE-289: same evidence-linking behaviour as

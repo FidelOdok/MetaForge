@@ -229,6 +229,90 @@ class TestMakeDesignLoopStarter:
         assert "decision_node_id" not in out
 
 
+class TestDuplicateCommitGuard:
+    """FORGE-291 (gap G-G5): calling start() again with byte-identical
+    inputs must NOT re-run the bisection or write a second iteration
+    subtree -- it returns the prior loop's already-persisted result with
+    duplicate=True."""
+
+    async def test_identical_inputs_return_the_same_loop_marked_duplicate(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        wp = await _seed_cad(twin)
+        start = make_design_loop_starter(twin)
+        first = await start(
+            work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        assert first["duplicate"] is False
+
+        second = await start(
+            work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        assert second["duplicate"] is True
+        assert second["loop_id"] == first["loop_id"]
+        assert second["iteration_ids"] == first["iteration_ids"]
+        assert second["iteration_count"] == first["iteration_count"]
+
+        # No second iteration subtree was created.
+        all_iterations = await twin.list_design_loop_iterations(UUID(first["loop_id"]))
+        assert len(all_iterations) == first["iteration_count"]
+
+    async def test_different_inputs_are_not_treated_as_duplicates(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        wp = await _seed_cad(twin)
+        start = make_design_loop_starter(twin)
+        first = await start(
+            work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        second = await start(
+            work_product_id=str(wp.id), load_n=200.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        assert second["duplicate"] is False
+        assert second["loop_id"] != first["loop_id"]
+
+    async def test_record_decision_toggle_alone_is_still_a_duplicate(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        """record_decision toggles a side effect, not the search itself --
+        two otherwise-identical calls differing only in it are the same
+        loop."""
+        wp = await _seed_cad(twin)
+        start = make_design_loop_starter(twin)
+        first = await start(
+            work_product_id=str(wp.id),
+            load_n=100.0,
+            deflection_limit_mm=0.5,
+            sf_limit=2.0,
+            record_decision=True,
+        )
+        second = await start(
+            work_product_id=str(wp.id),
+            load_n=100.0,
+            deflection_limit_mm=0.5,
+            sf_limit=2.0,
+            record_decision=False,
+        )
+        assert second["duplicate"] is True
+        assert second["loop_id"] == first["loop_id"]
+
+    async def test_duplicate_of_an_infeasible_run_reports_infeasible(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        wp = await _seed_cad(twin)
+        start = make_design_loop_starter(twin)
+        first = await start(
+            work_product_id=str(wp.id), load_n=20.0, deflection_limit_mm=0.0001, sf_limit=2.0
+        )
+        assert first["status"] == "infeasible"
+        second = await start(
+            work_product_id=str(wp.id), load_n=20.0, deflection_limit_mm=0.0001, sf_limit=2.0
+        )
+        assert second["duplicate"] is True
+        assert second["status"] == "infeasible"
+        assert second["winner"] is None
+
+
 class TestTubeHeightDesignLoop:
     """FORGE-288 (gap G-G2): a second real optimizer (height_mm, wall
     thickness fixed) plugged into the SAME make_design_loop_starter
@@ -395,6 +479,33 @@ class TestDesignLoopAdapter:
         )
         assert approved["approved"] is True
 
+    async def test_max_iterations_and_duplicate_pass_through(self, twin: InMemoryTwinAPI) -> None:
+        wp = await _seed_cad(twin)
+        starter = make_design_loop_starter(twin)
+        server = TwinServer(twin=twin, design_loop_starter=starter)
+
+        first = await server.start_design_loop(
+            {
+                "work_product_id": str(wp.id),
+                "load_n": 100.0,
+                "deflection_limit_mm": 0.5,
+                "max_iterations": 5,
+            }
+        )
+        assert first["max_iterations"] == 5
+        assert first["duplicate"] is False
+
+        second = await server.start_design_loop(
+            {
+                "work_product_id": str(wp.id),
+                "load_n": 100.0,
+                "deflection_limit_mm": 0.5,
+                "max_iterations": 5,
+            }
+        )
+        assert second["duplicate"] is True
+        assert second["loop_id"] == first["loop_id"]
+
     async def test_not_registered_when_none_supplied(self, twin: InMemoryTwinAPI) -> None:
         server = TwinServer(twin=twin)
         assert "twin.start_design_loop" not in server.tool_ids
@@ -512,6 +623,25 @@ class TestDesignLoopRoutes:
             )
             assert approve_resp.status_code == 200
             assert approve_resp.json()["approved"] is True
+
+    async def test_duplicate_call_via_rest_returns_the_same_loop(
+        self, client, twin: InMemoryTwinAPI
+    ) -> None:
+        wp = await _seed_cad(twin)
+        payload = {
+            "workProductId": str(wp.id),
+            "loadN": 100.0,
+            "deflectionLimitMm": 0.5,
+            "sfLimit": 2.0,
+            "maxIterations": 60,
+        }
+        async with client:
+            first = await client.post("/v1/design-loop/start", json=payload)
+            second = await client.post("/v1/design-loop/start", json=payload)
+        assert first.json()["duplicate"] is False
+        assert second.json()["duplicate"] is True
+        assert second.json()["loop_id"] == first.json()["loop_id"]
+        assert second.json()["max_iterations"] == 60
 
     async def test_unknown_loop_404s(self, client) -> None:
         async with client:

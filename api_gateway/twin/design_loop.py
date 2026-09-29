@@ -53,10 +53,30 @@ recorded (when it recorded one) to the winning ``DesignLoopIteration`` via
 ``EdgeType.GENERATED_FROM`` -- so a reader can walk from a converged loop's
 winner straight to the Decision it produced, not just infer the connection
 from both existing.
+
+FORGE-291 (gap G-G5): a duplicate-commit guard -- calling ``start()`` again
+with byte-identical inputs (same ``work_product_id`` + every ``optimize_kwargs``
+value except ``record_decision``, which doesn't change the search) now
+short-circuits to the PRIOR loop's already-persisted result instead of
+re-running the bisection and re-writing a whole new iteration subtree.
+Same MET-506 "identical inputs = the same real-world thing" precedent
+``decision_recorder.py`` already established, applied here against a
+sha256 of the inputs (``loop_inputs_hash``, stamped on iteration 0 of every
+run) since a design loop has no single work-product node of its own to
+hash content against. Infeasibility detection needed no new mechanism --
+``status="infeasible"`` already existed (FORGE-287); this ticket's real
+remaining gap was duplicate detection and iteration-budget visibility (see
+``api_gateway/twin/optimizer.py`` for the latter). "Cost/iteration budget"
+in tokens is aspirational Jira wording that doesn't correspond to anything
+real here (this loop makes zero LLM calls -- pure deterministic bisection
+math); the honest budget already in play is ``max_iterations``, now
+surfaced in the response alongside the already-present ``iteration_count``.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -70,6 +90,16 @@ from twin_core.models.enums import EdgeType
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.design_loop")
+
+
+def _loop_inputs_hash(work_product_id: str, optimize_kwargs: dict[str, Any]) -> str:
+    """sha256 of the exact inputs that determine a loop's result --
+    ``record_decision`` excluded (it toggles a side effect, not the search
+    itself, so two calls differing only in it are still the same loop)."""
+    payload = {k: v for k, v in optimize_kwargs.items() if k != "record_decision"}
+    payload["work_product_id"] = work_product_id
+    canonical = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _default_wall_thickness_mapper(c: dict[str, Any]) -> tuple[float, dict[str, float]]:
@@ -131,8 +161,47 @@ def make_design_loop_starter(
         project_id: str | None = optimize_kwargs.get("project_id")
         requirement_ids: list[str] | None = optimize_kwargs.get("requirement_ids")
         optimize_kwargs.setdefault("record_decision", True)
+        loop_inputs_hash = _loop_inputs_hash(work_product_id, optimize_kwargs)
 
         with tracer.start_as_current_span("twin.start_design_loop") as span:
+            span.set_attribute("design_loop.loop_inputs_hash", loop_inputs_hash)
+
+            # FORGE-291: duplicate-commit guard. A hit means this exact loop
+            # already ran -- return its already-persisted result instead of
+            # spending a bisection + a whole new iteration subtree on a
+            # re-submission.
+            prior_iter0 = await twin.find_design_loop_by_inputs_hash(loop_inputs_hash)
+            if prior_iter0 is not None:
+                prior_iterations = await twin.list_design_loop_iterations(prior_iter0.loop_id)
+                prior_winner = next((it for it in prior_iterations if it.is_winner), None)
+                if prior_winner is None:
+                    prior_status = "infeasible"
+                elif prior_winner.iteration_number == 0:
+                    prior_status = "already_feasible_at_min"
+                else:
+                    prior_status = "optimal"
+                logger.info(
+                    "design_loop_duplicate_detected",
+                    loop_id=str(prior_iter0.loop_id),
+                    loop_inputs_hash=loop_inputs_hash,
+                )
+                return {
+                    "status": prior_status,
+                    "detail": (
+                        f"duplicate of an earlier run with identical inputs "
+                        f"(loop_id={prior_iter0.loop_id})"
+                    ),
+                    "winner": prior_winner.model_dump(mode="json") if prior_winner else None,
+                    "loop_id": str(prior_iter0.loop_id),
+                    "iteration_count": len(prior_iterations),
+                    "iteration_ids": [str(it.id) for it in prior_iterations],
+                    # Identical inputs by definition (that's what made this
+                    # a duplicate hit) -- the current call's own
+                    # max_iterations IS the prior run's.
+                    "max_iterations": optimize_kwargs.get("max_iterations", 60),
+                    "duplicate": True,
+                }
+
             out = await optimize(**optimize_kwargs)
             candidates: list[dict[str, Any]] = out["candidates"]
             winner: dict[str, Any] | None = out.get("winner")
@@ -182,6 +251,11 @@ def make_design_loop_starter(
                     feasible=c["feasible"],
                     status=iter_status,
                     is_winner=is_winner,
+                    # FORGE-291: stamped on every iteration (cheap, and
+                    # matches every OTHER field's per-iteration storage
+                    # convention) though only iteration 0 is ever queried
+                    # against, by find_design_loop_by_inputs_hash.
+                    loop_inputs_hash=loop_inputs_hash,
                 )
                 created = await twin.create_design_loop_iteration(iteration)
                 iterations.append(created)
@@ -227,6 +301,7 @@ def make_design_loop_starter(
                 "loop_id": str(loop_id),
                 "iteration_count": len(iterations),
                 "iteration_ids": [str(it.id) for it in iterations],
+                "duplicate": False,
             }
 
     return start
