@@ -179,13 +179,14 @@ class TestG7VerificationMethodMetadataFallback:
 
 
 class TestG7NotEvaluatedChecks:
-    async def test_measurement_evidence_are_not_evaluated(self, twin, project_id):
+    async def test_measurement_method_still_not_evaluated(self, twin, project_id):
+        # FORGE-258 only claimed expected_evidence -- measurement_method has
+        # no field/metadata-key convention anywhere in this codebase yet.
         result = await evaluate_g7_verification_readiness(twin, project_id)
         ids = {c.id for c in result.checks}
-        for expected in ("measurement_method_defined", "expected_evidence_defined"):
-            assert expected in ids
-            check = next(c for c in result.checks if c.id == expected)
-            assert check.status == GateCheckStatus.NOT_EVALUATED
+        assert "measurement_method_defined" in ids
+        check = next(c for c in result.checks if c.id == "measurement_method_defined")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
 
     async def test_acceptance_criteria_defined_is_no_longer_a_fixed_placeholder(
         self, twin, project_id
@@ -196,9 +197,49 @@ class TestG7NotEvaluatedChecks:
         ids = {c.id for c in result.checks}
         assert "acceptance_criteria_defined" not in ids
 
+    async def test_expected_evidence_defined_is_no_longer_a_fixed_placeholder(
+        self, twin, project_id
+    ):
+        # FORGE-258: same move as acceptance_criteria_defined above.
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        ids = {c.id for c in result.checks}
+        assert "expected_evidence_defined" not in ids
+
     async def test_gate_id_is_g7(self, twin, project_id):
         result = await evaluate_g7_verification_readiness(twin, project_id)
         assert result.gate_id == "G7"
+
+
+class TestG7ExpectedEvidenceCheck:
+    async def test_expected_evidence_present_passes(self, twin, project_id):
+        req = await twin.create_constraint(
+            _critical_req(project_id, source="agent").model_copy(
+                update={"expected_evidence": "simulation"}
+            )
+        )
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"requirement:{req.id}:expected_evidence")
+        assert check.status == GateCheckStatus.PASS
+        assert check.detail == "simulation"
+
+    async def test_missing_expected_evidence_fails(self, twin, project_id):
+        req = await twin.create_constraint(_critical_req(project_id, source="agent"))
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(c for c in result.checks if c.id == f"requirement:{req.id}:expected_evidence")
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+    async def test_bad_expected_evidence_rejected_at_the_model(self, project_id):
+        with pytest.raises(ValueError, match="not a recognized evidence type"):
+            Constraint(
+                name="req1",
+                expression="True",
+                severity=ConstraintSeverity.ERROR,
+                domain="mech",
+                source="agent",
+                project_id=project_id,
+                expected_evidence="vibes",
+            )
 
 
 class TestG8BaselineCheck:

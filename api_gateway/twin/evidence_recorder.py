@@ -66,22 +66,11 @@ from twin_core.consistency.staleness import (
     work_product_current_revision,
 )
 from twin_core.models.engineering_entity import EngineeringEntity
+from twin_core.models.enums import EVIDENCE_TYPES as _EVIDENCE_TYPES
 from twin_core.models.enums import EdgeType
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.evidence_recorder")
-
-_EVIDENCE_TYPES = frozenset(
-    {
-        "calculation",
-        "simulation",
-        "test",
-        "inspection",
-        "demonstration",
-        "datasheet",
-        "external_reference",
-    }
-)
 # FORGE-314: work_product added so Evidence can pin the exact CAD/geometry
 # revision it validated (the doc's own "CAD-BODY-003@7" example) -- see
 # twin_core.consistency.staleness's module docstring for how a WorkProduct's

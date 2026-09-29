@@ -196,6 +196,43 @@ test.describe('Requirements', () => {
     await expect(newRow).toContainText('no_data');
     await expect(newRow).toContainText('tip_deflection <= 0.5mm');
   });
+
+  test('verification declaration drives the unverified badge (FORGE-258)', async ({ page }) => {
+    await page.goto('/requirements?demo=1');
+    const matrix = page.getByTestId('requirements-matrix');
+    await expect(matrix).toBeVisible();
+
+    // Undeclared: no verification method, no expected evidence -- red
+    // "not declared" badge, distinct from the pass/fail/no_data status pill.
+    await matrix.getByTestId('new-constraint-button').click();
+    let form = page.getByTestId('new-constraint-form');
+    await form.getByLabel('Name').fill('req_no_verification');
+    await form.getByLabel('Metric').fill('req_no_verification');
+    await form.getByLabel('Limit').fill('1.0');
+    await form.getByRole('button', { name: 'Record' }).click();
+    await expect(form).not.toBeVisible();
+
+    const unverifiedRow = matrix.getByRole('row', { name: /req_no_verification/ });
+    await expect(unverifiedRow.getByTestId('unverified-badge')).toBeVisible();
+    await expect(unverifiedRow.getByTestId('unverified-badge')).toContainText('not declared');
+
+    // Declared: verification method + expected evidence both set -- no red
+    // badge, and both values render on the row.
+    await matrix.getByTestId('new-constraint-button').click();
+    form = page.getByTestId('new-constraint-form');
+    await form.getByLabel('Name').fill('req_has_verification');
+    await form.getByLabel('Metric').fill('req_has_verification');
+    await form.getByLabel('Limit').fill('2.0');
+    await form.getByLabel('Verification method').fill('FEA');
+    await form.getByLabel('Expected evidence').selectOption('simulation');
+    await form.getByRole('button', { name: 'Record' }).click();
+    await expect(form).not.toBeVisible();
+
+    const verifiedRow = matrix.getByRole('row', { name: /req_has_verification/ });
+    await expect(verifiedRow.getByTestId('unverified-badge')).not.toBeVisible();
+    await expect(verifiedRow).toContainText('FEA');
+    await expect(verifiedRow).toContainText('simulation');
+  });
 });
 
 test.describe('Design Assistant', () => {

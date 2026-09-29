@@ -38,6 +38,12 @@ evaluating this expression, so there is nothing dishonest about a
 placeholder here -- unlike a caller supplying neither an expression nor a
 structured binding, which is still rejected outright (an evaluable-nor-
 declared constraint is not a real requirement).
+
+FORGE-258 (gap G-A2): an entry may also carry ``expected_evidence`` --
+pass-through to the new ``Constraint.expected_evidence`` field, validated
+by the model itself (``twin_core.models.enums.EVIDENCE_TYPES``, the same
+set ``twin.record_evidence`` accepts) -- not re-validated here, same
+precedent as ``unit``'s own model-level validation.
 """
 
 from __future__ import annotations
@@ -124,6 +130,9 @@ def _validate_entry(index: int, entry: Any) -> dict[str, Any]:
         # (unchanged behavior for a caller that omits them).
         "acceptance_criteria": str(entry.get("acceptance_criteria") or ""),
         "verification_method": str(entry.get("verification_method") or ""),
+        # FORGE-258: optional, default "" -- validated by the Constraint
+        # model itself (EVIDENCE_TYPES), same precedent as unit.
+        "expected_evidence": str(entry.get("expected_evidence") or ""),
         # FORGE-259: structured measured-key binding -- optional, default ""
         # / None (unchanged behavior for a caller that omits them).
         "metric": metric,
@@ -144,6 +153,8 @@ def _render_markdown(title: str, entries: list[dict[str, Any]]) -> str:
             lines.append(f"**Acceptance criteria:** {e['acceptance_criteria']}")
         if e["verification_method"]:
             lines.append(f"**Verification method:** {e['verification_method']}")
+        if e["expected_evidence"]:
+            lines.append(f"**Expected evidence:** {e['expected_evidence']}")
         if e["metric"]:
             unit_suffix = e["unit"] or ""
             target = f" on {e['target_node_type']}" if e["target_node_type"] else ""
@@ -231,6 +242,7 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                     message=e["message"],
                     acceptance_criteria=e["acceptance_criteria"],
                     verification_method=e["verification_method"],
+                    expected_evidence=e["expected_evidence"],
                     metric=e["metric"],
                     operator=e["operator"],
                     limit=e["limit"],

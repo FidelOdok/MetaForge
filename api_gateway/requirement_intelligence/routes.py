@@ -146,6 +146,9 @@ class CreateConstraintRequest(BaseModel):
     targetNodeType: str = ""  # noqa: N815
     message: str = ""
     severity: str = "error"
+    # FORGE-258 (gap G-A2): the requirement-verification declaration.
+    verificationMethod: str = ""  # noqa: N815
+    expectedEvidence: str = ""  # noqa: N815
 
 
 class CreateConstraintResponse(BaseModel):
@@ -174,6 +177,8 @@ async def create_constraint(payload: CreateConstraintRequest) -> CreateConstrain
                     "target_node_type": payload.targetNodeType,
                     "message": payload.message,
                     "severity": payload.severity,
+                    "verification_method": payload.verificationMethod,
+                    "expected_evidence": payload.expectedEvidence,
                 }
             ],
             project_id=payload.projectId,

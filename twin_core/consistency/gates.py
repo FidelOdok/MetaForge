@@ -134,24 +134,34 @@ reads ``.requirements_to_architecture`` (does the requirement bind to a
 returns.
 
 **G7 (Verification Readiness)**: per critical (``ConstraintSeverity.ERROR``)
-requirement in the project, three real per-requirement checks -- "verification
+requirement in the project, four real per-requirement checks -- "verification
 method defined" and "acceptance criteria defined" read ``Constraint.
 verification_method``/``Constraint.acceptance_criteria`` (real typed fields,
 FORGE-312), falling back to the same-named ``metadata`` keys for data
 ``RequirementAuthorAgent`` (FORGE-55) already wrote there before those fields
-existed -- and "ownership defined" (``Constraint.source`` -- confirmed the
+existed -- "ownership defined" (``Constraint.source`` -- confirmed the
 closest real owner field this codebase has; ``TraceabilityAgent``'s own
-docstring says so explicitly). All three are a real FAIL when missing on a
-critical requirement, not a hedge -- unlike G5's alternatives, there's no
-legitimate "not applicable" case for a critical requirement lacking a
-verification method, acceptance criteria, or an owner. "Measurement method
-defined" and "expected evidence defined" still come back ``NOT_EVALUATED``:
-grepped the whole repo for ``expected_evidence``/``measurement_method`` as a
-field or metadata key -- zero hits anywhere; unlike acceptance_criteria, no
-recorder writes either of these yet. ``entity_type="verification_case"`` is a
-real, usable ``EngineeringEntity`` literal with a fully generic recorder
+docstring says so explicitly) -- and "expected evidence defined"
+(``Constraint.expected_evidence``, FORGE-258, gap G-A2, validated against
+``twin_core.models.enums.EVIDENCE_TYPES`` -- the same set
+``twin.record_evidence`` itself accepts, no metadata-key fallback since
+grepping the whole repo found zero prior uses of this key). All four are a
+real FAIL when missing on a critical requirement, not a hedge -- unlike G5's
+alternatives, there's no legitimate "not applicable" case for a critical
+requirement lacking a verification method, acceptance criteria, an owner, or
+a declared expected evidence kind. "Measurement method defined" still comes
+back ``NOT_EVALUATED``: no field or metadata-key convention exists for it
+anywhere in this codebase, and FORGE-258's own scope is specifically
+verification method + expected evidence, not measurement method (a related
+but separate, still-unclaimed concept). ``entity_type="verification_case"``
+is a real, usable ``EngineeringEntity`` literal with a fully generic recorder
 (``engineering_entity_recorder.py``) but no dedicated field convention of its
-own, same situation G4 found for "subsystem"/"interface".
+own, same situation G4 found for "subsystem"/"interface" -- and
+``api_gateway.requirement_intelligence.traceability``'s own
+``TraceabilityAgent``/``TraceabilityCoverage`` (FORGE-56) is a real, working
+"which requirements lack verification" engine with zero REST route or
+dashboard consumer today; surfacing it is real, separable follow-up work,
+not this ticket's own scope.
 
 **G8 (Release)**: "configuration baseline fixed" is real --
 ``TwinAPI.list_baselines(project_id=...)`` (FORGE-51) already exists and is
@@ -794,10 +804,7 @@ async def evaluate_g6_design_sketch(
     return GateEvaluation(gate_id="G6", status=_status_from_checks(checks), checks=checks)
 
 
-_G7_NOT_EVALUATED_CHECKS = (
-    ("measurement_method_defined", "Measurement method defined"),
-    ("expected_evidence_defined", "Expected evidence defined"),
-)
+_G7_NOT_EVALUATED_CHECKS = (("measurement_method_defined", "Measurement method defined"),)
 
 
 def _verification_method_of(req: Constraint) -> str:
@@ -809,6 +816,13 @@ def _verification_method_of(req: Constraint) -> str:
 
 def _acceptance_criteria_of(req: Constraint) -> str:
     return req.acceptance_criteria or str(req.metadata.get("acceptance_criteria") or "")
+
+
+def _expected_evidence_of(req: Constraint) -> str:
+    # FORGE-258: no pre-existing metadata-key convention to fall back to --
+    # confirmed via this module's own docstring grep, `expected_evidence`
+    # had zero hits anywhere before this field existed.
+    return req.expected_evidence
 
 
 async def _evaluate_critical_requirement_checks(twin: TwinAPI, project_id: UUID) -> list[GateCheck]:
@@ -865,6 +879,22 @@ async def _evaluate_critical_requirement_checks(twin: TwinAPI, project_id: UUID)
                     acceptance_criteria
                     if acceptance_criteria
                     else "no acceptance_criteria recorded on this critical requirement"
+                ),
+            )
+        )
+        # FORGE-258 (gap G-A2): real check, replacing what used to be a
+        # permanent NOT_EVALUATED placeholder -- expected_evidence is now a
+        # real, validated field (twin_core.models.enums.EVIDENCE_TYPES).
+        expected_evidence = _expected_evidence_of(req)
+        checks.append(
+            GateCheck(
+                id=f"requirement:{req.id}:expected_evidence",
+                label=f"Expected evidence defined: {req.name}",
+                status=GateCheckStatus.PASS if expected_evidence else GateCheckStatus.FAIL,
+                detail=(
+                    expected_evidence
+                    if expected_evidence
+                    else "no expected_evidence recorded on this critical requirement"
                 ),
             )
         )

@@ -64,6 +64,10 @@ export interface RequirementMatrixRow {
   detail: string;
   artefactIds: string[];
   evidence: EvidenceSummary[];
+  /** FORGE-258 (gap G-A2): "" means genuinely undeclared -- distinct from
+   * live status, which is about evidence, not declaration. */
+  verificationMethod: string;
+  expectedEvidence: string;
 }
 
 export interface RequirementMatrixReport {
@@ -83,6 +87,9 @@ export interface CreateConstraintPayload {
   targetNodeType?: string;
   message?: string;
   severity?: string;
+  /** FORGE-258 (gap G-A2): the kind of evidence expected to verify this. */
+  expectedEvidence?: string;
+  verificationMethod?: string;
 }
 
 export interface CreateConstraintResult {
