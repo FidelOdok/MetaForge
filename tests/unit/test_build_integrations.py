@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from mcp_core.workflows import WORKFLOWS
 from scripts.build_integrations import (
     DEFAULT_GATEWAY_URL,
-    SLASH_COMMANDS,
     build_claude_code,
     build_codex,
     plugin_manifest,
@@ -61,7 +61,7 @@ class TestGeneratedPackage:
         assert (root / ".claude-plugin" / "plugin.json").is_file()
 
     def test_every_command_is_written(self, root: Path) -> None:
-        for name in SLASH_COMMANDS:
+        for name in WORKFLOWS:
             assert (root / "commands" / f"{name}.md").is_file(), name
 
     def test_every_skill_with_a_definition_is_bundled(self, root: Path) -> None:
