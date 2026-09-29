@@ -80,6 +80,61 @@ and components with no recorded weight contributed nothing to the budget
 they were being checked against. A `no_data` result now names the fields
 it is missing, because "no data" is only useful if it says which.
 
+### MCP resources
+
+The server advertises `resources` on `initialize` and routes
+`resources/list` and `resources/read`. Resources use the `metaforge://`
+scheme:
+
+```
+metaforge://<adapter>/<kind>/<id>
+```
+
+A read routes on the adapter segment the URI already carries, rather than
+asking every adapter and taking the first match — that would make the
+answer depend on the order adapters happen to be constructed in, which no
+caller can see or control.
+
+`resources/list` follows the same rule as `tools/list`: an adapter that
+cannot answer is reported under `_meta.unavailableAdapters`, never quietly
+dropped. A short resource list reads to a model as "that context does not
+exist".
+
+Adapters have been able to register resources since MET-384 and the
+knowledge adapter already did — but until FORGE-355 the unified server
+dispatched neither method and advertised no capability, so a
+spec-compliant client got "Unknown method" and no way to learn they
+existed.
+
+#### Project resources
+
+| URI | What it answers |
+|---|---|
+| `metaforge://twin/brief/{project_id}` | What this project is and what has been built in it, newest work first, with recent requirement docs inline |
+| `metaforge://twin/hierarchy/{project_id}` | The product breakdown, with mass and cost rolled up the tree |
+| `metaforge://twin/requirements/{project_id}` | Requirements against the evidence that verifies them, with each row's live status |
+| `metaforge://twin/decisions/{project_id}` | Recorded decisions, their rationale and the alternatives considered |
+| `metaforge://twin/risks/{project_id}` | Recorded risk entities |
+
+The brief is the **same** one the chat harness gives its agent — one
+builder, two callers — so an MCP client and a chat agent are briefed
+identically and stay that way as it changes.
+
+Each resource renders an existing source rather than computing anything
+new. A resource doing its own analysis would be a second opinion the
+dashboard and the gates do not share, and the one an agent reads would be
+the one nobody validated.
+
+The requirement resource reports `no_data` as itself and states the count
+of requirements with no evidence at all. An unverified requirement must
+never read as a satisfied one — the same rule the cross-domain checks
+follow.
+
+A project that does not exist is an error; a project that exists with
+nothing recorded returns a resource saying so. "No such project" and
+"nothing built yet" are different answers, and the second is the one an
+agent needs at the start of a session.
+
 ### Grounding: citing what actually happened
 
 Every `tools/call` response carries a reference in `_meta`:

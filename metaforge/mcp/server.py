@@ -42,11 +42,14 @@ from mcp_core.guardrails import (
     decide,
 )
 from mcp_core.profiles import tools_for_profile
+from mcp_core.resources import ResourceUriError, parse_resource_uri
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
 from tool_registry.bootstrap import bootstrap_tool_registry
 from tool_registry.mcp_server.handlers import (
+    ResourceNotFoundError,
+    ResourceReadError,
     ToolHandlerError,
     ToolNotFoundError,
     make_error,
@@ -235,6 +238,10 @@ class UnifiedMcpServer:
                     result = await self._mcp_tools_list(params)
                 elif method == "tools/call":
                     result = await self._mcp_tools_call(params)
+                elif method == "resources/list":
+                    result = await self._resources_list(params)
+                elif method == "resources/read":
+                    result = await self._resources_read(params)
                 # Legacy MetaForge dialect (kept for backward compat with
                 # internal callers and existing integration tests).
                 elif method == "tool/list":
@@ -262,6 +269,20 @@ class UnifiedMcpServer:
                             "did_you_mean": exc.did_you_mean,
                             "tool_count": len(self._tool_index),
                         },
+                    )
+                )
+            except (ResourceNotFoundError, ResourceReadError) as exc:
+                # Same reason the approval errors are caught below: an
+                # exception escaping handle_request reaches the client as a
+                # dropped connection, which says nothing about what went
+                # wrong. A missing resource is an ordinary answer.
+                missing = isinstance(exc, ResourceNotFoundError)
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _METHOD_NOT_FOUND if missing else _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {"uri": getattr(exc, "uri", None), "retryable": False},
                     )
                 )
             except (ApprovalNotConfiguredError, ApprovalRejectedError) as exc:
@@ -341,6 +362,12 @@ class UnifiedMcpServer:
                 # the tool set mutates at runtime. Our adapters are
                 # static after bootstrap, so we don't advertise it.
                 "tools": {},
+                # FORGE-355: adapters have been registering resources since
+                # MET-384 (the knowledge adapter publishes several), but the
+                # unified server never routed resources/* and never said it
+                # could — so a spec-compliant client had no way to reach
+                # them, and no way to find out they existed.
+                "resources": {},
             },
             "serverInfo": {
                 "name": "metaforge-mcp",
@@ -563,6 +590,88 @@ class UnifiedMcpServer:
             call_id=call_id,
         )
         return result
+
+    # ── Resources (FORGE-355) ─────────────────────────────────────────────
+
+    async def _resources_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Aggregate ``resources/list`` across every adapter.
+
+        Same shape as ``_tool_list``, and the same rule: an adapter that
+        cannot answer is reported, never quietly dropped. A short resource
+        list reads to a model as "that context does not exist", which is the
+        failure this mirrors from FORGE-339.
+        """
+        sub_request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "unified-resources-list",
+                "method": "resources/list",
+                "params": params,
+            }
+        )
+        resources: list[dict[str, Any]] = []
+        unavailable: list[dict[str, str]] = []
+        for adapter in self._adapters:
+            adapter_id = str(getattr(adapter, "adapter_id", "?"))
+            try:
+                raw = await adapter.handle_request(sub_request)
+                payload = json.loads(raw)
+            except Exception as exc:
+                logger.error(
+                    "unified_mcp_resources_list_adapter_unavailable",
+                    adapter_id=adapter_id,
+                    error=str(exc),
+                )
+                unavailable.append({"adapter_id": adapter_id, "error": str(exc)})
+                continue
+            resources.extend(payload.get("result", {}).get("resources", []))
+
+        result: dict[str, Any] = {"resources": resources}
+        if unavailable:
+            result["_meta"] = {"unavailableAdapters": unavailable}
+        return result
+
+    async def _resources_read(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Route ``resources/read`` to the adapter named in the URI.
+
+        ``metaforge://<adapter>/<path>`` carries its own routing, so this
+        does not have to ask every adapter and take the first answer — which
+        would make the result depend on registration order.
+        """
+        uri = params.get("uri")
+        if not isinstance(uri, str) or not uri:
+            raise ResourceReadError(str(uri), "uri is required")
+
+        try:
+            parsed = parse_resource_uri(uri)
+        except ResourceUriError as exc:
+            raise ResourceReadError(uri, str(exc)) from exc
+
+        adapter = next(
+            (a for a in self._adapters if getattr(a, "adapter_id", None) == parsed.adapter),
+            None,
+        )
+        if adapter is None:
+            known = sorted(str(getattr(a, "adapter_id", "?")) for a in self._adapters)
+            raise ResourceNotFoundError(
+                f"{uri} (no adapter {parsed.adapter!r}; loaded: {', '.join(known)})"
+            )
+
+        raw = await adapter.handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "unified-resources-read",
+                    "method": "resources/read",
+                    "params": params,
+                }
+            )
+        )
+        payload = json.loads(raw)
+        if "error" in payload:
+            err = payload["error"]
+            raise ResourceReadError(uri, err.get("message", "resource read failed"))
+        return dict(payload.get("result", {}))
 
     # ── Tool-id resolution (FORGE-343) ────────────────────────────────────
     #

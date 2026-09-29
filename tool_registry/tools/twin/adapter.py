@@ -22,7 +22,12 @@ import structlog
 
 from mcp_core.context import current_context
 from observability.tracing import get_tracer
-from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
+from tool_registry.mcp_server.handlers import (
+    ResourceLimits,
+    ResourceManifestEntry,
+    ResourceNotFoundError,
+    ToolManifest,
+)
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.twin.queries import (
     detect_mutations,
@@ -69,6 +74,7 @@ class TwinServer(McpToolServer):
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
+        brief_provider: Any = None,
         parameter_optimizer: Any = None,
         device_instance_registrar: Any = None,
         measurement_recorder: Any = None,
@@ -246,6 +252,11 @@ class TwinServer(McpToolServer):
         # injection seam as every recorder above; None keeps tool_registry
         # free of api_gateway imports.
         self._promotion_attempter = promotion_attempter
+        # FORGE-355: renders metaforge://twin/brief/{project_id}. Injected
+        # like every recorder above, because the brief lives in the gateway
+        # (api_gateway.projects.brief) and tool_registry does not import
+        # upward.
+        self._brief_provider = brief_provider
         # FORGE-320: an injected async ``optimize(...)``
         # (make_wall_thickness_optimizer) -- bisection search for the
         # minimum-mass wall_thickness_mm satisfying deflection/safety-
@@ -323,6 +334,8 @@ class TwinServer(McpToolServer):
             self._register_rank_sensitivity()
         if promotion_attempter is not None:
             self._register_attempt_promotion()
+        if brief_provider is not None:
+            self._register_brief_resource()
         if parameter_optimizer is not None:
             self._register_optimize_parameter()
         if device_instance_registrar is not None:
@@ -3884,6 +3897,79 @@ class TwinServer(McpToolServer):
             ),
             delta_fraction=float(delta_fraction),
         )
+
+    # ------------------------------------------------------------------
+    # Project resources: metaforge://twin/<kind>/{project_id}  (FORGE-355)
+    # ------------------------------------------------------------------
+    #
+    # One injected renderer rather than a seam per kind. Four near-identical
+    # providers would be four places to forget the same thing, and the first
+    # one forgotten is the one nobody notices missing from resources/list.
+
+    #: kind -> (title, what it answers)
+    PROJECT_RESOURCES: dict[str, tuple[str, str]] = {
+        "brief": (
+            "Project brief",
+            "What this project is, what has been built in it, and the most "
+            "recent requirement documents inline, newest work first. The same "
+            "brief the chat harness gives its agent.",
+        ),
+        "hierarchy": (
+            "Product hierarchy",
+            "The product breakdown — assemblies and parts — with mass and cost rolled up the tree.",
+        ),
+        "requirements": (
+            "Requirement matrix",
+            "Requirements against the claims and evidence that verify them, "
+            "with each row's live status (pass / uncertain / fail / no_data / "
+            "stale). Absence of evidence shows as no_data, never as pass.",
+        ),
+        "decisions": (
+            "Design decisions",
+            "Recorded decisions with their rationale and the alternatives that were considered.",
+        ),
+        "risks": (
+            "Risks",
+            "Recorded risk entities and their scores.",
+        ),
+    }
+
+    _RESOURCE_PREFIX = "metaforge://twin/"
+
+    def _register_brief_resource(self) -> None:
+        for kind, (title, description) in self.PROJECT_RESOURCES.items():
+            self.register_resource(
+                manifest=ResourceManifestEntry(
+                    uri_template=f"{self._RESOURCE_PREFIX}{kind}/{{project_id}}",
+                    adapter_id="twin",
+                    name=title,
+                    description=description,
+                    mime_type="text/markdown",
+                ),
+                reader=self._read_project_resource,
+                matcher=self._make_matcher(kind),
+            )
+
+    @staticmethod
+    def _make_matcher(kind: str) -> Any:
+        prefix = f"metaforge://twin/{kind}/"
+        # Bound as a default argument: a closure over the loop variable would
+        # give every matcher the last kind.
+        return lambda uri, _p=prefix: uri.startswith(_p)
+
+    async def _read_project_resource(self, uri: str) -> list[dict[str, Any]]:
+        rest = uri[len(self._RESOURCE_PREFIX) :]
+        kind, _, project_id = rest.partition("/")
+        project_id = project_id.strip("/")
+        if kind not in self.PROJECT_RESOURCES or not project_id:
+            raise ResourceNotFoundError(uri)
+        text = await self._brief_provider(kind, project_id)
+        if text is None:
+            # A project that does not exist and a project with nothing
+            # recorded are different answers, and the second is legitimate —
+            # "no requirements yet" is information.
+            raise ResourceNotFoundError(f"{uri} (no project {project_id!r})")
+        return [{"uri": uri, "mimeType": "text/markdown", "text": text}]
 
     # ------------------------------------------------------------------
     # twin.attempt_promotion (FORGE-319)
