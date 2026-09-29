@@ -208,6 +208,49 @@ single `event: done` block.
   same dashboard applies whether the calls came over stdio, HTTP, or
   SSE.
 
+## Tool annotations and unknown-tool errors
+
+Every tool on `tools/list` carries the MCP annotation hints, so Codex
+can tell a read from a write before it calls anything:
+
+```json
+{
+  "name": "twin.get_node",
+  "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+  }
+}
+```
+
+The classification is deliberate rather than derived from the tool's
+name, and a tool nobody has classified inherits MCP's safe defaults
+(`readOnlyHint: false`, `destructiveHint: true`). One case is worth
+knowing: `twin.query_cypher` is read-only until the gateway is started
+with `--allow-twin-mutations`, after which it is not — the hint is
+computed per request from that flag, so it always matches what the
+server will enforce.
+
+Getting a tool id slightly wrong is recoverable. Separator mistakes
+resolve on their own, so `twin_get_node` and `twin/get_node` both reach
+`twin.get_node`; an alias that matches two tools is refused rather than
+guessed at. When an id matches nothing, the error names the closest real
+tools, in the message and in `error.data.did_you_mean`:
+
+```json
+{
+  "code": -32601,
+  "message": "Tool not found: twin.get_nodes. Did you mean: twin.get_node",
+  "data": {
+    "tool_id": "twin.get_nodes",
+    "did_you_mean": ["twin.get_node"],
+    "tool_count": 97
+  }
+}
+```
+
 ## Troubleshooting
 
 ### `curl: (7) Failed to connect`

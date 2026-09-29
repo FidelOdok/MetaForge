@@ -55,7 +55,7 @@ flowchart TB
     orch["Orchestrator<br/>workflow + DAG"]
     agents["Domain Agents<br/>per discipline"]
     skills["Skill Registry<br/>schema-validated units"]
-    mcp["MCP Tool Registry<br/>41 tools · 10 adapters"]
+    mcp["MCP Tool Registry<br/>97 tools · 17 adapters"]
     tools["Tool Adapters<br/>KiCad · FreeCAD<br/>CalculiX · CadQuery"]
     twin[("Digital Twin<br/>Neo4j · pgvector")]
 
@@ -149,7 +149,7 @@ curl "$METAFORGE_GATEWAY/v1/projects"
 
 Phase 1 (v0.1) covers 6–7 specialist agents across 6–7 disciplines, with KiCad
 read-only. The [capability matrix](capability-matrix.md) is the honest list:
-41 MCP tools, 11 dashboard routes, and the Phase-1 limits stated as limits.
+97 MCP tools, 11 dashboard routes, and the Phase-1 limits stated as limits.
 [Troubleshooting](troubleshooting.md) covers what goes wrong first.
 
 The [`examples/drone_flight_controller/`](https://github.com/FidelOdok/MetaForge/tree/main/examples/drone_flight_controller#readme)
