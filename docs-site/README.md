@@ -23,6 +23,10 @@ Before opening a PR that touches `docs/`:
 npm run build && npm test
 ```
 
+`npm test` needs Chrome (it renders the mermaid pages and measures them);
+set `CHROME_PATH` if it is not at one of the usual locations. It fails rather
+than skips without it.
+
 `npm run build` is what CI runs. `onBrokenLinks` and `onBrokenMarkdownLinks`
 are both `throw`, so it fails on a broken cross-reference the same way
 `mkdocs build --strict` used to. `npm test` then checks the built output
@@ -39,6 +43,7 @@ see `tests/routes.test.mjs` for why that list is written down.
 | `src/theme/` | Four swizzles: code-block card, TOC rail, article footer bar, sidebar furniture. |
 | `scripts/sync-static.mjs` | Copies `../docs/reference/openapi.json` into `static/` so the raw URL keeps working. |
 | `tests/routes.test.mjs` | URL-stability guard over `build/`. |
+| `tests/diagrams.test.mjs` | Renders every mermaid page in headless Chrome and checks no label is clipped. |
 
 ## Writing pages
 

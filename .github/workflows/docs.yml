@@ -64,7 +64,15 @@ jobs:
         working-directory: docs-site
         run: npm run build
 
-      - name: Check the published URLs still resolve
+      # Also renders every page with a mermaid diagram in headless Chrome and
+      # measures each label against the box it was drawn into. That check
+      # cannot be done statically: mermaid renders client-side, so the built
+      # HTML holds only a placeholder, and the failure is geometric rather
+      # than structural — diagram present, text present, box too short.
+      # ubuntu-latest ships Chrome; the test fails rather than skips without
+      # it, because a visual check that quietly does not run reads exactly
+      # like one that passes.
+      - name: Check published URLs resolve and diagrams are not clipped
         working-directory: docs-site
         run: npm test
 

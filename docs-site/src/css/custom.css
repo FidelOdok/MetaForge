@@ -665,6 +665,38 @@ body.docs-wrapper .container {
   }
 }
 
+/* ── Mermaid ────────────────────────────────────────────────────────────── */
+
+/* Mermaid measures every node label, then draws it into a `foreignObject`
+   sized to that measurement. The label is real HTML, so the article's own
+   paragraph rules applied to it: `line-height: 1.85` and `font-size: 16px`
+   on text mermaid had measured at `line-height: 1.5`. Every multi-line node
+   rendered taller than the box it was given, and the container rect clipped
+   it — "Dashboard / localhost:5173" lost its second line, and so did seven
+   other nodes on the introduction page alone.
+   
+   It read as a broken diagram. It was this stylesheet leaking in.
+   
+   Reset only the properties that feed that measurement. Mermaid's own theme
+   styles these labels and stays in charge of how they look. */
+.docusaurus-mermaid-container :is(p, ul, ol, li) {
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.docusaurus-mermaid-container a {
+  border-bottom: 0;
+}
+
+/* Wide flowcharts should scroll rather than force the article column open. */
+.docusaurus-mermaid-container {
+  margin: 24px 0;
+  overflow-x: auto;
+}
+
 /* ── 6. Code ────────────────────────────────────────────────────────────── */
 
 .markdown :not(pre) > code {
