@@ -143,3 +143,99 @@ async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt) -> str:
         f"counts toward the G8 release gate, FORGE-78)."
     )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# The other project resources (FORGE-355)
+# ---------------------------------------------------------------------------
+#
+# Each renders an existing source rather than computing anything new. A
+# resource that did its own analysis would be a second opinion the dashboard
+# and the gate do not share, and the one an agent reads would be the one
+# nobody validated.
+
+
+def render_hierarchy(nodes: list[Any]) -> str:
+    """The product breakdown, indented, with rolled-up mass and cost."""
+    if not nodes:
+        return "This project has no product hierarchy recorded yet."
+
+    by_parent: dict[Any, list[Any]] = {}
+    for node in nodes:
+        by_parent.setdefault(getattr(node, "parent_id", None), []).append(node)
+
+    lines = ["# Product hierarchy", ""]
+
+    def walk(parent: Any, depth: int) -> None:
+        for node in sorted(by_parent.get(parent, []), key=lambda n: str(getattr(n, "name", ""))):
+            bits = []
+            mass = getattr(node, "mass_kg", None)
+            cost = getattr(node, "cost", None)
+            if mass is not None:
+                bits.append(f"{mass} kg")
+            if cost is not None:
+                bits.append(f"cost {cost}")
+            suffix = f" — {', '.join(bits)}" if bits else ""
+            lines.append(f"{'  ' * depth}- {getattr(node, 'name', '?')}{suffix}")
+            walk(getattr(node, "id", None), depth + 1)
+
+    walk(None, 0)
+    return "\n".join(lines)
+
+
+def render_requirements(rows: list[Any]) -> str:
+    """Requirements against the evidence that verifies them.
+
+    Statuses come straight from the matrix (FORGE-318). ``no_data`` is
+    reported as itself — an unverified requirement must never read as a
+    satisfied one.
+    """
+    if not rows:
+        return "No requirements recorded for this project yet."
+
+    lines = ["# Requirement matrix", "", "| Requirement | Status | Evidence |", "|---|---|---|"]
+    for row in rows:
+        name = getattr(row, "requirement_name", None) or getattr(row, "requirement_id", "?")
+        status = getattr(row, "status", "no_data")
+        evidence = getattr(row, "evidence", None) or []
+        lines.append(f"| {name} | `{status}` | {len(evidence)} |")
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[str(getattr(row, "status", "no_data"))] = (
+            counts.get(str(getattr(row, "status", "no_data")), 0) + 1
+        )
+    unverified = counts.get("no_data", 0)
+    lines.append("")
+    lines.append(
+        f"{len(rows)} requirement(s): " + ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+    )
+    if unverified:
+        lines.append(
+            f"\n{unverified} requirement(s) have no evidence at all. That is "
+            "not a pass — it is a gap."
+        )
+    return "\n".join(lines)
+
+
+def render_entities(entities: list[Any], *, kind: str, title: str) -> str:
+    """Recorded decisions or risks, newest first."""
+    if not entities:
+        return f"No {kind} entities recorded for this project yet."
+
+    ordered = sorted(
+        entities,
+        key=lambda e: getattr(e, "updated_at", None) or getattr(e, "created_at", 0),
+        reverse=True,
+    )
+    lines = [f"# {title}", ""]
+    for entity in ordered:
+        lines.append(f"## {getattr(entity, 'title', None) or getattr(entity, 'id', '?')}")
+        body = getattr(entity, "rationale", None) or getattr(entity, "description", None)
+        if body:
+            lines.append(str(body))
+        alternatives = getattr(entity, "alternatives", None)
+        if alternatives:
+            lines.append("Alternatives considered: " + ", ".join(str(a) for a in alternatives))
+        lines.append("")
+    return "\n".join(lines).rstrip()

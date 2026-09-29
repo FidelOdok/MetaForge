@@ -3864,38 +3864,77 @@ class TwinServer(McpToolServer):
         )
 
     # ------------------------------------------------------------------
-    # metaforge://twin/brief/{project_id}  (FORGE-355)
+    # Project resources: metaforge://twin/<kind>/{project_id}  (FORGE-355)
     # ------------------------------------------------------------------
+    #
+    # One injected renderer rather than a seam per kind. Four near-identical
+    # providers would be four places to forget the same thing, and the first
+    # one forgotten is the one nobody notices missing from resources/list.
 
-    _BRIEF_PREFIX = "metaforge://twin/brief/"
+    #: kind -> (title, what it answers)
+    PROJECT_RESOURCES: dict[str, tuple[str, str]] = {
+        "brief": (
+            "Project brief",
+            "What this project is, what has been built in it, and the most "
+            "recent requirement documents inline, newest work first. The same "
+            "brief the chat harness gives its agent.",
+        ),
+        "hierarchy": (
+            "Product hierarchy",
+            "The product breakdown — assemblies and parts — with mass and cost rolled up the tree.",
+        ),
+        "requirements": (
+            "Requirement matrix",
+            "Requirements against the claims and evidence that verify them, "
+            "with each row's live status (pass / uncertain / fail / no_data / "
+            "stale). Absence of evidence shows as no_data, never as pass.",
+        ),
+        "decisions": (
+            "Design decisions",
+            "Recorded decisions with their rationale and the alternatives that were considered.",
+        ),
+        "risks": (
+            "Risks",
+            "Recorded risk entities and their scores.",
+        ),
+    }
+
+    _RESOURCE_PREFIX = "metaforge://twin/"
 
     def _register_brief_resource(self) -> None:
-        self.register_resource(
-            manifest=ResourceManifestEntry(
-                uri_template=f"{self._BRIEF_PREFIX}{{project_id}}",
-                adapter_id="twin",
-                name="Project brief",
-                description=(
-                    "What this project is, what has been built in it, and the "
-                    "most recent requirement documents inline. Newest work "
-                    "first. The same brief the chat harness gives its agent."
+        for kind, (title, description) in self.PROJECT_RESOURCES.items():
+            self.register_resource(
+                manifest=ResourceManifestEntry(
+                    uri_template=f"{self._RESOURCE_PREFIX}{kind}/{{project_id}}",
+                    adapter_id="twin",
+                    name=title,
+                    description=description,
+                    mime_type="text/markdown",
                 ),
-                mime_type="text/markdown",
-            ),
-            reader=self._read_brief,
-            matcher=lambda uri: uri.startswith(self._BRIEF_PREFIX),
-        )
+                reader=self._read_project_resource,
+                matcher=self._make_matcher(kind),
+            )
 
-    async def _read_brief(self, uri: str) -> list[dict[str, Any]]:
-        project_id = uri[len(self._BRIEF_PREFIX) :].strip("/")
-        if not project_id:
+    @staticmethod
+    def _make_matcher(kind: str) -> Any:
+        prefix = f"metaforge://twin/{kind}/"
+        # Bound as a default argument: a closure over the loop variable would
+        # give every matcher the last kind.
+        return lambda uri, _p=prefix: uri.startswith(_p)
+
+    async def _read_project_resource(self, uri: str) -> list[dict[str, Any]]:
+        rest = uri[len(self._RESOURCE_PREFIX) :]
+        kind, _, project_id = rest.partition("/")
+        project_id = project_id.strip("/")
+        if kind not in self.PROJECT_RESOURCES or not project_id:
             raise ResourceNotFoundError(uri)
-        brief = await self._brief_provider(project_id)
-        if brief is None:
-            # A project that does not exist and a project with nothing in it
-            # are different answers, and the second one is legitimate.
+        text = await self._brief_provider(kind, project_id)
+        if text is None:
+            # A project that does not exist and a project with nothing
+            # recorded are different answers, and the second is legitimate —
+            # "no requirements yet" is information.
             raise ResourceNotFoundError(f"{uri} (no project {project_id!r})")
-        return [{"uri": uri, "mimeType": "text/markdown", "text": brief}]
+        return [{"uri": uri, "mimeType": "text/markdown", "text": text}]
 
     # ------------------------------------------------------------------
     # twin.attempt_promotion (FORGE-319)
