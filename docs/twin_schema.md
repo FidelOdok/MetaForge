@@ -100,6 +100,44 @@ class EdgeBase(BaseModel):
 
 *Source: `twin_core/models/base.py`*
 
+#### Quantity
+
+```python
+class Quantity(BaseModel):
+    """A physical value with a unit and optional uncertainty, backed by
+    pint for real dimensional-consistency checking."""
+
+    value: float
+    unit: str
+    uncertainty: float | None = None
+
+    def to(self, unit: str) -> "Quantity": ...       # raises IncompatibleUnitsError on a dimension mismatch
+    def compatible_with(self, unit: str) -> bool: ... # same-dimension check, no conversion
+    def to_dict(self) -> dict: ...                    # {"value": ..., "unit": ..., "uncertainty": ...}
+    @classmethod
+    def from_dict(cls, data: dict) -> "Quantity": ...
+```
+
+Not a new node type -- a conversion+validation primitive for values already
+stored as plain `float`/`str` pairs in `Constraint.metadata`/
+`EngineeringEntity.metadata` (a Budget's `system_total`/`unit`, an
+Invariant's `limit`/`unit`, an Assumption's `value`/`unit`, ...). Any
+`metadata["unit"]` a recorder accepts (`api_gateway/twin/
+engineering_entity_recorder.py`) is validated as a real, parseable unit at
+record time; `twin_core.consistency.metrics.compute_metric_total` uses it to
+correctly convert a metric stored under a dimensionally-compatible-but-
+different unit (`"mass_g"` when the budget's own unit is `"kg"`) instead of
+silently treating it as absent, and raises `IncompatibleUnitsError` (a
+`ValueError`) when a metric is found under a genuinely incompatible
+dimension (`"mass_mm"`) -- callers (`twin_core.consistency.gates`) catch
+that and degrade the affected check to `NOT_EVALUATED`, never a crash or a
+silent pass. A small set of currency codes (`usd`/`gbp`/`eur`/`jpy`) are
+each registered as their own mutually-incompatible dimension, since this
+codebase does no real foreign-exchange conversion -- cross-currency data is
+correctly rejected rather than converted at a bogus 1:1 factor.
+
+*Source: `twin_core/models/quantity.py` (FORGE-311)*
+
 ---
 
 ## 2. Node Types

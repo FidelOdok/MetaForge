@@ -193,6 +193,7 @@ from twin_core.consistency.budgets import BudgetEngine, budget_from_entity
 from twin_core.consistency.invariants import InvariantEngine, invariant_from_entity
 from twin_core.consistency.models import Budget, Invariant
 from twin_core.models.enums import AuthorityState, ConstraintSeverity, WorkProductType
+from twin_core.models.quantity import IncompatibleUnitsError
 
 
 class GateCheckStatus(StrEnum):
@@ -431,9 +432,34 @@ async def evaluate_g3_feasibility(
 
     checks: list[GateCheck] = []
     for budget in budgets:
-        checks.append(await _evaluate_budget_check(budget_engine, budget))
+        try:
+            checks.append(await _evaluate_budget_check(budget_engine, budget))
+        except IncompatibleUnitsError as exc:
+            # FORGE-311: a WorkProduct storing this metric under a
+            # dimensionally-incompatible unit (e.g. a length where the
+            # budget's own unit is a mass) is a real data error -- degrade
+            # to NOT_EVALUATED with the reason, same as a malformed budget
+            # entity above, never a crashed gate or a silent pass.
+            checks.append(
+                GateCheck(
+                    id=f"budget:{budget.id}",
+                    label=f"{budget.metric.title()} budget ({budget.unit})",
+                    status=GateCheckStatus.NOT_EVALUATED,
+                    detail=str(exc),
+                )
+            )
     for invariant in invariants:
-        checks.append(await _evaluate_invariant_check(invariant_engine, project_id, invariant))
+        try:
+            checks.append(await _evaluate_invariant_check(invariant_engine, project_id, invariant))
+        except IncompatibleUnitsError as exc:
+            checks.append(
+                GateCheck(
+                    id=f"invariant:{invariant.id}",
+                    label=invariant.id,
+                    status=GateCheckStatus.NOT_EVALUATED,
+                    detail=str(exc),
+                )
+            )
     checks.extend(extra_checks)
     checks.extend(await _evaluate_risk_checks(twin, project_id))
     for check_id, label in _G3_NOT_EVALUATED_CHECKS:

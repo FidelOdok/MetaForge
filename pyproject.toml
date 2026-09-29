@@ -50,6 +50,11 @@ dependencies = [
     "opentelemetry-sdk>=1.20",
     "opentelemetry-exporter-otlp-proto-grpc>=1.20",
     "opentelemetry-instrumentation-fastapi>=0.43b0",
+    # Quantity (twin_core/models/quantity.py, FORGE-311): real dimensional
+    # consistency for physical values (mass/length/etc.), not just an
+    # informal unit-suffix-in-key-name convention. Pure Python, no C
+    # extension -- safe to add unconditionally.
+    "pint>=0.24",
 ]
 
 [project.scripts]
