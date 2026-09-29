@@ -269,7 +269,13 @@ class UnifiedMcpServer:
                 # user -- letting it escape gives a broken connection, which
                 # tells the agent nothing about why the tool did not run and
                 # invites it to retry.
-                rejected = isinstance(exc, ApprovalRejectedError)
+                # Narrowed inline: a stored isinstance result does not
+                # narrow the union at the use site.
+                outcome = (
+                    exc.outcome.value
+                    if isinstance(exc, ApprovalRejectedError)
+                    else "not_configured"
+                )
                 return json.dumps(
                     make_error(
                         request_id,
@@ -278,7 +284,7 @@ class UnifiedMcpServer:
                         {
                             "tool_id": exc.tool_id,
                             "code": "approval_required",
-                            "outcome": exc.outcome.value if rejected else "not_configured",
+                            "outcome": outcome,
                             # Nothing here is worth retrying without a human
                             # doing something first.
                             "retryable": False,
