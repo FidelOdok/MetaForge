@@ -311,6 +311,42 @@ For long-running tools, the server can send progress updates:
 }
 ```
 
+#### Roll-up on the unified server
+
+Sent to the unified server rather than to one adapter, `health/check`
+returns an aggregate. The server answers it by sending this same request
+to every adapter it has loaded, with a three-second timeout each, and
+reporting what came back:
+
+```json
+{
+  "service": "metaforge-mcp",
+  "status": "degraded",
+  "version": "0.1.0",
+  "uptime_seconds": 3600.0,
+  "adapter_count": 3,
+  "tool_count": 100,
+  "unreachable_adapters": ["calculix"],
+  "detail": "1 of 3 adapters did not answer: calculix. Their tools are registered but calls to them will fail.",
+  "adapters": [
+    {"adapter_id": "twin", "version": "0.1.0", "tools_registered": 12, "reachable": true},
+    {"adapter_id": "calculix", "version": "0.1.0", "tools_registered": 5, "reachable": false,
+     "error": "adapter container is down (-32001)"}
+  ]
+}
+```
+
+`status` is `healthy` only if every adapter answered, `degraded`
+otherwise. `tools_registered` is a registry count and does not shrink
+when an adapter goes down — `reachable` is the field that says whether
+those tools can actually be called. `unreachable_adapters` and `detail`
+are present only when something is wrong, so their absence is itself the
+healthy signal.
+
+Over HTTP this is a 200 in both states: the MCP server is up and
+reporting accurately on its dependencies. See
+[Health is measured, not asserted](capability-matrix.md#health-is-measured-not-asserted).
+
 ---
 
 ## 5. Pydantic Message Schemas
