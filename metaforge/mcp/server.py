@@ -21,6 +21,7 @@ than inheritance.
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import json
 import re
@@ -32,6 +33,7 @@ from uuid import uuid4
 import structlog
 
 from mcp_core.annotations import annotations_for
+from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
 from mcp_core.guardrails import (
     ApprovalAsk,
     ApprovalGateFn,
@@ -139,6 +141,7 @@ class UnifiedMcpServer:
         caller: Caller = Caller.LOCAL,
         approval_gate: ApprovalGateFn | None = None,
         exempt_local_writes: bool = True,
+        auth_posture: AuthPosture | None = None,
     ) -> None:
         self._adapters = list(adapters)
         # FORGE-339: when set, ``tools/list`` serves only this profile's
@@ -157,6 +160,15 @@ class UnifiedMcpServer:
         self._approval_gate = approval_gate
         self._exempt_local_writes = exempt_local_writes
         self._version = version
+        # FORGE-332: what the transport in front of us enforces. Only the
+        # transport knows, so it tells us; None means nobody said, and the
+        # health report says exactly that rather than guessing "open".
+        self._auth_posture = auth_posture
+        # Whoever last completed the `initialize` handshake. Reported by
+        # health/check so a version-skew question has an answer other than
+        # "ask the user what they are running".
+        self._client_info: dict[str, Any] | None = None
+        self._client_protocol: str | None = None
         self._start_time = datetime.now(UTC)
         # Held only so the process shutdown path can call close_all() and
         # release remote adapters' aiohttp ClientSessions -- unused by
@@ -185,6 +197,23 @@ class UnifiedMcpServer:
             adapter_count=len(self._adapters),
             tool_count=len(self._tool_index),
             adapter_ids=[a.adapter_id for a in self._adapters],
+        )
+
+    def declare_auth_posture(self, posture: AuthPosture) -> None:
+        """Record what the transport in front of this server enforces.
+
+        The transport is built after the server (both stdio and HTTP
+        resolve their credentials at serve time, not at bootstrap), so
+        this is a setter rather than a constructor-only argument. Calling
+        it is what keeps ``health/check`` from reporting ``unknown``;
+        ``tests/unit/test_mcp_health_auth.py`` asserts both entrypoints do.
+        """
+        self._auth_posture = posture
+        logger.info(
+            "unified_mcp_auth_posture",
+            mode=posture.mode,
+            transport=posture.transport,
+            identifies_caller=posture.oauth,
         )
 
     # ------------------------------------------------------------------
@@ -365,7 +394,26 @@ class UnifiedMcpServer:
         feature set we expose. Echoing the client's protocolVersion when
         compatible is the spec-recommended path; we pin to our known
         version to keep the contract stable across client upgrades.
+
+        FORGE-332: ``params`` used to be discarded whole. It carries the
+        only two facts about the other end this server ever learns — who
+        connected and which protocol revision they asked for — and without
+        them ``health/check`` could not answer a version-skew question, so
+        /metaforge:doctor had to either omit it or make it up. A client
+        asking for a revision we do not speak is also worth a line in the
+        log: pinning is the right behaviour, pinning silently is not.
         """
+        client = params.get("clientInfo")
+        self._client_info = client if isinstance(client, dict) else None
+        requested = params.get("protocolVersion")
+        self._client_protocol = requested if isinstance(requested, str) else None
+        if self._client_protocol and self._client_protocol != self._MCP_PROTOCOL_VERSION:
+            logger.warning(
+                "mcp_protocol_skew",
+                requested=self._client_protocol,
+                negotiated=self._MCP_PROTOCOL_VERSION,
+                client=(self._client_info or {}).get("name"),
+            )
         return {
             "protocolVersion": self._MCP_PROTOCOL_VERSION,
             "capabilities": {
@@ -914,28 +962,137 @@ class UnifiedMcpServer:
                 )
         return result
 
+    #: How long an adapter gets to answer a health probe. Short on purpose:
+    #: orchestrators poll this endpoint for readiness, and a probe that can
+    #: hang turns one sick adapter into a sick gateway.
+    _PROBE_TIMEOUT_SECONDS = 3.0
+
+    def _client_report(self) -> dict[str, Any]:
+        """Who is on the other end, and whether we speak the same protocol.
+
+        ``connected: false`` is the honest answer before any handshake --
+        the legacy transports and the tests call methods directly without
+        ``initialize``, and reporting an empty name there would read as a
+        client that failed to identify itself rather than one that never
+        arrived.
+        """
+        if self._client_info is None and self._client_protocol is None:
+            return {
+                "connected": False,
+                "protocol_negotiated": self._MCP_PROTOCOL_VERSION,
+                "detail": "no initialize handshake has been completed on this server",
+            }
+        info = self._client_info or {}
+        out: dict[str, Any] = {
+            "connected": True,
+            "name": info.get("name"),
+            "version": info.get("version"),
+            "protocol_requested": self._client_protocol,
+            "protocol_negotiated": self._MCP_PROTOCOL_VERSION,
+        }
+        if self._client_protocol and self._client_protocol != self._MCP_PROTOCOL_VERSION:
+            out["protocol_skew"] = True
+            out["detail"] = (
+                f"client asked for MCP {self._client_protocol}; this server pinned "
+                f"{self._MCP_PROTOCOL_VERSION}. Anything added after the pinned "
+                "revision is not available on this connection."
+            )
+        return out
+
+    async def _probe_adapter(self, adapter: McpToolServer) -> dict[str, Any]:
+        """Ask one adapter whether it is actually there."""
+        entry: dict[str, Any] = {
+            "adapter_id": str(getattr(adapter, "adapter_id", "?")),
+            "version": str(getattr(adapter, "version", "?")),
+            "tools_registered": len(getattr(adapter, "tool_ids", []) or []),
+        }
+        request = json.dumps(
+            {"jsonrpc": "2.0", "id": "unified-health", "method": "health/check", "params": {}}
+        )
+        try:
+            raw = await asyncio.wait_for(
+                adapter.handle_request(request), timeout=self._PROBE_TIMEOUT_SECONDS
+            )
+            payload = json.loads(raw)
+        except TimeoutError:
+            entry["reachable"] = False
+            entry["error"] = f"no answer within {self._PROBE_TIMEOUT_SECONDS:g}s"
+            return entry
+        except Exception as exc:
+            entry["reachable"] = False
+            entry["error"] = str(exc)
+            return entry
+
+        if "error" in payload:
+            entry["reachable"] = False
+            entry["error"] = payload["error"].get("message", "health/check returned an error")
+            return entry
+        entry["reachable"] = True
+        return entry
+
     async def _health_check(self) -> dict[str, Any]:
-        """Aggregate health across every adapter into one report."""
+        """Aggregate health across every adapter into one report.
+
+        FORGE-332: this used to return ``status: "healthy"`` unconditionally
+        and list each adapter's tool count *from registration* -- so a gateway
+        with every CAD container down answered "healthy" with a full adapter
+        list. Nothing here had asked an adapter anything.
+
+        That is worse than the tools/list problem it resembles (FORGE-339),
+        where the tool count at least shrank. A health report that cannot say
+        unhealthy is the one thing a doctor reads, and /metaforge:doctor is
+        built on this.
+
+        The service stays ``healthy`` only when every adapter answers;
+        otherwise ``degraded``, naming the ones that did not. The HTTP status
+        stays 200 either way -- the MCP server *is* up, and an orchestrator
+        restarting the gateway because an optional CAD container is down
+        would be the wrong cure.
+        """
         now = datetime.now(UTC)
         uptime = (now - self._start_time).total_seconds()
-        adapter_health: list[dict[str, Any]] = []
-        for adapter in self._adapters:
-            adapter_health.append(
-                {
-                    "adapter_id": adapter.adapter_id,
-                    "version": adapter.version,
-                    "tools_available": len(adapter.tool_ids),
-                }
-            )
-        return {
+
+        adapter_health = list(
+            await asyncio.gather(*(self._probe_adapter(a) for a in self._adapters))
+        )
+        unreachable = [a["adapter_id"] for a in adapter_health if not a["reachable"]]
+
+        report: dict[str, Any] = {
             "service": "metaforge-mcp",
             "version": self._version,
-            "status": "healthy",
+            "status": "degraded" if unreachable else "healthy",
             "uptime_seconds": round(uptime, 1),
             "adapter_count": len(self._adapters),
             "tool_count": len(self._tool_index),
+            # FORGE-332: A5 asks the doctor about four things -- gateway,
+            # adapters, auth and version skew. The adapters are probed
+            # above; these two are the rest, and neither was answerable
+            # from this call before. The doctor workflow already told the
+            # agent to "report the auth mode", which it could only do by
+            # inventing one.
+            "auth": (
+                self._auth_posture.report()
+                if self._auth_posture is not None
+                else dict(UNKNOWN_AUTH)
+            ),
+            "client": self._client_report(),
             "adapters": adapter_health,
         }
+        if unreachable:
+            # Named at the top level as well as per-adapter: a caller that
+            # reads only `status` still gets told what to look at.
+            report["unreachable_adapters"] = unreachable
+            report["detail"] = (
+                f"{len(unreachable)} of {len(self._adapters)} adapters did not answer: "
+                f"{', '.join(unreachable)}. Their tools are registered but calls to them "
+                "will fail."
+            )
+            logger.warning(
+                "unified_mcp_health_degraded",
+                unreachable=unreachable,
+                adapter_count=len(self._adapters),
+            )
+        return report
 
 
 # ---------------------------------------------------------------------------

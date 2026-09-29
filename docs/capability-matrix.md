@@ -281,6 +281,102 @@ itself the signal. `profile.missing` names tools the profile asked for
 that no loaded adapter registers, which is a configuration mistake rather
 than a smaller profile.
 
+### Health is measured, not asserted
+
+`health/check` on the unified server asks every adapter the same question
+and reports what came back. It does not read the registration table.
+
+```json
+{
+  "service": "metaforge-mcp",
+  "status": "degraded",
+  "adapter_count": 3,
+  "tool_count": 100,
+  "unreachable_adapters": ["calculix", "freecad"],
+  "detail": "2 of 3 adapters did not answer: calculix, freecad. Their tools are registered but calls to them will fail.",
+  "adapters": [
+    {"adapter_id": "twin", "version": "0.1.0", "tools_registered": 12, "reachable": true},
+    {"adapter_id": "calculix", "version": "0.1.0", "tools_registered": 5, "reachable": false,
+     "error": "adapter container is down (-32001)"},
+    {"adapter_id": "freecad", "version": "0.1.0", "tools_registered": 41, "reachable": false,
+     "error": "no answer within 3s"}
+  ]
+}
+```
+
+`status` is `healthy` only when every adapter answered; otherwise
+`degraded`, and `unreachable_adapters` names which. Each adapter gets
+three seconds; the probes run concurrently, so the whole check costs one
+timeout rather than one per adapter.
+
+The field is `tools_registered`, not `tools_available`. Those numbers come
+from the registry and stay the same whether the adapter is up or down —
+calling them "available" next to `reachable: false` claimed the opposite
+of what the same object said one key later.
+
+Two failure shapes stay distinct in `error`, because they need different
+fixes: **"container is down"** means the adapter answered with an error
+(start the container), **"no answer within 3s"** means nothing came back
+at all (the process is wedged, or the network to it is).
+
+The HTTP status stays **200** even when degraded. The MCP server is up and
+answering — it is telling you the truth about something else. A 503 here
+would have an orchestrator restart the gateway to cure a sick CAD
+container, which does not work and takes the working half down with it.
+
+### What is protecting this connection
+
+`health/check` also reports the auth posture and who is on the other end —
+the other three things `/metaforge:doctor` is asked about.
+
+```json
+{
+  "auth": {
+    "mode": "open",
+    "transport": "stdio",
+    "identifies_caller": false,
+    "detail": "no API key and no OAuth configured: every connection on this transport is accepted, and no call is attributable to anyone"
+  },
+  "client": {
+    "connected": true,
+    "name": "claude-code",
+    "version": "2.1.4",
+    "protocol_requested": "2025-06-18",
+    "protocol_negotiated": "2024-11-05",
+    "protocol_skew": true,
+    "detail": "client asked for MCP 2025-06-18; this server pinned 2024-11-05. Anything added after the pinned revision is not available on this connection."
+  }
+}
+```
+
+`auth.mode` is one of `open`, `api_key`, `oauth`, `api_key+oauth` — or
+`unknown`, which means the transport never declared one and the server
+genuinely cannot say. `unknown` is deliberately not merged into `open`:
+a deployment with nothing configured and a reporting gap need to be
+distinguishable, and the safe reading of `unknown` is "assume nothing".
+
+`identifies_caller` is true only under OAuth. A shared API key authorises
+the call but identifies nobody, which is the same distinction the HTTP
+gate already draws by returning an actor for a token and none for a key
+match — so a session record from an `api_key` connection is attributable
+to the key, not to a person.
+
+`detail` appears only when something is worth saying, which for `auth`
+means open mode. That is the state an unset `METAFORGE_MCP_API_KEY` gives
+you, so it is the one most likely to be in force without anyone having
+chosen it.
+
+`client` is filled from the `initialize` handshake. Before any handshake
+it reports `connected: false` rather than an anonymous client — the
+legacy transports dispatch without one, and an empty name would read as a
+client that failed to identify itself. `protocol_skew` appears when the
+client asked for an MCP revision this server does not speak: the
+connection still works, minus anything added after the pinned revision,
+which otherwise surfaces as "the tool is just missing".
+
+`/metaforge:doctor` (see [MCP prompts](#mcp-prompts)) is built on this
+call, so anything the report cannot say, the doctor cannot say either.
+
 ### Tool annotations
 
 Every tool reports `readOnlyHint`, `destructiveHint`, `idempotentHint`

@@ -41,7 +41,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 
-from mcp_core.auth import AUTH_DENIED, redact, verify_api_key
+from mcp_core.auth import AUTH_DENIED, AuthPosture, redact, verify_api_key
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
 
@@ -231,6 +231,13 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
         sys.stdout.write(_auth_error_response("auth", reason) + "\n")
         sys.stdout.flush()
         return
+    # FORGE-332: the check above already knows whether a key was in force
+    # (`reason == "open_mode"` means there was none). Tell the server, so
+    # health/check can say so too -- stdio launched from a plugin manifest
+    # is the commonest way to end up in open mode without deciding to.
+    server.declare_auth_posture(
+        AuthPosture(api_key=reason != "open_mode", oauth=False, transport="stdio")
+    )
 
     # MET-387: stdio installs the call context from env vars at boot —
     # one stdio process = one harness session, so a single context
@@ -313,7 +320,20 @@ def build_http_app(
     ``/authorize``, ``/token``) and ``/mcp`` accepts a valid OAuth bearer
     token **or** the static key. This is what the claude.ai web connector
     requires — it cannot send a static bearer header.
+
+    FORGE-332: whichever of those two is live, the server is told, so
+    ``health/check`` reports the auth mode instead of leaving
+    /metaforge:doctor to guess. Open mode is what an unset
+    ``METAFORGE_MCP_API_KEY`` gives you, so it is the state most likely to
+    be in force without anyone having chosen it.
     """
+    server.declare_auth_posture(
+        AuthPosture(
+            api_key=bool(api_key),
+            oauth=oauth is not None and oauth.config.enabled,
+            transport="http",
+        )
+    )
     app = FastAPI(
         title="MetaForge MCP",
         version="0.1.0",
