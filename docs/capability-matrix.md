@@ -258,6 +258,41 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Being briefed, not offered a brief
+
+`project.open` returns the project brief inline with the result, so the
+agent is briefed by the act of opening the project.
+
+It used to be a resource the client had to fetch —
+`metaforge://twin/brief/{project_id}` — and the workflow prompts told the
+agent to read it. That made being briefed depend on the client supporting
+resources *and* the agent following the instruction, and an agent that
+skipped it looked exactly like one that had opened an empty project.
+
+Two things had to be fixed before the resource worked at all:
+
+- **The standalone MCP sidecar served no resources whatsoever.**
+  Registration is conditional on an injected `brief_provider` and
+  `build_unified_server` never forwarded one, so `resources/list` came
+  back empty on the deployment external harnesses actually connect to.
+  Nothing failed — the resources were simply never there.
+- **They were published under the wrong method and field name.** Every
+  MetaForge resource is parameterised by project, so they are all
+  *templates*: they belong in `resources/templates/list` under
+  `resourceTemplates`/`uriTemplate`. They were being returned from
+  `resources/list` keyed `uri_template`, which is neither the method nor
+  the field a compliant client reads, and a template has no `uri` for it
+  to address.
+
+`resources/list` now returns concrete resources only (none today, which
+is the honest answer) and `resources/templates/list` returns the five
+project templates.
+
+A deployment with no brief provider omits the `brief` key rather than
+returning an empty string — "no brief configured" and "a project with
+nothing in it" must not read the same. A brief that fails to render never
+fails the open.
+
 ### Naming a project in prose
 
 `project.open` takes what the user said — an id, an exact name, or a

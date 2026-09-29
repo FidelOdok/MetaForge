@@ -83,10 +83,23 @@ class TestReachable:
         assert "resources" in result["capabilities"]
 
     async def test_resources_from_every_adapter_are_listed(self) -> None:
+        # FORGE-337: everything MetaForge publishes is parameterised by
+        # project, so it is all templates and belongs in
+        # resources/templates/list under the spec's own field names. It was
+        # coming back from resources/list keyed `uri_template`, which is
+        # neither the method nor the field a compliant client reads.
         server = UnifiedMcpServer(adapters=[_Twin(), _Knowledge()])
-        result = (await _rpc(server, "resources/list"))["result"]
-        names = {r["name"] for r in result["resources"]}
+        result = (await _rpc(server, "resources/templates/list"))["result"]
+        names = {r["name"] for r in result["resourceTemplates"]}
         assert names == {"Project brief", "Ingested document"}
+        assert all("uriTemplate" in r for r in result["resourceTemplates"])
+        assert all("uri_template" not in r for r in result["resourceTemplates"])
+
+    async def test_resources_list_holds_only_concrete_resources(self) -> None:
+        """A template has no `uri`, so returning one here gives a compliant
+        client an entry it cannot address. Empty is the honest answer."""
+        server = UnifiedMcpServer(adapters=[_Twin(), _Knowledge()])
+        assert (await _rpc(server, "resources/list"))["result"]["resources"] == []
 
     async def test_a_resource_can_be_read(self) -> None:
         server = UnifiedMcpServer(adapters=[_Twin()])
@@ -102,14 +115,14 @@ class TestNothingVanishes:
         # Same rule as tools/list (FORGE-339). A short resource list reads to
         # a model as "that context does not exist".
         server = UnifiedMcpServer(adapters=[_Twin(), _Down()])
-        result = (await _rpc(server, "resources/list"))["result"]
-        assert len(result["resources"]) == 1
+        result = (await _rpc(server, "resources/templates/list"))["result"]
+        assert len(result["resourceTemplates"]) == 1
         reported = {a["adapter_id"] for a in result["_meta"]["unavailableAdapters"]}
         assert "calculix" in reported
 
     async def test_a_healthy_server_adds_no_meta(self) -> None:
         server = UnifiedMcpServer(adapters=[_Twin()])
-        result = (await _rpc(server, "resources/list"))["result"]
+        result = (await _rpc(server, "resources/templates/list"))["result"]
         assert "_meta" not in result
 
 

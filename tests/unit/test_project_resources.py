@@ -102,16 +102,18 @@ class TestEntities:
 class TestRegistration:
     async def _list(self, server: UnifiedMcpServer) -> list[dict[str, Any]]:
         raw = await server.handle_request(
-            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "resources/list", "params": {}})
+            json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "method": "resources/templates/list", "params": {}}
+            )
         )
-        return json.loads(raw)["result"]["resources"]
+        return json.loads(raw)["result"]["resourceTemplates"]
 
     async def test_every_declared_kind_is_registered(self) -> None:
         async def provider(kind: str, project_id: str) -> str:
             return f"{kind}:{project_id}"
 
         server = UnifiedMcpServer(adapters=[TwinServer(twin=None, brief_provider=provider)])
-        templates = {r["uri_template"] for r in await self._list(server)}
+        templates = {r["uriTemplate"] for r in await self._list(server)}
         for kind in TwinServer.PROJECT_RESOURCES:
             assert f"metaforge://twin/{kind}/{{project_id}}" in templates
 

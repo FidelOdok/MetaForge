@@ -650,7 +650,7 @@ async def bootstrap_tool_registry(
             try:
                 from tool_registry.tools.project.adapter import ProjectServer
 
-                server = ProjectServer(backend=project_backend)
+                server = ProjectServer(backend=project_backend, brief_provider=brief_provider)
                 await registry.register_adapter(server)
                 registered.append("project")
                 logger.info(

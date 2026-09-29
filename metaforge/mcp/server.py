@@ -313,6 +313,8 @@ class UnifiedMcpServer:
                     result = self._prompts_get(params)
                 elif method == "resources/list":
                     result = await self._resources_list(params)
+                elif method == "resources/templates/list":
+                    result = await self._resources_templates_list(params)
                 elif method == "resources/read":
                     result = await self._resources_read(params)
                 # Legacy MetaForge dialect (kept for backward compat with
@@ -781,7 +783,60 @@ class UnifiedMcpServer:
                 continue
             resources.extend(payload.get("result", {}).get("resources", []))
 
-        result: dict[str, Any] = {"resources": resources}
+        # FORGE-337: everything MetaForge publishes is parameterised by
+        # project, so all of it is a *template* and belongs in
+        # ``resources/templates/list``. Entries were being returned here
+        # instead, with a ``uri_template`` key -- neither the method nor the
+        # field name the spec defines, so a compliant client saw a list of
+        # objects with no ``uri`` and nothing usable in it. Concrete
+        # resources still belong here; today there are none, and an empty
+        # list is the honest answer rather than a malformed full one.
+        concrete = [r for r in resources if "uri" in r]
+        result: dict[str, Any] = {"resources": concrete}
+        if unavailable:
+            result["_meta"] = {"unavailableAdapters": unavailable}
+        return result
+
+    async def _resources_templates_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        """``resources/templates/list`` -- the parameterised ones.
+
+        Adapters still speak the legacy ``resources/list`` internally and
+        report ``uri_template``; the translation to the spec's
+        ``resourceTemplates`` / ``uriTemplate`` happens here, in one place,
+        rather than in every adapter.
+        """
+        sub_request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "unified-resource-templates",
+                "method": "resources/list",
+                "params": params,
+            }
+        )
+        templates: list[dict[str, Any]] = []
+        unavailable: list[dict[str, str]] = []
+        for adapter in self._adapters:
+            adapter_id = str(getattr(adapter, "adapter_id", "?"))
+            try:
+                raw = await adapter.handle_request(sub_request)
+                payload = json.loads(raw)
+            except Exception as exc:
+                logger.error(
+                    "unified_mcp_resource_templates_adapter_unavailable",
+                    adapter_id=adapter_id,
+                    error=str(exc),
+                )
+                unavailable.append({"adapter_id": adapter_id, "error": str(exc)})
+                continue
+            for entry in payload.get("result", {}).get("resources", []):
+                template = entry.get("uri_template") or entry.get("uriTemplate")
+                if not template:
+                    continue
+                out = {k: v for k, v in entry.items() if k != "uri_template"}
+                out["uriTemplate"] = template
+                templates.append(out)
+
+        result: dict[str, Any] = {"resourceTemplates": templates}
         if unavailable:
             result["_meta"] = {"unavailableAdapters": unavailable}
         return result
@@ -1226,6 +1281,7 @@ async def build_unified_server(
     component_catalog_store: Any = None,
     component_intent_llm: Any = None,
     component_recorder: Any = None,
+    brief_provider: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -1279,6 +1335,7 @@ async def build_unified_server(
         component_catalog_store=component_catalog_store,
         component_intent_llm=component_intent_llm,
         component_recorder=component_recorder,
+        brief_provider=brief_provider,
     )
     capture = (
         SessionCapture(agent_session_store)

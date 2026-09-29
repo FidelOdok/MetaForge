@@ -882,53 +882,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
 
     # FORGE-355: renders metaforge://twin/brief/{project_id} using the same
     # builder the chat harness uses, so an MCP client and a chat agent are
-    # briefed identically. Returns None for a project that does not exist --
-    # distinct from a project that exists and is empty, which has a brief.
-    async def brief_provider_fn(kind: str, project_id: str) -> str | None:
-        from uuid import UUID
+    # briefed identically. FORGE-337 moved the body to
+    # api_gateway.projects.brief_provider so the standalone MCP sidecar can
+    # build the same one -- it had none, and served no resources at all.
+    from api_gateway.projects.brief_provider import make_brief_provider
+    from api_gateway.projects.routes import get_project_backend
 
-        from api_gateway.chat.routes import _brief_doc_excerpt
-        from api_gateway.projects.brief import (
-            build_project_brief,
-            render_entities,
-            render_hierarchy,
-            render_requirements,
-        )
-        from api_gateway.projects.routes import get_project_backend
-
-        project = await get_project_backend().get_project(project_id)
-        if project is None:
-            return None
-
-        if kind == "brief":
-            return await build_project_brief(project, doc_excerpt=_brief_doc_excerpt)
-
-        try:
-            pid = UUID(str(project_id))
-        except ValueError:
-            return None
-
-        if kind == "hierarchy":
-            return render_hierarchy(list(await twin.list_hierarchy_nodes(project_id=pid)))
-        if kind == "requirements":
-            from api_gateway.requirement_intelligence.matrix import build_requirement_matrix
-
-            return render_requirements(await build_requirement_matrix(twin, pid))
-        if kind == "decisions":
-            # Decisions are work products of type design_decision, not
-            # EngineeringEntity rows — list_engineering_entities does not
-            # accept that type and would have returned an empty list without
-            # complaining, which reads as "no decisions recorded".
-            decisions = [
-                wp
-                for wp in project.work_products
-                if str(getattr(wp.type, "value", wp.type)) == "design_decision"
-            ]
-            return render_entities(decisions, kind="decision", title="Design decisions")
-        if kind == "risks":
-            risks = await twin.list_engineering_entities(project_id=pid, entity_type="risk")
-            return render_entities(list(risks), kind="risk", title="Risks")
-        return None
+    brief_provider_fn = make_brief_provider(twin, get_project_backend())
 
     # FORGE-321: device registration; measurement recording (reuses
     # evidence_recorder_fn via a calibration_recorder for residuals).

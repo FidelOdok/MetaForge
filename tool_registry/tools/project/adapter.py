@@ -111,9 +111,18 @@ class ProjectServer(McpToolServer):
     lazy. ``set_backend()`` is the late-binding hook.
     """
 
-    def __init__(self, backend: ProjectBackendLike | None = None) -> None:
+    def __init__(
+        self,
+        backend: ProjectBackendLike | None = None,
+        brief_provider: Any = None,
+    ) -> None:
         super().__init__(adapter_id="project", version="0.1.0")
         self._backend: ProjectBackendLike | None = backend
+        # FORGE-337: so opening a project *briefs* the agent rather than
+        # merely offering a resource it may never read. Injected, like the
+        # twin adapter's copy, because the brief lives in the gateway and
+        # tool_registry does not import upward.
+        self._brief_provider = brief_provider
         self._register_tools()
 
     # ------------------------------------------------------------------
@@ -446,13 +455,41 @@ class ProjectServer(McpToolServer):
             project = next(p for p in projects if str(p.id) == match.id)
             bound = _bind_session_project(match.id)
             span.set_attribute("project.id", match.id)
+            brief = await self._brief_for(match.id)
             logger.info(
                 "project_mcp_open",
                 project_id=match.id,
                 query=query,
                 scope_bound=bound,
+                briefed=brief is not None,
             )
-            return {"project": _project_to_dict(project), "scope_bound": bound}
+            out: dict[str, Any] = {
+                "project": _project_to_dict(project),
+                "scope_bound": bound,
+            }
+            if brief is not None:
+                out["brief"] = brief
+            return out
+
+    async def _brief_for(self, project_id: str) -> str | None:
+        """The project brief, inline, or None if this deployment has none.
+
+        Returned with the tool result rather than left to the client to
+        fetch. ``/metaforge:use`` told the agent to read the brief resource,
+        which meant being briefed depended on the client supporting
+        resources *and* the agent choosing to follow the instruction — and
+        an agent that skipped it looked exactly like one that had read a
+        project with nothing in it. Never raises: failing to brief must not
+        fail the open.
+        """
+        if self._brief_provider is None:
+            return None
+        try:
+            brief = await self._brief_provider("brief", project_id)
+        except Exception as exc:  # noqa: BLE001 — the open still succeeded
+            logger.warning("project_brief_unavailable", project_id=project_id, error=str(exc))
+            return None
+        return brief if isinstance(brief, str) and brief.strip() else None
 
     async def handle_create(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("project.mcp.create") as span:
