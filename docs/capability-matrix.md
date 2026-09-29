@@ -80,6 +80,29 @@ and components with no recorded weight contributed nothing to the budget
 they were being checked against. A `no_data` result now names the fields
 it is missing, because "no data" is only useful if it says which.
 
+### MCP prompts
+
+Six curated workflows are served through `prompts/list` and `prompts/get`:
+
+| Prompt | What it does |
+|---|---|
+| `use` | Pick the project for this session and summarise where it stands |
+| `status` | What is built, and which requirements are unverified |
+| `design` | Design or revise a part, committed to the twin |
+| `fea` | Run a load case and record the evidence against the revision it came from |
+| `gate` | Review whether the project can be promoted |
+| `doctor` | Check the connection, and what is unreachable |
+
+They are defined once, in `mcp_core/workflows.py`, and served twice: as MCP
+prompts to any spec-compliant client, and as slash commands in the
+generated Claude Code package. Two definitions would mean two harnesses
+getting different instructions for the same task, and the one that drifts
+being whichever nobody is currently testing.
+
+An unknown prompt name lists the ones that exist, rather than rejecting
+bare — the caller cannot otherwise tell a typo from a server with no
+prompts at all.
+
 ### MCP resources
 
 The server advertises `resources` on `initialize` and routes
