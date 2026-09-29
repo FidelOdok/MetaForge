@@ -527,6 +527,47 @@ class TestDuplicateContentIsANoOp:
         assert "already_committed" not in v2
 
 
+class TestSupersedeTriggersStalenessPropagation:
+    """FORGE-314's literal acceptance criterion: editing (re-committing) a
+    named CAD part must make Evidence pinned to the old geometry stale."""
+
+    async def test_evidence_pinned_to_prior_geometry_goes_stale_on_recommit(
+        self, patched_blob_store: dict
+    ) -> None:
+        from api_gateway.twin.evidence_recorder import make_evidence_recorder
+        from twin_core.api import InMemoryTwinAPI
+        from twin_core.consistency.staleness import StalenessEngine
+
+        twin = InMemoryTwinAPI.create()
+        record_geometry = make_geometry_recorder(twin, None)
+        record_evidence = make_evidence_recorder(twin)
+        project_id = "44444444-4444-4444-4444-444444444444"
+
+        v1 = await record_geometry(step_base64=_STEP_B64, name="upper_arm", project_id=project_id)
+        evidence = await record_evidence(
+            evidence_type="inspection",
+            producer={"tool": "fit_check"},
+            inputs={},
+            result={"clearance_mm": 2.1},
+            valid_against=[{"ref": v1["node_id"], "entity_kind": "work_product"}],
+            project_id=project_id,
+        )
+
+        engine = StalenessEngine(twin)
+
+        # Re-committing DIFFERENT geometry for the same named part supersedes v1.
+        other_step = base64.b64encode(
+            b"ISO-10303-21;\nHEADER;\nrevised step body\nENDSEC;\n"
+        ).decode("ascii")
+        v2 = await record_geometry(step_base64=other_step, name="upper_arm", project_id=project_id)
+        assert v2["supersedes_node_id"] == v1["node_id"]
+
+        from uuid import UUID
+
+        status = await engine.get_status("engineering_entity", UUID(evidence["node_id"]))
+        assert status.value == "stale"
+
+
 @pytest.mark.asyncio
 async def test_unconstrained_warning_paths() -> None:
     from api_gateway.twin.geometry_recorder import _unconstrained_warning

@@ -35,20 +35,49 @@ didn't change. Over-marking stale is the safe direction (a false "check
 this again" costs a re-validation; a false "still current" costs
 correctness) and is consistent with spec section 20's "never a blind
 nothing-changed" principle -- not corrected away here.
+
+FORGE-314: a dependency (what something else was declared FROM) can now
+also be a WorkProduct -- Evidence pinning the exact CAD revision it
+validated is the doc's own ``CAD-BODY-003@7`` example, previously
+impossible here because WorkProduct has no ``revision`` int field the way
+Constraint/EngineeringEntity do (FORGE-50/51). Rather than inventing a
+fourth "what revision is this artefact at" concept (three already exist,
+disjointly: the revision int; ``VersionService``'s dashboard-only
+``metadata["_revisions"]`` list; the SUPERSEDES-chain
+``geometry_recorder.py`` already builds on every ``commit_geometry`` call),
+this reads a signal that already exists and is already produced by the real
+CAD-edit path: a WorkProduct's "revision" here is 0 while nothing
+supersedes it (it's the current tip -- the same "no incoming SUPERSEDES
+edge" test ``_find_current_work_product`` already uses) and 1 the moment
+something does. Evidence always pins the EXACT node id it validated, so a
+single supersession hop is all that needs detecting -- no multi-hop chain
+walk. ``DependencyEntityKind`` is deliberately its own, wider type rather
+than widening ``ControlledEntityKind`` (``twin_core.models.patch``):  that
+type specifically means "what ``TransactionEngine.commit`` can mutate via a
+Patch", which a WorkProduct still can't be, so keeping them separate means
+a work_product-kind ``Dependency`` can never be mistaken for something
+Patch/Baseline/RevisionSnapshot already promise to handle. A WorkProduct
+itself is still never staleness-MARKED (``StaleMarking``/``_get``/
+``set_status`` etc. stay on the narrower ``ControlledEntityKind`` unchanged
+-- only Constraint/EngineeringEntity nodes ever carry a ``staleness`` tag).
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from twin_core.api import TwinAPI
+from twin_core.models.enums import EdgeType
 from twin_core.models.patch import ControlledEntityKind
 
 _STALENESS_KEY = "staleness"
 _DEPENDS_ON_KEY = "depends_on"
+
+DependencyEntityKind = Literal["constraint", "engineering_entity", "work_product"]
 
 
 class StalenessStatus(StrEnum):
@@ -60,7 +89,7 @@ class StalenessStatus(StrEnum):
 
 
 class Dependency(BaseModel):
-    entity_kind: ControlledEntityKind
+    entity_kind: DependencyEntityKind
     entity_id: UUID
     revision: int
 
@@ -78,6 +107,19 @@ def _get_dependencies(metadata: dict) -> list[Dependency]:
 
 def _get_staleness(metadata: dict) -> StalenessStatus:
     return StalenessStatus(metadata.get(_STALENESS_KEY, StalenessStatus.CURRENT))
+
+
+async def work_product_current_revision(twin: TwinAPI, work_product_id: UUID) -> int:
+    """A WorkProduct's "revision" for staleness-pin purposes: 0 while it's
+    the current tip (nothing supersedes it -- the same test
+    ``geometry_recorder._find_current_work_product`` already uses), 1 the
+    moment something does. Public: used both here (current-revision lookup
+    during ``propagate``) and by ``evidence_recorder.py`` (to pin the
+    revision a new Evidence entity declares at record time)."""
+    incoming = await twin.get_edges(
+        work_product_id, direction="incoming", edge_type=EdgeType.SUPERSEDES
+    )
+    return 1 if incoming else 0
 
 
 class StalenessEngine:
@@ -126,7 +168,7 @@ class StalenessEngine:
         self, project_id: UUID
     ) -> tuple[
         list[tuple[ControlledEntityKind, UUID, dict]],
-        dict[tuple[ControlledEntityKind, UUID], int],
+        dict[tuple[DependencyEntityKind, UUID], int],
     ]:
         constraints = await self._twin.list_constraints(project_id=project_id)
         entities = await self._twin.list_engineering_entities(project_id=project_id)
@@ -134,17 +176,32 @@ class StalenessEngine:
             ("constraint", c.id, c.metadata) for c in constraints
         ] + [("engineering_entity", e.id, e.metadata) for e in entities]
 
-        current_revisions: dict[tuple[ControlledEntityKind, UUID], int] = {
+        current_revisions: dict[tuple[DependencyEntityKind, UUID], int] = {
             ("constraint", c.id): c.revision for c in constraints
         }
         current_revisions.update({("engineering_entity", e.id): e.revision for e in entities})
+
+        # FORGE-314: any work_product referenced by an entity's own
+        # depends_on pins needs its current revision resolved too -- lazily,
+        # only for wp ids actually pinned (never eagerly loading every
+        # WorkProduct in the project).
+        wp_ids: set[UUID] = set()
+        for _, _, metadata in all_nodes:
+            for dep in _get_dependencies(metadata):
+                if dep.entity_kind == "work_product":
+                    wp_ids.add(dep.entity_id)
+        for wp_id in wp_ids:
+            current_revisions[("work_product", wp_id)] = await work_product_current_revision(
+                self._twin, wp_id
+            )
+
         return all_nodes, current_revisions
 
     @staticmethod
     def _walk(
         all_nodes: list[tuple[ControlledEntityKind, UUID, dict]],
-        current_revisions: dict[tuple[ControlledEntityKind, UUID], int],
-        changed_kind: ControlledEntityKind,
+        current_revisions: dict[tuple[DependencyEntityKind, UUID], int],
+        changed_kind: DependencyEntityKind,
         changed_id: UUID,
     ) -> list[StaleMarking]:
         """Pure BFS over `depends_on` pins -- no reads, no writes. Shared by
@@ -155,8 +212,8 @@ class StalenessEngine:
         commit, since marking STALE as it goes IS its whole point).
         """
         markings: list[StaleMarking] = []
-        visited: set[tuple[ControlledEntityKind, UUID]] = set()
-        frontier: list[tuple[ControlledEntityKind, UUID]] = [(changed_kind, changed_id)]
+        visited: set[tuple[DependencyEntityKind, UUID]] = set()
+        frontier: list[tuple[DependencyEntityKind, UUID]] = [(changed_kind, changed_id)]
 
         while frontier:
             target_kind, target_id = frontier.pop()
@@ -184,7 +241,7 @@ class StalenessEngine:
         return markings
 
     async def propagate(
-        self, project_id: UUID, changed_kind: ControlledEntityKind, changed_id: UUID
+        self, project_id: UUID, changed_kind: DependencyEntityKind, changed_id: UUID
     ) -> list[StaleMarking]:
         """`changed_id` just moved to a new revision (REVISE/SUPERSEDE). Find
         every entity in `project_id` whose recorded `depends_on` pin for
@@ -204,7 +261,7 @@ class StalenessEngine:
     async def preview_impact(
         self,
         project_id: UUID,
-        changed_kind: ControlledEntityKind,
+        changed_kind: DependencyEntityKind,
         changed_id: UUID,
         *,
         projected_revision: int,

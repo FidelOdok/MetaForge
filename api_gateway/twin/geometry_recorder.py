@@ -318,6 +318,30 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                     logger.warning(
                         "geometry_supersedes_edge_failed", node_id=node_id, error=str(exc)
                     )
+                else:
+                    # FORGE-314: prior_step just stopped being the current tip
+                    # (it now has an incoming SUPERSEDES edge) -- any Evidence
+                    # pinned to prior_step.id@0 is now behind, and everything
+                    # that in turn depends on THAT evidence transitively too
+                    # (spec section 21's mount-CAD -> simulation -> BOM
+                    # example). Best-effort, same posture as the edge itself:
+                    # a staleness-propagation failure must never fail the
+                    # geometry commit that triggered it.
+                    if project_id:
+                        try:
+                            from uuid import UUID as _UUID
+
+                            from twin_core.consistency.staleness import StalenessEngine
+
+                            await StalenessEngine(twin).propagate(
+                                _UUID(project_id), "work_product", prior_step.id
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "geometry_staleness_propagation_failed",
+                                node_id=node_id,
+                                error=str(exc),
+                            )
 
             if script_node_id is not None:
                 try:
