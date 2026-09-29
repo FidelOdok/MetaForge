@@ -46,7 +46,12 @@ class _Spy(McpToolServer):
     def __init__(self) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self.ran: list[str] = []
-        for tool_id in ("twin.get_node", "twin.commit_geometry", "project.delete", "twin.query_cypher"):
+        for tool_id in (
+            "twin.get_node",
+            "twin.commit_geometry",
+            "project.delete",
+            "twin.query_cypher",
+        ):
             self.register_tool(_manifest(tool_id), self._make(tool_id))
 
     def _make(self, tool_id: str):
