@@ -223,3 +223,14 @@ exclude = [
     "dist/",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pint's own source uses PEP 695 generic syntax (Python 3.12+) internally
+# (e.g. pint/facets/context/objects.py); this repo's mypy `python_version`
+# target is 3.11, so even a --follow-imports=silent visit crashes on that
+# syntax with a hard parse error ("errors prevented further checking") that
+# aborts the ENTIRE run, not just pint's own (irrelevant) type info.
+# `follow_imports = "skip"` (stronger than "silent") tells mypy not to open
+# pint's source at all -- imported names resolve to Any instead.
+module = "pint.*"
+follow_imports = "skip"
