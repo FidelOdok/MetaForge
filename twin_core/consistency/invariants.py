@@ -24,6 +24,7 @@ from twin_core.consistency.metrics import compute_metric_total
 from twin_core.consistency.models import Invariant, InvariantComparison, InvariantResult
 from twin_core.graph_engine import GraphEngine
 from twin_core.models.engineering_entity import EngineeringEntity
+from twin_core.models.quantity import is_valid_unit
 
 
 def invariant_from_entity(entity: EngineeringEntity) -> Invariant:
@@ -41,6 +42,10 @@ def invariant_from_entity(entity: EngineeringEntity) -> Invariant:
     missing = [k for k in ("metric", "unit", "limit") if k not in md]
     if missing:
         raise ValueError(f"invariant entity {entity.id} metadata missing {missing}")
+    # FORGE-311: "compile"-time unit check -- a nonsense unit string is
+    # rejected here, before it ever reaches metric-total computation.
+    if not is_valid_unit(str(md["unit"])):
+        raise ValueError(f"invariant entity {entity.id}: {md['unit']!r} is not a recognized unit")
     try:
         limit = float(md["limit"])
         comparison = InvariantComparison(md.get("comparison", InvariantComparison.LTE.value))

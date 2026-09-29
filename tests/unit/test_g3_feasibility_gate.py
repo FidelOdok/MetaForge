@@ -121,6 +121,15 @@ class TestBudgetFromEntity:
         with pytest.raises(ValueError, match="malformed metadata"):
             budget_from_entity(e, project_id)
 
+    def test_unrecognized_unit_raises(self, project_id):
+        # FORGE-311: "compile"-time unit check.
+        e = _budget_entity(
+            project_id,
+            metadata={"metric": "mass", "unit": "not_a_real_unit_xyz", "system_total": 5.0},
+        )
+        with pytest.raises(ValueError, match="not a recognized unit"):
+            budget_from_entity(e, project_id)
+
 
 class TestInvariantFromEntity:
     def test_reads_metric_unit_limit_and_comparison(self, project_id):
@@ -147,6 +156,14 @@ class TestInvariantFromEntity:
     def test_requires_metric_unit_and_limit_in_metadata(self, project_id):
         e = _invariant_entity(project_id, metadata={"metric": "mass"})
         with pytest.raises(ValueError, match="missing"):
+            invariant_from_entity(e)
+
+    def test_unrecognized_unit_raises(self, project_id):
+        # FORGE-311: "compile"-time unit check.
+        e = _invariant_entity(
+            project_id, metadata={"metric": "mass", "unit": "not_a_real_unit_xyz", "limit": 5.0}
+        )
+        with pytest.raises(ValueError, match="not a recognized unit"):
             invariant_from_entity(e)
 
 
@@ -253,6 +270,20 @@ class TestBudgetChecks:
         assert check.status == GateCheckStatus.FAIL
         assert result.status == GateStatus.FAILED
 
+    async def test_dimension_mismatch_degrades_to_not_evaluated_not_a_crash(self, twin, project_id):
+        # FORGE-311: a WorkProduct storing this metric under an
+        # incompatible-dimension unit is a real data error -- the gate
+        # degrades that one check to NOT_EVALUATED rather than raising out
+        # of evaluate_g3_feasibility entirely.
+        await twin.graph.add_node(_wp("frame", project_id, {"mass_mm": 12.0}))
+        budget = Budget(
+            id="mass", project_id=project_id, metric="mass", unit="kg", system_total=5.0
+        )
+        result = await evaluate_g3_feasibility(twin, project_id, budgets=[budget])
+        check = next(c for c in result.checks if c.id == "budget:mass")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+        assert "incompatible" in check.detail
+
 
 class TestInvariantChecks:
     async def test_violated_invariant_fails_the_gate(self, twin, project_id):
@@ -268,6 +299,16 @@ class TestInvariantChecks:
         check = next(c for c in result.checks if c.id == "invariant:INV-COST")
         assert check.status == GateCheckStatus.FAIL
         assert result.status == GateStatus.FAILED
+
+    async def test_dimension_mismatch_degrades_to_not_evaluated_not_a_crash(self, twin, project_id):
+        await twin.graph.add_node(_wp("frame", project_id, {"mass_mm": 12.0}))
+        inv = Invariant(
+            id="INV-MASS", metric="mass", unit="kg", limit=5.0, comparison=InvariantComparison.LTE
+        )
+        result = await evaluate_g3_feasibility(twin, project_id, invariants=[inv])
+        check = next(c for c in result.checks if c.id == "invariant:INV-MASS")
+        assert check.status == GateCheckStatus.NOT_EVALUATED
+        assert "incompatible" in check.detail
 
 
 class TestRiskChecks:

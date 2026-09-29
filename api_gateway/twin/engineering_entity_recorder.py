@@ -30,6 +30,7 @@ from api_gateway.twin._ref_resolver import resolve_refs
 from observability.tracing import get_tracer
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType
+from twin_core.models.quantity import is_valid_unit
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.engineering_entity_recorder")
@@ -103,6 +104,17 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
             metadata = dict(extra or {})
             if session_id:
                 metadata.setdefault("session_id", session_id)
+            # FORGE-311 (lifecycle step 1): a nonsense unit string on any
+            # entity carrying one (assumption.value/unit,
+            # evidence.value/unit, budget.system_total/unit,
+            # invariant.limit/unit, objective.target/unit) is a "compile
+            # time" error -- reject it here, before it can silently reach
+            # metric-total computation (twin_core.consistency.metrics).
+            if "unit" in metadata and not is_valid_unit(str(metadata["unit"])):
+                raise ValueError(
+                    f"engineering entity recorder: metadata['unit'] "
+                    f"{metadata['unit']!r} is not a recognized unit"
+                )
 
             entity = EngineeringEntity(
                 entity_type=entity_type,  # type: ignore[arg-type]

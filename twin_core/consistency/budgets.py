@@ -28,6 +28,7 @@ from twin_core.consistency.metrics import compute_metric_total
 from twin_core.consistency.models import Budget, BudgetAllocation, BudgetStatus
 from twin_core.graph_engine import GraphEngine
 from twin_core.models.engineering_entity import EngineeringEntity
+from twin_core.models.quantity import is_valid_unit
 
 
 def budget_from_entity(entity: EngineeringEntity, project_id: UUID) -> Budget:
@@ -43,6 +44,10 @@ def budget_from_entity(entity: EngineeringEntity, project_id: UUID) -> Budget:
     missing = [k for k in ("metric", "unit", "system_total") if k not in md]
     if missing:
         raise ValueError(f"budget entity {entity.id} metadata missing {missing}")
+    # FORGE-311: "compile"-time unit check -- a nonsense unit string is
+    # rejected here, before it ever reaches metric-total computation.
+    if not is_valid_unit(str(md["unit"])):
+        raise ValueError(f"budget entity {entity.id}: {md['unit']!r} is not a recognized unit")
     try:
         allocations = [BudgetAllocation(**a) for a in md.get("allocations", [])]
         system_total = float(md["system_total"])
