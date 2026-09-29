@@ -59,7 +59,12 @@ import structlog
 
 from api_gateway.twin._ref_resolver import resolve_ref, resolve_refs
 from observability.tracing import get_tracer
-from twin_core.consistency.staleness import Dependency, StalenessEngine, StalenessStatus
+from twin_core.consistency.staleness import (
+    Dependency,
+    StalenessEngine,
+    StalenessStatus,
+    work_product_current_revision,
+)
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType
 
@@ -77,7 +82,11 @@ _EVIDENCE_TYPES = frozenset(
         "external_reference",
     }
 )
-_VALID_ENTITY_KINDS = frozenset({"constraint", "engineering_entity"})
+# FORGE-314: work_product added so Evidence can pin the exact CAD/geometry
+# revision it validated (the doc's own "CAD-BODY-003@7" example) -- see
+# twin_core.consistency.staleness's module docstring for how a WorkProduct's
+# "revision" is defined (0 while it's the current tip, 1 once superseded).
+_VALID_ENTITY_KINDS = frozenset({"constraint", "engineering_entity", "work_product"})
 
 _SUPPORTS_EDGE = EdgeType.SATISFIES
 _CONTRADICTS_EDGE = EdgeType.CONFLICTS_WITH
@@ -102,20 +111,34 @@ async def _resolve_valid_against(
                 f"evidence recorder: valid_against[{index}] 'entity_kind' must be one of "
                 f"{sorted(_VALID_ENTITY_KINDS)}, got {entity_kind!r}"
             )
-        entity_id = await resolve_ref(twin, str(entry["ref"]), project_id=project_id)
+        entity_id = await resolve_ref(
+            twin,
+            str(entry["ref"]),
+            project_id=project_id,
+            include_work_products=entity_kind == "work_product",
+        )
         revision = entry.get("revision")
         if revision is None:
-            current = (
-                await twin.get_constraint(entity_id)
-                if entity_kind == "constraint"
-                else await twin.get_engineering_entity(entity_id)
-            )
-            if current is None:
-                raise ValueError(
-                    f"evidence recorder: valid_against[{index}] ref {entry['ref']!r} "
-                    f"resolved to {entity_id} but no {entity_kind} exists with that id"
+            if entity_kind == "work_product":
+                current_wp = await twin.get_work_product(entity_id)
+                if current_wp is None:
+                    raise ValueError(
+                        f"evidence recorder: valid_against[{index}] ref {entry['ref']!r} "
+                        f"resolved to {entity_id} but no work_product exists with that id"
+                    )
+                revision = await work_product_current_revision(twin, entity_id)
+            else:
+                current = (
+                    await twin.get_constraint(entity_id)
+                    if entity_kind == "constraint"
+                    else await twin.get_engineering_entity(entity_id)
                 )
-            revision = current.revision
+                if current is None:
+                    raise ValueError(
+                        f"evidence recorder: valid_against[{index}] ref {entry['ref']!r} "
+                        f"resolved to {entity_id} but no {entity_kind} exists with that id"
+                    )
+                revision = current.revision
         dependencies.append(
             Dependency(entity_kind=entity_kind, entity_id=entity_id, revision=int(revision))
         )

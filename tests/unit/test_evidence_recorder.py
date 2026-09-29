@@ -14,7 +14,8 @@ from twin_core.api import InMemoryTwinAPI
 from twin_core.consistency.staleness import StalenessEngine
 from twin_core.models.constraint import Constraint
 from twin_core.models.engineering_entity import EngineeringEntity
-from twin_core.models.enums import ConstraintSeverity, EdgeType
+from twin_core.models.enums import ConstraintSeverity, EdgeType, WorkProductType
+from twin_core.models.work_product import WorkProduct
 
 
 class _FakeProjectBackend:
@@ -269,8 +270,84 @@ class TestValidAgainst:
                 producer={"tool": "x"},
                 inputs={},
                 result={"a": 1},
-                valid_against=[{"ref": "x", "entity_kind": "work_product"}],
+                valid_against=[{"ref": "x", "entity_kind": "assumption"}],
             )
+
+
+class TestValidAgainstWorkProduct:
+    """FORGE-314: valid_against can pin an Evidence entity to the exact CAD
+    revision it validated -- the doc's own ``CAD-BODY-003@7`` example."""
+
+    async def _seed_cad(self, twin, project_id, name="upper_arm"):
+        return await twin.create_work_product(
+            WorkProduct(
+                name=name,
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path=f"/cad/{name}.step",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+            )
+        )
+
+    async def test_pins_revision_zero_when_wp_is_current_tip(self, twin, project_id):
+        wp = await self._seed_cad(twin, project_id)
+        record = make_evidence_recorder(twin)
+        out = await record(
+            evidence_type="inspection",
+            producer={"tool": "x"},
+            inputs={},
+            result={"checked": True},
+            valid_against=[{"ref": str(wp.id), "entity_kind": "work_product"}],
+            project_id=project_id,
+        )
+        assert out["valid_against_count"] == 1
+        stored = await twin.get_engineering_entity(UUID(out["node_id"]))
+        deps = stored.metadata["depends_on"]
+        assert deps[0]["entity_kind"] == "work_product"
+        assert deps[0]["entity_id"] == str(wp.id)
+        assert deps[0]["revision"] == 0
+
+    async def test_unresolvable_work_product_ref_raises(self, twin, project_id):
+        record = make_evidence_recorder(twin)
+        with pytest.raises(ValueError):
+            await record(
+                evidence_type="inspection",
+                producer={"tool": "x"},
+                inputs={},
+                result={"checked": True},
+                valid_against=[{"ref": str(uuid4()), "entity_kind": "work_product"}],
+                project_id=project_id,
+            )
+
+    async def test_propagate_marks_evidence_stale_when_geometry_is_superseded(
+        self, twin, project_id
+    ):
+        """The literal FORGE-314 acceptance criterion: re-committing the
+        named CAD geometry supersedes the old WorkProduct node; Evidence
+        pinned to it goes STALE via the exact same StalenessEngine.propagate
+        used for constraint/engineering_entity dependencies."""
+        original = await self._seed_cad(twin, project_id)
+        record = make_evidence_recorder(twin)
+        out = await record(
+            evidence_type="inspection",
+            producer={"tool": "x"},
+            inputs={},
+            result={"checked": True},
+            valid_against=[{"ref": str(original.id), "entity_kind": "work_product"}],
+            project_id=project_id,
+        )
+
+        revised = await self._seed_cad(twin, project_id)
+        await twin.add_edge(revised.id, original.id, EdgeType.SUPERSEDES)
+
+        engine = StalenessEngine(twin)
+        markings = await engine.propagate(UUID(project_id), "work_product", original.id)
+
+        assert any(m.entity_id == UUID(out["node_id"]) for m in markings)
+        status = await engine.get_status("engineering_entity", UUID(out["node_id"]))
+        assert status.value == "stale"
 
 
 class TestSupersedesRevalidation:
