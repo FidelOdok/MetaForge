@@ -297,6 +297,14 @@ def client():
     class _FakeServer:
         adapters: dict = {}
         tool_ids: list = []
+        posture = None
+
+        # FORGE-332: build_http_app tells the server what it enforces, so a
+        # stand-in for the server has to be able to hear it. Recorded rather
+        # than swallowed -- test_http_app_declares_oauth_posture below is
+        # what stops the OAuth branch of that call from silently rotting.
+        def declare_auth_posture(self, posture) -> None:
+            self.posture = posture
 
         async def handle_request(self, raw: str) -> str:
             return '{"jsonrpc":"2.0","id":"health","result":{"status":"ok"}}'
@@ -304,6 +312,33 @@ def client():
     provider = OAuthProvider(OAuthConfig(login_secret="open-sesame"))
     app = build_http_app(_FakeServer(), enable_sse=False, oauth=provider)
     return starlette_testclient.TestClient(app)
+
+
+def test_http_app_declares_oauth_posture() -> None:
+    """The OAuth branch of the posture call, which the fixture exercises
+    but does not check. ``identifies_caller`` is the whole point of OAuth
+    here: a static key authorises, only a token attributes."""
+    pytest.importorskip("starlette.testclient")
+    from metaforge.mcp.__main__ import build_http_app
+
+    class _FakeServer:
+        adapters: dict = {}
+        tool_ids: list = []
+        posture = None
+
+        def declare_auth_posture(self, posture) -> None:
+            self.posture = posture
+
+        async def handle_request(self, raw: str) -> str:
+            return "{}"
+
+    server = _FakeServer()
+    build_http_app(
+        server, enable_sse=False, oauth=OAuthProvider(OAuthConfig(login_secret="open-sesame"))
+    )
+    assert server.posture is not None
+    assert server.posture.mode == "oauth"
+    assert server.posture.report()["identifies_caller"] is True
 
 
 def test_protected_resource_metadata_served(client) -> None:

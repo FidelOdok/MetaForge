@@ -336,6 +336,13 @@ reporting what came back:
 }
 ```
 
+The same report carries `auth` (what the transport in front of the server
+enforces: `open`, `api_key`, `oauth`, `api_key+oauth`, or `unknown` when
+the transport declared nothing) and `client` (the `clientInfo` from the
+`initialize` handshake, plus `protocol_skew` when the revision the client
+asked for is not the one the server pinned). Both are described under
+[What is protecting this connection](capability-matrix.md#what-is-protecting-this-connection).
+
 `status` is `healthy` only if every adapter answered, `degraded`
 otherwise. `tools_registered` is a registry count and does not shrink
 when an adapter goes down — `reachable` is the field that says whether

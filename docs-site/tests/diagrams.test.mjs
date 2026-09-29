@@ -156,6 +156,20 @@ async function startChrome() {
 async function measure(path) {
   const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+  // A diagram that never appears is usually a chunk that never executed,
+  // and the DOM afterwards looks exactly like a page with no fence in it.
+  // Collecting the page's own exceptions is the difference between a flake
+  // report and a cause.
+  const pageErrors = [];
+  const onException = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.sessionId !== sessionId) return;
+    if (msg.method === 'Runtime.exceptionThrown') {
+      const d = msg.params?.exceptionDetails;
+      pageErrors.push(d?.exception?.description || d?.text || 'unknown exception');
+    }
+  };
+  ws.addEventListener('message', onException);
   try {
     await send('Page.enable', {}, sessionId);
     await send('Runtime.enable', {}, sessionId);
@@ -210,11 +224,20 @@ async function measure(path) {
         // React, so polling a server-rendered shell just burns the deadline
         // and then reports "the fence did not become a diagram" — which is
         // the one message here that should only ever mean a real regression.
+        //
+        // This check used to look for .theme-doc-markdown and
+        // #__docusaurus, both of which Docusaurus server-renders into the
+        // HTML. It was therefore true on the very first tick, before any
+        // client JS had run, and the wait did nothing — which is how this
+        // test came to fail intermittently on a page whose diagram was fine.
+        // window.docusaurus is set by the client entry bundle, so it is
+        // true only once React is actually driving the page.
+        // (No backticks in here: this whole block is a template literal.)
         const hydrated = () =>
-          document.querySelector('.theme-doc-markdown') !== null &&
-          document.querySelector('#__docusaurus') !== null;
+          typeof window.docusaurus !== 'undefined' &&
+          document.querySelector('.theme-doc-markdown') !== null;
         const whenHydrated = (attempt = 0) => {
-          if (hydrated() || attempt > 100) return Promise.resolve();
+          if (hydrated() || attempt > 300) return Promise.resolve();
           return new Promise((r) => setTimeout(r, 100)).then(() => whenHydrated(attempt + 1));
         };
 
@@ -230,8 +253,13 @@ async function measure(path) {
       { expression, awaitPromise: true, returnByValue: true },
       sessionId,
     );
-    return result.value;
+    const value = result.value;
+    if (value.error && pageErrors.length) {
+      value.error += ` (page threw: ${pageErrors.join('; ')})`;
+    }
+    return value;
   } finally {
+    ws.removeEventListener('message', onException);
     await send('Target.closeTarget', { targetId });
   }
 }
@@ -258,7 +286,16 @@ after(async () => {
 
 for (const path of PAGES) {
   test(`diagrams on ${path} fit inside their boxes`, async () => {
-    const measured = await measure(path);
+    let measured = await measure(path);
+    if (measured.error) {
+      // One retry, in a fresh target. A stylesheet regression — the thing
+      // this test exists to catch — fails both attempts; a chunk that lost
+      // a race on a loaded machine does not. The retry is announced so a
+      // page that needs it every time is visible rather than silently
+      // absorbed.
+      console.error(`retrying ${path} after: ${measured.error}`);
+      measured = await measure(path);
+    }
     assert.ok(!measured.error, `${path}: ${measured.error}`);
     assert.ok(measured.labels.length > 0, `${path}: no labels measured`);
 

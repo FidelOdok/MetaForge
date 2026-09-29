@@ -33,6 +33,7 @@ from uuid import uuid4
 import structlog
 
 from mcp_core.annotations import annotations_for
+from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
 from mcp_core.guardrails import (
     ApprovalAsk,
     ApprovalGateFn,
@@ -140,6 +141,7 @@ class UnifiedMcpServer:
         caller: Caller = Caller.LOCAL,
         approval_gate: ApprovalGateFn | None = None,
         exempt_local_writes: bool = True,
+        auth_posture: AuthPosture | None = None,
     ) -> None:
         self._adapters = list(adapters)
         # FORGE-339: when set, ``tools/list`` serves only this profile's
@@ -158,6 +160,15 @@ class UnifiedMcpServer:
         self._approval_gate = approval_gate
         self._exempt_local_writes = exempt_local_writes
         self._version = version
+        # FORGE-332: what the transport in front of us enforces. Only the
+        # transport knows, so it tells us; None means nobody said, and the
+        # health report says exactly that rather than guessing "open".
+        self._auth_posture = auth_posture
+        # Whoever last completed the `initialize` handshake. Reported by
+        # health/check so a version-skew question has an answer other than
+        # "ask the user what they are running".
+        self._client_info: dict[str, Any] | None = None
+        self._client_protocol: str | None = None
         self._start_time = datetime.now(UTC)
         # Held only so the process shutdown path can call close_all() and
         # release remote adapters' aiohttp ClientSessions -- unused by
@@ -186,6 +197,23 @@ class UnifiedMcpServer:
             adapter_count=len(self._adapters),
             tool_count=len(self._tool_index),
             adapter_ids=[a.adapter_id for a in self._adapters],
+        )
+
+    def declare_auth_posture(self, posture: AuthPosture) -> None:
+        """Record what the transport in front of this server enforces.
+
+        The transport is built after the server (both stdio and HTTP
+        resolve their credentials at serve time, not at bootstrap), so
+        this is a setter rather than a constructor-only argument. Calling
+        it is what keeps ``health/check`` from reporting ``unknown``;
+        ``tests/unit/test_mcp_health_auth.py`` asserts both entrypoints do.
+        """
+        self._auth_posture = posture
+        logger.info(
+            "unified_mcp_auth_posture",
+            mode=posture.mode,
+            transport=posture.transport,
+            identifies_caller=posture.oauth,
         )
 
     # ------------------------------------------------------------------
@@ -366,7 +394,26 @@ class UnifiedMcpServer:
         feature set we expose. Echoing the client's protocolVersion when
         compatible is the spec-recommended path; we pin to our known
         version to keep the contract stable across client upgrades.
+
+        FORGE-332: ``params`` used to be discarded whole. It carries the
+        only two facts about the other end this server ever learns — who
+        connected and which protocol revision they asked for — and without
+        them ``health/check`` could not answer a version-skew question, so
+        /metaforge:doctor had to either omit it or make it up. A client
+        asking for a revision we do not speak is also worth a line in the
+        log: pinning is the right behaviour, pinning silently is not.
         """
+        client = params.get("clientInfo")
+        self._client_info = client if isinstance(client, dict) else None
+        requested = params.get("protocolVersion")
+        self._client_protocol = requested if isinstance(requested, str) else None
+        if self._client_protocol and self._client_protocol != self._MCP_PROTOCOL_VERSION:
+            logger.warning(
+                "mcp_protocol_skew",
+                requested=self._client_protocol,
+                negotiated=self._MCP_PROTOCOL_VERSION,
+                client=(self._client_info or {}).get("name"),
+            )
         return {
             "protocolVersion": self._MCP_PROTOCOL_VERSION,
             "capabilities": {
@@ -920,6 +967,38 @@ class UnifiedMcpServer:
     #: hang turns one sick adapter into a sick gateway.
     _PROBE_TIMEOUT_SECONDS = 3.0
 
+    def _client_report(self) -> dict[str, Any]:
+        """Who is on the other end, and whether we speak the same protocol.
+
+        ``connected: false`` is the honest answer before any handshake --
+        the legacy transports and the tests call methods directly without
+        ``initialize``, and reporting an empty name there would read as a
+        client that failed to identify itself rather than one that never
+        arrived.
+        """
+        if self._client_info is None and self._client_protocol is None:
+            return {
+                "connected": False,
+                "protocol_negotiated": self._MCP_PROTOCOL_VERSION,
+                "detail": "no initialize handshake has been completed on this server",
+            }
+        info = self._client_info or {}
+        out: dict[str, Any] = {
+            "connected": True,
+            "name": info.get("name"),
+            "version": info.get("version"),
+            "protocol_requested": self._client_protocol,
+            "protocol_negotiated": self._MCP_PROTOCOL_VERSION,
+        }
+        if self._client_protocol and self._client_protocol != self._MCP_PROTOCOL_VERSION:
+            out["protocol_skew"] = True
+            out["detail"] = (
+                f"client asked for MCP {self._client_protocol}; this server pinned "
+                f"{self._MCP_PROTOCOL_VERSION}. Anything added after the pinned "
+                "revision is not available on this connection."
+            )
+        return out
+
     async def _probe_adapter(self, adapter: McpToolServer) -> dict[str, Any]:
         """Ask one adapter whether it is actually there."""
         entry: dict[str, Any] = {
@@ -985,6 +1064,18 @@ class UnifiedMcpServer:
             "uptime_seconds": round(uptime, 1),
             "adapter_count": len(self._adapters),
             "tool_count": len(self._tool_index),
+            # FORGE-332: A5 asks the doctor about four things -- gateway,
+            # adapters, auth and version skew. The adapters are probed
+            # above; these two are the rest, and neither was answerable
+            # from this call before. The doctor workflow already told the
+            # agent to "report the auth mode", which it could only do by
+            # inventing one.
+            "auth": (
+                self._auth_posture.report()
+                if self._auth_posture is not None
+                else dict(UNKNOWN_AUTH)
+            ),
+            "client": self._client_report(),
             "adapters": adapter_health,
         }
         if unreachable:
