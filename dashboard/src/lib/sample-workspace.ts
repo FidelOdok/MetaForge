@@ -1125,6 +1125,30 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
       });
       return { constraintId: id, setWorkProductId: `sample-set-${id}` };
     }
+    if (path === '/features/generate') {
+      // FORGE-269: illustrative counts matching the two real macros
+      // (domain_agents/shared/design_ir_macros.py) exactly -- bolt_pattern
+      // is 6 entities (create_body, sketch, pad, sketch, pocket,
+      // polar_pattern), rib is 3 (create_body, sketch, pad).
+      const payload = body as { name?: string; feature?: { feature_type?: string } };
+      const featureType = payload.feature?.feature_type ?? 'rib';
+      const entityCount = featureType === 'bolt_pattern' ? 6 : 3;
+      return {
+        feature_type: featureType,
+        work_product_id: null,
+        cad_file: `output/${featureType}_${Date.now()}.step`,
+        entity_count: entityCount,
+        volume_mm3: featureType === 'bolt_pattern' ? 11760.0 : 900.0,
+        surface_area_mm2: featureType === 'bolt_pattern' ? 5200.0 : 1080.0,
+        bounding_box: { min_x: -30, min_y: -20, min_z: 0, max_x: 30, max_y: 20, max_z: 5 },
+        material: 'aluminum_6061',
+        committed: true,
+        twin_node_id: `sample-feature-${Date.now()}`,
+        model_url: '/samples/flight-controller.glb',
+        commit_error: null,
+        already_committed: false,
+      };
+    }
     if (path === '/design-loop/start') {
       // FORGE-287: a small, illustrative bisection-like trace -- narrows
       // toward a converged winner exactly like the real

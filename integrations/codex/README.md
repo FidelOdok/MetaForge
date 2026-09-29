@@ -10,7 +10,7 @@
 
 ## Skills
 
-29 engineering skills are included under `skills/`, the same procedures the MetaForge agents follow.
+30 engineering skills are included under `skills/`, the same procedures the MetaForge agents follow.
 
 ## Why there is no plugin manifest here
 

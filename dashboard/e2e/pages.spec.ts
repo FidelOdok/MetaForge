@@ -300,6 +300,37 @@ test.describe('Requirements', () => {
     const history = gateSection.getByTestId('gate-review-history');
     await expect(history).toContainText('reviewer@example.com');
   });
+
+  test('feature library generates a bolt pattern and a rib (FORGE-269)', async ({ page }) => {
+    await page.goto('/requirements?demo=1');
+    const featureSection = page.getByTestId('feature-library-section');
+    await expect(featureSection).toBeVisible();
+
+    await featureSection.getByTestId('open-feature-library-button').click();
+    const form = featureSection.getByTestId('feature-library-form');
+    await expect(form).toBeVisible();
+
+    // Default feature is bolt_pattern -- fill the name and generate.
+    await form.getByLabel('Name').fill('Motor mount bolt pattern');
+    await form.getByRole('button', { name: 'Generate' }).click();
+
+    await expect(form).not.toBeVisible();
+    let result = featureSection.getByTestId('feature-library-result');
+    await expect(result).toBeVisible();
+    await expect(result).toContainText('bolt_pattern');
+    await expect(result).toContainText('6 entities');
+
+    // Switch to rib and generate again.
+    await featureSection.getByTestId('open-feature-library-button').click();
+    await form.getByLabel('Feature').selectOption('rib');
+    await form.getByLabel('Name').fill('Wall reinforcement rib');
+    await form.getByRole('button', { name: 'Generate' }).click();
+
+    await expect(form).not.toBeVisible();
+    result = featureSection.getByTestId('feature-library-result');
+    await expect(result).toContainText('rib');
+    await expect(result).toContainText('3 entities');
+  });
 });
 
 test.describe('Design Assistant', () => {
