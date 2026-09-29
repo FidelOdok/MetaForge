@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "metaforge",
+  "displayName": "MetaForge",
+  "version": "0.1.0",
+  "description": "Engineer hardware against a digital twin: requirements, CAD, simulation and evidence, with writes held for human approval.",
+  "author": {
+    "name": "MetaForge",
+    "url": "https://www.metaforge.uk"
+  },
+  "homepage": "https://fidelodok.github.io/MetaForge/",
+  "repository": "https://github.com/FidelOdok/MetaForge",
+  "license": "Apache-2.0",
+  "keywords": [
+    "hardware",
+    "cad",
+    "simulation",
+    "digital-twin",
+    "engineering"
+  ],
+  "userConfig": {
+    "gateway_url": {
+      "type": "string",
+      "title": "Gateway URL",
+      "description": "Your MetaForge gateway's MCP endpoint. Leave the default if you are running one locally; enter your team or hosted URL otherwise.",
+      "default": "http://localhost:8765/mcp",
+      "required": true
+    },
+    "api_token": {
+      "type": "string",
+      "title": "API token",
+      "description": "Only needed for a gateway that requires one. A local gateway started with no auth configured does not.",
+      "sensitive": true
+    }
+  },
+  "mcpServers": {
+    "metaforge": {
+      "type": "http",
+      "url": "${user_config.gateway_url}",
+      "headers": {
+        "Authorization": "Bearer ${user_config.api_token}"
+      }
+    }
+  }
+}
