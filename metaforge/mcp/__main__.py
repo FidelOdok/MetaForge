@@ -87,6 +87,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--profile",
+        default=None,
+        help=(
+            "Serve only one tool profile (core, mechanical, simulation, "
+            "electronics, robotics). Every client caps how many tools it "
+            "carries, and most drop the overflow without saying so, which "
+            "leaves the model behaving as though the missing capability does "
+            "not exist. A profile keeps the set inside that cap on purpose. "
+            "Default: every registered tool (FORGE-339)."
+        ),
+    )
+    parser.add_argument(
         "--allow-twin-mutations",
         action="store_true",
         default=False,
@@ -1075,6 +1087,7 @@ async def _bootstrap(
         memory_client=memory_client,
         memory_insight_store=insight_store,
         twin_allow_mutations=getattr(args, "allow_twin_mutations", False),
+        profile=getattr(args, "profile", None),
         agent_session_store=agent_session_store,
         capture_sessions=getattr(args, "capture_sessions", False),
         decision_recorder=decision_recorder,
