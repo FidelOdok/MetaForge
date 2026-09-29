@@ -783,6 +783,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_hierarchy_rollup_fn,
     )
     from api_gateway.twin.metric_evaluator import make_metric_evaluator
+    from api_gateway.twin.optimizer import make_wall_thickness_optimizer
     from api_gateway.twin.revalidation import make_revalidation_executor
     from api_gateway.twin.robot_description_recorder import (
         make_robot_description_recorder,
@@ -824,6 +825,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin, tool_dispatch={"twin.evaluate_metric": metric_evaluator_fn}
     )
     sensitivity_ranker_fn = make_sensitivity_ranker(twin, evidence_recorder=evidence_recorder_fn)
+    # FORGE-320: reuses the same evidence_recorder_fn as sensitivity_ranker
+    # above, plus decision_recorder (built just below) for the "Decision
+    # with alternatives" output -- twin.record_decision already is exactly
+    # that, no new node type needed.
+    parameter_optimizer_fn = make_wall_thickness_optimizer(
+        twin, evidence_recorder=evidence_recorder_fn, decision_recorder=decision_recorder
+    )
 
     # FORGE-319: attempt_promotion is a plain function (twin, ...) -- bind
     # twin once here, same injected-callable shape as every make_X(twin,
@@ -937,6 +945,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         sensitivity_ranker=sensitivity_ranker_fn,
         # FORGE-319: the first real gate that refuses, not just reports.
         promotion_attempter=promotion_attempter_fn,
+        # FORGE-320: bisection search for the minimum-mass wall thickness
+        # satisfying deflection/safety-factor constraints.
+        parameter_optimizer=parameter_optimizer_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

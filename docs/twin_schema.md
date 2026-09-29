@@ -730,6 +730,38 @@ There is deliberately no `update_maturity_gate` -- each `twin.attempt_promotion`
 
 *Source: `twin_core/models/maturity_gate.py`, `api_gateway/requirement_intelligence/promotion.py`, `tool_registry/tools/twin/adapter.py`*
 
+### 2.17 Wall-Thickness Optimiser (FORGE-320)
+
+Not a node type -- a computation, invoked via `twin.optimize_parameter` (target lifecycle spec App. A "Optimiser", step 10: minimise an objective subject to constraints). The ticket's own Jira scope says "over Design IR parameters", but FORGE-317's own scoping already found -- confirmed still true here -- that `twin_core/design_ir/` is a CAD-*authoring* op sequence, never persisted onto a committed WorkProduct (the real arm's own "Upper Arm Link" carries `metadata["authored_by"] = "cadquery.execute_script"` and an empty `geometry_features.parameters` dict), not an engineering-analysis parameter model. This optimiser instead searches `wall_thickness_mm`, the one parameter FORGE-317's own sensitivity ranking already found dominant for both deflection and mass margin, over the same hollow-rectangular-tube hand-calcs.
+
+```python
+class CandidateEvaluation(BaseModel):
+    wall_thickness_mm: float
+    mass_kg: float
+    deflection_mm: float
+    deflection_margin_mm: float
+    stress_mpa: float
+    safety_factor: float
+    sf_margin: float
+    feasible: bool
+
+class OptimizationResult(BaseModel):
+    status: str  # "optimal" | "infeasible" | "already_feasible_at_min"
+    detail: str
+    winner: CandidateEvaluation | None
+    candidates: list[CandidateEvaluation]
+```
+
+Mass is the ticket's own stated OBJECTIVE, not a third constraint alongside SF/deflection -- the project's separate `moving_mass_budget` Constraint covers the whole assembly, not this one part in isolation, and no per-part budget allocation exists to check a share of it against (`BudgetAllocation.owner`/`.discipline` from FORGE-313 records who owns an interface quantity, not a numeric per-part mass share). Both constraints are monotonically non-decreasing in wall thickness (thicker wall -> stiffer -> lower deflection; thicker wall -> lower bending stress -> higher safety factor) for a fixed outer envelope, so the minimum-mass feasible point is exactly the smallest wall thickness where both constraints first hold -- bisection is exact here, not a heuristic, and no general nonlinear optimiser (e.g. scipy.optimize) was reached for.
+
+The safety-factor check is a real, new tier-0 hand-calc (`cantilever_max_bending_stress_mpa`, `sigma = M c / I` at the fixed end) -- no prior ticket in this epic computed stress at all, only deflection/mass. It needed a real yield-strength table, which didn't exist: `tool_registry/tools/cadquery/materials.py` gained `MATERIAL_YIELD_MPA` + `resolve_yield_mpa` (same name set, same "unrecognized material raises" discipline as the existing `MATERIAL_ELASTIC_MPA`/`resolve_elastic_properties`). "Confirmed by FEA" (the ticket's acceptance wording) is achievable only when a real `calculix.run_fea` mesh/load case is supplied for tier-2 escalation -- this ticket does not attempt automatic FEA boundary-condition derivation for a novel part (the same real, still-unsolved gap FORGE-315 already documented, FORGE-278/239/277).
+
+Every search is recorded as Evidence, `valid_against` the work product (FORGE-314's staleness pinning). When a feasible winner is found, it's also recorded as a Decision via the EXISTING `twin.record_decision` mechanism (MET-495, FORGE-61's own "alternatives" field) -- no new "Decision with alternatives" node type was built, since `record_decision` already is exactly that; each rejected candidate the bisection evaluated becomes one alternative, with the constraint that rejected it as its `reason_rejected`.
+
+**Deliberately out of scope**: proposing the winning wall thickness as an actual geometry change via ECT (`ControlledEntityKind` only supports `constraint`/`engineering_entity` today, not `work_product` -- a nontrivial, separate widening of the transaction engine itself, not a quick follow-up, same honesty precedent as FORGE-316 deferring `Constraint.dependencies`); regenerating/committing the optimised geometry (no parametrized re-authoring script exists for the real arm part -- its original `cadquery.execute_script` source was never persisted with a substitutable `wall_thickness_mm` variable); any dashboard UI (no UI surface named in this ticket's own Scope, same precedent as FORGE-315/316/317/319).
+
+*Source: `twin_core/prediction/optimizer.py`, `api_gateway/twin/optimizer.py`, `tool_registry/tools/cadquery/materials.py`, `tool_registry/tools/twin/adapter.py`*
+
 ---
 
 ## 3. Edge Types

@@ -106,6 +106,7 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.commit_procurement_record",
         "twin.commit_system_architecture",
         "twin.commit_technical_drawing",
+        "twin.optimize_parameter",
         "twin.propose_change",
         "twin.propose_engineering_change",
         "twin.record_claim",
