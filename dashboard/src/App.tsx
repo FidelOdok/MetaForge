@@ -32,6 +32,7 @@ const FilesPage = page(() => import('./pages/FilesPage'), 'FilesPage');
 const KnowledgePage = page(() => import('./pages/KnowledgePage'), 'KnowledgePage');
 const SourceDetailPage = page(() => import('./pages/SourceDetailPage'), 'SourceDetailPage');
 const CompliancePage = page(() => import('./pages/CompliancePage'), 'CompliancePage');
+const EvalsPage = page(() => import('./pages/EvalsPage'), 'EvalsPage');
 const SettingsPage = page(() => import('./pages/SettingsPage'), 'SettingsPage');
 
 const queryClient = new QueryClient({
@@ -55,6 +56,7 @@ const ROUTES: Array<[path: string, Page: ComponentType]> = [
   ['knowledge', KnowledgePage],
   ['knowledge/sources/:id', SourceDetailPage],
   ['compliance', CompliancePage],
+  ['evals', EvalsPage],
   ['settings', SettingsPage],
 ];
 

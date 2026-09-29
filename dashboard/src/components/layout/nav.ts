@@ -3,6 +3,7 @@ import {
   BookOpen,
   Box,
   Boxes,
+  ClipboardCheck,
   Files,
   FlaskConical,
   ListChecks,
@@ -44,6 +45,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/files', label: 'Files & artifacts', icon: Files },
       { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
       { to: '/compliance', label: 'Compliance', icon: BadgeCheck },
+      { to: '/evals', label: 'Evals', icon: ClipboardCheck },
     ],
   },
 ];
@@ -61,6 +63,7 @@ export const SECTION_LABELS: Record<string, string> = {
   files: 'Files & artifacts',
   knowledge: 'Knowledge',
   compliance: 'Compliance',
+  evals: 'Evals',
   settings: 'Settings & connection',
 };
 

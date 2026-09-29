@@ -30,6 +30,7 @@ from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.design_loop.routes import router as design_loop_router
+from api_gateway.evals.routes import router as evals_router
 from api_gateway.features.routes import router as features_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, set_reported_auth_mode
@@ -1652,6 +1653,7 @@ def create_app(
     app.include_router(constraint_router)
     app.include_router(requirements_router)
     app.include_router(design_loop_router)
+    app.include_router(evals_router)
     app.include_router(promotion_router)
     app.include_router(features_router)
     app.include_router(decisions_router)

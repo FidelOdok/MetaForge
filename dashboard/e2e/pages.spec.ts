@@ -45,6 +45,26 @@ test.describe('BOM Page', () => {
   });
 });
 
+test.describe('Evals Page', () => {
+  test('renders per-scenario pass rates and recent nightly runs (FORGE-292)', async ({ page }) => {
+    await page.goto('/evals?demo=1');
+    await expect(page.getByRole('heading', { name: 'Evals' })).toBeVisible();
+
+    const table = page.getByTestId('evals-table');
+    await expect(table).toBeVisible();
+    const rows = table.getByTestId('eval-scenario-row');
+    await expect(rows).toHaveCount(3);
+
+    // The new outcome-graded design-loop scenario renders alongside the
+    // pre-existing keyword-graded ones.
+    await expect(table).toContainText('design_loop_wall_thickness');
+    await expect(table).toContainText('design_loop_v1');
+    await expect(table).toContainText('100%');
+
+    await expect(page.getByTestId('eval-history-badge')).toHaveCount(3);
+  });
+});
+
 test.describe('Digital Twin Viewer', () => {
   test('renders page content', async ({ page }) => {
     await page.goto('/twin');
