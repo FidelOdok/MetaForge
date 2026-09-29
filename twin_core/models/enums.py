@@ -51,6 +51,14 @@ class NodeType(StrEnum):
     # that a HierarchyNode links to via EdgeType.REALIZED_BY/INSTANCE_OF,
     # not duplicates of them.
     HIERARCHY_NODE = "hierarchy_node"
+    # FORGE-319 (target lifecycle spec §29 MaturityGate, step 17): a real
+    # promotion gate with its own persistent multi-field state
+    # (required_claim_ids/results/state/authority) -- an ECT-like small
+    # state machine, not a generic EngineeringEntity tag (unlike waiver/
+    # release_approval, which are flat single-purpose records that fit
+    # entirely in metadata; MaturityGate's required_claim_ids/results are
+    # structured lists that want real typed fields).
+    MATURITY_GATE = "maturity_gate"
 
 
 class WorkProductType(StrEnum):

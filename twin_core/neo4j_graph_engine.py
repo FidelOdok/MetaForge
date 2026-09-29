@@ -320,6 +320,16 @@ class Neo4jGraphEngine(GraphEngine):
             from twin_core.models.hierarchy_node import HierarchyNode
 
             return HierarchyNode.model_validate(data)
+        elif node_type == NodeType.MATURITY_GATE:
+            # Same FORGE-68 failure mode -- without this branch a
+            # MaturityGate read back from Neo4j degrades to a bare
+            # NodeBase, losing required_claim_ids/results/promoted
+            # entirely, and get_maturity_gate/list_maturity_gates
+            # (FORGE-319) would always look like "not found"/empty against
+            # a real deployment even right after a successful create.
+            from twin_core.models.maturity_gate import MaturityGate
+
+            return MaturityGate.model_validate(data)
         else:
             return NodeBase.model_validate(data)
 

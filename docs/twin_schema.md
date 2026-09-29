@@ -680,6 +680,56 @@ Dashboard: `RequirementsPage.tsx` gained an "Evidence matrix" section (below the
 
 *Source: `twin_core/consistency/claims.py`, `api_gateway/requirement_intelligence/matrix.py`, `api_gateway/requirement_intelligence/routes.py`, `dashboard/src/pages/RequirementsPage.tsx`*
 
+### 2.16 MaturityGate (FORGE-319)
+
+The first place in this codebase a gate genuinely REFUSES rather than only reports. `twin_core.consistency.gates`'s G3-G8 design-flow gates are a different, pre-existing concept -- per that module's own docstring, a FAILED status only informs a human reviewer, since `enforce_consistency_gate` doesn't exist. `MaturityGate` is its own `NodeType` (not a generic `EngineeringEntity` tag) because a promotion attempt has real, structured multi-field state worth typing, the same reasoning `EngineeringChangeTransaction` (FORGE-66) already used for itself.
+
+```python
+class MaturityLevel(StrEnum):
+    CONCEPT = "concept"
+    SIM_VALIDATED = "sim_validated"
+    PHYSICALLY_VALIDATED = "physically_validated"
+    RELEASED = "released"
+
+class RequiredClaimDecision(StrEnum):
+    PASS = "pass"
+    UNCERTAIN = "uncertain"
+    FAIL = "fail"
+    WAIVED = "waived"   # FAIL, covered by an approved waiver -- still counts as
+                         # satisfied, but recorded honestly, never relabelled "pass"
+
+class RequiredClaimResult(BaseModel):
+    requirement_id: UUID
+    requirement_name: str
+    decision: RequiredClaimDecision
+    detail: str
+    waiver_id: UUID | None = None
+
+class MaturityGate(NodeBase):
+    level: MaturityLevel
+    required_claim_ids: list[UUID]
+    results: list[RequiredClaimResult]
+    promoted: bool = False
+    blocked_reason: str | None = None
+    decided_by: str | None = None
+    decided_at: datetime | None = None
+    k: float = 1.0
+```
+
+There is deliberately no `update_maturity_gate` -- each `twin.attempt_promotion` call persists a brand-new, immutable record (whether it promoted or was refused), so "why wasn't this promoted" always has a real, queryable history instead of one mutable, driftable record.
+
+`attempt_promotion(twin, *, project_id, level, required_claim_ids, k=1.0, decided_by=None)` (`api_gateway/requirement_intelligence/promotion.py`) reuses rather than re-derives:
+
+- **Pass/fail decision** -- §2.15's own `build_requirement_matrix` status per required requirement id. `status="pass"` maps to `PASS`; `"uncertain"`/`"stale"` to `UNCERTAIN`; `"fail"`/`"no_data"` to `FAIL`. No second margin/band computation is invented here.
+- **Waiver coverage** -- the existing `entity_type="waiver"` / `twin.approve_engineering_entity` mechanism (FORGE-73), the same `list_engineering_entities(..., entity_type="waiver")` + `authority in APPROVED_AUTHORITY` pattern `gates.py`'s own G8 `_evaluate_waivers_check` uses (that constant is now public, promoted the same way FORGE-316 promoted `ImpactEngine._build_revalidation_plan`, since this is now a second real consumer) -- but scoped per-requirement here: only a waiver whose `parent_refs` names the SPECIFIC blocked requirement id unblocks it, since G8's own check is a blanket "any waivers outstanding" scan and a mass-specific waiver must never silently unblock an unrelated requirement.
+- **Human authority** -- a caller-supplied `decided_by` string, the same agent-asserted-identity trust level every `created_by`/ECT `approver`/`decided_by` field in this codebase already carries (`ect.py`'s own `approve`/`commit`). Not a second authentication concept. All required claims satisfied but no `decided_by` supplied is still `promoted=False` (a dry run, not an automatic grant) -- the `blocked_reason` names this explicitly.
+
+`twin.attempt_promotion` (MCP tool, `tool_registry/tools/twin/adapter.py`) is registered only when the gateway wires in a `promotion_attempter` callable (same optional-constructor-param / conditional-registration pattern every `twin.*` tool in this epic follows).
+
+**Deliberately out of scope**: any change to `gates.py`'s own G3-G8 advisory posture (this ticket adds one new function, `attempt_promotion`, and does not touch that module's existing behavior beyond the one constant rename); `MaturityGate` state transitions beyond "one attempt = one immutable record" (no in-place re-evaluation of a past attempt); any dashboard UI (the ticket's own Scope section names no UI surface, matching FORGE-315/316/317's own precedent of no dashboard bullet).
+
+*Source: `twin_core/models/maturity_gate.py`, `api_gateway/requirement_intelligence/promotion.py`, `tool_registry/tools/twin/adapter.py`*
+
 ---
 
 ## 3. Edge Types
