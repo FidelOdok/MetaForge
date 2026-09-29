@@ -346,7 +346,7 @@ def build_http_app(
             return authorization.split(None, 1)[1].strip()
         return None
 
-    def _check_auth(request: Request, authorization: str | None) -> None:
+    def _check_auth(request: Request, authorization: str | None) -> str | None:
         """Accept the static API key (MET-338) OR an OAuth token (MET-480).
 
         Open mode (no key, no OAuth) passes everything. When either
@@ -359,19 +359,31 @@ def build_http_app(
         oauth_on = oauth is not None and oauth.config.enabled
 
         # OAuth token path (only when configured).
-        if oauth is not None and oauth_on and provided and oauth.validate_token(provided):
-            return
+        #
+        # FORGE-330: the actor this token is bound to used to be thrown away
+        # here — `validate_token` returns it and the call site tested it for
+        # truthiness. Everything downstream then took `actor_id` from the
+        # client-supplied X-MetaForge-Actor header instead, so over HTTP a
+        # caller could claim to be anyone and that is what landed in the
+        # session record. Self-asserted attribution is not an audit trail.
+        if oauth is not None and oauth_on and provided:
+            actor = oauth.validate_token(provided)
+            if actor:
+                return actor
 
         # Static API-key path — authoritative only when a key is set.
         reason = "invalid_token"
         if api_key:
             result = verify_api_key(provided, api_key)
             if result.ok:
-                return
+                # A shared API key authorises the call but identifies nobody.
+                # Returning None keeps that distinction: authorised is not
+                # the same as attributable.
+                return None
             reason = result.reason
         elif not oauth_on:
             # Neither mechanism configured → open mode, everything passes.
-            return
+            return None
 
         # At least one mechanism is on and the request failed it.
         logger.warning(
@@ -404,7 +416,7 @@ def build_http_app(
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> JSONResponse:
-        _check_auth(request, authorization)
+        verified_actor = _check_auth(request, authorization)
         raw_body = await request.body()
         # MET-387: install per-request McpCallContext from headers so
         # downstream handlers see the project / actor / session via
@@ -412,6 +424,13 @@ def build_http_app(
         from mcp_core.context import context_from_headers, with_context
 
         ctx = context_from_headers(dict(request.headers))
+        # FORGE-330: a verified token outranks whatever the client put in
+        # X-MetaForge-Actor. The header is a convenience for unauthenticated
+        # local use; it must never be able to overwrite an identity the
+        # server established cryptographically, or the audit trail records
+        # whoever the caller said they were.
+        if verified_actor:
+            ctx = ctx.model_copy(update={"actor_id": verified_actor})
         with with_context(ctx):
             response = await server.handle_request(raw_body.decode("utf-8"))
         # JSON-RPC notifications produce no body — return 204 so the
