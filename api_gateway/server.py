@@ -782,6 +782,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_hierarchy_rollup_fn,
     )
     from api_gateway.twin.metric_evaluator import make_metric_evaluator
+    from api_gateway.twin.revalidation import make_revalidation_executor
     from api_gateway.twin.robot_description_recorder import (
         make_robot_description_recorder,
         make_robot_description_updater,
@@ -812,6 +813,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
     evidence_recorder_fn = make_evidence_recorder(twin, project_backend)
     metric_evaluator_fn = make_metric_evaluator(
         twin, evidence_recorder=evidence_recorder_fn, mcp_bridge=metric_evaluator_bridge
+    )
+    # FORGE-316: dispatch table for twin.execute_revalidation_plan --
+    # every tool a stale Evidence's metadata["replay"]["tool_id"] can name.
+    # Only twin.evaluate_metric exists today; adding a future evaluator/
+    # recorder here is how it becomes automatically re-runnable too.
+    revalidation_executor_fn = make_revalidation_executor(
+        twin, tool_dispatch={"twin.evaluate_metric": metric_evaluator_fn}
     )
 
     # MET-740: robot-description (URDF/SDF/USD) persistence for the
@@ -913,6 +921,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # (spec §30, minimum sufficient fidelity). metric_evaluator_bridge
         # is bound to the real active_bridge below, once it exists.
         metric_evaluator=metric_evaluator_fn,
+        # FORGE-316: automatic selective re-run of exactly what a
+        # committed ECT's real revalidation_plan marked stale.
+        revalidation_executor=revalidation_executor_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

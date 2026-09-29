@@ -23,6 +23,16 @@ conditions" for a genuinely novel part). When escalation triggers with no
 result rather than guessing at node-set names -- the same "resolve before
 construct, never silently guess" discipline every recorder in this package
 already follows for ref resolution.
+
+FORGE-316: every Evidence this module records also carries a ``replay``
+payload (``{tool_id: "twin.evaluate_metric", args: {...}}``) -- literally
+enough to call this same function again. ``twin.execute_revalidation_plan``
+uses this to automatically re-run exactly the checks a committed change
+actually marked stale, rather than requiring a human to redo them by hand.
+An optional ``supersedes`` (the id of the stale tier-0 evidence being
+replayed) threads through to ``evidence_recorder.py``'s own FORGE-65
+revalidation flow -- a rerun is a new evidence entity, never a mutation of
+the old one.
 """
 
 from __future__ import annotations
@@ -90,6 +100,7 @@ def make_metric_evaluator(
         band_fraction: float = 0.2,
         escalation_k: float = 1.0,
         tier2: dict[str, Any] | None = None,
+        supersedes: str | None = None,
     ) -> dict[str, Any]:
         wp_id = UUID(work_product_id)
         wp = await twin.get_work_product(wp_id)
@@ -118,6 +129,23 @@ def make_metric_evaluator(
             "escalated": tier0.escalate,
         }
 
+        # FORGE-316: the exact kwargs needed to call this same tool again --
+        # stored on the resulting Evidence so an automatic revalidation
+        # (twin.execute_revalidation_plan) can literally re-run this check
+        # rather than only knowing it's stale. Deliberately excludes
+        # 'tier2' (a fresh mesh/node-set reference goes stale itself; a
+        # replay re-derives tier0 fresh and only re-escalates if the new
+        # margin still calls for it) and 'supersedes' (set fresh per call).
+        replay_args = {
+            "work_product_id": work_product_id,
+            "project_id": project_id,
+            "load_n": load_n,
+            "youngs_modulus_mpa": youngs_modulus_mpa,
+            "limit_mm": limit_mm,
+            "band_fraction": band_fraction,
+            "escalation_k": escalation_k,
+        }
+
         if evidence_recorder is not None:
             ev = await evidence_recorder(
                 evidence_type="calculation",
@@ -135,6 +163,8 @@ def make_metric_evaluator(
                     f"tier-0 cantilever beam estimate: {tier0.metric}={tier0.value_mm:.4g}mm"
                 ),
                 valid_against=[{"ref": work_product_id, "entity_kind": "work_product"}],
+                supersedes=supersedes,
+                replay={"tool_id": "twin.evaluate_metric", "args": replay_args},
                 project_id=project_id,
             )
             out["evidence_node_id"] = ev["node_id"]
@@ -202,6 +232,15 @@ def make_metric_evaluator(
                     f"{tier0.margin_mm:.4g}mm < band {tier0.band_mm:.4g}mm)"
                 ),
                 valid_against=[{"ref": work_product_id, "entity_kind": "work_product"}],
+                # A tier-2 replay re-invokes the SAME tool with the SAME
+                # tier-0 args, not a fixed replay of this exact FEA call --
+                # it re-derives whether tier-2 is still needed fresh (this
+                # module never re-uses a mesh_file/node-set reference that
+                # may itself be stale). No 'supersedes' threaded here: a
+                # revalidation replay supersedes the tier-0 evidence (the
+                # thing that was actually pinned as a dependency), not this
+                # tier-2 sub-record.
+                replay={"tool_id": "twin.evaluate_metric", "args": replay_args},
                 project_id=project_id,
             )
             out["tier2"]["evidence_node_id"] = ev2["node_id"]

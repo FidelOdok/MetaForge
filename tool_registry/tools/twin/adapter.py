@@ -66,6 +66,7 @@ class TwinServer(McpToolServer):
         hierarchy_node_recorder: Any = None,
         hierarchy_rollup_fn: Any = None,
         metric_evaluator: Any = None,
+        revalidation_executor: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -213,6 +214,14 @@ class TwinServer(McpToolServer):
         # Same injection seam as every recorder above; None keeps
         # tool_registry free of twin_core.prediction imports.
         self._metric_evaluator = metric_evaluator
+        # FORGE-316: an injected async ``execute(ect_id) -> dict``
+        # (make_revalidation_executor) -- re-runs exactly the Evidence a
+        # committed ECT's real revalidation_plan marked stale, for any
+        # entity carrying a replayable metadata["replay"] recipe (e.g.
+        # twin.evaluate_metric's own evidence); anything else is reported
+        # needing manual review. Same injection seam as every recorder
+        # above; None keeps tool_registry free of api_gateway imports.
+        self._revalidation_executor = revalidation_executor
         self._register_tools()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -256,6 +265,8 @@ class TwinServer(McpToolServer):
             self._register_compute_hierarchy_rollup()
         if metric_evaluator is not None:
             self._register_evaluate_metric()
+        if revalidation_executor is not None:
+            self._register_execute_revalidation_plan()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -3558,3 +3569,67 @@ class TwinServer(McpToolServer):
             escalation_k=float(escalation_k),
             tier2=tier2 if isinstance(tier2, dict) else None,
         )
+
+    # ------------------------------------------------------------------
+    # twin.execute_revalidation_plan (FORGE-316)
+    # ------------------------------------------------------------------
+
+    def _register_execute_revalidation_plan(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.execute_revalidation_plan",
+                adapter_id="twin",
+                name="Execute Revalidation Plan",
+                description=(
+                    "After a committed twin.commit_engineering_change, automatically "
+                    "re-run exactly the Evidence that ECT's real post-commit "
+                    "revalidation_plan marked stale -- only for entities carrying a "
+                    "replayable provenance recipe (e.g. twin.evaluate_metric's own "
+                    "evidence). Records fresh Evidence superseding the stale one for "
+                    "each; anything without a replay recipe (hand-authored evidence, "
+                    "or a non-evidence entity the impact walk reached) is reported as "
+                    "needing manual review, never guessed at. Requires the ECT to "
+                    "already be COMMITTED."
+                ),
+                capability="twin_revalidate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "ect_id": {
+                            "type": "string",
+                            "description": "The COMMITTED EngineeringChangeTransaction id.",
+                        },
+                    },
+                    "required": ["ect_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "re_run": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "entity_id": {"type": "string"},
+                                    "tool_id": {"type": "string"},
+                                    "new_evidence_node_id": {"type": ["string", "null"]},
+                                },
+                            },
+                        },
+                        "manual_review_needed": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.execute_revalidation_plan,
+        )
+
+    async def execute_revalidation_plan(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        ect_id = arguments.get("ect_id")
+        if not ect_id or not isinstance(ect_id, str):
+            raise ValueError("twin.execute_revalidation_plan: 'ect_id' is required")
+        return await self._revalidation_executor(ect_id)

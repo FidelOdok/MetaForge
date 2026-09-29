@@ -319,6 +319,131 @@ class TestCommit:
         assert result.committed_patch_result["status"] == "conflict"
 
 
+class TestCommitStalenessPropagation:
+    """FORGE-316: commit() must actually call StalenessEngine.propagate()
+    for real -- FORGE-66's own commit() never did, despite the living
+    plan's tracker (wrongly) assuming it already had."""
+
+    async def test_commit_marks_dependent_evidence_stale_and_builds_real_plan(
+        self, twin, project_id
+    ):
+        from twin_core.consistency.staleness import Dependency, StalenessEngine
+        from twin_core.models.engineering_entity import EngineeringEntity
+
+        req = await _seed_requirement(twin, project_id)
+        evidence = await twin.create_engineering_entity(
+            EngineeringEntity(entity_type="evidence", statement="sim result", project_id=project_id)
+        )
+        await StalenessEngine(twin).declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="constraint", entity_id=req.id, revision=1)],
+        )
+
+        ect = await propose_change(
+            twin,
+            trigger=ChangeTrigger(type="user_request"),
+            observation="x",
+            patch=_revise_patch(req, project_id=project_id),
+            project_id=project_id,
+        )
+        await analyze(twin, ect.id)
+        await approve(twin, ect.id, approver="reviewer")
+        committed = await commit(twin, ect.id)
+
+        assert committed.status == ECTStatus.COMMITTED
+        status = await StalenessEngine(twin).get_status("engineering_entity", evidence.id)
+        assert status.value == "stale"
+
+        assert len(committed.revalidation_plan) == 1
+        step = committed.revalidation_plan[0]
+        assert step["entity_id"] == str(evidence.id)
+        assert step["entity_kind"] == "engineering_entity"
+        assert "supersedes" in step["action"] or "rerun" in step["action"]
+
+    async def test_commit_with_no_dependents_gives_empty_plan(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id)
+        ect = await propose_change(
+            twin,
+            trigger=ChangeTrigger(type="user_request"),
+            observation="x",
+            patch=_revise_patch(req, project_id=project_id),
+            project_id=project_id,
+        )
+        await analyze(twin, ect.id)
+        await approve(twin, ect.id, approver="reviewer")
+        committed = await commit(twin, ect.id)
+        assert committed.revalidation_plan == []
+
+    async def test_no_project_id_skips_propagation_without_failing_commit(self, twin):
+        """An ECT proposed with no project_id can still commit -- staleness
+        propagation needs a project scope, so it's skipped, not fatal."""
+        unscoped_project = uuid4()
+        req = await _seed_requirement(twin, unscoped_project)
+        ect = await propose_change(
+            twin,
+            trigger=ChangeTrigger(type="user_request"),
+            observation="x",
+            patch=_revise_patch(req, project_id=unscoped_project),
+            project_id=None,
+        )
+        await analyze(twin, ect.id)
+        await approve(twin, ect.id, approver="reviewer")
+        committed = await commit(twin, ect.id)
+        assert committed.status == ECTStatus.COMMITTED
+        assert committed.revalidation_plan == []
+
+    async def test_staleness_propagation_failure_does_not_block_commit(self, twin, project_id):
+        """A staleness-propagation failure must never make an
+        already-successful graph commit look like it failed (same
+        best-effort posture geometry_recorder.py already established)."""
+        from twin_core.consistency.staleness import StalenessEngine
+
+        class _BoomStaleness(StalenessEngine):
+            async def propagate(self, *args, **kwargs):  # type: ignore[override]
+                raise RuntimeError("staleness backend unreachable")
+
+        req = await _seed_requirement(twin, project_id)
+        ect = await propose_change(
+            twin,
+            trigger=ChangeTrigger(type="user_request"),
+            observation="x",
+            patch=_revise_patch(req, project_id=project_id),
+            project_id=project_id,
+        )
+        await analyze(twin, ect.id)
+        await approve(twin, ect.id, approver="reviewer")
+        committed = await commit(twin, ect.id, staleness_engine=_BoomStaleness(twin))
+        assert committed.status == ECTStatus.COMMITTED
+        assert committed.revalidation_plan == []
+
+
+class TestAnalyzeRevalidationPlan:
+    async def test_analyze_stores_the_full_pre_commit_plan(self, twin, project_id):
+        from twin_core.consistency.staleness import Dependency, StalenessEngine
+        from twin_core.models.engineering_entity import EngineeringEntity
+
+        req = await _seed_requirement(twin, project_id)
+        evidence = await twin.create_engineering_entity(
+            EngineeringEntity(entity_type="evidence", statement="sim result", project_id=project_id)
+        )
+        await StalenessEngine(twin).declare_dependencies(
+            "engineering_entity",
+            evidence.id,
+            [Dependency(entity_kind="constraint", entity_id=req.id, revision=1)],
+        )
+        ect = await propose_change(
+            twin,
+            trigger=ChangeTrigger(type="user_request"),
+            observation="x",
+            patch=_revise_patch(req, project_id=project_id),
+            project_id=project_id,
+        )
+        analyzed = await analyze(twin, ect.id)
+        assert len(analyzed.revalidation_plan) == 1
+        assert analyzed.revalidation_plan[0]["entity_id"] == str(evidence.id)
+
+
 class TestMarkRolledBack:
     async def test_rolled_back_requires_committed_status(self, twin, project_id):
         req = await _seed_requirement(twin, project_id)

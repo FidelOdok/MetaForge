@@ -159,6 +159,7 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
         contradicts: list[str] | None = None,
         valid_against: list[dict[str, Any]] | None = None,
         supersedes: str | None = None,
+        replay: dict[str, Any] | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
@@ -217,6 +218,18 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
             }
             if session_id:
                 metadata["session_id"] = session_id
+            if replay:
+                # FORGE-316: an optional, trusted-caller-only passthrough --
+                # {"tool_id": <a real invokable MCP tool id>, "args": {...
+                # the exact kwargs to call it again with}}. NOT derived
+                # from producer/inputs (producer.tool is often a Python
+                # dotted path, e.g. FORGE-315's cantilever_tip_deflection_mm,
+                # not an invokable tool_id -- guessing replayability from it
+                # would be wrong more often than right). Only a caller that
+                # actually knows how to re-invoke itself (e.g.
+                # metric_evaluator.py) should ever pass this; this module
+                # stores it opaquely, never validates its shape.
+                metadata["replay"] = replay
 
             entity = EngineeringEntity(
                 entity_type="evidence",
