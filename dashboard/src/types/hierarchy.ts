@@ -1,3 +1,21 @@
+/** One interface quantity (FORGE-313) -- a measurable property of an
+ * interface between two components, e.g. "tip deflection <= 0.5mm". */
+export interface InterfaceQuantitySummary {
+  metric: string;
+  unit: string;
+  limit: number | null;
+  op: string;
+}
+
+/** One interface (FORGE-313) touching a hierarchy node, from a
+ * SYSTEM_ARCHITECTURE work product's structured interfaces list. */
+export interface InterfaceSummary {
+  otherComponent: string;
+  interfaceType: string;
+  description: string;
+  quantities: InterfaceQuantitySummary[];
+}
+
 /** One position in a project's product hierarchy tree (FORGE-261). */
 export interface HierarchyNode {
   id: string;
@@ -15,4 +33,12 @@ export interface HierarchyNode {
   massOverBudget: boolean | null;
   costBudget: number | null;
   costOverBudget: boolean | null;
+  /** FORGE-313: who's accountable for this node's allocation, if the
+   * allocation set one. */
+  massBudgetOwner: string | null;
+  massBudgetDiscipline: string | null;
+  costBudgetOwner: string | null;
+  costBudgetDiscipline: string | null;
+  /** FORGE-313: interfaces touching this node. */
+  interfaces: InterfaceSummary[];
 }

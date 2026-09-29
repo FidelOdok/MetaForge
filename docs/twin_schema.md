@@ -532,6 +532,37 @@ Rolled-up mass/cost are deliberately NOT cached fields here -- see `twin_core.co
 
 *Source: `twin_core/models/hierarchy_node.py`*
 
+### 2.11 InterfaceQuantity (FORGE-313)
+
+A measurable property of an interface between two components -- e.g. "upper-arm tip deflection <= 0.5mm", owned by mechanical. Not a graph node type: `HierarchyNode`'s own design (above) never holds design content directly, and `twin.commit_system_architecture` already has a real, structured home for interfaces -- each `ArchInterface` (`{from, to, interface_type, description}`) between two named components, persisted as metadata on one `SYSTEM_ARCHITECTURE` work product. `InterfaceQuantity` is a value type embedded in that interface's own `quantities` list.
+
+```python
+class PredictedValue(BaseModel):
+    value: float
+    band: float | None = None
+    tier: str = ""
+    evidence: str = ""  # a reference string -- no MEASURED_BY/PREDICTED_BY edge writer exists yet
+
+class MeasuredValue(BaseModel):
+    value: float
+    source: str = ""
+    timestamp: str = ""
+
+class InterfaceQuantity(BaseModel):
+    metric: str
+    unit: str          # validated via twin_core.models.quantity.is_valid_unit when non-empty
+    limit: float | None = None
+    op: str = "<="      # "<=" / ">=" / "==" -- free string, mirrors InvariantComparison's values
+    owner: str = ""
+    discipline: str = ""
+    predicted: PredictedValue | None = None
+    measured: list[MeasuredValue] = Field(default_factory=list)
+```
+
+`twin.commit_system_architecture` validates every interface's `quantities` through this model at record time (a bad unit or missing metric is rejected, not silently stored) and renders them into the work product's markdown. `GET /v1/twin/hierarchy` resolves interfaces per node by matching a `HierarchyNode.name` against each interface's `from`/`to` component name, surfaced to the Structure tab as `interfaces: InterfaceSummary[]` on each node.
+
+*Source: `twin_core/models/interface.py`*
+
 ---
 
 ## 3. Edge Types

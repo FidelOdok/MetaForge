@@ -57,6 +57,26 @@ test.describe('Digital Twin Viewer', () => {
     await expect(page.getByRole('heading', { name: 'Structure' })).toBeVisible();
   });
 
+  test('Structure tab: interfaces and allocation owners are visible (FORGE-313)', async ({
+    page,
+  }) => {
+    await page.goto('/twin?demo=1');
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    // The ticket's own acceptance example: an interface quantity between
+    // upper_arm and shoulder, and a mass allocation with an owner.
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await expect(upperArmRow).toBeVisible();
+    await expect(page.getByText('shoulder')).toBeVisible();
+
+    const interfaceBadge = upperArmRow.getByLabel('1 interface');
+    await expect(interfaceBadge).toBeVisible();
+    await expect(interfaceBadge).toHaveAttribute('title', /tip_deflection/);
+
+    const massCell = page.getByTitle('Owner: alice (mechanical)');
+    await expect(massCell).toBeVisible();
+  });
+
   test('Assembly tab: joints are editable and persist', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the graph canvas.

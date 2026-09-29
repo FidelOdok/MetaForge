@@ -3464,3 +3464,11 @@ button:disabled {
   color: var(--mf-c-ffb4ab);
   margin-right: 2px;
 }
+/* FORGE-313: small badge marking a node with a declared interface
+   (from twin.commit_system_architecture) -- hover (native title tooltip,
+   which already renders \n as line breaks) for details. */
+.tw-structure-interfaces-badge {
+  font-size: 13px !important;
+  color: var(--mf-c-9a9aaa);
+  cursor: help;
+}
