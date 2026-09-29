@@ -42,6 +42,7 @@ from fastapi.responses import (
 )
 
 from mcp_core.auth import AUTH_DENIED, AuthPosture, redact, verify_api_key
+from mcp_core.elicitation import ElicitAction, ElicitResult
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
 
@@ -212,6 +213,107 @@ def _stdio_max_line_bytes() -> int:
     return value
 
 
+class StdioElicitor:
+    """Ask the connected client a question over stdio (FORGE-360).
+
+    stdio is a single duplex pipe, so a server-to-client request is just a
+    JSON-RPC request written to stdout with an id, and the answer is
+    whichever inbound line carries that id. The read loop routes it here;
+    this class only owns the correlation and the wait.
+
+    A client that never answers is not a refusal. The timeout resolves to
+    ``cancel``, which :func:`mcp_core.elicitation.elicitation_gate` maps to
+    ``TIMED_OUT`` -- so the agent is told nobody looked, rather than that a
+    reviewer said no.
+    """
+
+    def __init__(
+        self,
+        write: Callable[[str], None],
+        *,
+        timeout_seconds: float = 180.0,
+    ) -> None:
+        self._write = write
+        self._timeout = timeout_seconds
+        self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._next = 0
+
+    def resolve(self, message_id: str, payload: dict[str, Any]) -> bool:
+        """Hand an inbound response to whoever is waiting for it.
+
+        Returns False when nothing is waiting, so the caller can treat the
+        line as an ordinary request rather than dropping it silently.
+        """
+        future = self._pending.pop(message_id, None)
+        if future is None or future.done():
+            return False
+        future.set_result(payload)
+        return True
+
+    async def __call__(self, message: str, requested_schema: dict[str, Any]) -> ElicitResult:
+        self._next += 1
+        message_id = f"elicit-{self._next}"
+        future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        self._pending[message_id] = future
+        self._write(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message_id,
+                    "method": "elicitation/create",
+                    "params": {"message": message, "requestedSchema": requested_schema},
+                }
+            )
+        )
+        try:
+            payload = await asyncio.wait_for(future, timeout=self._timeout)
+        except TimeoutError:
+            self._pending.pop(message_id, None)
+            logger.warning("mcp_elicitation_timeout", message_id=message_id)
+            return ElicitResult(ElicitAction.CANCEL)
+
+        if "error" in payload:
+            # The client could not put the question. Not an answer, so it
+            # must not read as one.
+            logger.warning("mcp_elicitation_error", error=payload["error"])
+            return ElicitResult(ElicitAction.CANCEL)
+        result = payload.get("result") or {}
+        raw_action = result.get("action")
+        try:
+            action = ElicitAction(raw_action if isinstance(raw_action, str) else "")
+        except ValueError:
+            logger.warning("mcp_elicitation_bad_action", action=raw_action)
+            return ElicitResult(ElicitAction.CANCEL)
+        content = result.get("content")
+        return ElicitResult(action, content if isinstance(content, dict) else {})
+
+
+def _is_response(raw: str) -> tuple[bool, str, dict[str, Any]]:
+    """Is this inbound line an answer to something *we* asked?
+
+    A JSON-RPC response carries an id and a result/error and no method. The
+    stdio loop treated every line as a request, which was correct while the
+    traffic was one-directional and becomes a silent misroute the moment it
+    is not: our own answer would have been dispatched as a method call and
+    come back as "Unknown method: None".
+
+    Anything unparseable is reported as "not a response" so it still reaches
+    ``handle_request``, which already turns it into a proper parse error.
+    """
+    try:
+        msg = json.loads(raw)
+    except (ValueError, TypeError):
+        return False, "", {}
+    if not isinstance(msg, dict) or "method" in msg:
+        return False, "", {}
+    if "result" not in msg and "error" not in msg:
+        return False, "", {}
+    message_id = msg.get("id")
+    if not isinstance(message_id, str):
+        return False, "", {}
+    return True, message_id, msg
+
+
 async def run_stdio(server: UnifiedMcpServer) -> None:
     """Read line-delimited JSON-RPC requests from stdin; reply on stdout.
 
@@ -269,6 +371,35 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
     transport, _ = await loop.connect_read_pipe(
         lambda: asyncio.StreamReaderProtocol(reader), sys.stdin
     )
+    # FORGE-360: stdout now has two writers -- replies to the client's
+    # requests, and our own elicitation requests -- so framing needs a lock.
+    # Interleaved partial lines would corrupt the stream for both.
+    write_lock = asyncio.Lock()
+
+    async def write_line(text: str) -> None:
+        async with write_lock:
+            sys.stdout.write(text + "\n")
+            sys.stdout.flush()
+
+    pending_writes: set[asyncio.Task[None]] = set()
+
+    def write_soon(text: str) -> None:
+        task = asyncio.ensure_future(write_line(text))
+        pending_writes.add(task)
+        task.add_done_callback(pending_writes.discard)
+
+    elicitor = StdioElicitor(write_soon)
+    server.attach_elicitor(elicitor)
+
+    in_flight: set[asyncio.Task[None]] = set()
+
+    async def dispatch(raw: str) -> None:
+        response = await server.handle_request(raw)
+        # JSON-RPC notifications return an empty body — writing a
+        # blank line breaks the client's JSON line framing.
+        if response:
+            await write_line(response)
+
     try:
         while True:
             line = await reader.readline()
@@ -277,16 +408,28 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
             raw = line.decode("utf-8").strip()
             if not raw:
                 continue
-            response = await server.handle_request(raw)
-            # JSON-RPC notifications return an empty body — writing a
-            # blank line breaks the client's JSON line framing.
-            if not response:
+            # Our own answer, not a new request. Before elicitation the
+            # stream was one-directional and this could not happen.
+            is_response, message_id, payload = _is_response(raw)
+            if is_response and elicitor.resolve(message_id, payload):
                 continue
-            sys.stdout.write(response + "\n")
-            sys.stdout.flush()
+            # Dispatched as a task rather than awaited. A call held for
+            # approval waits on an elicitation response that arrives on
+            # *this* stream: awaiting it here means never reading the line
+            # that would release it, which is a deadlock rather than a
+            # slow approval.
+            task = asyncio.ensure_future(dispatch(raw))
+            in_flight.add(task)
+            task.add_done_callback(in_flight.discard)
     except asyncio.CancelledError:
         pass
     finally:
+        # Let anything mid-flight finish writing before the pipe closes,
+        # so a client does not see a truncated reply on shutdown.
+        if in_flight:
+            await asyncio.gather(*in_flight, return_exceptions=True)
+        if pending_writes:
+            await asyncio.gather(*pending_writes, return_exceptions=True)
         transport.close()
         logger.info("mcp_stdio_stopped")
 

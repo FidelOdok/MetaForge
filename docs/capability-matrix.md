@@ -249,13 +249,74 @@ Every outcome other than an approval stops the call:
 "nobody was looking" need different words to an agent; all three carry
 `retryable: false`.
 
-**Local stdio writes are exempt by default.** Not because local is
-trusted — the chat path holds local writes today — but because a stdio
-session has nowhere to answer: no dashboard is necessarily open and the
-MCP client cannot render a prompt until elicitation lands (F2). Holding
-there with no way to approve is an outage, not a guardrail. Set
-`exempt_local_writes=False` in any deployment where a reviewer is
-watching the dashboard.
+**Local stdio writes are exempt by default — unless the client can be
+asked.** Not because local is trusted (the chat path holds local writes
+today) but because a stdio session historically had nowhere to answer:
+no dashboard is necessarily open. Holding with no way to approve is an
+outage, not a guardrail. A client that supports elicitation *is*
+somewhere to answer, so the exemption stops applying to it. Set
+`exempt_local_writes=False` to hold local writes even from clients that
+cannot be asked.
+
+### Answering in the harness
+
+Where the connected client supports MCP elicitation, the approval is put
+to the user in the harness they are already looking at, rather than
+parked in a dashboard queue they may not have open.
+
+```json
+{
+  "jsonrpc": "2.0", "id": "elicit-1", "method": "elicitation/create",
+  "params": {
+    "message": "MetaForge wants to run twin.commit_geometry.\n\nwrites; held for approval (remote caller)\n\nArguments:\n  obj_id: bracket\n\nRequested by: remote",
+    "requestedSchema": {
+      "type": "object",
+      "properties": {"approve": {"type": "boolean", "title": "Run twin.commit_geometry?"}},
+      "required": ["approve"]
+    }
+  }
+}
+```
+
+Three conditions all have to hold, and `health/check` reports the result
+as `client.can_elicit`:
+
+1. the transport has a channel back to the client (stdio does; a plain
+   HTTP POST with no SSE does not),
+2. the client declared the `elicitation` capability at `initialize`, and
+3. the negotiated protocol revision is `2025-06-18` or later, which is
+   where `elicitation/create` was introduced. A client that declares the
+   capability while negotiating an older revision is not listening for
+   the request.
+
+The server negotiates the revision the client asked for when it is one of
+`2024-11-05` or `2025-06-18`, and otherwise answers `2024-11-05`.
+
+The three-action response maps onto the outcomes above:
+
+| Response | Outcome |
+|---|---|
+| `accept` with `approve: true` | approved |
+| `accept` with `approve: false` | `rejected` — they were asked and said no |
+| `decline` | `rejected` — they refused the prompt itself |
+| `cancel`, or no answer inside the window | `timed_out` — nobody decided |
+
+An `accept` whose content does not carry a boolean `approve` is treated
+as a refusal. The failure mode of guessing the other way is an unreviewed
+write.
+
+**Elicitation is preferred, not chained.** A client that can be asked is
+asked, and the dashboard queue is not consulted; going on to the queue
+after the user had already answered would put the same question to a
+second person and discard the first answer. Clients that cannot elicit
+use the queue exactly as before.
+
+Arguments are summarised into the prompt, redacted on any field whose
+name looks like a credential and clipped to keep the dialog readable. The
+spec is explicit that a server must not *request* sensitive information
+through elicitation; shipping a credential into the same dialog is the
+same mistake pointed the other way, and a reviewer does not need the key
+to say yes.
 
 ### When the list is short
 
