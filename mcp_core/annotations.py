@@ -168,6 +168,11 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         "project.update",
         "twin.approve_engineering_change",
         "twin.approve_engineering_entity",
+        # A maturity-gate promotion is the same family as the approvals
+        # above: a human-authority decision that moves project state
+        # forward (concept -> sim_validated -> ... -> released). It refuses
+        # rather than warns, and it persists the attempt either way.
+        "twin.attempt_promotion",
         "twin.execute_revalidation_plan",
         "twin.mark_engineering_change_rolled_back",
         "twin.reject_engineering_change",
