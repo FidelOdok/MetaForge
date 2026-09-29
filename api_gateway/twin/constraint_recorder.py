@@ -78,6 +78,10 @@ def _validate_entry(index: int, entry: Any) -> dict[str, Any]:
         "message": str(entry.get("message") or ""),
         "domain": str(entry.get("domain") or "systems"),
         "parent_refs": raw_parent_refs,
+        # FORGE-312: real typed fields on Constraint -- optional, default ""
+        # (unchanged behavior for a caller that omits them).
+        "acceptance_criteria": str(entry.get("acceptance_criteria") or ""),
+        "verification_method": str(entry.get("verification_method") or ""),
     }
 
 
@@ -87,6 +91,10 @@ def _render_markdown(title: str, entries: list[dict[str, Any]]) -> str:
         lines.append(f"## {e['name']} ({e['severity']}, {e['domain']})")
         if e["message"]:
             lines.append(e["message"])
+        if e["acceptance_criteria"]:
+            lines.append(f"**Acceptance criteria:** {e['acceptance_criteria']}")
+        if e["verification_method"]:
+            lines.append(f"**Verification method:** {e['verification_method']}")
         lines.append(f"```python\n{e['expression']}\n```")
         lines.append("")
     return "\n".join(lines)
@@ -166,6 +174,8 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                     cross_domain=False,
                     source="twin.record_constraint_set",
                     message=e["message"],
+                    acceptance_criteria=e["acceptance_criteria"],
+                    verification_method=e["verification_method"],
                     # FORGE-46: NodeBase.project_id was never set here before --
                     # only mirrored into metadata -- so list_constraints(project_id=...)
                     # (the resolver's read path) could never find these nodes.

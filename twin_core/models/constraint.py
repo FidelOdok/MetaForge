@@ -23,6 +23,13 @@ class Constraint(NodeBase):
     cross_domain: bool = False
     source: str
     message: str = ""
+    # FORGE-312 (lifecycle step 2, spec section 29 Requirement): real typed
+    # fields, not metadata dict keys -- `constraint_recorder.py` keeps them,
+    # `twin_core.consistency.gates`'s G7 checks read them (falling back to
+    # `metadata["verification_method"]` for data RequirementAuthorAgent
+    # (FORGE-55) already wrote there before this field existed).
+    acceptance_criteria: str = ""
+    verification_method: str = ""
     last_evaluated: datetime | None = None
     metadata: dict = Field(default_factory=dict)
     # FORGE-50 (Phase 2, epic FORGE-35): optimistic-concurrency revision

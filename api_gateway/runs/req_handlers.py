@@ -207,11 +207,25 @@ def constraint_entries_from_spec(constraints: list[dict[str, str]]) -> list[dict
                     ),
                     "severity": "error",
                     "message": message,
+                    # FORGE-312: `verify` now also lands in the real
+                    # `verification_method` field (constraint_recorder.py
+                    # keeps it, G7 reads it) -- the message suffix above
+                    # stays too, for a human skimming the rendered
+                    # constraint-set document. For a quantified constraint,
+                    # the condition itself IS its own acceptance criterion.
+                    "verification_method": verify,
+                    "acceptance_criteria": f"{param} {limit} {unit}".strip(),
                 }
             )
         else:
             entries.append(
-                {"name": name, "expression": "True", "severity": "info", "message": message}
+                {
+                    "name": name,
+                    "expression": "True",
+                    "severity": "info",
+                    "message": message,
+                    "verification_method": verify,
+                }
             )
     return entries
 

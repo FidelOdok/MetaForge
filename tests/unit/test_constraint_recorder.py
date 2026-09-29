@@ -79,6 +79,51 @@ async def test_recorder_creates_nodes_and_set_work_product(
 
 
 @pytest.mark.asyncio
+async def test_acceptance_criteria_and_verification_method_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # FORGE-312: these used to be silently dropped -- now real typed fields.
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    record = make_constraint_recorder(twin)
+
+    out = await record(
+        title="Arm requirements",
+        constraints=[
+            {
+                **_MASS_LIMIT,
+                "acceptance_criteria": "moving mass <= 4.5 kg",
+                "verification_method": "FEA",
+            }
+        ],
+        project_id=PROJECT_ID,
+    )
+    from uuid import UUID
+
+    c = await twin.constraints.get_constraint(UUID(out["constraint_ids"][0]))
+    assert c is not None
+    assert c.acceptance_criteria == "moving mass <= 4.5 kg"
+    assert c.verification_method == "FEA"
+
+
+@pytest.mark.asyncio
+async def test_acceptance_criteria_and_verification_method_default_to_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    record = make_constraint_recorder(twin)
+
+    out = await record(title="Arm requirements", constraints=[_MASS_LIMIT], project_id=PROJECT_ID)
+    from uuid import UUID
+
+    c = await twin.constraints.get_constraint(UUID(out["constraint_ids"][0]))
+    assert c is not None
+    assert c.acceptance_criteria == ""
+    assert c.verification_method == ""
+
+
+@pytest.mark.asyncio
 async def test_bad_expression_rejected_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_blob(monkeypatch)
     record = make_constraint_recorder(InMemoryTwinAPI.create(), None)

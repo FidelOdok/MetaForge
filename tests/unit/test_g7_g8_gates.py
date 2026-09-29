@@ -116,18 +116,85 @@ class TestG7OwnershipCheck:
         assert check.status == GateCheckStatus.FAIL
 
 
+class TestG7AcceptanceCriteriaCheck:
+    async def test_acceptance_criteria_present_passes(self, twin, project_id):
+        req = await twin.create_constraint(
+            _critical_req(project_id, source="agent").model_copy(
+                update={"acceptance_criteria": "deflection <= 0.5mm at full load"}
+            )
+        )
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(
+            c for c in result.checks if c.id == f"requirement:{req.id}:acceptance_criteria"
+        )
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_missing_acceptance_criteria_fails(self, twin, project_id):
+        req = await twin.create_constraint(_critical_req(project_id, source="agent"))
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(
+            c for c in result.checks if c.id == f"requirement:{req.id}:acceptance_criteria"
+        )
+        assert check.status == GateCheckStatus.FAIL
+        assert result.status == GateStatus.FAILED
+
+    async def test_metadata_fallback_still_passes(self, twin, project_id):
+        # A requirement recorded before FORGE-312 (acceptance_criteria only
+        # in metadata, not the typed field) must not regress to FAIL.
+        req = await twin.create_constraint(
+            _critical_req(project_id, source="agent", metadata={"acceptance_criteria": "SF >= 2.0"})
+        )
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(
+            c for c in result.checks if c.id == f"requirement:{req.id}:acceptance_criteria"
+        )
+        assert check.status == GateCheckStatus.PASS
+
+
+class TestG7VerificationMethodMetadataFallback:
+    async def test_metadata_only_verification_method_still_passes(self, twin, project_id):
+        # RequirementAuthorAgent (FORGE-55) wrote verification_method into
+        # metadata before the typed field existed -- must not regress.
+        req = await twin.create_constraint(
+            _critical_req(project_id, source="agent", metadata={"verification_method": "test"})
+        )
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(
+            c for c in result.checks if c.id == f"requirement:{req.id}:verification_method"
+        )
+        assert check.status == GateCheckStatus.PASS
+
+    async def test_typed_field_takes_precedence_when_metadata_is_empty(self, twin, project_id):
+        req = await twin.create_constraint(
+            _critical_req(project_id, source="agent").model_copy(
+                update={"verification_method": "analysis"}
+            )
+        )
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        check = next(
+            c for c in result.checks if c.id == f"requirement:{req.id}:verification_method"
+        )
+        assert check.status == GateCheckStatus.PASS
+        assert check.detail == "analysis"
+
+
 class TestG7NotEvaluatedChecks:
-    async def test_acceptance_measurement_evidence_are_not_evaluated(self, twin, project_id):
+    async def test_measurement_evidence_are_not_evaluated(self, twin, project_id):
         result = await evaluate_g7_verification_readiness(twin, project_id)
         ids = {c.id for c in result.checks}
-        for expected in (
-            "acceptance_criteria_defined",
-            "measurement_method_defined",
-            "expected_evidence_defined",
-        ):
+        for expected in ("measurement_method_defined", "expected_evidence_defined"):
             assert expected in ids
             check = next(c for c in result.checks if c.id == expected)
             assert check.status == GateCheckStatus.NOT_EVALUATED
+
+    async def test_acceptance_criteria_defined_is_no_longer_a_fixed_placeholder(
+        self, twin, project_id
+    ):
+        # FORGE-312: acceptance_criteria_defined moved from a fixed global
+        # placeholder to a real per-requirement check.
+        result = await evaluate_g7_verification_readiness(twin, project_id)
+        ids = {c.id for c in result.checks}
+        assert "acceptance_criteria_defined" not in ids
 
     async def test_gate_id_is_g7(self, twin, project_id):
         result = await evaluate_g7_verification_readiness(twin, project_id)

@@ -127,6 +127,31 @@ def test_non_quantified_limits_become_info_only() -> None:
     assert "inspect" in entries[0]["message"]
 
 
+def test_quantified_limit_populates_real_verification_and_acceptance_fields() -> None:
+    # FORGE-312: `verify` used to only land inside the free-text `message`
+    # suffix -- now it's also a real `verification_method` entry field, and
+    # the condition itself becomes a real `acceptance_criteria` entry field.
+    entries = constraint_entries_from_spec(
+        [{"param": "mass", "limit": "<= 60", "unit": "g", "verify": "scale"}]
+    )
+    entry = entries[0]
+    assert entry["verification_method"] == "scale"
+    assert entry["acceptance_criteria"] == "mass <= 60 g"
+    assert "(verify: scale)" in entry["message"]  # human-readable suffix kept
+
+
+def test_non_quantified_limit_still_gets_verification_method_field() -> None:
+    entries = constraint_entries_from_spec(
+        [{"param": "board size", "limit": "per the outline", "unit": "mm", "verify": "inspect"}]
+    )
+    assert entries[0]["verification_method"] == "inspect"
+
+
+def test_missing_verify_defaults_to_empty_string() -> None:
+    entries = constraint_entries_from_spec([{"param": "mass", "limit": "<= 60", "unit": "g"}])
+    assert entries[0]["verification_method"] == ""
+
+
 def test_duplicate_params_get_unique_names() -> None:
     entries = constraint_entries_from_spec(
         [
