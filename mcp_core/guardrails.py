@@ -26,8 +26,10 @@ Layer-1 module: stdlib only.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any, Protocol
 
 from mcp_core.annotations import annotations_for
 
@@ -58,14 +60,24 @@ class Decision:
     reason: str
 
 
-#: Callers exempt from holding, when a deployment opts into exempting them.
-#: Nothing is exempt by default. An earlier draft of this module let LOCAL
-#: through on the reasoning that the engineer is at the machine — but the
-#: chat path already holds local writes today (``HarnessRuntime`` pauses on
-#: ``requires_approval`` whoever is chatting), so exempting local MCP calls
-#: would have made the newer, less supervised path the more permissive one.
-#: A stdio agent runs tool calls on its own; being on the same laptop is not
-#: the same as watching.
+#: Callers a deployment may exempt from holding.
+#:
+#: This went back and forth, so the reasoning is worth keeping. The chat path
+#: already holds local writes (``HarnessRuntime`` pauses on
+#: ``requires_approval`` whoever is chatting), which argues for holding local
+#: MCP writes too — a stdio agent runs tool calls on its own, and being on
+#: the same laptop is not the same as watching.
+#:
+#: But holding needs somewhere to answer. A stdio session has no approval
+#: surface: no dashboard is necessarily open, and the MCP client cannot
+#: render one until elicitation lands (F2, FORGE-360). Holding there with
+#: nothing to hold against is not a guardrail, it is an outage — every write
+#: refused, no way to allow it.
+#:
+#: So local is exempt *by default* and remote never is, which is also what
+#: the spec asks for: requests arriving through a tunnel get read-only plus
+#: approval-held writes. Once F2 gives stdio somewhere to answer, the default
+#: should flip and this comment should be the thing that gets deleted.
 _EXEMPTIBLE: frozenset[Caller] = frozenset({Caller.LOCAL})
 
 
@@ -74,14 +86,15 @@ def decide(
     *,
     caller: Caller,
     twin_mutations_enabled: bool = False,
-    exempt_local_writes: bool = False,
+    exempt_local_writes: bool = True,
 ) -> Decision:
     """Say whether this call needs a human before it runs.
 
-    ``exempt_local_writes`` lets a deployment skip the hold for stdio
-    sessions on the engineer's own machine. Opt-in, and named for exactly
-    what it turns off: F1 is "regardless of which client asks", and an
-    exemption that ships on by default is the rule not being there.
+    ``exempt_local_writes`` skips the hold for stdio sessions on the
+    engineer's own machine. On by default only because stdio has nowhere to
+    answer an approval yet (see ``_EXEMPTIBLE``); set it False in any
+    deployment that has a reviewer watching the dashboard. Remote callers
+    are never exempt.
     """
     annotations = annotations_for(tool_id, twin_mutations_enabled=twin_mutations_enabled)
 
@@ -98,3 +111,73 @@ def decide(
     destructive = annotations["destructiveHint"]
     kind = "may overwrite or remove data" if destructive else "writes"
     return Decision(tool_id, True, f"{kind}; held for approval ({caller.value} caller)")
+
+
+# ── The seam the gateway fills ────────────────────────────────────────────
+#
+# Parking a call until a human clicks approve needs a store, a REST surface
+# and the dashboard — all gateway-layer things. `mcp_core` does not import
+# upward, so the MCP server takes an injected gate, the same shape the twin
+# adapter uses for its recorders.
+
+
+class ApprovalOutcome(StrEnum):
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    #: Nobody answered inside the window. Distinct from REJECTED on purpose:
+    #: "no one was looking" and "a person said no" call for different words
+    #: to the agent, and conflating them teaches it to retry a refusal.
+    TIMED_OUT = "timed_out"
+
+
+@dataclass(frozen=True)
+class ApprovalAsk:
+    """What a reviewer needs to see to answer."""
+
+    tool_id: str
+    arguments: dict[str, Any]
+    caller: Caller
+    reason: str
+    session_id: str | None = None
+
+
+class ApprovalGate(Protocol):
+    """Holds a call until a human decides. Injected by the gateway."""
+
+    def __call__(self, ask: ApprovalAsk) -> Awaitable[ApprovalOutcome]: ...
+
+
+class ApprovalNotConfiguredError(RuntimeError):
+    """A write needed approval and there was no way to ask for one.
+
+    The call is refused rather than run. A server told to hold writes but
+    given nothing to hold them with is misconfigured, and running the write
+    anyway would make the guardrail look present while doing nothing — which
+    is worse than not having it, because nobody goes looking for a control
+    they believe is on.
+    """
+
+    def __init__(self, tool_id: str, reason: str) -> None:
+        self.tool_id = tool_id
+        super().__init__(
+            f"{tool_id} needs approval ({reason}) but no approval gate is configured. "
+            "Refusing rather than running it. Configure an approval gate, or set "
+            "exempt_local_writes if this is a local stdio deployment."
+        )
+
+
+class ApprovalRejectedError(RuntimeError):
+    """A human said no."""
+
+    def __init__(self, tool_id: str, outcome: ApprovalOutcome) -> None:
+        self.tool_id = tool_id
+        self.outcome = outcome
+        detail = (
+            "no one answered before the approval window closed"
+            if outcome is ApprovalOutcome.TIMED_OUT
+            else "a reviewer rejected it"
+        )
+        super().__init__(f"{tool_id} was not run: {detail}.")
+
+
+ApprovalGateFn = Callable[[ApprovalAsk], Awaitable[ApprovalOutcome]]

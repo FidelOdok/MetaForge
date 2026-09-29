@@ -31,6 +31,15 @@ from typing import Any
 import structlog
 
 from mcp_core.annotations import annotations_for
+from mcp_core.guardrails import (
+    ApprovalAsk,
+    ApprovalGateFn,
+    ApprovalNotConfiguredError,
+    ApprovalOutcome,
+    ApprovalRejectedError,
+    Caller,
+    decide,
+)
 from mcp_core.profiles import tools_for_profile
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
@@ -118,6 +127,9 @@ class UnifiedMcpServer:
         session_capture: SessionCapture | None = None,
         tool_registry: ToolRegistry | None = None,
         profile: str | None = None,
+        caller: Caller = Caller.LOCAL,
+        approval_gate: ApprovalGateFn | None = None,
+        exempt_local_writes: bool = True,
     ) -> None:
         self._adapters = list(adapters)
         # FORGE-339: when set, ``tools/list`` serves only this profile's
@@ -127,6 +139,14 @@ class UnifiedMcpServer:
         if profile is not None:
             tools_for_profile(profile)
         self._profile = profile
+        # FORGE-359: who is on the other end, and how a write gets authorised.
+        # `caller` is set per transport today (stdio is the engineer at the
+        # machine; anything remote is not) and becomes per-request identity
+        # when FORGE-330 lands OAuth — the shape does not change, only where
+        # the value comes from.
+        self._caller = caller
+        self._approval_gate = approval_gate
+        self._exempt_local_writes = exempt_local_writes
         self._version = version
         self._start_time = datetime.now(UTC)
         # Held only so the process shutdown path can call close_all() and
@@ -240,6 +260,28 @@ class UnifiedMcpServer:
                             "tool_id": exc.tool_id,
                             "did_you_mean": exc.did_you_mean,
                             "tool_count": len(self._tool_index),
+                        },
+                    )
+                )
+            except (ApprovalNotConfiguredError, ApprovalRejectedError) as exc:
+                # A refused write is a normal outcome, not a crash. It has to
+                # reach the client as a JSON-RPC error it can read out to the
+                # user -- letting it escape gives a broken connection, which
+                # tells the agent nothing about why the tool did not run and
+                # invites it to retry.
+                rejected = isinstance(exc, ApprovalRejectedError)
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": "approval_required",
+                            "outcome": exc.outcome.value if rejected else "not_configured",
+                            # Nothing here is worth retrying without a human
+                            # doing something first.
+                            "retryable": False,
                         },
                     )
                 )
@@ -555,11 +597,64 @@ class UnifiedMcpServer:
         prefix = requested.split(".")[0].split("_")[0].lower()
         return [tid for tid in known if tid.lower().startswith(prefix)][:limit]
 
+    async def _authorise(self, tool_id: str, arguments: dict[str, Any]) -> None:
+        """Hold a write until a human approves it, whoever asked (FORGE-359).
+
+        Raises rather than returning a flag: every path out of here that is
+        not an approval must stop the call, and an exception cannot be
+        forgotten at a call site the way a returned bool can.
+        """
+        decision = decide(
+            tool_id,
+            caller=self._caller,
+            twin_mutations_enabled=self._twin_mutations_enabled(),
+            exempt_local_writes=self._exempt_local_writes,
+        )
+        if not decision.requires_approval:
+            return
+
+        if self._approval_gate is None:
+            # Configured to hold, with nothing to hold it with. Refusing is
+            # the only honest option: running it would leave the guardrail
+            # looking present while doing nothing, and nobody audits a
+            # control they believe is switched on.
+            logger.error(
+                "mcp_approval_gate_missing",
+                tool_id=tool_id,
+                caller=self._caller.value,
+                reason=decision.reason,
+            )
+            raise ApprovalNotConfiguredError(tool_id, decision.reason)
+
+        logger.info(
+            "mcp_tool_call_held_for_approval",
+            tool_id=tool_id,
+            caller=self._caller.value,
+            reason=decision.reason,
+        )
+        outcome = await self._approval_gate(
+            ApprovalAsk(
+                tool_id=tool_id,
+                arguments=arguments,
+                caller=self._caller,
+                reason=decision.reason,
+            )
+        )
+        if outcome is not ApprovalOutcome.APPROVED:
+            logger.info(
+                "mcp_tool_call_not_approved",
+                tool_id=tool_id,
+                caller=self._caller.value,
+                outcome=outcome.value,
+            )
+            raise ApprovalRejectedError(tool_id, outcome)
+
     async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route ``tool/call`` to the adapter that owns ``tool_id``."""
         tool_id = self._resolve_tool_id(params.get("tool_id", ""))
         adapter = self._tool_index[tool_id]
         params = {**params, "tool_id": tool_id}
+        await self._authorise(tool_id, params.get("arguments") or {})
 
         # Commit-by-reference: fill a commit_geometry call's step_base64 from the
         # last export for this (session_id, obj_id) so agents needn't thread the
