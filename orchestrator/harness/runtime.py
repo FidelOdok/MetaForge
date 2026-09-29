@@ -37,11 +37,9 @@ from orchestrator.harness.providers.pipeline import (
     StreamInvoke,
 )
 from orchestrator.harness.runs import (
-    ApprovalDecision,
+    ApprovalWait,
     InMemoryRunStore,
-    InvalidTransition,
-    RunNotFoundError,
-    RunStatus,
+    await_approval_decision,
 )
 from orchestrator.harness.tools import ApprovalDeniedError, GateCheck, ToolRegistry, ToolSpec
 from orchestrator.harness.validation import validate_arguments
@@ -212,23 +210,20 @@ class HarnessRuntime:
                 logger.warning(
                     "approval_notify_failed", run_id=run.id, tool=spec.name, error=str(exc)
                 )
-        deadline = time.monotonic() + self.approval_timeout_seconds
-        while time.monotonic() < deadline:
-            status = self.runs.get(run.id).status
-            if status is RunStatus.RUNNING:
-                return
-            if status is RunStatus.REJECTED:
-                raise ApprovalDeniedError(spec.name, "rejected")
-            await self.approval_sleep(self.approval_poll_interval)
-        # Timed out — deny by default. A decision landing in the exact
-        # instant between the last poll and here is still honored (checked
-        # once more) rather than clobbered by a race with submit_approval.
-        try:
-            self.runs.submit_approval(run.id, ApprovalDecision.REJECT)
-        except (InvalidTransition, RunNotFoundError):
-            pass
-        if self.runs.get(run.id).status is RunStatus.RUNNING:
+        # FORGE-359: the wait itself lives in ``runs`` so the MCP path holds
+        # calls the same way. One copy of the loop means one copy of the
+        # race fix it carries.
+        outcome = await await_approval_decision(
+            self.runs,
+            run.id,
+            timeout_seconds=self.approval_timeout_seconds,
+            poll_interval=self.approval_poll_interval,
+            sleep=self.approval_sleep,
+        )
+        if outcome is ApprovalWait.APPROVED:
             return
+        if outcome is ApprovalWait.REJECTED:
+            raise ApprovalDeniedError(spec.name, "rejected")
         logger.warning("approval_timed_out", run_id=run.id, tool=spec.name)
         raise ApprovalDeniedError(spec.name, "timed out waiting for approval (denied by default)")
 
