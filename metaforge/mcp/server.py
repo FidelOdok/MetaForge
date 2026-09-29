@@ -34,6 +34,7 @@ import structlog
 
 from mcp_core.annotations import annotations_for
 from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
+from mcp_core.elicitation import ELICITATION_PROTOCOL_VERSION, Elicitor, elicitation_gate
 from mcp_core.guardrails import (
     ApprovalAsk,
     ApprovalGateFn,
@@ -142,6 +143,7 @@ class UnifiedMcpServer:
         approval_gate: ApprovalGateFn | None = None,
         exempt_local_writes: bool = True,
         auth_posture: AuthPosture | None = None,
+        elicitor: Elicitor | None = None,
     ) -> None:
         self._adapters = list(adapters)
         # FORGE-339: when set, ``tools/list`` serves only this profile's
@@ -164,11 +166,17 @@ class UnifiedMcpServer:
         # transport knows, so it tells us; None means nobody said, and the
         # health report says exactly that rather than guessing "open".
         self._auth_posture = auth_posture
+        # FORGE-360: the transport's channel back to the client, if it has
+        # one. Held rather than used -- whether we may actually ask depends
+        # on what the client said at initialize.
+        self._elicitor = elicitor
         # Whoever last completed the `initialize` handshake. Reported by
         # health/check so a version-skew question has an answer other than
         # "ask the user what they are running".
         self._client_info: dict[str, Any] | None = None
         self._client_protocol: str | None = None
+        self._client_capabilities: dict[str, Any] = {}
+        self._negotiated_protocol = self._DEFAULT_PROTOCOL_VERSION
         self._start_time = datetime.now(UTC)
         # Held only so the process shutdown path can call close_all() and
         # release remote adapters' aiohttp ClientSessions -- unused by
@@ -199,6 +207,16 @@ class UnifiedMcpServer:
             adapter_ids=[a.adapter_id for a in self._adapters],
         )
 
+    def attach_elicitor(self, elicitor: Elicitor) -> None:
+        """Give this server a way to put a question to the connected client.
+
+        Set by the transport for the same reason the auth posture is: only
+        the transport has a channel back. A transport with no
+        server-to-client direction never calls this, and ``can_elicit``
+        stays False -- which is the honest state, not a degraded one.
+        """
+        self._elicitor = elicitor
+
     def declare_auth_posture(self, posture: AuthPosture) -> None:
         """Record what the transport in front of this server enforces.
 
@@ -219,6 +237,22 @@ class UnifiedMcpServer:
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
+
+    @property
+    def can_elicit(self) -> bool:
+        """Whether this connection can put a question to the human (FORGE-360).
+
+        Three things all have to be true, and each has bitten something:
+        the transport has a way back to the client, the client said it
+        supports elicitation, and the revision we negotiated is one where
+        ``elicitation/create`` exists. A client that declares the capability
+        while negotiating an older revision is not listening for it.
+        """
+        return (
+            self._elicitor is not None
+            and "elicitation" in self._client_capabilities
+            and self._negotiated_protocol >= ELICITATION_PROTOCOL_VERSION
+        )
 
     @property
     def adapters(self) -> list[McpToolServer]:
@@ -384,6 +418,20 @@ class UnifiedMcpServer:
     # Code 2.1.x speaks; bumping this is a coordinated change with the
     # client side, not a routine bump.
     _MCP_PROTOCOL_VERSION = "2024-11-05"
+    _DEFAULT_PROTOCOL_VERSION = "2024-11-05"
+
+    #: Revisions this server will negotiate up to when a client asks for
+    #: one. FORGE-360: elicitation exists only from 2025-06-18, and a
+    #: server that pinned an older revision has no business sending
+    #: ``elicitation/create`` -- a correct client is not listening for it.
+    #: So the pin became an allow-list rather than a constant.
+    #:
+    #: What we implement of 2025-06-18: elicitation, ``_meta`` on results,
+    #: tool annotations, and no JSON-RPC batching (which that revision
+    #: removes and we never had). Structured tool output stays optional in
+    #: that revision, so not emitting ``outputSchema`` is conformant.
+    #: Anything outside that list is a reason not to add a revision here.
+    _SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = ("2024-11-05", "2025-06-18")
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         """Standard MCP handshake — return server capabilities.
@@ -407,15 +455,33 @@ class UnifiedMcpServer:
         self._client_info = client if isinstance(client, dict) else None
         requested = params.get("protocolVersion")
         self._client_protocol = requested if isinstance(requested, str) else None
-        if self._client_protocol and self._client_protocol != self._MCP_PROTOCOL_VERSION:
-            logger.warning(
-                "mcp_protocol_skew",
-                requested=self._client_protocol,
-                negotiated=self._MCP_PROTOCOL_VERSION,
-                client=(self._client_info or {}).get("name"),
-            )
+        caps = params.get("capabilities")
+        self._client_capabilities = caps if isinstance(caps, dict) else {}
+
+        # FORGE-360: meet the client on its own revision when we speak it.
+        # The spec's rule is to echo the requested version if supported and
+        # otherwise answer with our own; pinning unconditionally meant a
+        # client asking for 2025-06-18 was told 2024-11-05 and then, quite
+        # correctly, stopped expecting anything that revision added.
+        if self._client_protocol in self._SUPPORTED_PROTOCOL_VERSIONS:
+            self._negotiated_protocol = self._client_protocol
+        else:
+            self._negotiated_protocol = self._DEFAULT_PROTOCOL_VERSION
+            if self._client_protocol:
+                logger.warning(
+                    "mcp_protocol_skew",
+                    requested=self._client_protocol,
+                    negotiated=self._negotiated_protocol,
+                    client=(self._client_info or {}).get("name"),
+                )
+        logger.info(
+            "mcp_initialize",
+            client=(self._client_info or {}).get("name"),
+            protocol=self._negotiated_protocol,
+            can_elicit=self.can_elicit,
+        )
         return {
-            "protocolVersion": self._MCP_PROTOCOL_VERSION,
+            "protocolVersion": self._negotiated_protocol,
             "capabilities": {
                 # ``listChanged`` would let us push notifications when
                 # the tool set mutates at runtime. Our adapters are
@@ -823,16 +889,32 @@ class UnifiedMcpServer:
         not an approval must stop the call, and an exception cannot be
         forgotten at a call site the way a returned bool can.
         """
+        # FORGE-360: the local-write exemption exists only because a stdio
+        # session had nowhere to answer an approval -- F1 says so in
+        # ``guardrails._EXEMPTIBLE``. A client that can elicit *is* somewhere
+        # to answer, so the exemption stops applying to it. This is the flip
+        # that comment asked for, narrowed to connections that can actually
+        # be asked rather than applied to every stdio session blindly.
+        can_elicit = self.can_elicit
         decision = decide(
             tool_id,
             caller=self._caller,
             twin_mutations_enabled=self._twin_mutations_enabled(),
-            exempt_local_writes=self._exempt_local_writes,
+            exempt_local_writes=self._exempt_local_writes and not can_elicit,
         )
         if not decision.requires_approval:
             return
 
-        if self._approval_gate is None:
+        # In-harness first: the person who asked for this is looking at that
+        # window. Not a fallback chain -- once a client has been asked, going
+        # on to the dashboard would put the same question to a second person
+        # and discard the first answer.
+        gate = (
+            elicitation_gate(self._elicitor)
+            if can_elicit and self._elicitor is not None
+            else self._approval_gate
+        )
+        if gate is None:
             # Configured to hold, with nothing to hold it with. Refusing is
             # the only honest option: running it would leave the guardrail
             # looking present while doing nothing, and nobody audits a
@@ -850,8 +932,9 @@ class UnifiedMcpServer:
             tool_id=tool_id,
             caller=self._caller.value,
             reason=decision.reason,
+            route="elicitation" if can_elicit else "dashboard",
         )
-        outcome = await self._approval_gate(
+        outcome = await gate(
             ApprovalAsk(
                 tool_id=tool_id,
                 arguments=arguments,
@@ -979,7 +1062,7 @@ class UnifiedMcpServer:
         if self._client_info is None and self._client_protocol is None:
             return {
                 "connected": False,
-                "protocol_negotiated": self._MCP_PROTOCOL_VERSION,
+                "protocol_negotiated": self._negotiated_protocol,
                 "detail": "no initialize handshake has been completed on this server",
             }
         info = self._client_info or {}
@@ -988,14 +1071,18 @@ class UnifiedMcpServer:
             "name": info.get("name"),
             "version": info.get("version"),
             "protocol_requested": self._client_protocol,
-            "protocol_negotiated": self._MCP_PROTOCOL_VERSION,
+            "protocol_negotiated": self._negotiated_protocol,
+            # FORGE-360: the approval route this connection actually has.
+            # "Writes are held for approval" means something different when
+            # the holding place is a dashboard nobody has open.
+            "can_elicit": self.can_elicit,
         }
-        if self._client_protocol and self._client_protocol != self._MCP_PROTOCOL_VERSION:
+        if self._client_protocol and self._client_protocol != self._negotiated_protocol:
             out["protocol_skew"] = True
             out["detail"] = (
-                f"client asked for MCP {self._client_protocol}; this server pinned "
-                f"{self._MCP_PROTOCOL_VERSION}. Anything added after the pinned "
-                "revision is not available on this connection."
+                f"client asked for MCP {self._client_protocol}; this server does not "
+                f"speak it and negotiated {self._negotiated_protocol}. Anything added "
+                "after that revision is not available on this connection."
             )
         return out
 
