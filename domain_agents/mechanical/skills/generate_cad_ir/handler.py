@@ -175,6 +175,7 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
                     name=input_data.name,
                     project_id=input_data.project_id,
                     extra_metadata=extra_metadata,
+                    parameters=input_data.parameters,
                 )
                 span.set_attribute("committed", committed)
                 span.set_attribute("already_committed", already_committed)
@@ -202,6 +203,7 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
         name: str,
         project_id: str | None,
         extra_metadata: dict[str, Any],
+        parameters: dict[str, Any] | None = None,
     ) -> tuple[bool, str | None, str | None, str | None, bool]:
         """Best-effort persist the STEP bytes via twin.commit_geometry.
 
@@ -229,6 +231,8 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
             arguments["project_id"] = project_id
         if extra_metadata:
             arguments["extra_metadata"] = extra_metadata
+        if parameters:
+            arguments["parameters"] = parameters
 
         try:
             result = await self.context.mcp.invoke("twin.commit_geometry", arguments, timeout=60)

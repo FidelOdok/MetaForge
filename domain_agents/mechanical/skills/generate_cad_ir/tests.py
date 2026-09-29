@@ -343,6 +343,42 @@ class TestGenerateCadIrHandler:
         assert extra["bbox_mm"]["max_x"] == 40.0
         assert extra["mass_kg"] == pytest.approx(7800.0 * 1e-9 * 2700.0)
 
+    async def test_commit_threads_caller_supplied_parameters(self, tmp_path, monkeypatch):
+        """FORGE-270 (gap G-D2): the values that drove this generation reach
+        twin.commit_geometry's own 'parameters' argument, so a later call
+        with a changed value can be recognized as an edit of the same part."""
+        monkeypatch.chdir(tmp_path)
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-456"})
+
+        await handler.execute(
+            GenerateCadIrInput(
+                name="Shoulder Yoke",
+                work_product_id=work_product.id,
+                entities=_BRACKET_ENTITIES,
+                parameters={"thickness_mm": 2.0, "feature_type": "rib"},
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert commit_call[1]["parameters"] == {"thickness_mm": 2.0, "feature_type": "rib"}
+
+    async def test_commit_omits_parameters_when_not_supplied(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ctx, handler, work_product = await _make_ctx_and_handler()
+        ctx.mcp.register_tool("twin.commit_geometry", capability="twin_geometry")
+        ctx.mcp.register_tool_response("twin.commit_geometry", {"node_id": "node-456"})
+
+        await handler.execute(
+            GenerateCadIrInput(
+                name="Shoulder Yoke", work_product_id=work_product.id, entities=_BRACKET_ENTITIES
+            )
+        )
+
+        commit_call = next(c for c in ctx.mcp.calls if c[0] == "twin.commit_geometry")
+        assert "parameters" not in commit_call[1]
+
     async def test_commit_omits_mass_kg_without_material(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         ctx, handler, work_product = await _make_ctx_and_handler()

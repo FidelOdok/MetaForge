@@ -102,6 +102,22 @@ test.describe('Digital Twin Viewer', () => {
     await expect(editor.getByText(/rotor_joint/)).not.toBeVisible({ timeout: 10_000 });
     await expect(editor.getByText(/tail_joint/)).toBeVisible();
   });
+
+  test('History tab shows a parameter diff against a superseded version (FORGE-270)', async ({
+    page,
+  }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the graph canvas.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByText('enclosure.step').click();
+    await page.getByRole('button', { name: 'history' }).click();
+
+    const diff = page.getByTestId('feature-version-diff');
+    await expect(diff).toBeVisible();
+    await expect(diff).toContainText('wall_mm');
+    await expect(diff).toContainText('3');
+    await expect(diff).toContainText('2');
+  });
 });
 
 test.describe('Requirements', () => {

@@ -36,6 +36,7 @@ This is the structured path FR-1 describes (agents emit Design IR, never adapter
 - `material` -- material name for metadata (default: aluminum_6061)
 - `project_id` -- optional project UUID to link the committed work product to
 - `commit` -- persist into the Twin immediately (default `true`)
+- `parameters` -- optional dict of the caller-supplied values that drove this generation (FORGE-270, gap G-D2), e.g. `{"thickness_mm": 2.0}`. Threaded straight through to `twin.commit_geometry`'s own `parameters` argument, landing in the committed node's `metadata.geometry_features.parameters` -- lets `generate_parametric_feature` (and any future typed-parameter caller) record what value produced this geometry, so a later call with a changed value is recognized as an edit of the same part (a new `SUPERSEDES`-linked version) rather than an untraceable sibling
 
 ## Output
 
