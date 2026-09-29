@@ -117,6 +117,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.record_engineering_entity",
         "twin.record_evidence",
         "twin.record_hierarchy_node",
+        "twin.record_measurement",
+        "twin.register_device_instance",
         "twin.stage_work_product_file",
     }
 )

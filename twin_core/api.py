@@ -25,6 +25,7 @@ from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.constraint import Constraint
 from twin_core.models.datasheet import Datasheet
+from twin_core.models.device_instance import DeviceInstance
 from twin_core.models.engineering_change_transaction import EngineeringChangeTransaction
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType, NodeType, WorkProductType
@@ -430,6 +431,19 @@ class TwinAPI(ABC):
     async def list_maturity_gates(
         self, project_id: UUID | None = None, level: str | None = None
     ) -> list[MaturityGate]: ...
+
+    # --- Device Instances (FORGE-321) ---
+
+    @abstractmethod
+    async def create_device_instance(self, instance: DeviceInstance) -> DeviceInstance: ...
+
+    @abstractmethod
+    async def get_device_instance(self, instance_id: UUID) -> DeviceInstance | None: ...
+
+    @abstractmethod
+    async def list_device_instances(
+        self, project_id: UUID | None = None, product_id: str | None = None
+    ) -> list[DeviceInstance]: ...
 
     # --- Components ---
 
@@ -1124,6 +1138,35 @@ class InMemoryTwinAPI(TwinAPI):
             filters["level"] = level
         nodes = await self._graph.list_nodes(
             node_type=NodeType.MATURITY_GATE,
+            filters=filters if filters else None,
+        )
+        return nodes  # type: ignore[return-value]
+
+    # --- Device Instances (FORGE-321) ---
+
+    async def create_device_instance(self, instance: DeviceInstance) -> DeviceInstance:
+        existing = await self._graph.get_node(instance.id)
+        if existing is not None:
+            raise ValueError(f"DeviceInstance with ID {instance.id} already exists")
+        result = await self._graph.add_node(instance)
+        return result  # type: ignore[return-value]
+
+    async def get_device_instance(self, instance_id: UUID) -> DeviceInstance | None:
+        node = await self._graph.get_node(instance_id)
+        if node is not None and isinstance(node, DeviceInstance):
+            return node
+        return None
+
+    async def list_device_instances(
+        self, project_id: UUID | None = None, product_id: str | None = None
+    ) -> list[DeviceInstance]:
+        filters: dict[str, Any] = {}
+        if project_id is not None:
+            filters["project_id"] = project_id
+        if product_id is not None:
+            filters["product_id"] = product_id
+        nodes = await self._graph.list_nodes(
+            node_type=NodeType.DEVICE_INSTANCE,
             filters=filters if filters else None,
         )
         return nodes  # type: ignore[return-value]

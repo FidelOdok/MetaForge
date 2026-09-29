@@ -33,6 +33,16 @@ An optional ``supersedes`` (the id of the stale tier-0 evidence being
 replayed) threads through to ``evidence_recorder.py``'s own FORGE-65
 revalidation flow -- a rerun is a new evidence entity, never a mutation of
 the old one.
+
+FORGE-321: an optional ``calibrated_band_lookup(metric, tier) ->
+CalibratedBand | None`` (``api_gateway/twin/calibration.py``) lets a real
+measurement history override the fixed-prior ``band_fraction`` -- when it
+returns enough samples to calibrate, its band (converted to an equivalent
+fraction of ``limit_mm``) is used instead; below that sample count (or
+with no lookup wired in at all) behavior is byte-for-byte unchanged from
+before this ticket. This is deliberately a full override, not a blend:
+once real measurement history exists for a metric/tier, it is a better
+estimate of the true error than the fixed 0.2 prior, so it wins outright.
 """
 
 from __future__ import annotations
@@ -86,11 +96,15 @@ def bounding_box_extents_mm(metadata: dict[str, Any]) -> tuple[float, float, flo
 
 
 def make_metric_evaluator(
-    twin: Any, *, evidence_recorder: Any = None, mcp_bridge: Any = None
+    twin: Any,
+    *,
+    evidence_recorder: Any = None,
+    mcp_bridge: Any = None,
+    calibrated_band_lookup: Any = None,
 ) -> Any:
     """Return an async ``evaluate_tip_deflection(...)`` bound to a twin +
     (optional) evidence recorder + (optional) mcp_bridge for tier-2
-    escalation."""
+    escalation + (optional) calibrated-band lookup (FORGE-321)."""
 
     async def evaluate_tip_deflection(
         *,
@@ -110,6 +124,18 @@ def make_metric_evaluator(
             raise ValueError(f"twin.evaluate_metric: no work_product {work_product_id!r}")
         length_mm, width_mm, height_mm = bounding_box_extents_mm(wp.metadata)
 
+        # FORGE-321: a real measurement history overrides the fixed prior
+        # outright once there's enough of it -- see module docstring.
+        band_source = "fixed_prior"
+        calibration_sample_count: int | None = None
+        effective_band_fraction = band_fraction
+        if calibrated_band_lookup is not None and limit_mm:
+            calibrated = await calibrated_band_lookup(metric="tip_deflection", tier=0)
+            if calibrated is not None:
+                effective_band_fraction = calibrated.band / limit_mm
+                band_source = "calibrated"
+                calibration_sample_count = calibrated.sample_count
+
         tier0 = evaluate_tip_deflection_tier0(
             length_mm=length_mm,
             width_mm=width_mm,
@@ -117,7 +143,7 @@ def make_metric_evaluator(
             load_n=load_n,
             youngs_modulus_mpa=youngs_modulus_mpa,
             limit_mm=limit_mm,
-            band_fraction=band_fraction,
+            band_fraction=effective_band_fraction,
             escalation_k=escalation_k,
         )
 
@@ -129,6 +155,8 @@ def make_metric_evaluator(
             "limit_mm": tier0.limit_mm,
             "margin_mm": tier0.margin_mm,
             "escalated": tier0.escalate,
+            "band_source": band_source,
+            "calibration_sample_count": calibration_sample_count,
         }
 
         # FORGE-316: the exact kwargs needed to call this same tool again --

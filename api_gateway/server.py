@@ -763,6 +763,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.requirement_intelligence.promotion import attempt_promotion
     from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.blob_stager import make_blob_stager
+    from api_gateway.twin.calibration import (
+        make_calibrated_band_lookup,
+        make_calibration_recorder,
+    )
     from api_gateway.twin.claim_recorder import make_claim_recorder
     from api_gateway.twin.component_recorder import make_component_recorder
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
@@ -771,6 +775,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_design_sketch_approver,
         make_design_sketch_recorder,
     )
+    from api_gateway.twin.device_instance_recorder import make_device_instance_registrar
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.ect_tools import make_ect_bridge
     from api_gateway.twin.engineering_entity_approval import make_engineering_entity_approver
@@ -782,6 +787,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_hierarchy_node_recorder,
         make_hierarchy_rollup_fn,
     )
+    from api_gateway.twin.measurement_recorder import make_measurement_recorder
     from api_gateway.twin.metric_evaluator import make_metric_evaluator
     from api_gateway.twin.optimizer import make_wall_thickness_optimizer
     from api_gateway.twin.revalidation import make_revalidation_executor
@@ -814,8 +820,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # escalation (a real calculix.run_fea call).
     metric_evaluator_bridge = _LazyBridge()
     evidence_recorder_fn = make_evidence_recorder(twin, project_backend)
+    # FORGE-321: a real measurement history overrides evaluate_metric's
+    # fixed-prior band once enough of it exists for a given metric/tier --
+    # built before metric_evaluator_fn so it can be wired straight in.
+    calibrated_band_lookup_fn = make_calibrated_band_lookup(twin)
     metric_evaluator_fn = make_metric_evaluator(
-        twin, evidence_recorder=evidence_recorder_fn, mcp_bridge=metric_evaluator_bridge
+        twin,
+        evidence_recorder=evidence_recorder_fn,
+        mcp_bridge=metric_evaluator_bridge,
+        calibrated_band_lookup=calibrated_band_lookup_fn,
     )
     # FORGE-316: dispatch table for twin.execute_revalidation_plan --
     # every tool a stale Evidence's metadata["replay"]["tool_id"] can name.
@@ -838,6 +851,16 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # ...) factory above.
     async def promotion_attempter_fn(**kwargs: Any) -> dict[str, Any]:
         return await attempt_promotion(twin, **kwargs)
+
+    # FORGE-321: device registration; measurement recording (reuses
+    # evidence_recorder_fn via a calibration_recorder for residuals).
+    device_instance_registrar_fn = make_device_instance_registrar(twin)
+    calibration_recorder_fn = make_calibration_recorder(
+        twin, evidence_recorder=evidence_recorder_fn
+    )
+    measurement_recorder_fn = make_measurement_recorder(
+        twin, calibration_recorder=calibration_recorder_fn
+    )
 
     # MET-740: robot-description (URDF/SDF/USD) persistence for the
     # dashboard's cad-export routes. REST-route-triggered, not agent/MCP-
@@ -948,6 +971,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-320: bisection search for the minimum-mass wall thickness
         # satisfying deflection/safety-factor constraints.
         parameter_optimizer=parameter_optimizer_fn,
+        # FORGE-321: DeviceInstance registration + measurement recording
+        # (residuals feed the calibrated band evaluate_metric now reads).
+        device_instance_registrar=device_instance_registrar_fn,
+        measurement_recorder=measurement_recorder_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

@@ -445,6 +445,8 @@ class DeviceInstance(NodeBase):
     global_asset_id: str | None = None
 ```
 
+FORGE-321: `create_device_instance`/`get_device_instance`/`list_device_instances` CRUD (`twin_core/api.py`) and `twin.register_device_instance` (MCP tool) were added -- the model existed since before this epic but was never instantiable. See section 2.18.
+
 *Source: `twin_core/models/device_instance.py`*
 
 ### 2.8 TwinModel
@@ -762,6 +764,41 @@ Every search is recorded as Evidence, `valid_against` the work product (FORGE-31
 
 *Source: `twin_core/prediction/optimizer.py`, `api_gateway/twin/optimizer.py`, `tool_registry/tools/cadquery/materials.py`, `tool_registry/tools/twin/adapter.py`*
 
+### 2.18 Realise + Learn: Device Instances, Measurements + Calibration (FORGE-321)
+
+The final step of this epic. `DeviceInstance` (spec section 2.7) already existed but had no CRUD or MCP tool -- `twin.register_device_instance` fixes that, persisting a real manufactured unit and an optional `INSTANCE_OF` edge to the design revision (a WorkProduct) it was built from, when the caller has one to name. `product_id` stays a free-text identifier exactly as already documented, never assumed to be a resolvable graph ref -- a unit can be registered before or without a born-digital design record on hand.
+
+```python
+async def register(
+    *, serial_number: str, product_id: str,
+    firmware_version: str = "", hardware_revision: str = "",
+    manufactured_at: str | None = None, provisioned_at: str | None = None,
+    design_revision_ref: str | None = None,   # WorkProduct name/id -- optional
+    project_id: str | None = None, metadata: dict | None = None,
+) -> dict
+```
+
+`InterfaceQuantity` (section 2.11, FORGE-313) has no node id of its own -- embedded in `ArchInterface.quantities` inside a `SYSTEM_ARCHITECTURE` WorkProduct. `twin.record_measurement` appends a real `MeasuredValue` there (explicit `work_product_id`, or the project's one such document -- FORGE-313's own one-per-project assumption), and links the measuring `DeviceInstance` via a new `MEASURED_BY` edge to that WorkProduct (the edge names the document holding the quantity; the measurement's own `interface`/`metric` metadata disambiguates which one within it):
+
+```python
+async def record(
+    *, device_instance_id: str, from_component: str, to_component: str,
+    metric: str, value: float, unit: str = "mm", source: str = "", timestamp: str = "",
+    work_product_id: str | None = None, project_id: str | None = None,
+    predicted_value: float | None = None, predicted_tier: int = 0,
+) -> dict
+```
+
+Residual computation needs a real predicted value. Rather than trusting a possibly-stale or absent `quantity.predicted` field, the caller supplies `predicted_value` explicitly -- e.g. from a `twin.evaluate_metric` call made just before this one, the natural, honest composition. When the quantity's own `predicted` is still unset, this call also backfills it (the first real prediction a quantity gets is whatever the caller most recently computed); an ALREADY-set `predicted` is never overwritten by a later measurement call. Omitting `predicted_value` records the measurement but skips calibration entirely -- never fabricates a predicted value to diff against.
+
+**Calibration** (`digital_twin/calibration/store.py`, no twin/MCP dependency): a residual is `predicted - measured`, persisted as Evidence (`evidence_type="inspection"`, reusing FORGE-64's mechanism, not a new node type) keyed by `(metric, tier)`. `compute_calibrated_band` turns a list of residuals for one `(metric, tier)` into `band = k * stddev(|residual|)` (`k=2.0` default) once at least 3 samples exist -- below that, returns `None` so the caller's existing fixed prior stays in force, zero regression risk. This is deliberately running-stats, not full conformal prediction: the ticket's own acceptance wording ("the residual narrows the FEA band") only needs a real dispersion estimate that tightens with more measurements, not a coverage-guaranteed interval.
+
+`twin.evaluate_metric` (FORGE-315) now takes an optional calibrated-band lookup: when a calibrated band exists for `(metric="tip_deflection", tier=0)`, it's converted to an equivalent fraction of `limit_mm` and used INSTEAD of the fixed `band_fraction=0.2` prior -- a full override once real measurement history exists, not a blend, since a real calibrated band is a strictly better estimate. The lookup scans EVERY calibration-residual Evidence entity across every project, on purpose: calibration is a prior for the NEXT project, not a per-project cache, matching the ticket's own acceptance wording ("a new project's prediction uses the calibrated band"). The response gains `band_source` (`"fixed_prior"` | `"calibrated"`) and `calibration_sample_count` so a caller can tell which was used.
+
+**Deliberately out of scope**: job 1 of the ticket's own Jira Scope -- committing Gerbers as WorkProducts and a `kicad-cli pcb export pos` pick-and-place adapter method -- was NOT built. The real arm yardstick project has zero PCB/electronics artifacts anywhere in its 34 work products (it's a purely mechanical demo), and the ticket's own Acceptance criterion never exercises job 1 at all (only device registration, measurement recording, and calibration). Building it against synthetic Gerber bytes would be exactly the kind of fabricated demo this epic's own discipline avoids; filed as its own deferred follow-up instead. Also deliberately out of scope: any dashboard UI (no UI surface named in this ticket's own Scope, same precedent as FORGE-315/316/317/319/320).
+
+*Source: `digital_twin/calibration/store.py`, `api_gateway/twin/calibration.py`, `api_gateway/twin/device_instance_recorder.py`, `api_gateway/twin/measurement_recorder.py`, `api_gateway/twin/metric_evaluator.py`, `tool_registry/tools/twin/adapter.py`*
+
 ---
 
 ## 3. Edge Types
@@ -781,7 +818,8 @@ Edges are directed relationships between nodes. Each edge type has defined sourc
 | `PARENT_OF` | Version -> Version (also used for WorkProduct -> WorkProduct provenance, e.g. a robot_description's source cad_model parts) | Version lineage / source-artifact provenance |
 | `CONFLICTS_WITH` | Constraint -> Constraint | Two constraints that cannot both be satisfied |
 | `REALIZED_BY` | HierarchyNode -> WorkProduct | FORGE-260: a hierarchy position's real cad_model/robot_description geometry |
-| `INSTANCE_OF` | HierarchyNode -> BOMItem | FORGE-260: a COTS leaf position is an instance of one canonical component record |
+| `INSTANCE_OF` | HierarchyNode -> BOMItem, or DeviceInstance -> WorkProduct | FORGE-260: a COTS leaf position is an instance of one canonical component record. FORGE-321: a manufactured unit is an instance of the design revision it was built from |
+| `MEASURED_BY` | DeviceInstance -> WorkProduct | FORGE-321: a real-world measurement from this unit was recorded against an interface quantity embedded in this system_architecture WorkProduct |
 
 ### Typed Edge Models
 
