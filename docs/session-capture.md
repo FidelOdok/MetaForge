@@ -143,3 +143,30 @@ an event with it or the claim has nothing behind it.
 This is the server-side half of F4. Flagging a reply that made *no* tool
 calls at all is a client-side concern — the server never sees the reply —
 but the session record is what any such check has to read.
+
+## Who a captured action is attributed to (FORGE-330)
+
+Every call carries an `actor_id` in the form `<kind>:<name>` —
+`user:fidel`, `agent:claude_code`, `system:cron` — and that is what the
+session record shows.
+
+Where it comes from depends on what the server can verify:
+
+| Situation | `actor_id` | Trust |
+|---|---|---|
+| OAuth bearer token accepted | the actor bound to that token | verified by the server |
+| `X-MetaForge-Actor` header, no token | whatever the header says | an unverified claim |
+| Static API key only | the header, if any | an unverified claim |
+| Nothing supplied | `system:unattributed` | explicit absence |
+
+**A verified token always wins.** It used to be the other way round: the
+actor bound to the token was discarded and the header was taken at face
+value, so a remote caller could send `X-MetaForge-Actor: user:anyone` and
+that is what landed in the record. Self-asserted attribution is not an
+audit trail.
+
+A static API key authorises a call without identifying anyone, so it does
+not manufacture an identity and does not promote the header into one —
+authorised and attributable are different claims. When reading a session
+for a review, treat an actor that arrived without a verified token as the
+claim it is.
