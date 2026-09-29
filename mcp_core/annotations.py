@@ -120,6 +120,60 @@ ADDITIVE: frozenset[str] = frozenset(
     }
 )
 
+# Writes that produce a new artefact or result without altering anything
+# that already exists. Same approval requirement as any write; the hint only
+# tells a reviewer which kind of write they are being asked about.
+PRODUCING: frozenset[str] = frozenset(
+    {
+        "cadquery.create_assembly",
+        "cadquery.create_parametric",
+        "cadquery.generate_enclosure",
+        "cadquery.generate_ros2_launch",
+        "freecad.create_parametric",
+        "freecad.generate_mesh",
+        "calculix.run_fea",
+        "calculix.run_thermal",
+        "gazebo.run_simulation",
+        "isaac_sim.render_scene",
+        "isaac_sim.run_physics",
+    }
+)
+
+# Tools that can overwrite or remove something. Listed explicitly even
+# though it matches the default, so that ``unclassified()`` can tell
+# "nobody has looked at this" apart from "someone looked and it is
+# dangerous" — the two have the same behaviour and very different meanings.
+#
+# Every ``export_*`` is here because it writes to a caller-supplied path and
+# will happily overwrite what is already there. A harness asking before it
+# does that is the correct amount of friction.
+DESTRUCTIVE: frozenset[str] = frozenset(
+    {
+        "cadquery.boolean_operation",
+        "cadquery.execute_script",
+        "cadquery.export_geometry",
+        "cadquery.export_sdf",
+        "cadquery.export_sdf_assembly",
+        "cadquery.export_urdf",
+        "cadquery.export_urdf_assembly",
+        "cadquery.export_usd",
+        "cadquery.export_usd_assembly",
+        "freecad.boolean_operation",
+        "freecad.export_geometry",
+        "kicad.export_bom",
+        "kicad.export_gerber",
+        "kicad.export_netlist",
+        "omniverse_usd.convert_glb_to_usd",
+        "project.delete",
+        "project.update",
+        "twin.approve_engineering_change",
+        "twin.approve_engineering_entity",
+        "twin.execute_revalidation_plan",
+        "twin.mark_engineering_change_rolled_back",
+        "twin.reject_engineering_change",
+    }
+)
+
 # Tools that reach outside the twin — the network, a distributor API, the
 # open web. ``openWorldHint`` defaults to true in the spec, so this set marks
 # the tools for which it stays true; everything else is closed-world.
@@ -164,7 +218,7 @@ def annotations_for(
         "readOnlyHint": read_only,
         # A read-only tool cannot be destructive. Past that, only an
         # explicitly additive tool gets the benefit of the doubt.
-        "destructiveHint": not (read_only or tool_id in ADDITIVE),
+        "destructiveHint": not (read_only or tool_id in ADDITIVE or tool_id in PRODUCING),
         "idempotentHint": read_only or tool_id in IDEMPOTENT,
         "openWorldHint": tool_id in OPEN_WORLD,
     }
@@ -181,5 +235,5 @@ def unclassified(tool_ids: list[str]) -> list[str]:
     default — but nobody has looked at it, and that is worth surfacing
     rather than letting the set quietly fall behind the registry.
     """
-    known = READ_ONLY | CONDITIONALLY_READ_ONLY | ADDITIVE
+    known = READ_ONLY | CONDITIONALLY_READ_ONLY | ADDITIVE | PRODUCING | DESTRUCTIVE
     return sorted(t for t in tool_ids if t not in known)
