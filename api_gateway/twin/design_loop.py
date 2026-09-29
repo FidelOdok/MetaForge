@@ -26,17 +26,32 @@ approve. This module adds exactly that:
   ValueError, not a silently-accepted no-op.
 
 Deliberately out of scope (see this ticket's own PR description for the
-full split): generalising the search beyond a single scalar parameter
-(FORGE-288); duplicate-commit guards / infeasibility heuristics beyond what
+full split): duplicate-commit guards / infeasibility heuristics beyond what
 the optimizer itself already returns / cost-budget policy tuning
 (FORGE-291); wiring gate evaluators to block the loop on evidence gaps
-(FORGE-290); an eval harness (FORGE-292). This module's own "iteration
-budget" is exactly ``twin_core.prediction.optimizer``'s existing
-``max_iterations`` (default 60) -- not a second, separate budget concept.
+(FORGE-290); an eval harness (FORGE-292); true multi-objective/Pareto-front
+search (FORGE-288's own real scope is single-objective-with-constraints,
+matching the ticket's own literal example -- see FORGE-288's PR for the
+full split). This module's own "iteration budget" is exactly
+``twin_core.prediction.optimizer``'s existing ``max_iterations`` (default
+60) -- not a second, separate budget concept.
+
+FORGE-288 (gap G-G2) generalized ``start()``'s own candidate ingestion
+beyond ``wall_thickness_mm`` -- it used to read ``c["wall_thickness_mm"]``/
+``c["mass_kg"]``/``c["deflection_margin_mm"]``/``c["sf_margin"]`` directly
+off each candidate dict, which only ever matched
+``make_wall_thickness_optimizer``'s own shape. ``parameter_name``/
+``metric``/``candidate_mapper`` make that ingestion generic, defaulting to
+the EXACT prior wall-thickness behavior (verified by a regression test
+reproducing this session's own live-validated numbers unchanged) -- a
+second real optimizer, ``make_tube_height_optimizer`` (sweeps ``height_mm``
+with wall thickness fixed, same real hollow-tube physics), proves the
+generalization is real, not a rename.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -51,45 +66,68 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.design_loop")
 
 
+def _default_wall_thickness_mapper(c: dict[str, Any]) -> tuple[float, dict[str, float]]:
+    """The exact mapping ``start()`` always used before FORGE-288 -- kept as
+    the default so every existing caller (``make_wall_thickness_optimizer``,
+    the MCP tool, the REST route) is unaffected by the generalization."""
+    return c["wall_thickness_mm"], {
+        "deflection_margin_mm": c["deflection_margin_mm"],
+        "sf_margin": c["sf_margin"],
+    }
+
+
+def tube_height_candidate_mapper(c: dict[str, Any]) -> tuple[float, dict[str, float]]:
+    """FORGE-288: the mapping for ``make_tube_height_optimizer``'s own
+    candidate shape (``height_mm`` instead of ``wall_thickness_mm``) --
+    pass as ``candidate_mapper`` alongside ``parameter_name="height_mm"``."""
+    return c["height_mm"], {
+        "deflection_margin_mm": c["deflection_margin_mm"],
+        "sf_margin": c["sf_margin"],
+    }
+
+
 def make_design_loop_starter(
-    twin: Any, *, optimize: Any = None, evidence_recorder: Any = None, decision_recorder: Any = None
+    twin: Any,
+    *,
+    optimize: Any = None,
+    evidence_recorder: Any = None,
+    decision_recorder: Any = None,
+    parameter_name: str = "wall_thickness_mm",
+    metric: str = "mass_kg",
+    candidate_mapper: Callable[[dict[str, Any]], tuple[float, dict[str, float]]] | None = None,
 ) -> Any:
-    """Return an async ``start(...)`` bound to a twin + the wall-thickness
-    optimizer (built fresh from ``evidence_recorder``/``decision_recorder``
-    when ``optimize`` isn't supplied directly -- same defaulting a caller
-    would otherwise have to duplicate)."""
+    """Return an async ``start(**optimize_kwargs)`` bound to a twin + an
+    optimizer (the wall-thickness one, built fresh from
+    ``evidence_recorder``/``decision_recorder``, when ``optimize`` isn't
+    supplied directly -- same defaulting a caller would otherwise have to
+    duplicate).
+
+    ``parameter_name``/``metric``/``candidate_mapper`` (FORGE-288) let a
+    DIFFERENT optimizer (e.g. ``make_tube_height_optimizer``) plug into the
+    exact same persistence/SUPERSEDES/CONSTRAINED_BY/approve machinery --
+    ``candidate_mapper`` takes one raw candidate dict from ``optimize``'s
+    own ``candidates`` list and returns ``(parameter_value,
+    constraints_status)``; ``optimize_kwargs`` are forwarded to ``optimize``
+    unchanged, so a differently-shaped optimizer (different bounds args,
+    a fixed parameter like ``wall_thickness_mm``, ...) just works without
+    this function needing to know its exact signature.
+    """
     if optimize is None:
         from api_gateway.twin.optimizer import make_wall_thickness_optimizer
 
         optimize = make_wall_thickness_optimizer(
             twin, evidence_recorder=evidence_recorder, decision_recorder=decision_recorder
         )
+    mapper = candidate_mapper or _default_wall_thickness_mapper
 
-    async def start(
-        *,
-        work_product_id: str,
-        load_n: float,
-        deflection_limit_mm: float,
-        sf_limit: float = 2.0,
-        material: str = "aluminum_6061",
-        wall_min_mm: float = 0.5,
-        wall_max_mm: float | None = None,
-        project_id: str | None = None,
-        requirement_ids: list[str] | None = None,
-    ) -> dict[str, Any]:
+    async def start(**optimize_kwargs: Any) -> dict[str, Any]:
+        work_product_id: str = optimize_kwargs["work_product_id"]
+        project_id: str | None = optimize_kwargs.get("project_id")
+        requirement_ids: list[str] | None = optimize_kwargs.get("requirement_ids")
+        optimize_kwargs.setdefault("record_decision", True)
+
         with tracer.start_as_current_span("twin.start_design_loop") as span:
-            out = await optimize(
-                work_product_id=work_product_id,
-                load_n=load_n,
-                deflection_limit_mm=deflection_limit_mm,
-                sf_limit=sf_limit,
-                material=material,
-                wall_min_mm=wall_min_mm,
-                wall_max_mm=wall_max_mm,
-                project_id=project_id,
-                requirement_ids=requirement_ids,
-                record_decision=True,
-            )
+            out = await optimize(**optimize_kwargs)
             candidates: list[dict[str, Any]] = out["candidates"]
             winner: dict[str, Any] | None = out.get("winner")
             status: str = out["status"]
@@ -99,16 +137,17 @@ def make_design_loop_starter(
             pid = UUID(project_id) if project_id else None
             span.set_attribute("design_loop.loop_id", str(loop_id))
             span.set_attribute("design_loop.status", status)
+            span.set_attribute("design_loop.parameter_name", parameter_name)
 
             # Index-based, not value-based: twin_core.prediction.optimizer's
             # own structure guarantees exactly where the winner sits --
             # ``already_feasible_at_min`` -> candidates[0] (the lo bounds
             # check itself), ``optimal`` -> candidates[-1] (``winner =
             # eval_at(hi); candidates.append(winner)`` right before
-            # return). Matching by wall_thickness_mm VALUE instead would be
-            # wrong: the final ``eval_at(hi)`` can re-evaluate to the exact
-            # same value as the last loop-appended candidate, so more than
-            # one candidate can legitimately share that float.
+            # return). Matching by parameter VALUE instead would be wrong:
+            # the final ``eval_at(hi)`` can re-evaluate to the exact same
+            # value as the last loop-appended candidate, so more than one
+            # candidate can legitimately share that float.
             winner_index: int | None = None
             if winner is not None and status == "optimal":
                 winner_index = len(candidates) - 1
@@ -123,19 +162,17 @@ def make_design_loop_starter(
                     iter_status = "infeasible" if is_last else "candidate"
                 else:
                     iter_status = "converged" if is_winner else "candidate"
+                parameter_value, constraints_status = mapper(c)
                 iteration = DesignLoopIteration(
                     loop_id=loop_id,
                     iteration_number=i,
                     project_id=pid,
                     work_product_id=wp_id,
-                    parameter_name="wall_thickness_mm",
-                    parameter_value=c["wall_thickness_mm"],
-                    metric="mass_kg",
-                    objective_value=c["mass_kg"],
-                    constraints_status={
-                        "deflection_margin_mm": c["deflection_margin_mm"],
-                        "sf_margin": c["sf_margin"],
-                    },
+                    parameter_name=parameter_name,
+                    parameter_value=parameter_value,
+                    metric=metric,
+                    objective_value=c[metric],
+                    constraints_status=constraints_status,
                     feasible=c["feasible"],
                     status=iter_status,
                     is_winner=is_winner,

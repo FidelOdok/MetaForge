@@ -573,6 +573,56 @@ function IterationRow({ iteration }: { iteration: DesignLoopIteration }) {
   );
 }
 
+/** FORGE-288 (gap G-G2): a tiny hand-rolled inline-SVG sparkline plotting
+ * objective_value vs iteration_number -- no chart library in this
+ * codebase, and the ticket's own "optimisation run view: objective vs
+ * iteration chart" wording is satisfied by the smallest real version of
+ * that, not a new dependency or page. Generic: works for whichever
+ * parameter/metric the loop actually swept (wall_thickness_mm/mass_kg,
+ * height_mm/mass_kg, ...). */
+function IterationSparkline({ iterations }: { iterations: DesignLoopIteration[] }) {
+  if (iterations.length < 2) return null;
+  const width = 280;
+  const height = 48;
+  const padding = 4;
+  const values = iterations.map((it) => it.objective_value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const points = iterations
+    .map((it, i) => {
+      const x = padding + (i / (iterations.length - 1)) * (width - 2 * padding);
+      const y = height - padding - ((it.objective_value - min) / span) * (height - 2 * padding);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  const metric = iterations[0]?.metric ?? 'objective';
+
+  return (
+    <div data-testid="design-loop-sparkline" className="px-3 pt-2 pb-1">
+      <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-on-surface-variant">
+        {metric} vs iteration
+      </div>
+      <svg width={width} height={height} role="img" aria-label={`${metric} across ${iterations.length} iterations`}>
+        <polyline points={points} fill="none" stroke="var(--mf-c-86cfff, #86cfff)" strokeWidth={1.5} />
+        {iterations.map((it, i) => {
+          const x = padding + (i / (iterations.length - 1)) * (width - 2 * padding);
+          const y = height - padding - ((it.objective_value - min) / span) * (height - 2 * padding);
+          return (
+            <circle
+              key={it.iteration_number}
+              cx={x}
+              cy={y}
+              r={it.is_winner ? 2.5 : 1.5}
+              fill={it.is_winner ? 'var(--mf-c-3dd68c, #3dd68c)' : 'var(--mf-c-86cfff, #86cfff)'}
+            />
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 /** FORGE-287 (gap G-G1): the closed design loop's iteration timeline --
  * propose -> build -> simulate -> evaluate against constraints -> revise ->
  * repeat, until pass or proven infeasible, with a human approving the
@@ -716,6 +766,7 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
           className="rounded-lg overflow-hidden overflow-x-auto"
           style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
         >
+          <IterationSparkline iterations={iterations} />
           <table className="w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--mf-c-191b22)' }}>
@@ -723,10 +774,10 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
                   #
                 </th>
                 <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-right" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
-                  wall_thickness_mm
+                  {iterations[0]?.parameter_name ?? 'parameter_value'}
                 </th>
                 <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-right" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
-                  mass_kg
+                  {iterations[0]?.metric ?? 'objective_value'}
                 </th>
                 <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-center" style={{ height: '32px', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
                   Feasible

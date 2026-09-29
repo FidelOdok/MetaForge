@@ -281,6 +281,7 @@ async def bootstrap_tool_registry(
     design_loop_starter: Any = None,
     design_loop_reader: Any = None,
     design_loop_approver: Any = None,
+    tube_height_design_loop_starter: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -430,6 +431,13 @@ async def bootstrap_tool_registry(
         design_loop_approver: Optional async ``approve(...)``
             (make_design_loop_approver, FORGE-287). When supplied, registers
             ``twin.approve_design_loop``. ``None`` skips registration.
+        tube_height_design_loop_starter: Optional async ``start(...)``
+            (make_design_loop_starter wired with make_tube_height_optimizer,
+            FORGE-288). When supplied, registers
+            ``twin.start_tube_height_design_loop`` -- a second real
+            parameter (height_mm) plugged into the SAME design-loop
+            machinery ``design_loop_starter`` uses. ``None`` skips
+            registration.
 
     Returns:
         The populated ToolRegistry.
@@ -615,6 +623,7 @@ async def bootstrap_tool_registry(
                     design_loop_starter=design_loop_starter,
                     design_loop_reader=design_loop_reader,
                     design_loop_approver=design_loop_approver,
+                    tube_height_design_loop_starter=tube_height_design_loop_starter,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

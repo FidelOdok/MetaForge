@@ -130,6 +130,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # new DesignLoopIteration node + edges -- pure append, nothing
         # existing is overwritten.
         "twin.start_design_loop",
+        # FORGE-288: same family as twin.start_design_loop -- a second real
+        # parameter (height_mm) over the same append-only persistence.
+        "twin.start_tube_height_design_loop",
     }
 )
 

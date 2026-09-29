@@ -19,6 +19,7 @@ from twin_core.models.enums import WorkProductType
 from twin_core.models.work_product import WorkProduct
 from twin_core.prediction.optimizer import (
     cantilever_max_bending_stress_mpa,
+    optimize_tube_height,
     optimize_wall_thickness,
 )
 
@@ -110,6 +111,113 @@ class TestOptimizeWallThickness:
                 **_ALUMINUM,
                 load_n=20.0,
                 deflection_limit_mm=0.5,
+            )
+
+
+class TestOptimizeTubeHeight:
+    """FORGE-288 (gap G-G2): a second, genuinely different parameter over
+    the SAME real physics as optimize_wall_thickness -- proof the design
+    loop's own candidate ingestion generalized beyond wall_thickness_mm,
+    not a renamed copy of the same search."""
+
+    def test_finds_optimal_minimum_feasible_height(self) -> None:
+        result = optimize_tube_height(
+            length_mm=180.0,
+            width_mm=60.0,
+            wall_thickness_mm=2.0,
+            **_ALUMINUM,
+            load_n=800.0,
+            deflection_limit_mm=0.5,
+            sf_limit=2.0,
+            height_min_mm=5.0,
+        )
+        assert result.status == "optimal"
+        assert result.winner is not None
+        assert result.winner.feasible is True
+        assert result.winner.deflection_margin_mm >= 0
+        assert result.winner.sf_margin >= 0
+        assert 5.0 <= result.winner.height_mm <= 240.0
+        assert len(result.candidates) >= 2
+
+    def test_infeasible_when_limit_unachievable_within_bounds(self) -> None:
+        result = optimize_tube_height(
+            length_mm=180.0,
+            width_mm=60.0,
+            wall_thickness_mm=2.0,
+            **_ALUMINUM,
+            load_n=5000.0,
+            deflection_limit_mm=0.001,
+            sf_limit=2.0,
+            height_min_mm=5.0,
+            height_max_mm=50.0,
+        )
+        assert result.status == "infeasible"
+        assert result.winner is None
+        assert "even the maximum allowed height" in result.detail
+
+    def test_already_feasible_at_min_when_constraints_are_loose(self) -> None:
+        result = optimize_tube_height(
+            length_mm=180.0,
+            width_mm=60.0,
+            wall_thickness_mm=2.0,
+            **_ALUMINUM,
+            load_n=20.0,
+            deflection_limit_mm=1000.0,
+            sf_limit=0.001,
+            height_min_mm=5.0,
+        )
+        assert result.status == "already_feasible_at_min"
+        assert result.winner is not None
+        assert result.winner.height_mm == 5.0
+
+    def test_winner_mass_increases_with_stricter_constraints(self) -> None:
+        loose = optimize_tube_height(
+            length_mm=180.0,
+            width_mm=60.0,
+            wall_thickness_mm=2.0,
+            **_ALUMINUM,
+            load_n=800.0,
+            deflection_limit_mm=2.0,
+            sf_limit=1.5,
+            height_min_mm=5.0,
+        )
+        strict = optimize_tube_height(
+            length_mm=180.0,
+            width_mm=60.0,
+            wall_thickness_mm=2.0,
+            **_ALUMINUM,
+            load_n=800.0,
+            deflection_limit_mm=0.3,
+            sf_limit=3.0,
+            height_min_mm=5.0,
+        )
+        assert loose.winner is not None
+        assert strict.winner is not None
+        assert strict.winner.mass_kg > loose.winner.mass_kg
+
+    def test_rejects_height_min_that_leaves_no_cavity(self) -> None:
+        with pytest.raises(ValueError, match="real cavity"):
+            optimize_tube_height(
+                length_mm=180.0,
+                width_mm=60.0,
+                wall_thickness_mm=2.0,
+                **_ALUMINUM,
+                load_n=20.0,
+                deflection_limit_mm=0.5,
+                height_min_mm=1.0,
+            )
+
+    def test_rejects_degenerate_height_bounds(self) -> None:
+        with pytest.raises(ValueError, match="height_max_mm"):
+            optimize_tube_height(
+                length_mm=180.0,
+                width_mm=60.0,
+                wall_thickness_mm=2.0,
+                **_ALUMINUM,
+                load_n=20.0,
+                deflection_limit_mm=0.5,
+                height_min_mm=10.0,
+                height_max_mm=5.0,
             )
 
 

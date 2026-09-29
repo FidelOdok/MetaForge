@@ -271,6 +271,9 @@ test.describe('Requirements', () => {
     await expect(rows.first()).toBeVisible();
     await expect(rows).toHaveCount(7);
 
+    // Sparkline renders alongside the iteration table (FORGE-288).
+    await expect(loopSection.getByTestId('design-loop-sparkline')).toBeVisible();
+
     // Exactly one converged winner, awaiting approval.
     await expect(loopSection.getByText('awaiting approval')).toBeVisible();
     await expect(loopSection.getByTestId('design-loop-approved-badge')).not.toBeVisible();
