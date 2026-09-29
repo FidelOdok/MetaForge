@@ -73,6 +73,7 @@ from api_gateway.chat.turn_capture import capture_step, capture_turn_done
 # (Postgres) backend in via ``init_project_backend``, the alias silently
 # keeps pointing at the empty in-memory store — so every project-scoped
 # chat lost its brief (get_project always missed) on any real deployment.
+from api_gateway.projects.brief import build_project_brief
 from api_gateway.projects.routes import get_project_backend
 from domain_agents.base_agent import get_llm_model, is_llm_available
 from domain_agents.mechanical.pydantic_ai_agent import (
@@ -299,110 +300,7 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
     if project is None:
         return None
 
-    lines = [
-        f"You are working inside the MetaForge project **{project.name}** "
-        f"(project_id `{project.id}`, status {project.status}).",
-    ]
-    if project.description:
-        lines.append(f"Project intent: {project.description}")
-
-    # FORGE-244: work_products is insertion order (oldest first) -- a busy
-    # project's newest, most-relevant work (live-observed: 14 AR4 robot-arm
-    # parts + its robot description, all at positions 38-52) sorted straight
-    # past a flat [:_PROJECT_WP_LIMIT] slice, so the brief described an old
-    # 3-joint URDF instead of the actual current design. Sorting by recency
-    # first means the newest work is always what a plain positional cutoff
-    # keeps, not what it drops.
-    wps_by_recency = sorted(project.work_products, key=lambda wp: wp.updated_at, reverse=True)
-    wps = wps_by_recency[:_PROJECT_WP_LIMIT]
-    if wps:
-        lines.append(
-            f"\nExisting work products in this project "
-            f"({len(project.work_products)}, newest first):"
-        )
-        for wp in wps:
-            lines.append(f"- {wp.name} — {wp.type} (status {wp.status})")
-        remaining = len(project.work_products) - _PROJECT_WP_LIMIT
-        if remaining > 0:
-            lines.append(
-                f"- …and {remaining} more (older) work product(s) not shown here. "
-                "Call twin.find_by_property (or project.get) if you need to see "
-                "something not listed above."
-            )
-    else:
-        lines.append("\nThis project has no work products yet.")
-
-    # FORGE-86: inline the actual content of the most-recently-updated
-    # requirement docs, not just their names — see _brief_doc_excerpt.
-    doc_wps = sorted(
-        (wp for wp in project.work_products if wp.type in _BRIEF_DOC_TYPES),
-        key=lambda wp: wp.updated_at,
-        reverse=True,
-    )[:_BRIEF_DOC_LIMIT]
-    for wp in doc_wps:
-        excerpt = await _brief_doc_excerpt(wp.id)
-        if excerpt:
-            lines.append(f"\n### {wp.name} ({wp.type})\n{excerpt}")
-
-    # MET-584: requirements-discovery directive. Chat has no gates, so the
-    # elicitation nudge lives in the brief — the enforcement twin of this is
-    # the design-flow Requirements gate (MET-582/583), and — for intent/needs
-    # specifically — the G0/G1 gates (FORGE-48, epic FORGE-35).
-    types = {str(getattr(wp.type, "value", wp.type)) for wp in project.work_products}
-    if not types & {"intent", "stakeholder_need"}:
-        lines.append(
-            "\nThis project has NO recorded intent or stakeholder needs (no "
-            "intent or stakeholder_need entity). Before substantive design "
-            "work, elicit WHY this product exists and who it's for — ask the "
-            "user rather than assuming. Record the intent first with "
-            "`twin.record_engineering_entity` (`entity_type='intent'`, give it "
-            "a short `title` so later entries can reference it), then any "
-            "stakeholder needs the same way (`entity_type='stakeholder_need'`, "
-            "`parent_refs=[the intent's title]`, `relation='motivates'`)."
-        )
-    if not types & {"prd", "constraint_set"}:
-        lines.append(
-            "\nThis project has NO recorded requirements or constraints (no prd "
-            "or constraint_set work product). Before substantive design work — "
-            "authoring or committing geometry, selecting components — elicit the "
-            "key quantified requirements from the user (loads, mass/envelope "
-            "budgets, power, cost, safety factors) and record them with "
-            "`twin.record_constraint_set` (and the rationale with "
-            "`twin.record_decision`). Ask before you assume. If an intent/need "
-            "was recorded above, link each requirement back to it with "
-            "`parent_refs=[the need's title]`."
-        )
-    if types & {"prd", "constraint_set"}:
-        lines.append(
-            "\nAs the design goes deeper — sizing a specific subsystem or "
-            "component — quantify what THAT specifically needs (e.g. this "
-            "leg's actuator torque, not just the system's overall payload) "
-            "and record it with `twin.record_constraint_set`, setting "
-            "`parent_refs` to the higher-level requirement it implements. This "
-            "keeps the chain from stated intent down to a specific part "
-            "traceable instead of stopping at the system level."
-        )
-
-    lines.append(
-        f"\nAny CAD model you generate in this project is NOT saved until you call "
-        f'`twin.commit_geometry` with `project_id="{project.id}"` — do this before your '
-        f"final answer whenever you generated or modified geometry this turn. Record "
-        f'design decisions the same way with `twin.record_decision` (`project_id="{project.id}"`). '
-        f"Ground your answers in the work products above."
-    )
-    lines.append(
-        f"\nWhen checking what's currently broken, call `twin.constraint_violations` "
-        f'with `project_id="{project.id}"` — without it, the result may include '
-        f"other projects' violations (FORGE-75)."
-    )
-    lines.append(
-        f'\nAlways pass `project_id="{project.id}"` on `twin.record_engineering_entity` '
-        f"too (intent, stakeholder_need, objective, risk, budget, invariant, waiver, "
-        f"release_approval, ...) — without it the entity is unscoped and invisible to "
-        f"this project's gate checks (e.g. a waiver recorded with no project_id never "
-        f"counts toward the G8 release gate, FORGE-78)."
-    )
-    return "\n".join(lines)
+    return await build_project_brief(project, doc_excerpt=_brief_doc_excerpt)
 
 
 # FORGE-300: work-product types that unambiguously identify a discipline
