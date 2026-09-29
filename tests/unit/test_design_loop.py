@@ -172,6 +172,62 @@ class TestMakeDesignLoopStarter:
         assert "evidence_node_id" in out
         assert "decision_node_id" in out
 
+    async def test_links_decision_to_winning_iteration_via_generated_from(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        """FORGE-289 (gap G-G3): a reader can walk from the converged
+        winner's DesignLoopIteration to the Decision it produced, via a
+        real EdgeType.GENERATED_FROM edge -- not just infer the connection
+        from both existing in the same loop run."""
+        from api_gateway.twin.decision_recorder import make_decision_recorder
+
+        wp = await _seed_cad(twin)
+        decision_recorder = make_decision_recorder(twin)
+        optimize = make_wall_thickness_optimizer(twin, decision_recorder=decision_recorder)
+        start = make_design_loop_starter(twin, optimize=optimize)
+        out = await start(
+            work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        decision_id = UUID(out["decision_node_id"])
+        iterations = await twin.list_design_loop_iterations(UUID(out["loop_id"]))
+        winner = next(it for it in iterations if it.is_winner)
+
+        edges = await twin.get_edges(decision_id, edge_type=EdgeType.GENERATED_FROM)
+        assert len(edges) == 1
+        assert edges[0].target_id == winner.id
+
+    async def test_no_generated_from_edge_when_no_decision_recorded(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        wp = await _seed_cad(twin)
+        start = make_design_loop_starter(twin)
+        out = await start(
+            work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        assert "decision_node_id" not in out
+        iterations = await twin.list_design_loop_iterations(UUID(out["loop_id"]))
+        winner = next(it for it in iterations if it.is_winner)
+        edges = await twin.get_edges(
+            winner.id, direction="incoming", edge_type=EdgeType.GENERATED_FROM
+        )
+        assert edges == []
+
+    async def test_no_generated_from_edge_when_infeasible(self, twin: InMemoryTwinAPI) -> None:
+        from api_gateway.twin.decision_recorder import make_decision_recorder
+
+        wp = await _seed_cad(twin)
+        decision_recorder = make_decision_recorder(twin)
+        optimize = make_wall_thickness_optimizer(twin, decision_recorder=decision_recorder)
+        start = make_design_loop_starter(twin, optimize=optimize)
+        out = await start(
+            work_product_id=str(wp.id),
+            load_n=20.0,
+            deflection_limit_mm=0.0001,
+            sf_limit=2.0,
+        )
+        assert out["status"] == "infeasible"
+        assert "decision_node_id" not in out
+
 
 class TestTubeHeightDesignLoop:
     """FORGE-288 (gap G-G2): a second real optimizer (height_mm, wall

@@ -381,6 +381,71 @@ class TestMakeWallThicknessOptimizer:
         assert decision_wp is not None
         assert decision_wp.metadata["parent_refs"] == [str(req.id)]
 
+    async def test_links_decision_to_its_own_evidence(self, twin: InMemoryTwinAPI) -> None:
+        """FORGE-289 (gap G-G3): when both recorders are wired, the Decision
+        must link to the Evidence THIS SAME RUN recorded, via a real edge --
+        not just a rationale string mentioning "found via bisection"."""
+        from twin_core.models.enums import EdgeType
+
+        wp = await _seed_cad(twin)
+        evidence_recorder = make_evidence_recorder(twin)
+        decision_recorder = make_decision_recorder(twin)
+        optimize = make_wall_thickness_optimizer(
+            twin, evidence_recorder=evidence_recorder, decision_recorder=decision_recorder
+        )
+        out = await optimize(
+            work_product_id=str(wp.id), load_n=20.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        decision_id = UUID(out["decision_node_id"])
+        edges = await twin.get_edges(decision_id, edge_type=EdgeType.SUPPORTED_BY)
+        assert len(edges) == 1
+        assert str(edges[0].target_id) == out["evidence_node_id"]
+
+    async def test_no_evidence_link_when_evidence_recorder_absent(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        wp = await _seed_cad(twin)
+        decision_recorder = make_decision_recorder(twin)
+        optimize = make_wall_thickness_optimizer(twin, decision_recorder=decision_recorder)
+        out = await optimize(
+            work_product_id=str(wp.id), load_n=20.0, deflection_limit_mm=0.5, sf_limit=2.0
+        )
+        decision_wp = await twin.get_work_product(UUID(out["decision_node_id"]))
+        assert decision_wp is not None
+        assert decision_wp.metadata.get("evidence_refs", []) == []
+
+
+class TestMakeTubeHeightOptimizerDecisionEvidenceLink:
+    """FORGE-289: same evidence-linking behaviour as
+    TestMakeWallThicknessOptimizer.test_links_decision_to_its_own_evidence,
+    proven separately for the tube-height optimizer -- the two share
+    identical wiring code, but a test that only covers one leaves the other
+    unverified."""
+
+    async def test_links_decision_to_its_own_evidence(self, twin: InMemoryTwinAPI) -> None:
+        from api_gateway.twin.optimizer import make_tube_height_optimizer
+        from twin_core.models.enums import EdgeType
+
+        wp = await _seed_cad(twin)
+        evidence_recorder = make_evidence_recorder(twin)
+        decision_recorder = make_decision_recorder(twin)
+        optimize = make_tube_height_optimizer(
+            twin, evidence_recorder=evidence_recorder, decision_recorder=decision_recorder
+        )
+        out = await optimize(
+            work_product_id=str(wp.id),
+            wall_thickness_mm=1.0,
+            load_n=20.0,
+            deflection_limit_mm=0.5,
+            sf_limit=2.0,
+            height_min_mm=3.0,
+        )
+        assert out["status"] == "optimal"
+        decision_id = UUID(out["decision_node_id"])
+        edges = await twin.get_edges(decision_id, edge_type=EdgeType.SUPPORTED_BY)
+        assert len(edges) == 1
+        assert str(edges[0].target_id) == out["evidence_node_id"]
+
 
 class TestOptimizeParameterAdapter:
     async def test_tool_registered_and_returns_shape(self, twin: InMemoryTwinAPI) -> None:

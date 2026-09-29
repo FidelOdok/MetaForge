@@ -8,6 +8,7 @@ import { AxiosError, type AxiosAdapter, type AxiosInstance, type InternalAxiosRe
 // the REST route's pass-through shape rather than the dashboard's usual
 // camelCase contract, since the real route itself is a thin pass-through).
 interface SampleDesignLoopIteration {
+  id: string;
   iteration_number: number;
   parameter_name: string;
   parameter_value: number;
@@ -49,6 +50,19 @@ interface SampleMaturityGate {
   comment: string | null;
   createdAt: string;
   results?: SampleRequiredClaimResult[];
+}
+
+// FORGE-289 (gap G-G3): illustrative shape of one Decision, mirroring
+// api_gateway/twin/decision_routes.py's own GET /v1/decisions pass-through
+// (snake_case, same convention the design-loop mocks above use).
+interface SampleDecision {
+  id: string;
+  title: string;
+  rationale: string;
+  alternatives: { option: string; reason_rejected: string }[];
+  parent_refs: string[];
+  evidence_refs: string[];
+  created_at: string | null;
 }
 
 // Generated from the hosted console sample workspace (illustrative Drone FC data).
@@ -847,6 +861,31 @@ const SAMPLE_WORKSPACE_SEED = {
   // FORGE-290 (gap G-G4): gate-review attempts, newest first -- empty
   // until the "Attempt promotion" action records one.
   promotionGates: [] as SampleMaturityGate[],
+  // FORGE-289 (gap G-G3): decisions keyed by the node id they're related
+  // to (a hierarchy node's own id, or a converged design loop's winning
+  // iteration id) -- mirrors GET /v1/decisions?related_to=<node_id>'s own
+  // "what decisions touch this node" shape. Seeded with one decision on
+  // 'sample-hier-upper-arm' so the Structure tab has something to show
+  // without first running a design loop; the design-loop entry is added
+  // dynamically by the /design-loop/start handler below, same as the real
+  // optimizer records a Decision only once it finds a feasible winner.
+  decisions: {
+    'sample-hier-upper-arm': [
+      {
+        id: 'sample-decision-wall-thickness',
+        title: 'Upper arm wall thickness: 2.5mm (aluminum_6061)',
+        rationale:
+          'Minimum wall thickness meeting deflection <= 0.5mm and safety factor >= 2 for the upper arm link, found via bisection over the tier-0 hollow-tube hand-calc. Resulting mass: 1.4kg.',
+        alternatives: [
+          { option: 'wall_thickness_mm=1.0', reason_rejected: 'deflection_margin=-0.18mm, sf_margin=-0.2' },
+          { option: 'wall_thickness_mm=1.75', reason_rejected: 'deflection_margin=-0.04mm, sf_margin=0.3' },
+        ],
+        parent_refs: ['sample-hier-upper-arm'],
+        evidence_refs: ['sample-evidence-wall-thickness'],
+        created_at: '2026-09-20T10:00:00Z',
+      },
+    ],
+  } as Record<string, SampleDecision[]>,
   // FORGE-313: a small product hierarchy for the Structure tab -- mirrors
   // the ticket's own acceptance example (an "upper_arm"/"shoulder"
   // interface with a tip_deflection quantity, a mass allocation with an
@@ -1001,7 +1040,12 @@ function segment(path: string, index: number): string {
 }
 
 /** Resolve one request against the in-memory workspace; `undefined` = unsupported. */
-function route(method: string, path: string, body: Record<string, unknown>): unknown {
+function route(
+  method: string,
+  path: string,
+  body: Record<string, unknown>,
+  params: Record<string, unknown> = {},
+): unknown {
   const now = new Date().toISOString();
   const s = state;
   if (method === 'get') {
@@ -1097,6 +1141,10 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     if (/^\/design-loop\/[^/]+$/.test(path)) return s.designLoops[segment(path, 2)];
     if (path === '/promotion') return { gates: s.promotionGates };
+    if (path === '/decisions') {
+      const relatedTo = String(params.related_to ?? '');
+      return { related_to: relatedTo, decisions: s.decisions[relatedTo] ?? [] };
+    }
     return undefined;
   }
   if (method === 'post') {
@@ -1173,6 +1221,7 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
         const feasible = v <= 1.5;
         const isWinner = i === values.length - 1;
         return {
+          id: `${loopId}-${i}`,
           iteration_number: i,
           parameter_name: 'wall_thickness_mm',
           parameter_value: v,
@@ -1190,14 +1239,36 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
         };
       });
       s.designLoops[loopId] = { loop_id: loopId, status: 'optimal', iterations };
+      // FORGE-289: the real optimizer records a Decision (with evidence
+      // link) for a converged winner -- mirror that here so the Design
+      // Loop section's own DecisionList has something to show.
+      const winner = iterations[iterations.length - 1];
+      if (!winner) return undefined;
+      s.decisions[winner.id] = [
+        {
+          id: `sample-decision-${loopId}`,
+          title: `Optimised wall thickness: ${winner.parameter_value.toFixed(4)}mm (aluminum_6061)`,
+          rationale:
+            `Minimum wall thickness meeting deflection <= 0.5mm and safety factor >= 2, found via bisection over the tier-0 hollow-tube hand-calc. Resulting mass: ${winner.objective_value.toFixed(4)}kg.`,
+          alternatives: iterations
+            .filter((it) => !it.feasible)
+            .map((it) => ({
+              option: `wall_thickness_mm=${it.parameter_value.toFixed(4)}`,
+              reason_rejected: `deflection_margin=${it.constraints_status.deflection_margin_mm}mm, sf_margin=${it.constraints_status.sf_margin}`,
+            })),
+          parent_refs: [],
+          evidence_refs: [`sample-evidence-${loopId}`],
+          created_at: now,
+        },
+      ];
       return {
         loop_id: loopId,
         status: 'optimal',
         detail: 'minimum feasible wall thickness found via bisection: 0.8047mm',
-        winner: iterations[iterations.length - 1],
+        winner,
         candidates: iterations,
         iteration_count: iterations.length,
-        iteration_ids: iterations.map((it) => `${loopId}-${it.iteration_number}`),
+        iteration_ids: iterations.map((it) => it.id),
       };
     }
     if (path === '/promotion/attempt') {
@@ -1355,7 +1426,8 @@ export const sampleAdapter: AxiosAdapter = async (config: InternalAxiosRequestCo
     string,
     unknown
   >;
-  const data = route(method, path, body);
+  const params = (config.params ?? {}) as Record<string, unknown>;
+  const data = route(method, path, body, params);
   if (data === undefined) {
     throw new AxiosError(
       'This action is unavailable in sample mode. Exit sample mode to use your gateway.',

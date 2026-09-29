@@ -264,6 +264,99 @@ class TestForge61ParentRefs:
             await record(title="D", rationale="r", relation="not_a_real_edge_type")
 
 
+class TestForge289EvidenceRefs:
+    """FORGE-289 (gap G-G3): a decision may link to the Evidence node(s) that
+    support it -- via a real ``EdgeType.SUPPORTED_BY`` edge, not just a
+    rationale string that happens to mention the calculation."""
+
+    async def _record_evidence(self, twin: Any, project_id: str) -> str:
+        from api_gateway.twin.evidence_recorder import make_evidence_recorder
+
+        record_evidence = make_evidence_recorder(twin, None)
+        ev = await record_evidence(
+            evidence_type="calculation",
+            producer={"tool": "test"},
+            inputs={"x": 1},
+            result={"y": 2},
+            project_id=project_id,
+        )
+        return ev["node_id"]
+
+    async def test_evidence_refs_link_via_supported_by_edge(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        evidence_id = await self._record_evidence(twin, pid)
+        record = make_decision_recorder(twin, None)
+
+        result = await record(
+            title="Optimised wall thickness",
+            rationale="found via bisection",
+            evidence_refs=[evidence_id],
+            project_id=pid,
+        )
+
+        assert result["evidence_refs"] == [evidence_id]
+        wp = await twin.get_work_product(UUID(result["node_id"]))
+        assert wp is not None
+        assert wp.metadata["evidence_refs"] == [evidence_id]
+        edges = await twin.get_edges(UUID(result["node_id"]), edge_type=EdgeType.SUPPORTED_BY)
+        assert len(edges) == 1
+        assert str(edges[0].target_id) == evidence_id
+
+    async def test_no_evidence_refs_means_no_edges(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+        result = await record(title="D", rationale="r")
+        assert result["evidence_refs"] == []
+
+    async def test_unresolvable_evidence_ref_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        record = make_decision_recorder(twin, None)
+        with pytest.raises(ValueError, match="did not resolve"):
+            await record(title="D", rationale="r", evidence_refs=["nonexistent"])
+
+    async def test_evidence_refs_and_parent_refs_both_link_independently(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        req = await twin.create_constraint(
+            Constraint(
+                name="mass_budget",
+                expression="True",
+                severity=ConstraintSeverity.ERROR,
+                domain="mech",
+                source="test",
+                project_id=UUID(pid),
+            )
+        )
+        evidence_id = await self._record_evidence(twin, pid)
+        record = make_decision_recorder(twin, None)
+
+        result = await record(
+            title="D",
+            rationale="r",
+            parent_refs=["mass_budget"],
+            evidence_refs=[evidence_id],
+            project_id=pid,
+        )
+
+        satisfies_edges = await twin.get_edges(
+            UUID(result["node_id"]), edge_type=EdgeType.SATISFIES
+        )
+        supported_by_edges = await twin.get_edges(
+            UUID(result["node_id"]), edge_type=EdgeType.SUPPORTED_BY
+        )
+        assert [e.target_id for e in satisfies_edges] == [req.id]
+        assert [str(e.target_id) for e in supported_by_edges] == [evidence_id]
+
+
 class TestAdapterHandler:
     async def test_record_decision_tool_registered_and_calls_recorder(
         self, monkeypatch: pytest.MonkeyPatch
@@ -310,6 +403,47 @@ class TestAdapterHandler:
             }
         )
         assert out["parent_refs"] == [str(req.id)]
+
+    async def test_handler_passes_through_evidence_refs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from api_gateway.twin.evidence_recorder import make_evidence_recorder
+
+        _patch_blob(monkeypatch)
+        pid = "f8240b2a-9e01-4b16-83eb-b24cfcd4a04f"
+        twin = InMemoryTwinAPI.create()
+        ev = await make_evidence_recorder(twin, None)(
+            evidence_type="calculation",
+            producer={"tool": "test"},
+            inputs={},
+            result={"y": 1},
+            project_id=pid,
+        )
+        server = TwinServer(
+            twin=twin, allow_mutations=True, decision_recorder=make_decision_recorder(twin, None)
+        )
+        out = await server.record_decision(
+            {
+                "title": "T",
+                "rationale": "because",
+                "evidence_refs": [ev["node_id"]],
+                "project_id": pid,
+            }
+        )
+        assert out["evidence_refs"] == [ev["node_id"]]
+
+    async def test_handler_validates_evidence_refs_is_an_array(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_blob(monkeypatch)
+        twin = InMemoryTwinAPI.create()
+        server = TwinServer(
+            twin=twin, allow_mutations=True, decision_recorder=make_decision_recorder(twin, None)
+        )
+        with pytest.raises(ValueError, match="evidence_refs"):
+            await server.record_decision(
+                {"title": "T", "rationale": "r", "evidence_refs": "not-a-list"}
+            )
 
     async def test_handler_validates_required_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_blob(monkeypatch)

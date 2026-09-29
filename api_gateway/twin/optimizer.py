@@ -18,6 +18,11 @@ evaluated becomes one alternative, with the constraint that rejected it as
 its ``reason_rejected``. No new "Decision with alternatives" node type was
 built -- ``record_decision`` already is exactly that.
 
+FORGE-289: the Decision is also linked to the Evidence node this same run
+recorded via ``evidence_refs`` (a real ``EdgeType.SUPPORTED_BY`` graph edge)
+-- previously the rationale string mentioned the calculation but nothing
+connected the two nodes.
+
 Deliberately out of scope (see ``twin_core/prediction/optimizer.py``'s own
 docstring for the full rationale): proposing the winning wall thickness as
 an actual geometry change via ECT (``ControlledEntityKind`` only supports
@@ -151,6 +156,13 @@ def make_wall_thickness_optimizer(
                     ),
                     alternatives=alternatives,
                     parent_refs=requirement_ids,
+                    # FORGE-289: link the Decision to the Evidence this same
+                    # run just recorded, when there is one -- a real graph
+                    # edge, not just a rationale string that happens to
+                    # mention "found via bisection".
+                    evidence_refs=(
+                        [out["evidence_node_id"]] if "evidence_node_id" in out else None
+                    ),
                     project_id=project_id,
                     domain="mechanical",
                 )
@@ -274,6 +286,11 @@ def make_tube_height_optimizer(
                     ),
                     alternatives=alternatives,
                     parent_refs=requirement_ids,
+                    # FORGE-289: same real evidence edge as the wall-thickness
+                    # optimizer above.
+                    evidence_refs=(
+                        [out["evidence_node_id"]] if "evidence_node_id" in out else None
+                    ),
                     project_id=project_id,
                     domain="mechanical",
                 )

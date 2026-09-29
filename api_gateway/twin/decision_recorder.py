@@ -23,6 +23,17 @@ satisfies — resolved via the same exact-name-or-UUID resolver FORGE-45 built
 type). Without this a G5 "selected concept linked to requirements/objectives"
 check has nothing to evaluate against; see
 ``twin_core.consistency.gates.evaluate_g5_concept_selection``.
+
+FORGE-289 (gap G-G3, "decision records ... with alternatives and evidence
+links, not prose"): ``alternatives`` was already real structured data (see
+above), never prose -- the actual gap was evidence linkage. A decision's
+``rationale`` could mention the Evidence a search produced, but nothing ever
+created a graph edge to it, so a reader (or a gate evaluator) had no way to
+walk from a Decision to the Evidence backing it. ``evidence_refs`` closes
+that: resolved the same way as ``parent_refs``, linked via
+``EdgeType.SUPPORTED_BY`` (previously declared, never used) rather than
+``satisfies`` -- "supported by evidence" and "satisfies a requirement" are
+different relations and shouldn't share one edge type.
 """
 
 from __future__ import annotations
@@ -87,6 +98,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         rationale: str,
         alternatives: list[dict[str, Any]] | None = None,
         parent_refs: list[str] | None = None,
+        evidence_refs: list[str] | None = None,
         relation: str = _DEFAULT_RELATION,
         project_id: str | None = None,
         session_id: str | None = None,
@@ -157,6 +169,17 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
             if parent_refs:
                 resolved_parent_ids = await resolve_refs(twin, parent_refs, project_id=project_id)
 
+            # FORGE-289: same discipline -- resolve before the work product
+            # exists, zero partial writes on an unresolvable ref.
+            # ``include_work_products`` isn't needed here: an evidence ref is
+            # always the EngineeringEntity id ``evidence_recorder.py`` returns
+            # as ``node_id``, never a name lookup.
+            resolved_evidence_ids: list[UUID] = []
+            if evidence_refs:
+                resolved_evidence_ids = await resolve_refs(
+                    twin, evidence_refs, project_id=project_id
+                )
+
             # 1. blob → MinIO (graceful: keep the node even if storage is down).
             minio_object_key: str | None = None
             try:
@@ -183,6 +206,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["session_id"] = session_id
             if resolved_parent_ids:
                 metadata["parent_refs"] = [str(p) for p in resolved_parent_ids]
+            if resolved_evidence_ids:
+                metadata["evidence_refs"] = [str(e) for e in resolved_evidence_ids]
 
             now = datetime.now(UTC)
             wp = WorkProduct(
@@ -211,6 +236,18 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                     parent_id,
                     relation_edge,
                     metadata={"kind": "decision_trace"},
+                )
+
+            # FORGE-289: the real evidence link -- a reader (or a gate
+            # evaluator) can now walk Decision -[SUPPORTED_BY]-> Evidence
+            # instead of only reading a rationale string that happens to
+            # mention it.
+            for evidence_id in resolved_evidence_ids:
+                await twin.add_edge(
+                    created.id,
+                    evidence_id,
+                    EdgeType.SUPPORTED_BY,
+                    metadata={"kind": "decision_evidence"},
                 )
 
             # 2. project junction link (MET-489 facet 3) so it shows on the
@@ -249,6 +286,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 indexed=indexed,
                 minio_object_key=minio_object_key,
                 parent_count=len(resolved_parent_ids),
+                evidence_count=len(resolved_evidence_ids),
             )
             return {
                 "node_id": node_id,
@@ -256,6 +294,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "content_hash": content_hash,
                 "project_linked": linked,
                 "parent_refs": [str(p) for p in resolved_parent_ids],
+                "evidence_refs": [str(e) for e in resolved_evidence_ids],
                 "knowledge_indexed": indexed,
                 "deduplicated": False,
             }

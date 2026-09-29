@@ -77,6 +77,26 @@ test.describe('Digital Twin Viewer', () => {
     await expect(massCell).toBeVisible();
   });
 
+  test('Structure tab: selecting a hierarchy node shows its linked decisions (FORGE-289)', async ({
+    page,
+  }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await upperArmRow.getByRole('button', { name: 'upper_arm', exact: true }).click();
+
+    const panel = page.getByTestId('structure-decisions-panel');
+    await expect(panel).toBeVisible();
+    const card = panel.getByTestId('decision-card');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Upper arm wall thickness');
+    await expect(card).toContainText('2 alternatives considered');
+    await expect(card).toContainText('Supported by 1 evidence record');
+  });
+
   test('Assembly tab: joints are editable and persist', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the graph canvas.
@@ -273,6 +293,11 @@ test.describe('Requirements', () => {
 
     // Sparkline renders alongside the iteration table (FORGE-288).
     await expect(loopSection.getByTestId('design-loop-sparkline')).toBeVisible();
+
+    // The converged winner's Decision renders as a card, linked via the
+    // real GENERATED_FROM edge (FORGE-289).
+    await expect(loopSection.getByTestId('decision-card')).toBeVisible();
+    await expect(loopSection.getByTestId('decision-card')).toContainText('Optimised wall thickness');
 
     // Exactly one converged winner, awaiting approval.
     await expect(loopSection.getByText('awaiting approval')).toBeVisible();

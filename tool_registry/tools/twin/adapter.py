@@ -895,6 +895,16 @@ class TwinServer(McpToolServer):
                                 "selected concept satisfies -- by name/title or node id."
                             ),
                         },
+                        "evidence_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-289: Evidence node id(s) (twin.record_evidence's "
+                                "own node_id) that support this decision -- linked via "
+                                "EdgeType.SUPPORTED_BY, a real graph edge a reader can "
+                                "walk instead of a rationale string mentioning evidence."
+                            ),
+                        },
                         "relation": {
                             "type": "string",
                             "description": (
@@ -919,6 +929,7 @@ class TwinServer(McpToolServer):
                         "content_hash": {"type": "string"},
                         "project_linked": {"type": "boolean"},
                         "parent_refs": {"type": "array", "items": {"type": "string"}},
+                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
                     },
                 },
                 phase=1,
@@ -940,6 +951,9 @@ class TwinServer(McpToolServer):
         parent_refs = arguments.get("parent_refs")
         if parent_refs is not None and not isinstance(parent_refs, list):
             raise ValueError("twin.record_decision: 'parent_refs' must be an array")
+        evidence_refs = arguments.get("evidence_refs")
+        if evidence_refs is not None and not isinstance(evidence_refs, list):
+            raise ValueError("twin.record_decision: 'evidence_refs' must be an array")
         relation = arguments.get("relation")
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
@@ -949,6 +963,7 @@ class TwinServer(McpToolServer):
             "rationale": rationale,
             "alternatives": alternatives,
             "parent_refs": parent_refs,
+            "evidence_refs": evidence_refs,
             "project_id": project_id if isinstance(project_id, str) else None,
             "session_id": session_id if isinstance(session_id, str) else None,
             "supersedes": supersedes if isinstance(supersedes, str) else None,

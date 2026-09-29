@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Boxes } from 'lucide-react';
 import { useHierarchyTree } from '../../hooks/use-hierarchy';
 import { iconForHierarchyKind } from '../../utils/wp-icons';
+import { DecisionList } from '../shared/DecisionList';
 import type { HierarchyNode } from '../../types/hierarchy';
 
 /**
@@ -163,6 +164,11 @@ export function StructureView({
 }) {
   const { data: nodes, isLoading } = useHierarchyTree(projectId ?? undefined);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // FORGE-289 (gap G-G3): "Decision cards linked from hierarchy nodes" --
+  // tracked locally rather than through the parent's selectedNode/inspector
+  // machinery, which assumes a WorkProduct (CAD) node shape a HierarchyNode
+  // doesn't have.
+  const [decisionNodeId, setDecisionNodeId] = useState<string | null>(null);
 
   const forest = useMemo(() => buildForest(nodes ?? []), [nodes]);
 
@@ -220,9 +226,18 @@ export function StructureView({
               depth={0}
               collapsed={collapsed}
               onToggle={toggle}
-              onSelect={onSelect}
+              onSelect={(id) => {
+                onSelect(id);
+                setDecisionNodeId(id);
+              }}
             />
           ))}
+        </div>
+      )}
+
+      {decisionNodeId && (
+        <div data-testid="structure-decisions-panel" className="mt-3">
+          <DecisionList nodeId={decisionNodeId} heading="Decisions" />
         </div>
       )}
     </div>
