@@ -132,3 +132,14 @@ project** on `/projects` instead of only in the global `/sessions` stream.
 > **locally** (stdio) — a remote `mcp-http` sidecar can't write your laptop's
 > filesystem. For a remote sidecar, set it from the agent via Bash
 > (`metaforge-capture use <id>`). Tracked as a follow-up to MET-501.
+
+## Tracing a claim back to a call (FORGE-362)
+
+Every MCP tool call returns `_meta.callId`, and the captured `action`
+event carries the same value as `data.call_id`. That makes a claimed
+action checkable: given a call id from a reply, either the timeline has
+an event with it or the claim has nothing behind it.
+
+This is the server-side half of F4. Flagging a reply that made *no* tool
+calls at all is a client-side concern — the server never sees the reply —
+but the session record is what any such check has to read.
