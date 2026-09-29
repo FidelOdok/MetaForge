@@ -104,11 +104,12 @@ Your work is captured for review:
 correctly: run `metaforge-capture use <project_id>` (CLI) or call session.start \
 with the project_id. If you don't know which project, ask the user. With no \
 active project, capture stays unbound.
-- session.start also scopes your later tool calls to that project, but only \
-when your client presents a stable session (stdio, or an X-MetaForge-Session \
-header). It tells you which happened: if it returns \
-`project_scope_bound: false`, keep passing project_id explicitly on calls \
-that take it.
+- session.start also scopes your later tool calls to that project. It tells \
+you whether that took effect: if it returns `project_scope_bound: false`, \
+the scope did NOT stick and you must keep passing project_id explicitly on \
+every call that takes one. Most clients get a sticky scope automatically \
+(stdio, or any HTTP client echoing the Mcp-Session-Id this server issues at \
+initialize); a client doing neither gets `false`.
 - Record design choices with twin.record_decision (title, rationale, alternatives) \
 so they persist as typed, reviewable decisions.
 - Capturing your reasoning (not just actions) is an optional client-side add-on \

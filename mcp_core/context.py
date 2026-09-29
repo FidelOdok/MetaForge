@@ -63,6 +63,29 @@ class McpCallContext(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    #: The all-zero session of the unattributed sentinel. Binding anything to
+    #: it would be process-global by another name, which is the leak the
+    #: binding registry below is keyed to avoid.
+    _SENTINEL_SESSION = UUID("00000000-0000-0000-0000-000000000000")
+
+    @property
+    def session_is_stable(self) -> bool:
+        """Whether ``session_id`` came from the caller or we invented it.
+
+        FORGE-334. It matters because a session binding is only ever found
+        again by a later call presenting the *same* id. When the transport
+        supplied none, ``default_factory`` hands out a fresh one per call, so
+        a binding stored against it can never match and the scope does not
+        stick -- however confidently anything reports that it did.
+
+        ``model_fields_set`` is the honest test: the three builders
+        (headers, env, chat thread) all pass ``session_id`` only when they
+        actually have one, and ``model_copy(update=...)`` preserves the set.
+        """
+        if self.session_id == self._SENTINEL_SESSION:
+            return False
+        return "session_id" in self.model_fields_set
+
 
 # Sentinel context used when the caller didn't install one. Encodes the
 # legacy "unscoped, unattributed" behaviour explicitly so handlers can

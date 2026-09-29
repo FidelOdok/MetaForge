@@ -258,6 +258,38 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Picking a project, and it sticking
+
+`/metaforge:use` calls `session.start` with a `project_id`. Everything
+after that resolves to it: a later call that names no project gets the
+session's, and a call that names one explicitly still wins.
+
+The binding is keyed on the call's session id, never process-global. On a
+shared sidecar a "last project started" would hand one client's project to
+another's calls, which is a worse bug than the one it fixes.
+
+That means it only works for a caller the server can recognise again on
+the next request. Three ways that happens:
+
+| Transport | Session identity |
+|---|---|
+| stdio | `METAFORGE_SESSION_ID` — one process, one session |
+| Streamable HTTP | `Mcp-Session-Id`, issued by the server on the `initialize` response and echoed by the client on every later request |
+| Anything else | `X-MetaForge-Session`, MetaForge's own header |
+
+The middle row is the transport's own mechanism, so a spec-compliant HTTP
+client gets a sticky scope without being told about anything
+MetaForge-specific. A client may end its session with `DELETE /mcp`
+carrying the header, which releases the binding.
+
+**`session.start` reports whether it worked, and the report is load-bearing.**
+`project_scope_bound: false` means the caller presented no session
+identity, so the binding could never be matched again and the client must
+keep passing `project_id` on every call. Until FORGE-334 this came back
+`true` regardless — which, given the instruction attached to it, told the
+agent to stop sending the one thing that was still working, and every
+later call fell through to the default tenant with nothing reporting it.
+
 ### Answering in the harness
 
 Where the connected client supports MCP elicitation, the approval is put

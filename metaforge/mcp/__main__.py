@@ -28,6 +28,7 @@ import os
 import sys
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -42,6 +43,7 @@ from fastapi.responses import (
 )
 
 from mcp_core.auth import AUTH_DENIED, AuthPosture, redact, verify_api_key
+from mcp_core.context import HEADER_SESSION
 from mcp_core.elicitation import ElicitAction, ElicitResult
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
@@ -439,6 +441,52 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: The session header the Streamable HTTP transport defines. Distinct from
+#: MetaForge's own ``X-MetaForge-Session``: that one is ours and a client has
+#: to be told about it, this one every spec-compliant client already sends
+#: back once the server has issued it.
+MCP_SESSION_HEADER = "Mcp-Session-Id"
+
+
+def _is_initialize(raw_body: bytes) -> bool:
+    """Whether this POST body is the ``initialize`` request.
+
+    Unparseable bodies answer False: ``handle_request`` turns them into a
+    proper JSON-RPC parse error, and minting a session for a request that
+    was never valid would leave a binding nothing will ever claim.
+    """
+    try:
+        message = json.loads(raw_body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(message, dict) and message.get("method") == "initialize"
+
+
+def _session_for_request(headers: dict[str, str], raw_body: bytes) -> str | None:
+    """The session id this request belongs to, minting one at initialize.
+
+    Returns None when there is nothing to do -- a non-initialize request
+    from a client that is not carrying a session. That client keeps the old
+    behaviour (a fresh context per call, and ``session.start`` telling it so)
+    rather than being handed a session it never asked for and will not echo.
+    """
+    folded = {k.lower(): v for k, v in headers.items()}
+    existing = folded.get(MCP_SESSION_HEADER.lower())
+    if existing:
+        # Already in a session. Only accept a well-formed one: our context
+        # keys bindings by UUID, and a value we cannot parse would silently
+        # become "no session" one layer down.
+        try:
+            UUID(existing)
+        except ValueError:
+            logger.warning("mcp_session_header_unparseable", value=existing[:64])
+            return None
+        return existing
+    if _is_initialize(raw_body):
+        return str(uuid4())
+    return None
+
+
 def build_http_app(
     server: UnifiedMcpServer,
     *,
@@ -586,7 +634,18 @@ def build_http_app(
         # ``current_context()``.
         from mcp_core.context import context_from_headers, with_context
 
-        ctx = context_from_headers(dict(request.headers))
+        headers = dict(request.headers)
+        # FORGE-334: adopt the transport's own session. The Streamable HTTP
+        # spec says a server MAY assign a session id on the InitializeResult
+        # via ``Mcp-Session-Id``, and that a client which receives one MUST
+        # echo it on every subsequent request. We were issuing none, so every
+        # HTTP client without our proprietary X-MetaForge-Session header got
+        # a freshly invented session per call -- which is why a project
+        # picked with ``/metaforge:use`` did not stick for them.
+        issued_session = _session_for_request(headers, raw_body)
+        if issued_session is not None:
+            headers[HEADER_SESSION] = issued_session
+        ctx = context_from_headers(headers)
         # FORGE-330: a verified token outranks whatever the client put in
         # X-MetaForge-Actor. The header is a convenience for unauthenticated
         # local use; it must never be able to overwrite an identity the
@@ -600,7 +659,34 @@ def build_http_app(
         # client doesn't try to json-parse an empty string.
         if not response:
             return JSONResponse(content=None, status_code=204)
-        return JSONResponse(json.loads(response))
+        out = JSONResponse(json.loads(response))
+        if issued_session is not None:
+            out.headers[MCP_SESSION_HEADER] = issued_session
+        return out
+
+    @app.delete("/mcp")
+    async def mcp_delete(request: Request) -> JSONResponse:
+        """Explicit session termination, per the Streamable HTTP spec.
+
+        A client that is done SHOULD send DELETE with its ``Mcp-Session-Id``.
+        Releasing the project binding here is what keeps a long-lived sidecar
+        from holding one for a client that has gone away -- the registry is
+        capped and evicts oldest-first, so without this a departed client's
+        binding can outlive an active client's.
+        """
+        from uuid import UUID
+
+        from mcp_core.context import clear_session_project
+
+        raw = request.headers.get(MCP_SESSION_HEADER)
+        if not raw:
+            return JSONResponse({"error": "Mcp-Session-Id required"}, status_code=400)
+        try:
+            clear_session_project(UUID(raw))
+        except ValueError:
+            return JSONResponse({"error": "Mcp-Session-Id is not a known session"}, status_code=404)
+        logger.info("mcp_session_terminated", session_id=raw)
+        return JSONResponse(content=None, status_code=204)
 
     if enable_sse:
 

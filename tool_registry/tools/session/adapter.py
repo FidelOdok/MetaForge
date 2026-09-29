@@ -45,6 +45,24 @@ def _bind_project(project_id: Any) -> bool:
         from mcp_core.context import bind_session_project, current_context
 
         ctx = current_context()
+        # FORGE-334: this used to bind and return True whatever the session
+        # identity was. When the caller presents none, the context hands out
+        # a fresh session_id per call, so the binding was stored against an
+        # id nothing would ever present again -- and `project_scope_bound:
+        # true` told the client the opposite. Acting on that report is the
+        # documented behaviour ("keep passing project_id explicitly" only if
+        # it comes back false), so the client then stopped sending the one
+        # thing that was still working and every later call fell through to
+        # the default tenant.
+        if not ctx.session_is_stable:
+            logger.warning(
+                "session_project_bind_unstable_session",
+                reason=(
+                    "caller presented no session identity; a binding here could "
+                    "never be matched again"
+                ),
+            )
+            return False
         bind_session_project(ctx.session_id, UUID(project_id))
     except Exception as exc:  # noqa: BLE001 — scoping must not fail session.start
         logger.warning("session_project_bind_failed", error=str(exc))
