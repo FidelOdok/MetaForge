@@ -2776,7 +2776,11 @@ class TwinServer(McpToolServer):
                                     "ref": {"type": "string"},
                                     "entity_kind": {
                                         "type": "string",
-                                        "enum": ["constraint", "engineering_entity"],
+                                        "enum": [
+                                            "constraint",
+                                            "engineering_entity",
+                                            "work_product",
+                                        ],
                                     },
                                     "revision": {"type": "integer"},
                                 },
@@ -2785,7 +2789,10 @@ class TwinServer(McpToolServer):
                             "description": (
                                 "Revision-pinned dependencies (e.g. the requirement "
                                 "whose current revision this evidence was computed "
-                                "against) -- omit 'revision' to pin the current one."
+                                "against) -- omit 'revision' to pin the current one. "
+                                "'work_product' pins a CAD/artefact revision (FORGE-314, "
+                                "the doc's own CAD-BODY-003@7 example) -- its revision is "
+                                "0 while it's the current tip, 1 once superseded."
                             ),
                         },
                         "supersedes": {
