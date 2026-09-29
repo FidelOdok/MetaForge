@@ -592,3 +592,86 @@ class TestMissingArtifacts:
         assert result.status is CheckStatus.NO_DATA
         assert result.passed is False
         assert result.severity == "info"
+
+
+class TestNoDataIsNotAPass:
+    """F3, the cases that computed a verdict from absence (FORGE-361).
+
+    A skip that reports success is the failure mode: a gate reading
+    ``passed`` cannot tell "this check was satisfied" from "this check never
+    ran", and the project with nothing recorded is the one that looks
+    cleanest.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_pcb_with_no_dimensions_does_not_fit_everything(self, twin, validator):
+        # Was: width defaulted to 0.0, so a dimensionless PCB fitted inside
+        # any enclosure and the message read "PCB (0.0x0.0mm) fits".
+        pcb = _make_pcb()
+        pcb.metadata["dimensions"] = {}
+        enc = _make_enclosure(width=60.0, height=40.0)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
+
+        result = await validator.check_pcb_enclosure_fit(pcb.id, "main")
+        assert result.status is CheckStatus.NO_DATA
+        assert result.passed is False
+        assert "pcb.width" in result.details["missing"]
+
+    @pytest.mark.asyncio
+    async def test_a_missing_dimension_reads_the_same_on_either_side(self, twin, validator):
+        # The asymmetry this replaces: a missing PCB dimension passed
+        # (0 <= available) while a missing enclosure dimension failed
+        # (x <= -0.0). The same absence, opposite verdicts, depending only
+        # on which artifact it was missing from.
+        pcb_blank = _make_pcb()
+        pcb_blank.metadata["dimensions"] = {}
+        enc_ok = _make_enclosure(width=60.0, height=40.0)
+        await twin.create_work_product(pcb_blank)
+        await twin.create_work_product(enc_ok)
+        missing_pcb = await validator.check_pcb_enclosure_fit(pcb_blank.id, "main")
+
+        twin2_pcb = _make_pcb(width=50.0, height=30.0)
+        enc_blank = _make_enclosure()
+        enc_blank.metadata["dimensions"] = {}
+        await twin.create_work_product(twin2_pcb)
+        await twin.create_work_product(enc_blank)
+        missing_enc = await validator.check_pcb_enclosure_fit(twin2_pcb.id, "main")
+
+        assert missing_pcb.status is missing_enc.status is CheckStatus.NO_DATA
+
+    @pytest.mark.asyncio
+    async def test_the_missing_fields_are_named(self, twin, validator):
+        # "no data" is only useful if it says which data.
+        pcb = _make_pcb()
+        pcb.metadata["dimensions"] = {"width": 50.0}
+        enc = _make_enclosure(width=60.0, height=40.0)
+        await twin.create_work_product(pcb)
+        await twin.create_work_product(enc)
+
+        result = await validator.check_pcb_enclosure_fit(pcb.id, "main")
+        assert result.details["missing"] == ["pcb.height"]
+        assert "pcb.height" in result.message
+
+
+class TestPassedProperty:
+    def test_only_a_real_pass_is_passed(self):
+        def _check(status):
+            return CrossDomainCheck(
+                name="x", domain_a="a", domain_b="b", status=status, message="m"
+            )
+
+        assert _check(CheckStatus.PASS).passed is True
+        assert _check(CheckStatus.FAIL).passed is False
+        # The whole point: an existing `if not check.passed` caller treats
+        # no-data as not-satisfied rather than as success.
+        assert _check(CheckStatus.NO_DATA).passed is False
+
+    def test_ran_separates_could_not_from_did_not(self):
+        def _check(status):
+            return CrossDomainCheck(
+                name="x", domain_a="a", domain_b="b", status=status, message="m"
+            )
+
+        assert _check(CheckStatus.FAIL).ran is True
+        assert _check(CheckStatus.NO_DATA).ran is False
