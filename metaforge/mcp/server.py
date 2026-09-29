@@ -43,6 +43,7 @@ from mcp_core.guardrails import (
 )
 from mcp_core.profiles import tools_for_profile
 from mcp_core.resources import ResourceUriError, parse_resource_uri
+from mcp_core.workflows import WORKFLOWS, prompt_body, prompt_manifest
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
 from skill_registry.geometry_stash import GeometryStash
@@ -113,6 +114,10 @@ https://github.com/FidelOdok/MetaForge/blob/main/docs/session-capture.md
 
 Full tool catalog and Phase-1 limits: \
 https://github.com/FidelOdok/MetaForge/blob/main/docs/capability-matrix.md"""
+
+
+class PromptNotFoundError(Exception):
+    """``prompts/get`` named a workflow that does not exist (FORGE-340)."""
 
 
 class UnifiedMcpServer:
@@ -238,6 +243,10 @@ class UnifiedMcpServer:
                     result = await self._mcp_tools_list(params)
                 elif method == "tools/call":
                     result = await self._mcp_tools_call(params)
+                elif method == "prompts/list":
+                    result = self._prompts_list()
+                elif method == "prompts/get":
+                    result = self._prompts_get(params)
                 elif method == "resources/list":
                     result = await self._resources_list(params)
                 elif method == "resources/read":
@@ -271,6 +280,8 @@ class UnifiedMcpServer:
                         },
                     )
                 )
+            except PromptNotFoundError as exc:
+                return json.dumps(make_error(request_id, _METHOD_NOT_FOUND, str(exc)))
             except (ResourceNotFoundError, ResourceReadError) as exc:
                 # Same reason the approval errors are caught below: an
                 # exception escaping handle_request reaches the client as a
@@ -368,6 +379,10 @@ class UnifiedMcpServer:
                 # could — so a spec-compliant client had no way to reach
                 # them, and no way to find out they existed.
                 "resources": {},
+                # FORGE-340: the curated workflows, available to every
+                # spec-compliant client rather than only to harnesses with
+                # their own command surface.
+                "prompts": {},
             },
             "serverInfo": {
                 "name": "metaforge-mcp",
@@ -590,6 +605,31 @@ class UnifiedMcpServer:
             call_id=call_id,
         )
         return result
+
+    # ── Prompts (FORGE-340) ───────────────────────────────────────────────
+
+    def _prompts_list(self) -> dict[str, Any]:
+        return {"prompts": prompt_manifest()}
+
+    def _prompts_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Return one workflow's instructions.
+
+        An unknown name names the ones that exist, for the same reason
+        ToolNotFoundError does (FORGE-343): a bare rejection leaves the caller
+        unable to tell a typo from a server that has no prompts at all.
+        """
+        name = params.get("name")
+        try:
+            body = prompt_body(str(name))
+        except KeyError:
+            available = ", ".join(w for w in WORKFLOWS)
+            raise PromptNotFoundError(f"Unknown prompt: {name!r}. Available: {available}") from None
+        return {
+            "description": WORKFLOWS[str(name)][0],
+            "messages": [
+                {"role": "user", "content": {"type": "text", "text": body}},
+            ],
+        }
 
     # ── Resources (FORGE-355) ─────────────────────────────────────────────
 

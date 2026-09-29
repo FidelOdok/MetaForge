@@ -20,7 +20,12 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from mcp_core.workflows import WORKFLOWS  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "integrations"
@@ -31,67 +36,6 @@ DEFAULT_GATEWAY_URL = "http://localhost:8765/mcp"
 
 PLUGIN_NAME = "metaforge"
 VERSION = "0.1.0"
-
-SLASH_COMMANDS: dict[str, tuple[str, str]] = {
-    "use": (
-        "Pick the project to work in for this session",
-        "Set the active MetaForge project.\n\n"
-        "Call `project.list` to show the projects on this gateway, ask which one "
-        "if the user has not said, then call `session.start` with that "
-        "`project_id` so everything recorded afterwards is attributed to it.\n\n"
-        "Then read `metaforge://twin/brief/<project_id>` and summarise where the "
-        "project stands — newest work first. Do not restate the whole brief.",
-    ),
-    "status": (
-        "Where this project stands right now",
-        "Summarise the active project's state.\n\n"
-        "Read `metaforge://twin/brief/<project_id>` and "
-        "`metaforge://twin/requirements/<project_id>`.\n\n"
-        "Report what is built, and which requirements are unverified. A "
-        "requirement with `no_data` has no evidence at all — say so plainly. It "
-        "is a gap, not a pass, and it is the thing most worth surfacing.",
-    ),
-    "design": (
-        "Design or revise a part",
-        "Design a part in the active project.\n\n"
-        "Read the brief first so the part fits what already exists. Author "
-        "geometry through the CAD tools, give every part a meaningful name "
-        "(never `Part_1`), and commit with `twin.commit_geometry`.\n\n"
-        "A write may be held for approval — that is expected, not an error. Tell "
-        "the user it is waiting in the dashboard rather than retrying.",
-    ),
-    "fea": (
-        "Run a load case and record the evidence",
-        "Run structural analysis on a committed part.\n\n"
-        "Stage the geometry with `twin.stage_work_product_file`, set up the load "
-        "case, run `calculix.run_fea`, then check convergence with "
-        "`calculix.check_mesh_convergence` and cross-check against a hand "
-        "calculation where one applies.\n\n"
-        "Record the result with `twin.record_evidence`, pinned to the exact "
-        "revision it came from. A number with no evidence behind it is not a "
-        "result — say what you could not establish rather than rounding it into "
-        "a claim.",
-    ),
-    "gate": (
-        "Review a maturity gate",
-        "Review whether the active project can be promoted.\n\n"
-        "Read `metaforge://twin/requirements/<project_id>` and report each "
-        "required claim's status. `uncertain`, `stale` and `no_data` all block; "
-        "only an approved waiver naming that requirement overrides a `fail`.\n\n"
-        "`twin.attempt_promotion` refuses rather than warns, and it needs a named "
-        "human in `decided_by`. Do not supply one on the user's behalf.",
-    ),
-    "doctor": (
-        "Check the connection and what is reachable",
-        "Diagnose this MetaForge connection.\n\n"
-        "Call `health/check`, then `tools/list` and `resources/list`. Report the "
-        "gateway version and auth mode.\n\n"
-        "Check `_meta.unavailableAdapters` on both listings — an adapter whose "
-        "container is down contributes no tools and no resources, and the list "
-        "simply looks shorter. Name any that are missing rather than describing "
-        "what is left as if it were everything.",
-    ),
-}
 
 
 def plugin_manifest(*, default_gateway_url: str) -> dict:
@@ -218,7 +162,7 @@ def write_commands(root: Path) -> list[str]:
     commands = root / "commands"
     commands.mkdir(parents=True, exist_ok=True)
     written = []
-    for name, (description, body) in SLASH_COMMANDS.items():
+    for name, (description, body) in WORKFLOWS.items():
         path = commands / f"{name}.md"
         path.write_text(f"---\ndescription: {description}\n---\n\n{body}\n")
         written.append(f"/{PLUGIN_NAME}:{name}")
