@@ -1029,6 +1029,29 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
         conclusions: ['The drone shall fly at a cruise speed of at least 8 m/s.'],
       };
     }
+    if (path === '/requirements/constraints') {
+      // FORGE-259: the constraint editor's create action -- appends a
+      // real no_data row to the illustrative matrix, same as a fresh
+      // constraint with no claims yet on the real backend.
+      const payload = body as {
+        name?: string;
+        metric?: string;
+        operator?: string;
+        limit?: number;
+        unit?: string;
+      };
+      const id = `sample-req-${Date.now()}`;
+      s.requirementMatrix.rows.push({
+        requirementId: id,
+        requirementName: payload.name ?? 'new_requirement',
+        limitText: `${payload.metric ?? ''} ${payload.operator ?? '<='} ${payload.limit ?? ''}${payload.unit ?? ''}`,
+        status: 'no_data',
+        detail: 'no claim recorded against this requirement',
+        artefactIds: [],
+        evidence: [],
+      });
+      return { constraintId: id, setWorkProductId: `sample-set-${id}` };
+    }
     if (path === '/chat/threads') {
       const thread = {
         id: `sample-thread-${Date.now()}`,

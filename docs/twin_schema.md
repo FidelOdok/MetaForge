@@ -228,6 +228,11 @@ A Constraint is a rule that must be satisfied across one or more work products. 
 | `message` | `str` | No | Human-readable description of the constraint |
 | `acceptance_criteria` | `str` | No | What must be true for this requirement to be considered met (FORGE-312) |
 | `verification_method` | `str` | No | How it's verified (e.g. `"FEA"`, `"test"`, `"inspection"`) (FORGE-312) |
+| `metric` | `str` | No | The property this requirement is about, e.g. `"tip_deflection"` (FORGE-259) |
+| `operator` | `str` | No | Comparison against `limit` -- `"<="`/`">="`/`"=="`/`"<"`/`">"`/`"!="`. Default `"<="` (FORGE-259) |
+| `limit` | `float` | No | The numeric limit `metric` is compared to (FORGE-259) |
+| `unit` | `str` | No | Must be a unit `twin_core.models.quantity` recognizes (FORGE-259) |
+| `target_node_type` | `str` | No | The kind of node `metric` is measured on, e.g. `"cad_model"` (FORGE-259) |
 | `last_evaluated` | `datetime` | No | When the constraint was last checked |
 | `metadata` | `dict` | No | Additional context |
 
@@ -236,6 +241,34 @@ keys) so `twin_core.consistency.gates`'s G7 (Verification Readiness) gate
 can check a critical requirement for both directly. Both fall back to the
 identically-named `metadata` key when empty, for requirements
 `RequirementAuthorAgent` (FORGE-55) wrote before these fields existed.
+
+FORGE-259 (gap G-A3): `metric`/`operator`/`limit`/`unit`/`target_node_type`
+are a structured measured-key binding -- what property this requirement is
+about, compared how, against what limit, on what kind of node -- as an
+alternative to the opaque `expression` string. All five are optional and
+blank/`None` by default, so every existing `expression`-only Constraint
+stays valid unchanged (the same additive discipline `acceptance_criteria`/
+`verification_method` already established). `twin.record_constraint_set`
+accepts EITHER an `expression` OR a structured `metric`+`limit` binding per
+entry -- when only the structured binding is supplied, a benign placeholder
+expression (`"True"`) is recorded instead of requiring the caller to also
+hand-write Python, since live pass/fail/no_data status for a requirement
+comes from `GET /v1/requirements/matrix` (section 2.15, real Claim/Evidence
+data), never from evaluating this expression. When present, the structured
+binding also becomes a matrix row's `limitText` (e.g. `"tip_deflection <=
+0.5mm"`), replacing the free-text `message`/`name` fallback with real,
+machine-set data. Deliberately NOT wired into `expression` evaluation
+itself, or into FORGE-315/317/320's evaluator/sensitivity/optimizer tools
+automatically (those already take their own metric/limit kwargs directly)
+-- reading a Constraint's structured fields into those tools automatically
+is real, separable follow-up work, not this ticket's own minimal scope.
+
+The dashboard's Requirements page (section "Evidence matrix", FORGE-318)
+gained a "+ New constraint" form writing exactly this binding via a new
+`POST /v1/requirements/constraints` route (reusing
+`api_gateway.twin.constraint_recorder` directly, the same validation every
+MCP caller already goes through) -- create-only for this first cut, no
+edit.
 
 ```python
 class ConstraintSeverity(StrEnum):
@@ -263,11 +296,17 @@ class Constraint(NodeBase):
     message: str = ""
     acceptance_criteria: str = ""
     verification_method: str = ""
+    # FORGE-259: structured measured-key binding -- alternative to `expression`.
+    metric: str = ""
+    operator: str = "<="
+    limit: float | None = None
+    unit: str = ""
+    target_node_type: str = ""
     last_evaluated: datetime | None = None
     metadata: dict = Field(default_factory=dict)
 ```
 
-*Source: `twin_core/models/constraint.py`*
+*Source: `twin_core/models/constraint.py`, `api_gateway/twin/constraint_recorder.py`, `api_gateway/requirement_intelligence/routes.py`, `dashboard/src/pages/RequirementsPage.tsx`*
 
 ### 2.3 Version
 

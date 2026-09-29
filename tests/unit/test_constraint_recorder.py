@@ -327,3 +327,121 @@ async def test_parent_refs_must_be_a_list_of_strings(monkeypatch: pytest.MonkeyP
                 {"name": "x", "expression": "True", "parent_refs": "not_a_list"},
             ],
         )
+
+
+# --- FORGE-259: structured measured-key binding (metric/operator/limit/unit) ---
+
+
+@pytest.mark.asyncio
+async def test_structured_binding_without_expression_gets_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    record = make_constraint_recorder(twin)
+
+    out = await record(
+        title="Arm requirements",
+        constraints=[
+            {
+                "name": "tip_deflection",
+                "metric": "tip_deflection",
+                "operator": "<=",
+                "limit": 0.5,
+                "unit": "mm",
+                "target_node_type": "cad_model",
+            }
+        ],
+        project_id=PROJECT_ID,
+    )
+    from uuid import UUID
+
+    c = await twin.constraints.get_constraint(UUID(out["constraint_ids"][0]))
+    assert c is not None
+    assert c.expression == "True"
+    assert c.metric == "tip_deflection"
+    assert c.operator == "<="
+    assert c.limit == 0.5
+    assert c.unit == "mm"
+    assert c.target_node_type == "cad_model"
+
+
+@pytest.mark.asyncio
+async def test_neither_expression_nor_structured_binding_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_blob(monkeypatch)
+    record = make_constraint_recorder(InMemoryTwinAPI.create(), None)
+    with pytest.raises(ValueError, match="'expression', or a structured"):
+        await record(title="t", constraints=[{"name": "x"}])
+
+
+@pytest.mark.asyncio
+async def test_bad_operator_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_blob(monkeypatch)
+    record = make_constraint_recorder(InMemoryTwinAPI.create(), None)
+    with pytest.raises(ValueError, match="operator"):
+        await record(
+            title="t",
+            constraints=[
+                {"name": "x", "metric": "mass", "limit": 1.0, "operator": "~="},
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_bad_unit_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_blob(monkeypatch)
+    record = make_constraint_recorder(InMemoryTwinAPI.create(), None)
+    with pytest.raises(ValueError, match="not a recognized unit"):
+        await record(
+            title="t",
+            constraints=[
+                {"name": "x", "metric": "mass", "limit": 1.0, "unit": "bogus_unit"},
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_structured_fields_default_to_empty_for_expression_only_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    record = make_constraint_recorder(twin)
+
+    out = await record(title="Arm requirements", constraints=[_MASS_LIMIT], project_id=PROJECT_ID)
+    from uuid import UUID
+
+    c = await twin.constraints.get_constraint(UUID(out["constraint_ids"][0]))
+    assert c is not None
+    assert c.metric == ""
+    assert c.operator == "<="
+    assert c.limit is None
+    assert c.unit == ""
+    assert c.target_node_type == ""
+
+
+@pytest.mark.asyncio
+async def test_adapter_accepts_structured_binding_without_expression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    calls: dict[str, Any] = {}
+
+    async def recorder(**kwargs: Any) -> dict[str, Any]:
+        calls.update(kwargs)
+        return {"node_id": "n1", "constraint_ids": ["c1"]}
+
+    server = TwinServer(twin=twin, constraint_recorder=recorder)
+    out = await server.record_constraint_set(
+        {
+            "title": "t",
+            "constraints": [
+                {"name": "x", "metric": "mass", "operator": "<=", "limit": 4.5, "unit": "kg"}
+            ],
+        }
+    )
+    assert out["node_id"] == "n1"
+    assert calls["constraints"][0]["metric"] == "mass"

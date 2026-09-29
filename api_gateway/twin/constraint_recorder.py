@@ -23,6 +23,21 @@ resolved via the same exact-name-or-UUID resolver FORGE-45 built
 across the whole batch are resolved up front, before the constraint_set work
 product or any Constraint node is created, so an unresolvable ref fails the
 call with zero partial writes.
+
+FORGE-259 (gap G-A3): an entry may also carry the structured measured-key
+binding fields (``metric``/``operator``/``limit``/``unit``/
+``target_node_type``, all pass-through to the new ``Constraint`` fields,
+FORGE-312's own additive-field discipline). This is what the dashboard's
+constraint editor writes -- picking a metric/operator/limit/unit/target
+directly rather than hand-typing a Python expression. When a caller
+supplies a real ``metric`` + ``limit`` binding and omits ``expression``,
+a benign placeholder (``"True"``) is recorded instead: live pass/fail/
+no_data status for a requirement comes from FORGE-318's own
+``build_requirement_matrix`` (real Claim/Evidence data), never from
+evaluating this expression, so there is nothing dishonest about a
+placeholder here -- unlike a caller supplying neither an expression nor a
+structured binding, which is still rejected outright (an evaluable-nor-
+declared constraint is not a real requirement).
 """
 
 from __future__ import annotations
@@ -43,6 +58,12 @@ tracer = get_tracer("api_gateway.twin.constraint_recorder")
 
 _MAX_CONSTRAINTS = 50
 _SEVERITIES = {s.value for s in ConstraintSeverity}
+# FORGE-259: same free-string convention InterfaceQuantity.op (FORGE-313)
+# already established -- not a new enum, but still worth rejecting a typo
+# loudly at record time rather than silently accepting an operator no
+# consumer will ever recognize.
+_OPERATORS = {"<=", ">=", "==", "<", ">", "!="}
+_PLACEHOLDER_EXPRESSION = "True"
 
 
 def _validate_entry(index: int, entry: Any) -> dict[str, Any]:
@@ -50,17 +71,38 @@ def _validate_entry(index: int, entry: Any) -> dict[str, Any]:
     if not isinstance(entry, dict):
         raise ValueError(f"constraint[{index}] must be an object")
     name = entry.get("name")
-    expression = entry.get("expression")
     if not name or not isinstance(name, str):
         raise ValueError(f"constraint[{index}]: 'name' is required (non-empty string)")
-    if not expression or not isinstance(expression, str):
-        raise ValueError(f"constraint[{index}] '{name}': 'expression' is required")
+
+    metric = str(entry.get("metric") or "")
+    limit = entry.get("limit")
+    has_structured_binding = bool(metric) and limit is not None
+
+    expression = entry.get("expression")
+    if not expression:
+        if not has_structured_binding:
+            raise ValueError(
+                f"constraint[{index}] '{name}': provide either 'expression', or a structured "
+                "'metric' + 'limit' binding"
+            )
+        expression = _PLACEHOLDER_EXPRESSION
+    elif not isinstance(expression, str):
+        raise ValueError(f"constraint[{index}] '{name}': 'expression' must be a string")
     try:
         compile(expression, "<constraint>", "eval")
     except SyntaxError as exc:
         raise ValueError(
             f"constraint[{index}] '{name}': expression does not compile: {exc}"
         ) from exc
+
+    operator = str(entry.get("operator") or "<=")
+    if operator not in _OPERATORS:
+        raise ValueError(
+            f"constraint[{index}] '{name}': 'operator' must be one of {sorted(_OPERATORS)}"
+        )
+    if limit is not None and not isinstance(limit, (int, float)):
+        raise ValueError(f"constraint[{index}] '{name}': 'limit' must be a number")
+
     severity = str(entry.get("severity") or "error").lower()
     if severity not in _SEVERITIES:
         raise ValueError(
@@ -82,6 +124,13 @@ def _validate_entry(index: int, entry: Any) -> dict[str, Any]:
         # (unchanged behavior for a caller that omits them).
         "acceptance_criteria": str(entry.get("acceptance_criteria") or ""),
         "verification_method": str(entry.get("verification_method") or ""),
+        # FORGE-259: structured measured-key binding -- optional, default ""
+        # / None (unchanged behavior for a caller that omits them).
+        "metric": metric,
+        "operator": operator,
+        "limit": float(limit) if limit is not None else None,
+        "unit": str(entry.get("unit") or ""),
+        "target_node_type": str(entry.get("target_node_type") or ""),
     }
 
 
@@ -95,6 +144,12 @@ def _render_markdown(title: str, entries: list[dict[str, Any]]) -> str:
             lines.append(f"**Acceptance criteria:** {e['acceptance_criteria']}")
         if e["verification_method"]:
             lines.append(f"**Verification method:** {e['verification_method']}")
+        if e["metric"]:
+            unit_suffix = e["unit"] or ""
+            target = f" on {e['target_node_type']}" if e["target_node_type"] else ""
+            lines.append(
+                f"**Binding:** {e['metric']} {e['operator']} {e['limit']}{unit_suffix}{target}"
+            )
         lines.append(f"```python\n{e['expression']}\n```")
         lines.append("")
     return "\n".join(lines)
@@ -176,6 +231,11 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                     message=e["message"],
                     acceptance_criteria=e["acceptance_criteria"],
                     verification_method=e["verification_method"],
+                    metric=e["metric"],
+                    operator=e["operator"],
+                    limit=e["limit"],
+                    unit=e["unit"],
+                    target_node_type=e["target_node_type"],
                     # FORGE-46: NodeBase.project_id was never set here before --
                     # only mirrored into metadata -- so list_constraints(project_id=...)
                     # (the resolver's read path) could never find these nodes.

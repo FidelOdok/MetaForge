@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -173,3 +173,90 @@ class TestRequirementMatrixRoute:
         async with client:
             resp = await client.get("/v1/requirements/matrix", params={"project_id": "not-a-uuid"})
         assert resp.status_code == 400
+
+
+class TestCreateConstraintRoute:
+    """POST /v1/requirements/constraints (FORGE-259)."""
+
+    @pytest.fixture
+    def app(self):
+        from fastapi import FastAPI
+
+        from api_gateway.requirement_intelligence.routes import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return app
+
+    @pytest.fixture
+    def client(self, app):
+        from httpx import ASGITransport, AsyncClient
+
+        transport = ASGITransport(app=app)
+        return AsyncClient(transport=transport, base_url="http://test")
+
+    @pytest.fixture
+    def twin(self):
+        from api_gateway.requirement_intelligence.routes import _twin
+
+        _twin._graph._nodes.clear()
+        _twin._graph._outgoing.clear()
+        _twin._graph._incoming.clear()
+        return _twin
+
+    async def test_creates_a_structured_constraint(self, client, twin) -> None:
+        project_id = uuid4()
+        async with client:
+            resp = await client.post(
+                "/v1/requirements/constraints",
+                json={
+                    "projectId": str(project_id),
+                    "name": "tip_deflection",
+                    "metric": "tip_deflection",
+                    "operator": "<=",
+                    "limit": 0.5,
+                    "unit": "mm",
+                    "targetNodeType": "cad_model",
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["constraintId"]
+            assert body["setWorkProductId"]
+
+            constraint = await twin.get_constraint(UUID(body["constraintId"]))
+            assert constraint is not None
+            assert constraint.metric == "tip_deflection"
+            assert constraint.limit == 0.5
+            assert constraint.unit == "mm"
+
+            # It shows up immediately on the live matrix, no_data (no claim yet).
+            matrix_resp = await client.get(
+                "/v1/requirements/matrix", params={"project_id": str(project_id)}
+            )
+        rows = matrix_resp.json()["rows"]
+        assert len(rows) == 1
+        assert rows[0]["status"] == "no_data"
+        assert rows[0]["limitText"] == "tip_deflection <= 0.5mm"
+
+    async def test_bad_unit_400s(self, client, twin) -> None:
+        async with client:
+            resp = await client.post(
+                "/v1/requirements/constraints",
+                json={
+                    "projectId": str(uuid4()),
+                    "name": "x",
+                    "metric": "mass",
+                    "limit": 1.0,
+                    "unit": "bogus_unit",
+                },
+            )
+        assert resp.status_code == 400
+
+    async def test_missing_required_field_422s(self, client, twin) -> None:
+        async with client:
+            resp = await client.post(
+                "/v1/requirements/constraints",
+                json={"projectId": str(uuid4()), "name": "x"},
+            )
+        assert resp.status_code == 422

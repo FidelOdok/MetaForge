@@ -3,11 +3,12 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from twin_core.models.base import NodeBase
 from twin_core.models.confidence import Confidence
 from twin_core.models.enums import AuthorityState, ConstraintSeverity, ConstraintStatus, NodeType
+from twin_core.models.quantity import is_valid_unit
 
 
 class Constraint(NodeBase):
@@ -30,6 +31,28 @@ class Constraint(NodeBase):
     # (FORGE-55) already wrote there before this field existed).
     acceptance_criteria: str = ""
     verification_method: str = ""
+    # FORGE-259 (gap G-A3, milestone M1): a structured measured-key binding
+    # -- what property this constraint is about, compared how, against what
+    # limit and unit, on what kind of node -- rather than only the opaque
+    # `expression` string. All five are optional/blank-default so every
+    # existing `expression`-only Constraint stays valid unchanged (same
+    # additive discipline FORGE-312 already used for acceptance_criteria/
+    # verification_method). Deliberately NOT wired into `expression`
+    # evaluation or into FORGE-315/317/320's evaluator/sensitivity/
+    # optimizer tools automatically -- those already take their own
+    # metric/limit kwargs directly and reading a Constraint's structured
+    # fields into them is real, separable follow-up work, not this
+    # ticket's own minimal scope (the ticket asks for the declaration to
+    # exist and be editable, not for every existing tool to auto-consume
+    # it). `unit`, when set, must be one of `twin_core.models.quantity`'s
+    # recognized units -- the same validator `InterfaceQuantity.unit`
+    # (FORGE-313) already uses, so a constraint and an interface quantity
+    # can never silently disagree about what units even mean.
+    metric: str = ""
+    operator: str = "<="
+    limit: float | None = None
+    unit: str = ""
+    target_node_type: str = ""
     last_evaluated: datetime | None = None
     metadata: dict = Field(default_factory=dict)
     # FORGE-50 (Phase 2, epic FORGE-35): optimistic-concurrency revision
@@ -42,3 +65,10 @@ class Constraint(NodeBase):
     # BASELINED -- never derived from `confidence`.
     authority: AuthorityState = AuthorityState.PROPOSED
     confidence: Confidence | None = None
+
+    @field_validator("unit")
+    @classmethod
+    def _validate_unit(cls, v: str) -> str:
+        if v and not is_valid_unit(v):
+            raise ValueError(f"{v!r} is not a recognized unit")
+        return v

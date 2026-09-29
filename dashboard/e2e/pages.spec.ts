@@ -109,8 +109,10 @@ test.describe('Requirements', () => {
     page,
   }) => {
     await page.goto('/requirements?demo=1');
-    const panel = page.getByTestId('requirements-panel');
-    const table = panel.getByRole('table');
+    // Scoped to the quality table specifically -- the evidence matrix
+    // table (FORGE-318) also renders a `mass_limit` row on this same
+    // page, so an unscoped `getByRole('table')` is ambiguous.
+    const table = page.getByTestId('requirements-quality-table');
     await expect(table.getByText('mass_limit')).toBeVisible();
     await expect(table.getByText('vague_speed')).toBeVisible();
 
@@ -168,6 +170,31 @@ test.describe('Requirements', () => {
       page.getByRole('button', { name: 'Export CSV' }).click(),
     ]);
     expect(download.suggestedFilename()).toBe('requirement-matrix.csv');
+  });
+
+  test('constraint editor records a structured requirement (FORGE-259)', async ({ page }) => {
+    await page.goto('/requirements?demo=1');
+    const matrix = page.getByTestId('requirements-matrix');
+    await expect(matrix).toBeVisible();
+
+    await matrix.getByTestId('new-constraint-button').click();
+    const form = page.getByTestId('new-constraint-form');
+    await expect(form).toBeVisible();
+
+    await form.getByLabel('Name').fill('tip_deflection');
+    await form.getByLabel('Metric').fill('tip_deflection');
+    await form.getByLabel('Limit').fill('0.5');
+    await form.getByLabel('Unit').fill('mm');
+    await form.getByLabel('Target node type').fill('cad_model');
+    await form.getByRole('button', { name: 'Record' }).click();
+
+    // The form closes and the new requirement appears in the matrix,
+    // live pass/fail/no_data status computed the same way every other
+    // row's is -- honestly no_data since no claim cites it yet.
+    await expect(form).not.toBeVisible();
+    const newRow = matrix.getByRole('row', { name: /tip_deflection/ });
+    await expect(newRow).toContainText('no_data');
+    await expect(newRow).toContainText('tip_deflection <= 0.5mm');
   });
 });
 
