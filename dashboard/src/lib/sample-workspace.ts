@@ -27,6 +27,30 @@ interface SampleDesignLoop {
   iterations: SampleDesignLoopIteration[];
 }
 
+// FORGE-290: illustrative shape of one gate-review attempt -- mirrors
+// AttemptPromotionResponse's own camelCase REST contract (unlike the
+// design-loop mocks above, which mirror the MCP tool's snake_case
+// pass-through) since this route DOES wrap its response in a proper
+// Pydantic model server-side.
+interface SampleRequiredClaimResult {
+  requirementId: string;
+  requirementName: string;
+  decision: 'pass' | 'uncertain' | 'fail' | 'waived';
+  detail: string;
+  waiverId: string | null;
+}
+
+interface SampleMaturityGate {
+  gateId: string;
+  level: string;
+  promoted: boolean;
+  blockedReason: string | null;
+  decidedBy: string | null;
+  comment: string | null;
+  createdAt: string;
+  results?: SampleRequiredClaimResult[];
+}
+
 // Generated from the hosted console sample workspace (illustrative Drone FC data).
 const SAMPLE_WORKSPACE_SEED = {
   nodes: [
@@ -820,6 +844,9 @@ const SAMPLE_WORKSPACE_SEED = {
   // loop_id -- empty until the dashboard's "Start design loop" action
   // creates one (see the POST /design-loop/start handler below).
   designLoops: {} as Record<string, SampleDesignLoop>,
+  // FORGE-290 (gap G-G4): gate-review attempts, newest first -- empty
+  // until the "Attempt promotion" action records one.
+  promotionGates: [] as SampleMaturityGate[],
   // FORGE-313: a small product hierarchy for the Structure tab -- mirrors
   // the ticket's own acceptance example (an "upper_arm"/"shoulder"
   // interface with a tip_deflection quantity, a mass allocation with an
@@ -1056,6 +1083,7 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
     if (path === '/requirements/matrix') return s.requirementMatrix;
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     if (/^\/design-loop\/[^/]+$/.test(path)) return s.designLoops[segment(path, 2)];
+    if (path === '/promotion') return { gates: s.promotionGates };
     return undefined;
   }
   if (method === 'post') {
@@ -1134,6 +1162,58 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
         iteration_count: iterations.length,
         iteration_ids: iterations.map((it) => `${loopId}-${it.iteration_number}`),
       };
+    }
+    if (path === '/promotion/attempt') {
+      // FORGE-290: illustrative evidence-gated approval -- looks each
+      // requested requirement up on the SAME live-ish matrix the evidence
+      // matrix above renders, blocking on anything but 'pass' (matching
+      // the real attempt_promotion's own no_data-blocks discipline),
+      // unless the reviewer explicitly rejects (overrides even a pass).
+      const payload = body as {
+        requiredClaimIds?: string[];
+        level?: string;
+        decidedBy?: string;
+        comment?: string;
+        reject?: boolean;
+      };
+      const ids = payload.requiredClaimIds ?? [];
+      const results: SampleRequiredClaimResult[] = ids.map((id) => {
+        const row = s.requirementMatrix.rows.find((r) => r.requirementId === id);
+        const req = s.requirementsReport.requirements.find((r) => r.id === id);
+        const decision: SampleRequiredClaimResult['decision'] =
+          row?.status === 'pass' ? 'pass' : row?.status === 'uncertain' || row?.status === 'stale' ? 'uncertain' : 'fail';
+        return {
+          requirementId: id,
+          requirementName: req?.name ?? row?.requirementName ?? id,
+          decision,
+          detail: row?.detail ?? 'no claim recorded against this requirement',
+          waiverId: null,
+        };
+      });
+      const blocking = results.filter((r) => r.decision !== 'pass' && r.decision !== 'waived');
+      let promoted = false;
+      let blockedReason: string | null = null;
+      if (payload.reject) {
+        blockedReason = payload.comment ?? `rejected by ${payload.decidedBy}`;
+      } else if (blocking.length > 0) {
+        blockedReason = blocking.map((r) => `${r.requirementName} (${r.decision}): ${r.detail}`).join('; ');
+      } else if (!payload.decidedBy) {
+        blockedReason = 'all required claims satisfied, but promotion requires human authority';
+      } else {
+        promoted = true;
+      }
+      const gate: SampleMaturityGate = {
+        gateId: `sample-gate-${Date.now()}`,
+        level: payload.level ?? 'concept',
+        promoted,
+        blockedReason,
+        decidedBy: payload.decidedBy ?? null,
+        comment: payload.comment ?? null,
+        createdAt: now,
+        results,
+      };
+      s.promotionGates.unshift(gate);
+      return gate;
     }
     const approveLoopMatch = path.match(/^\/design-loop\/([^/]+)\/approve$/);
     if (approveLoopMatch && approveLoopMatch[1]) {

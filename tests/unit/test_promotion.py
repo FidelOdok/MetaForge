@@ -293,3 +293,185 @@ class TestAttemptPromotionAdapter:
         server = TwinServer(twin=twin, promotion_attempter=promotion_attempter)
         with pytest.raises(ValueError, match="required_claim_ids"):
             await server.attempt_promotion({"project_id": "x", "level": "sim_validated"})
+
+
+class TestHumanVetoAndComment:
+    """FORGE-290 (gap G-G4): approve/reject with comment."""
+
+    async def test_reject_requires_decided_by(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id, "tip_deflection", "<= 0.5mm")
+        with pytest.raises(ValueError, match="decided_by"):
+            await attempt_promotion(
+                twin,
+                project_id=str(project_id),
+                level="sim_validated",
+                required_claim_ids=[str(req.id)],
+                reject=True,
+            )
+
+    async def test_reject_blocks_even_when_every_claim_passes(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id, "tip_deflection", "<= 0.5mm")
+        artefact = await _seed_artefact(twin, project_id)
+        await _record_supported_claim(twin, project_id, req, artefact)
+
+        result = await attempt_promotion(
+            twin,
+            project_id=str(project_id),
+            level="sim_validated",
+            required_claim_ids=[str(req.id)],
+            decided_by="chief_engineer",
+            comment="not confident in the load case yet",
+            reject=True,
+        )
+        assert result["promoted"] is False
+        assert result["blocked_reason"] == "not confident in the load case yet"
+        assert result["results"][0]["decision"] == "pass"  # evidence itself was fine
+
+        gate = await twin.get_maturity_gate(UUID(result["gate_id"]))
+        assert gate is not None
+        assert gate.promoted is False
+        assert gate.decided_by == "chief_engineer"
+        assert gate.comment == "not confident in the load case yet"
+
+    async def test_reject_without_comment_uses_a_generic_reason(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id, "tip_deflection", "<= 0.5mm")
+        artefact = await _seed_artefact(twin, project_id)
+        await _record_supported_claim(twin, project_id, req, artefact)
+
+        result = await attempt_promotion(
+            twin,
+            project_id=str(project_id),
+            level="sim_validated",
+            required_claim_ids=[str(req.id)],
+            decided_by="chief_engineer",
+            reject=True,
+        )
+        assert result["promoted"] is False
+        assert "chief_engineer" in result["blocked_reason"]
+
+    async def test_comment_recorded_on_a_normal_approval_too(self, twin, project_id):
+        req = await _seed_requirement(twin, project_id, "tip_deflection", "<= 0.5mm")
+        artefact = await _seed_artefact(twin, project_id)
+        await _record_supported_claim(twin, project_id, req, artefact)
+
+        result = await attempt_promotion(
+            twin,
+            project_id=str(project_id),
+            level="sim_validated",
+            required_claim_ids=[str(req.id)],
+            decided_by="reviewer",
+            comment="looks good, ship it",
+        )
+        assert result["promoted"] is True
+        assert result["comment"] == "looks good, ship it"
+
+    async def test_decided_by_recorded_even_when_blocked_by_evidence(self, twin, project_id):
+        # Real gap fixed by this ticket: decided_by used to be dropped
+        # (set to None) whenever promoted was False -- "who reviewed this
+        # blocked attempt" was lost even though a human clearly did.
+        req = await _seed_requirement(twin, project_id, "tip_deflection", "<= 0.5mm")
+        result = await attempt_promotion(
+            twin,
+            project_id=str(project_id),
+            level="sim_validated",
+            required_claim_ids=[str(req.id)],
+            decided_by="reviewer",
+        )
+        assert result["promoted"] is False
+        gate = await twin.get_maturity_gate(UUID(result["gate_id"]))
+        assert gate is not None
+        assert gate.decided_by == "reviewer"
+
+
+class TestPromotionRoutes:
+    """POST /v1/promotion/attempt, GET /v1/promotion (FORGE-290)."""
+
+    @pytest.fixture
+    def app(self):
+        from fastapi import FastAPI
+
+        from api_gateway.promotion.routes import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return app
+
+    @pytest.fixture
+    def client(self, app):
+        from httpx import ASGITransport, AsyncClient
+
+        transport = ASGITransport(app=app)
+        return AsyncClient(transport=transport, base_url="http://test")
+
+    @pytest.fixture(autouse=True)
+    def _wire(self, twin):
+        from api_gateway.promotion.routes import init_twin as init_promotion_twin
+
+        init_promotion_twin(twin)
+        yield
+        init_promotion_twin(InMemoryTwinAPI.create())
+
+    async def test_attempt_and_list_round_trip(self, client, twin, project_id) -> None:
+        req = await _seed_requirement(twin, project_id, "tip_deflection", "<= 0.5mm")
+        artefact = await _seed_artefact(twin, project_id)
+        await _record_supported_claim(twin, project_id, req, artefact)
+
+        async with client:
+            resp = await client.post(
+                "/v1/promotion/attempt",
+                json={
+                    "projectId": str(project_id),
+                    "level": "sim_validated",
+                    "requiredClaimIds": [str(req.id)],
+                    "decidedBy": "reviewer",
+                },
+            )
+            assert resp.status_code == 200
+            assert resp.json()["promoted"] is True
+
+            list_resp = await client.get("/v1/promotion", params={"project_id": str(project_id)})
+        assert list_resp.status_code == 200
+        gates = list_resp.json()["gates"]
+        assert len(gates) == 1
+        assert gates[0]["promoted"] is True
+        assert gates[0]["decidedBy"] == "reviewer"
+
+    async def test_reject_via_route(self, client, twin, project_id) -> None:
+        req = await _seed_requirement(twin, project_id, "tip_deflection", "<= 0.5mm")
+        artefact = await _seed_artefact(twin, project_id)
+        await _record_supported_claim(twin, project_id, req, artefact)
+
+        async with client:
+            resp = await client.post(
+                "/v1/promotion/attempt",
+                json={
+                    "projectId": str(project_id),
+                    "level": "sim_validated",
+                    "requiredClaimIds": [str(req.id)],
+                    "decidedBy": "reviewer",
+                    "comment": "hold off for now",
+                    "reject": True,
+                },
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["promoted"] is False
+        assert body["blockedReason"] == "hold off for now"
+
+    async def test_reject_without_decided_by_400s(self, client, project_id) -> None:
+        async with client:
+            resp = await client.post(
+                "/v1/promotion/attempt",
+                json={
+                    "projectId": str(project_id),
+                    "level": "sim_validated",
+                    "requiredClaimIds": [str(uuid4())],
+                    "reject": True,
+                },
+            )
+        assert resp.status_code == 400
+
+    async def test_invalid_project_id_400s(self, client) -> None:
+        async with client:
+            resp = await client.get("/v1/promotion", params={"project_id": "not-a-uuid"})
+        assert resp.status_code == 400

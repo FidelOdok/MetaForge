@@ -4024,7 +4024,22 @@ class TwinServer(McpToolServer):
                             "type": "string",
                             "description": (
                                 "Human authority signoff -- omit to get a dry-run "
-                                "('all satisfied, awaiting authority') without promoting."
+                                "('all satisfied, awaiting authority') without promoting. "
+                                "Required when 'reject' is true (who rejected it)."
+                            ),
+                        },
+                        "comment": {
+                            "type": "string",
+                            "description": (
+                                "A reviewer's own rationale, distinct from the system-derived "
+                                "blocked_reason -- recorded on either outcome (FORGE-290)."
+                            ),
+                        },
+                        "reject": {
+                            "type": "boolean",
+                            "description": (
+                                "Human veto (FORGE-290): refuse promotion even if every "
+                                "required claim is satisfied. Requires decided_by. Default false."
                             ),
                         },
                     },
@@ -4037,6 +4052,8 @@ class TwinServer(McpToolServer):
                         "level": {"type": "string"},
                         "promoted": {"type": "boolean"},
                         "blocked_reason": {"type": ["string", "null"]},
+                        "decided_by": {"type": ["string", "null"]},
+                        "comment": {"type": ["string", "null"]},
                         "results": {"type": "array", "items": {"type": "object"}},
                     },
                 },
@@ -4060,12 +4077,16 @@ class TwinServer(McpToolServer):
             )
         k = arguments.get("k", 1.0)
         decided_by = arguments.get("decided_by")
+        comment = arguments.get("comment")
+        reject = arguments.get("reject", False)
         return await self._promotion_attempter(
             project_id=project_id,
             level=level,
             required_claim_ids=[str(c) for c in required_claim_ids],
             k=float(k),
             decided_by=decided_by if isinstance(decided_by, str) else None,
+            comment=comment if isinstance(comment, str) else None,
+            reject=bool(reject),
         )
 
     # ------------------------------------------------------------------

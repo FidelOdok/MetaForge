@@ -35,6 +35,7 @@ from api_gateway.health import health_router, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
 from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
+from api_gateway.promotion.routes import router as promotion_router
 from api_gateway.requirement_intelligence.routes import router as requirements_router
 from api_gateway.runs.routes import router as runs_router
 from api_gateway.sessions.routes import router as sessions_router
@@ -1094,6 +1095,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.design_loop.routes import init_twin as init_design_loop_twin
     from api_gateway.projects.routes import init_project_backend
     from api_gateway.projects.routes import init_twin as init_projects_twin
+    from api_gateway.promotion.routes import init_twin as init_promotion_twin
     from api_gateway.requirement_intelligence.routes import init_twin as init_requirements_twin
     from api_gateway.simulation.routes import init_twin as init_simulation_twin
     from api_gateway.twin.hierarchy_routes import init_twin as init_hierarchy_twin
@@ -1190,6 +1192,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_hierarchy_twin(twin)
     init_requirements_twin(twin)
     init_design_loop_twin(twin)
+    init_promotion_twin(twin)
     # FORGE-287: the dashboard's "start closed design loop" action reuses
     # the SAME bound optimizer callable wired into bootstrap_tool_registry
     # above (design_loop_starter_fn), so Evidence/Decision recording isn't
@@ -1668,6 +1671,7 @@ def create_app(
     app.include_router(constraint_router)
     app.include_router(requirements_router)
     app.include_router(design_loop_router)
+    app.include_router(promotion_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

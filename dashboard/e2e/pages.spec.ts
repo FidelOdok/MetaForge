@@ -263,6 +263,43 @@ test.describe('Requirements', () => {
     await expect(loopSection.getByTestId('design-loop-approved-badge')).toBeVisible();
     await expect(loopSection.getByTestId('approve-design-loop-button')).not.toBeVisible();
   });
+
+  test('gate review blocks on unsatisfied claims, then a reviewer can approve or reject with comment (FORGE-290)', async ({
+    page,
+  }) => {
+    await page.goto('/requirements?demo=1');
+    const gateSection = page.getByTestId('gate-review-section');
+    await expect(gateSection).toBeVisible();
+
+    await gateSection.getByTestId('open-gate-review-button').click();
+    const form = gateSection.getByTestId('gate-review-form');
+    await expect(form).toBeVisible();
+
+    // mass_limit is a real FAIL row in the sample matrix -- picking it and
+    // approving should block on real (illustrative) evidence, not on
+    // missing reviewer identity.
+    await form.getByRole('checkbox').first().check();
+    await form.getByLabel('Reviewer').fill('reviewer@example.com');
+    await form.getByTestId('approve-gate-button').click();
+
+    const result = gateSection.getByTestId('gate-review-result');
+    await expect(result).toBeVisible();
+    await expect(result).toContainText('blocked');
+
+    // Now pick ONLY vague_speed, a real PASS row -- but REJECT it anyway
+    // with a comment: the human veto overrides even satisfied evidence.
+    await form.getByRole('checkbox').first().uncheck();
+    await form.getByRole('checkbox').nth(1).check();
+    await form.getByLabel('Comment').fill('hold off, want a second opinion');
+    await form.getByTestId('reject-gate-button').click();
+
+    await expect(result).toContainText('blocked');
+    await expect(result).toContainText('hold off, want a second opinion');
+
+    // Both attempts appear in the history.
+    const history = gateSection.getByTestId('gate-review-history');
+    await expect(history).toContainText('reviewer@example.com');
+  });
 });
 
 test.describe('Design Assistant', () => {
