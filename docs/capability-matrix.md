@@ -258,6 +258,49 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Pointing at the view that shows it
+
+A `tools/call` result can carry links to the dashboard view for whatever
+it just touched, alongside the call id in `_meta`:
+
+```json
+"_meta": {
+  "callId": "7a619373979b4216",
+  "links": [
+    {"url": "https://forge.example.com/twin?tab=model&node=n-7",
+     "label": "View the part in the twin"}
+  ]
+}
+```
+
+An agent saying *"I committed the bracket"* is asking the reader to go and
+find it — thirteen pages, some project, some node. The server is the only
+party that knows both the id and the route.
+
+Two rules, because a wrong link is worse than none (the agent states it
+with the same confidence either way, and the reader only finds out by
+clicking):
+
+- **The base URL is never invented.** It comes from
+  `METAFORGE_DASHBOARD_URL`. Unset means no links at all, and
+  `health/check` reports `dashboard_links: "disabled (...)"` so a doctor
+  can say so rather than leaving the reader to conclude the tools never
+  produce them.
+- **The route is never invented.** Only mappings verified against the
+  dashboard's own route table are listed, and a test re-checks every one
+  of them against `dashboard/src/App.tsx` — the failure mode of renaming
+  a route is otherwise a link that 404s months later in someone else's
+  transcript. A tool with no mapping, or a result missing the id its
+  route needs, gets no link; linking the bare page would point at
+  whatever happens to be selected, which is a different object.
+
+`links` is absent rather than empty when there is nothing to say: an
+empty list reads as "we looked and there is no view for this".
+
+`/twin` accepts `?node=` (MET-514) and `?tab=` (`graph`, `structure`,
+`model`, `sim`, `asm`, `mfg`). The tab was local state until FORGE-371,
+so a link naming one landed on the page and silently showed the default.
+
 ### Who did it, with what
 
 Every captured action carries an attribution stamp. Until FORGE-366 they

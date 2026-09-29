@@ -516,3 +516,33 @@ describe('TwinViewerPage', () => {
     });
   });
 });
+
+describe('deep links (FORGE-371)', () => {
+  // A reply that says "I committed the bracket" should be able to link to
+  // the view that shows it. ?node= has worked since MET-514; ?tab= was
+  // local state, so a link naming a tab landed on the page and silently
+  // showed the default -- which reads as the link being wrong rather than
+  // unsupported.
+  it('opens on the tab named in the URL', () => {
+    window.history.pushState({}, '', '/twin?tab=asm');
+    render(<TwinViewerPage />);
+    expect(screen.getByRole('button', { name: 'Assembly' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('falls back to the default tab for a name it does not know', () => {
+    // The link may come from a build older or newer than this one. Still a
+    // working page, not an error.
+    window.history.pushState({}, '', '/twin?tab=nonsense');
+    render(<TwinViewerPage />);
+    expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('leaves the default tab alone when no tab is named', () => {
+    window.history.pushState({}, '', '/twin');
+    render(<TwinViewerPage />);
+    expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
