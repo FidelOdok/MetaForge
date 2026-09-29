@@ -7,7 +7,13 @@ from pydantic import Field, field_validator
 
 from twin_core.models.base import NodeBase
 from twin_core.models.confidence import Confidence
-from twin_core.models.enums import AuthorityState, ConstraintSeverity, ConstraintStatus, NodeType
+from twin_core.models.enums import (
+    EVIDENCE_TYPES,
+    AuthorityState,
+    ConstraintSeverity,
+    ConstraintStatus,
+    NodeType,
+)
 from twin_core.models.quantity import is_valid_unit
 
 
@@ -31,6 +37,18 @@ class Constraint(NodeBase):
     # (FORGE-55) already wrote there before this field existed).
     acceptance_criteria: str = ""
     verification_method: str = ""
+    # FORGE-258 (gap G-A2, milestone M1): the KIND of evidence that would
+    # actually verify this requirement -- e.g. a "safety_factor" constraint
+    # naming expected_evidence="simulation" says a claim citing only a
+    # "datasheet" evidence entity doesn't count, even if a claim technically
+    # exists. Validated against twin_core.models.enums.EVIDENCE_TYPES, the
+    # SAME set twin.record_evidence's own evidence_type accepts -- a
+    # requirement can never declare it expects evidence this codebase has
+    # no way to actually record. Unlike verification_method (a free string,
+    # FORGE-312) or target_node_type (free string, FORGE-259), this one is
+    # validated: the whole point of the field is to be checked against real
+    # Evidence, so a typo here should fail loud, not silently never match.
+    expected_evidence: str = ""
     # FORGE-259 (gap G-A3, milestone M1): a structured measured-key binding
     # -- what property this constraint is about, compared how, against what
     # limit and unit, on what kind of node -- rather than only the opaque
@@ -71,4 +89,13 @@ class Constraint(NodeBase):
     def _validate_unit(cls, v: str) -> str:
         if v and not is_valid_unit(v):
             raise ValueError(f"{v!r} is not a recognized unit")
+        return v
+
+    @field_validator("expected_evidence")
+    @classmethod
+    def _validate_expected_evidence(cls, v: str) -> str:
+        if v and v not in EVIDENCE_TYPES:
+            raise ValueError(
+                f"{v!r} is not a recognized evidence type (one of {sorted(EVIDENCE_TYPES)})"
+            )
         return v

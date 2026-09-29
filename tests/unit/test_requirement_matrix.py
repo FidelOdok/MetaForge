@@ -255,3 +255,30 @@ class TestBuildRequirementMatrix:
         )
         rows = await build_requirement_matrix(twin, project_id)
         assert rows[0].limitText == "tip_deflection <= 0.5mm"
+
+    async def test_verification_method_and_expected_evidence_surfaced(self, twin, project_id):
+        # FORGE-258 (gap G-A2): a matrix row carries the declaration itself,
+        # not just the live evidence-derived status.
+        await twin.create_constraint(
+            Constraint(
+                name="safety_factor",
+                expression="True",
+                verification_method="FEA",
+                expected_evidence="simulation",
+                severity=ConstraintSeverity.ERROR,
+                domain="mech",
+                source="test",
+                project_id=project_id,
+            )
+        )
+        rows = await build_requirement_matrix(twin, project_id)
+        assert rows[0].verificationMethod == "FEA"
+        assert rows[0].expectedEvidence == "simulation"
+
+    async def test_verification_method_and_expected_evidence_default_to_empty(
+        self, twin, project_id
+    ):
+        await _seed_requirement(twin, project_id)
+        rows = await build_requirement_matrix(twin, project_id)
+        assert rows[0].verificationMethod == ""
+        assert rows[0].expectedEvidence == ""

@@ -233,6 +233,7 @@ A Constraint is a rule that must be satisfied across one or more work products. 
 | `limit` | `float` | No | The numeric limit `metric` is compared to (FORGE-259) |
 | `unit` | `str` | No | Must be a unit `twin_core.models.quantity` recognizes (FORGE-259) |
 | `target_node_type` | `str` | No | The kind of node `metric` is measured on, e.g. `"cad_model"` (FORGE-259) |
+| `expected_evidence` | `str` | No | The kind of evidence that would verify this, e.g. `"simulation"` -- must be one of `twin_core.models.enums.EVIDENCE_TYPES` (FORGE-258) |
 | `last_evaluated` | `datetime` | No | When the constraint was last checked |
 | `metadata` | `dict` | No | Additional context |
 
@@ -270,6 +271,34 @@ gained a "+ New constraint" form writing exactly this binding via a new
 MCP caller already goes through) -- create-only for this first cut, no
 edit.
 
+FORGE-258 (gap G-A2): `expected_evidence` closes the requirement-to-
+verification-linkage gap -- `verification_method` (FORGE-312) says *how* a
+requirement is verified as free text, but nothing previously said *what kind
+of evidence would actually count*. `expected_evidence` is validated against
+`twin_core.models.enums.EVIDENCE_TYPES`, the exact same set
+`twin.record_evidence`'s own `evidence_type` argument accepts, so a
+requirement can never declare it expects a kind of evidence this codebase
+has no way to record. Unlike `verification_method`/`target_node_type` (free
+strings), this one is checked, because the entire point of the field is to
+be compared against real recorded Evidence later, so a typo should fail
+loud at write time. G7 (Verification Readiness) gained a fourth real
+per-requirement check -- a critical requirement's `expected_evidence` must
+be set, alongside its existing `verification_method`/`source`/
+`acceptance_criteria` checks. The Requirements page's evidence matrix rows
+now carry `verificationMethod`/`expectedEvidence`, and a row where *both*
+are blank renders a red "not declared" badge (the matrix's `no_data`
+status pill already covers "no evidence recorded yet" -- the new badge
+covers the distinct, earlier gap of "this requirement never even said what
+verification it expects"). Deliberately out of scope:
+`measurement_method_defined` stays a G7 `NOT_EVALUATED` check -- no field or
+metadata convention exists anywhere in this codebase for "measurement
+method" as distinct from `verification_method`, and inventing one wasn't
+this ticket's own ask; `TraceabilityAgent`/`TraceabilityCoverage`
+(`api_gateway/requirement_intelligence/traceability.py`, FORGE-56) is a
+real, already-tested coverage engine for "requirement without verification"
+that has no REST route or dashboard consumer today -- surfacing it is
+separable follow-up work, not folded into this smaller, more literal fix.
+
 ```python
 class ConstraintSeverity(StrEnum):
     ERROR = "error"       # Must be resolved — blocks commit
@@ -302,6 +331,8 @@ class Constraint(NodeBase):
     limit: float | None = None
     unit: str = ""
     target_node_type: str = ""
+    # FORGE-258: the kind of evidence expected to verify this requirement.
+    expected_evidence: str = ""
     last_evaluated: datetime | None = None
     metadata: dict = Field(default_factory=dict)
 ```

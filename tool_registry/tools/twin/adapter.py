@@ -1196,6 +1196,24 @@ class TwinServer(McpToolServer):
                                             "(e.g. 'cad_model'). Free text, not enforced."
                                         ),
                                     },
+                                    "expected_evidence": {
+                                        "type": "string",
+                                        "enum": [
+                                            "calculation",
+                                            "simulation",
+                                            "test",
+                                            "inspection",
+                                            "demonstration",
+                                            "datasheet",
+                                            "external_reference",
+                                        ],
+                                        "description": (
+                                            "FORGE-258: the KIND of evidence that would "
+                                            "actually verify this requirement -- same "
+                                            "values twin.record_evidence's own "
+                                            "evidence_type accepts."
+                                        ),
+                                    },
                                     "severity": {
                                         "type": "string",
                                         "enum": ["error", "warning", "info"],

@@ -445,3 +445,49 @@ async def test_adapter_accepts_structured_binding_without_expression(
     )
     assert out["node_id"] == "n1"
     assert calls["constraints"][0]["metric"] == "mass"
+
+
+# --- FORGE-258: expected_evidence (gap G-A2) ---
+
+
+@pytest.mark.asyncio
+async def test_expected_evidence_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    record = make_constraint_recorder(twin)
+
+    out = await record(
+        title="Arm requirements",
+        constraints=[{**_MASS_LIMIT, "expected_evidence": "simulation"}],
+        project_id=PROJECT_ID,
+    )
+    from uuid import UUID
+
+    c = await twin.constraints.get_constraint(UUID(out["constraint_ids"][0]))
+    assert c is not None
+    assert c.expected_evidence == "simulation"
+
+
+@pytest.mark.asyncio
+async def test_expected_evidence_defaults_to_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_blob(monkeypatch)
+    twin = InMemoryTwinAPI.create()
+    record = make_constraint_recorder(twin)
+
+    out = await record(title="Arm requirements", constraints=[_MASS_LIMIT], project_id=PROJECT_ID)
+    from uuid import UUID
+
+    c = await twin.constraints.get_constraint(UUID(out["constraint_ids"][0]))
+    assert c is not None
+    assert c.expected_evidence == ""
+
+
+@pytest.mark.asyncio
+async def test_bad_expected_evidence_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_blob(monkeypatch)
+    record = make_constraint_recorder(InMemoryTwinAPI.create(), None)
+    with pytest.raises(ValueError, match="not a recognized evidence type"):
+        await record(
+            title="t",
+            constraints=[{**_MASS_LIMIT, "expected_evidence": "vibes"}],
+        )

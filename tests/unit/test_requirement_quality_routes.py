@@ -260,3 +260,48 @@ class TestCreateConstraintRoute:
                 json={"projectId": str(uuid4()), "name": "x"},
             )
         assert resp.status_code == 422
+
+    async def test_creates_with_verification_declaration(self, client, twin) -> None:
+        # FORGE-258 (gap G-A2).
+        project_id = uuid4()
+        async with client:
+            resp = await client.post(
+                "/v1/requirements/constraints",
+                json={
+                    "projectId": str(project_id),
+                    "name": "safety_factor",
+                    "metric": "safety_factor",
+                    "operator": ">=",
+                    "limit": 2.0,
+                    "verificationMethod": "FEA",
+                    "expectedEvidence": "simulation",
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+
+            constraint = await twin.get_constraint(UUID(body["constraintId"]))
+            assert constraint is not None
+            assert constraint.verification_method == "FEA"
+            assert constraint.expected_evidence == "simulation"
+
+            matrix_resp = await client.get(
+                "/v1/requirements/matrix", params={"project_id": str(project_id)}
+            )
+        rows = matrix_resp.json()["rows"]
+        assert rows[0]["verificationMethod"] == "FEA"
+        assert rows[0]["expectedEvidence"] == "simulation"
+
+    async def test_bad_expected_evidence_400s(self, client, twin) -> None:
+        async with client:
+            resp = await client.post(
+                "/v1/requirements/constraints",
+                json={
+                    "projectId": str(uuid4()),
+                    "name": "x",
+                    "metric": "mass",
+                    "limit": 1.0,
+                    "expectedEvidence": "vibes",
+                },
+            )
+        assert resp.status_code == 400

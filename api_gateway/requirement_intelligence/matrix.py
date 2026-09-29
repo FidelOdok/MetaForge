@@ -73,6 +73,12 @@ class RequirementMatrixRow(BaseModel):
     detail: str
     artefactIds: list[str] = Field(default_factory=list)  # noqa: N815
     evidence: list[EvidenceSummary] = Field(default_factory=list)
+    # FORGE-258 (gap G-A2): surfaced so the dashboard can render "declared
+    # but unverified" without a second fetch -- "" means genuinely
+    # undeclared, distinct from the live status (which is about evidence,
+    # not declaration).
+    verificationMethod: str = ""  # noqa: N815
+    expectedEvidence: str = ""  # noqa: N815
 
 
 def _extract_value_limit_margin(
@@ -136,6 +142,10 @@ async def _derive_row(
         limit_text = f"{req.metric} {req.operator} {req.limit}{req.unit}"
     else:
         limit_text = req.message or req.name
+    verification_method = req.verification_method or str(
+        req.metadata.get("verification_method") or ""
+    )
+    expected_evidence = req.expected_evidence
 
     if not claims:
         return RequirementMatrixRow(
@@ -144,6 +154,8 @@ async def _derive_row(
             limitText=limit_text,
             status="no_data",
             detail="no claim recorded against this requirement",
+            verificationMethod=verification_method,
+            expectedEvidence=expected_evidence,
         )
 
     # Multiple artefacts can each claim to satisfy the same requirement --
@@ -177,6 +189,8 @@ async def _derive_row(
             detail=detail,
             artefactIds=artefact_ids,
             evidence=evidence_summaries,
+            verificationMethod=verification_method,
+            expectedEvidence=expected_evidence,
         )
 
     if any_stale:
@@ -188,6 +202,8 @@ async def _derive_row(
             detail="claim is supported, but at least one cited evidence entity is stale",
             artefactIds=artefact_ids,
             evidence=evidence_summaries,
+            verificationMethod=verification_method,
+            expectedEvidence=expected_evidence,
         )
 
     # Most current evidence with an extractable margin wins the derived status.
@@ -205,6 +221,8 @@ async def _derive_row(
             detail="claim supported by current evidence (no extractable margin to grade further)",
             artefactIds=artefact_ids,
             evidence=evidence_summaries,
+            verificationMethod=verification_method,
+            expectedEvidence=expected_evidence,
         )
 
     best = current_with_margin[-1]
@@ -231,6 +249,8 @@ async def _derive_row(
         detail=detail,
         artefactIds=artefact_ids,
         evidence=evidence_summaries,
+        verificationMethod=verification_method,
+        expectedEvidence=expected_evidence,
     )
 
 

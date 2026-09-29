@@ -245,3 +245,22 @@ class EdgeType(StrEnum):
     # measurement's own metadata (interface/metric) disambiguates which
     # quantity within it.
     MEASURED_BY = "measured_by"
+
+
+# FORGE-64 (epic FORGE-35, Phase 6): the real evidence kinds
+# `twin.record_evidence` accepts (`api_gateway/twin/evidence_recorder.py`
+# imports this, not the other way around -- twin_core never imports from
+# api_gateway). FORGE-258 (gap G-A2) reuses the SAME set for
+# `Constraint.expected_evidence`, so a requirement can never declare it
+# expects a kind of evidence this codebase can't actually record.
+EVIDENCE_TYPES: frozenset[str] = frozenset(
+    {
+        "calculation",
+        "simulation",
+        "test",
+        "inspection",
+        "demonstration",
+        "datasheet",
+        "external_reference",
+    }
+)

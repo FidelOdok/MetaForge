@@ -740,6 +740,10 @@ const SAMPLE_WORKSPACE_SEED = {
             staleness: 'current',
           },
         ],
+        // FORGE-258 (gap G-A2): not declared -- illustrates the "not
+        // declared" flag independently of the live pass/fail status.
+        verificationMethod: '',
+        expectedEvidence: '',
       },
       {
         requirementId: 'sample-req-speed',
@@ -759,6 +763,10 @@ const SAMPLE_WORKSPACE_SEED = {
             staleness: 'current',
           },
         ],
+        // FORGE-258: a fully-declared requirement -- verification method
+        // AND expected evidence set, illustrating the complete case.
+        verificationMethod: 'analysis',
+        expectedEvidence: 'simulation',
       },
       {
         requirementId: 'sample-req-mass-min',
@@ -778,6 +786,8 @@ const SAMPLE_WORKSPACE_SEED = {
             staleness: 'stale',
           },
         ],
+        verificationMethod: '',
+        expectedEvidence: '',
       },
     ],
   },
@@ -1039,6 +1049,8 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
         operator?: string;
         limit?: number;
         unit?: string;
+        verificationMethod?: string;
+        expectedEvidence?: string;
       };
       const id = `sample-req-${Date.now()}`;
       s.requirementMatrix.rows.push({
@@ -1049,6 +1061,9 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
         detail: 'no claim recorded against this requirement',
         artefactIds: [],
         evidence: [],
+        // FORGE-258 (gap G-A2).
+        verificationMethod: payload.verificationMethod ?? '',
+        expectedEvidence: payload.expectedEvidence ?? '',
       });
       return { constraintId: id, setWorkProductId: `sample-set-${id}` };
     }

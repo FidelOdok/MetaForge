@@ -21,6 +21,20 @@ import type {
 
 const OPERATORS = ['<=', '>=', '==', '<', '>', '!='] as const;
 
+// FORGE-258 (gap G-A2): same real evidence_type values twin.record_evidence
+// itself accepts (twin_core.models.enums.EVIDENCE_TYPES) -- an empty option
+// means "not declared", never guessed.
+const EXPECTED_EVIDENCE_TYPES = [
+  '',
+  'calculation',
+  'simulation',
+  'test',
+  'inspection',
+  'demonstration',
+  'datasheet',
+  'external_reference',
+] as const;
+
 const FIELD_STYLE: React.CSSProperties = {
   background: 'var(--mf-c-191b22)',
   border: '1px solid var(--mf-r-65-72-90-0p3)',
@@ -37,6 +51,8 @@ function NewConstraintForm({ projectId, onDone }: { projectId: string; onDone: (
   const [limit, setLimit] = useState('');
   const [unit, setUnit] = useState('');
   const [targetNodeType, setTargetNodeType] = useState('');
+  const [verificationMethod, setVerificationMethod] = useState('');
+  const [expectedEvidence, setExpectedEvidence] = useState<(typeof EXPECTED_EVIDENCE_TYPES)[number]>('');
 
   const limitValue = Number(limit);
   const canSubmit = name.trim() !== '' && metric.trim() !== '' && limit !== '' && !Number.isNaN(limitValue);
@@ -53,6 +69,8 @@ function NewConstraintForm({ projectId, onDone }: { projectId: string; onDone: (
         limit: limitValue,
         unit: unit.trim(),
         targetNodeType: targetNodeType.trim(),
+        verificationMethod: verificationMethod.trim(),
+        expectedEvidence,
       },
       {
         onSuccess: () => {
@@ -140,6 +158,33 @@ function NewConstraintForm({ projectId, onDone }: { projectId: string; onDone: (
           className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
           style={{ ...FIELD_STYLE, width: '140px' }}
         />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+        Verification method
+        <input
+          value={verificationMethod}
+          onChange={(e) => setVerificationMethod(e.target.value)}
+          placeholder="FEA"
+          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+          style={{ ...FIELD_STYLE, width: '120px' }}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+        Expected evidence
+        <select
+          value={expectedEvidence}
+          onChange={(e) =>
+            setExpectedEvidence(e.target.value as (typeof EXPECTED_EVIDENCE_TYPES)[number])
+          }
+          className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
+          style={{ ...FIELD_STYLE, width: '140px' }}
+        >
+          {EXPECTED_EVIDENCE_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t || 'not declared'}
+            </option>
+          ))}
+        </select>
       </label>
       <div className="flex gap-2">
         <Button
@@ -257,7 +302,10 @@ const STATUS_VARIANT: Record<RequirementMatrixStatus, 'success' | 'warning' | 'e
   pass: 'success',
   uncertain: 'warning',
   fail: 'error',
-  no_data: 'default',
+  // FORGE-258 (gap G-A2): "red cells for unverified requirements" -- a
+  // no_data row has no claim citing it at all, the literal "unverified"
+  // state this ticket asks to flag.
+  no_data: 'error',
   stale: 'info',
 };
 
@@ -299,9 +347,23 @@ function MatrixRow({ row }: { row: RequirementMatrixRow }) {
           <div className="text-on-surface-variant" style={{ fontSize: '11px' }}>
             {row.limitText}
           </div>
+          {(row.verificationMethod || row.expectedEvidence) && (
+            <div className="text-on-surface-variant" style={{ fontSize: '11px' }}>
+              {row.verificationMethod || '—'} · expects {row.expectedEvidence || '—'}
+            </div>
+          )}
         </td>
         <td className="px-2 text-center">
           <Badge variant={STATUS_VARIANT[row.status]}>{row.status}</Badge>
+          {!row.verificationMethod && !row.expectedEvidence && (
+            <div
+              data-testid="unverified-badge"
+              className="text-error"
+              style={{ fontSize: '10px', marginTop: '2px' }}
+            >
+              not declared
+            </div>
+          )}
         </td>
         <td className="px-3 py-2 text-xs text-on-surface-variant">{row.detail}</td>
         <td className="px-2 text-center">
