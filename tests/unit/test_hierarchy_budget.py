@@ -133,3 +133,26 @@ class TestComputeBudgetAllocationStatus:
         by_target = {r.target: r for r in results}
         assert by_target[str(base.id)].over_budget is False
         assert by_target[str(shoulder.id)].over_budget is True
+
+    async def test_owner_and_discipline_pass_through(self, api):
+        # FORGE-313
+        base = await api.create_hierarchy_node(HierarchyNode(name="Base", kind="subsystem"))
+        budget = _budget(
+            "mass",
+            "kg",
+            [
+                BudgetAllocation(
+                    target=str(base.id), amount=2.0, owner="alice", discipline="mechanical"
+                )
+            ],
+        )
+        results = await compute_budget_allocation_status(api, budget)
+        assert results[0].owner == "alice"
+        assert results[0].discipline == "mechanical"
+
+    async def test_owner_and_discipline_default_to_empty(self, api):
+        base = await api.create_hierarchy_node(HierarchyNode(name="Base", kind="subsystem"))
+        budget = _budget("mass", "kg", [BudgetAllocation(target=str(base.id), amount=2.0)])
+        results = await compute_budget_allocation_status(api, budget)
+        assert results[0].owner == ""
+        assert results[0].discipline == ""

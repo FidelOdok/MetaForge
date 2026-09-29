@@ -42,6 +42,11 @@ class AllocationStatus(BaseModel):
     allocated: float
     actual: float | None
     over_budget: bool | None
+    # FORGE-313: pass-through of BudgetAllocation.owner/.discipline, so a
+    # caller (hierarchy_routes.py) doesn't need its own copy of the Budget
+    # to know who owns an over-budget subsystem.
+    owner: str = ""
+    discipline: str = ""
 
 
 async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> list[AllocationStatus]:
@@ -65,6 +70,8 @@ async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> lis
                 allocated=allocation.amount,
                 actual=actual,
                 over_budget=over_budget,
+                owner=allocation.owner,
+                discipline=allocation.discipline,
             )
         )
     return results

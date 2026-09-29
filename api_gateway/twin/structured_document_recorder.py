@@ -274,12 +274,35 @@ def make_hazard_analysis_recorder(twin: Any, project_backend: Any = None) -> Any
 # ---------------------------------------------------------------------------
 
 
+def _validate_interface_quantities(interfaces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """FORGE-313: validate each interface's ``quantities`` (if present)
+    through ``InterfaceQuantity`` -- rejects a malformed quantity (bad unit,
+    missing metric) at record time rather than letting it land unchecked in
+    metadata. Returns the interfaces with quantities normalized to plain
+    dicts (JSON-round-trippable), everything else passed through as-is."""
+    from twin_core.models.interface import InterfaceQuantity
+
+    validated: list[dict[str, Any]] = []
+    for i in interfaces:
+        raw_quantities = i.get("quantities") or []
+        try:
+            quantities = [InterfaceQuantity(**q).model_dump() for q in raw_quantities]
+        except Exception as exc:  # noqa: BLE001 -- re-raised as a clear ValueError below
+            raise ValueError(
+                f"system_architecture commit: interface {i.get('from')!r} -> "
+                f"{i.get('to')!r} has an invalid quantity: {exc}"
+            ) from exc
+        validated.append({**i, "quantities": quantities})
+    return validated
+
+
 def render_system_architecture_markdown(
     name: str,
     system_name: str,
     components: list[dict[str, Any]],
     interfaces: list[dict[str, Any]],
 ) -> tuple[str, dict[str, Any]]:
+    interfaces = _validate_interface_quantities(interfaces)
     known = {c["name"] for c in components}
     dangling = [i for i in interfaces if i["from"] not in known or i["to"] not in known]
     mermaid_lines = ["```mermaid", "graph LR"]
@@ -290,6 +313,13 @@ def render_system_architecture_markdown(
             f"  {_slug(i['from'])} -->|{i.get('interface_type', '')}| {_slug(i['to'])}"
         )
     mermaid_lines.append("```")
+
+    def _quantities_cell(i: dict[str, Any]) -> str:
+        parts = []
+        for q in i.get("quantities") or []:
+            limit = f" {q['op']} {q['limit']}{q['unit']}" if q.get("limit") is not None else ""
+            parts.append(f"{q['metric']}{limit}")
+        return "; ".join(parts)
 
     md = "\n".join(
         [
@@ -310,9 +340,15 @@ def render_system_architecture_markdown(
             "## Interfaces",
             "",
             _md_table(
-                ["From", "To", "Type", "Description"],
+                ["From", "To", "Type", "Description", "Quantities"],
                 [
-                    [i["from"], i["to"], i.get("interface_type", ""), i.get("description", "")]
+                    [
+                        i["from"],
+                        i["to"],
+                        i.get("interface_type", ""),
+                        i.get("description", ""),
+                        _quantities_cell(i),
+                    ]
                     for i in interfaces
                 ],
             ),

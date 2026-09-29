@@ -716,6 +716,87 @@ const SAMPLE_WORKSPACE_SEED = {
       missing: ['safety', 'power', 'environmental', 'verification'],
     },
   },
+  // FORGE-313: a small product hierarchy for the Structure tab -- mirrors
+  // the ticket's own acceptance example (an "upper_arm"/"shoulder"
+  // interface with a tip_deflection quantity, a mass allocation with an
+  // owner) so the sample workspace demonstrates the same thing the real
+  // arm project's live validation does.
+  hierarchyNodes: [
+    {
+      id: 'sample-hier-arm',
+      name: 'Arm',
+      kind: 'product',
+      parentId: null,
+      quantity: null,
+      placement: null,
+      massKg: 2.3,
+      cost: 145.0,
+      massBudgetKg: null,
+      massOverBudget: null,
+      costBudget: null,
+      costOverBudget: null,
+      massBudgetOwner: null,
+      massBudgetDiscipline: null,
+      costBudgetOwner: null,
+      costBudgetDiscipline: null,
+      interfaces: [],
+    },
+    {
+      id: 'sample-hier-upper-arm',
+      name: 'upper_arm',
+      kind: 'subsystem',
+      parentId: 'sample-hier-arm',
+      quantity: 1,
+      placement: null,
+      massKg: 1.4,
+      cost: 90.0,
+      massBudgetKg: 1.5,
+      massOverBudget: false,
+      costBudget: null,
+      costOverBudget: null,
+      massBudgetOwner: 'alice',
+      massBudgetDiscipline: 'mechanical',
+      costBudgetOwner: null,
+      costBudgetDiscipline: null,
+      interfaces: [
+        {
+          otherComponent: 'shoulder',
+          interfaceType: 'mechanical',
+          description: 'shoulder joint',
+          quantities: [{ metric: 'tip_deflection', unit: 'mm', limit: 0.5, op: '<=' }],
+        },
+      ],
+    },
+    {
+      id: 'sample-hier-shoulder',
+      name: 'shoulder',
+      kind: 'subsystem',
+      parentId: 'sample-hier-arm',
+      quantity: 1,
+      placement: null,
+      massKg: 0.9,
+      cost: 55.0,
+      massBudgetKg: 0.8,
+      massOverBudget: true,
+      costBudget: null,
+      costOverBudget: null,
+      massBudgetOwner: 'bob',
+      massBudgetDiscipline: 'mechanical',
+      costBudgetOwner: null,
+      costBudgetDiscipline: null,
+      interfaces: [
+        {
+          otherComponent: 'upper_arm',
+          interfaceType: 'mechanical',
+          description: 'shoulder joint',
+          quantities: [
+            { metric: 'tip_deflection', unit: 'mm', limit: 0.5, op: '<=' },
+            { metric: 'J2_torque', unit: 'N*m', limit: 12.0, op: '<=' },
+          ],
+        },
+      ],
+    },
+  ],
 };
 
 // ── Sample mode flag ────────────────────────────────────────────────────────
@@ -868,6 +949,7 @@ function route(method: string, path: string, body: Record<string, unknown>): unk
       };
     }
     if (path === '/requirements/quality') return s.requirementsReport;
+    if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     return undefined;
   }
   if (method === 'post') {

@@ -43,6 +43,26 @@ function formatCost(cost: number, budget: number | null): string {
   return budget != null ? `$${cost.toFixed(2)} / $${budget.toFixed(2)}` : `$${cost.toFixed(2)}`;
 }
 
+/** FORGE-313: "owner (discipline)" for a budget-allocation tooltip, or
+ * undefined when neither was set (never renders an empty "()"). */
+function ownerTitle(owner: string | null, discipline: string | null): string | undefined {
+  if (!owner && !discipline) return undefined;
+  return discipline ? `Owner: ${owner || 'unassigned'} (${discipline})` : `Owner: ${owner}`;
+}
+
+/** FORGE-313: one line per interface, for the interfaces badge's tooltip. */
+function interfacesTitle(interfaces: HierarchyNode['interfaces']): string {
+  return interfaces
+    .map((iface) => {
+      const quantities = iface.quantities
+        .map((q) => `${q.metric}${q.limit != null ? ` ${q.op} ${q.limit}${q.unit}` : ''}`)
+        .join(', ');
+      const label = `${iface.otherComponent}${iface.interfaceType ? ` (${iface.interfaceType})` : ''}`;
+      return quantities ? `${label}: ${quantities}` : label;
+    })
+    .join('\n');
+}
+
 function TreeRow({
   node,
   depth,
@@ -92,12 +112,27 @@ function TreeRow({
           )}
           {node.name}
         </button>
+        {node.interfaces.length > 0 && (
+          <span
+            className="material-symbols-outlined tw-structure-interfaces-badge"
+            aria-label={`${node.interfaces.length} interface${node.interfaces.length === 1 ? '' : 's'}`}
+            title={interfacesTitle(node.interfaces)}
+          >
+            link
+          </span>
+        )}
         <span className="tw-structure-kind-label">{node.kind}</span>
         <span className="tw-structure-qty">{node.quantity ?? '—'}</span>
-        <span className={`tw-structure-mass${node.massOverBudget ? ' is-over-budget' : ''}`}>
+        <span
+          className={`tw-structure-mass${node.massOverBudget ? ' is-over-budget' : ''}`}
+          title={ownerTitle(node.massBudgetOwner, node.massBudgetDiscipline)}
+        >
           {formatMass(node.massKg, node.massBudgetKg)}
         </span>
-        <span className={`tw-structure-cost${node.costOverBudget ? ' is-over-budget' : ''}`}>
+        <span
+          className={`tw-structure-cost${node.costOverBudget ? ' is-over-budget' : ''}`}
+          title={ownerTitle(node.costBudgetOwner, node.costBudgetDiscipline)}
+        >
           {formatCost(node.cost, node.costBudget)}
         </span>
       </div>

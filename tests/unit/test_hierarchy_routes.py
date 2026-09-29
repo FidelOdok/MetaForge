@@ -133,6 +133,42 @@ class TestBudgetAllocationWiring:
         assert node.massBudgetKg == 4.5
         assert node.massOverBudget is True
 
+    async def test_allocation_owner_and_discipline_surfaced(self) -> None:
+        # FORGE-313
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+
+        base = await twin.create_hierarchy_node(
+            HierarchyNode(name="Base", kind="subsystem", project_id=pid)
+        )
+        await twin.create_engineering_entity(
+            EngineeringEntity(
+                entity_type="budget",
+                statement="Moving mass budget",
+                title="mass_budget",
+                project_id=pid,
+                metadata={
+                    "metric": "mass",
+                    "unit": "kg",
+                    "system_total": 4.5,
+                    "allocations": [
+                        {
+                            "target": str(base.id),
+                            "amount": 4.5,
+                            "owner": "alice",
+                            "discipline": "mechanical",
+                        }
+                    ],
+                },
+            )
+        )
+
+        result = await get_hierarchy_tree(project_id=str(pid))
+        node = next(n for n in result.nodes if n.id == str(base.id))
+        assert node.massBudgetOwner == "alice"
+        assert node.massBudgetDiscipline == "mechanical"
+
     async def test_under_budget_node_is_not_flagged(self) -> None:
         twin = InMemoryTwinAPI.create()
         init_twin(twin)
@@ -216,3 +252,68 @@ class TestBudgetAllocationWiring:
 
         result = await get_hierarchy_tree()
         assert result.nodes[0].massBudgetKg is None
+
+
+class TestInterfacesWiring:
+    """FORGE-313: interfaces per node, resolved from a SYSTEM_ARCHITECTURE
+    work product's structured `interfaces` metadata."""
+
+    async def test_interface_surfaced_on_both_named_components(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+
+        upper_arm = await twin.create_hierarchy_node(
+            HierarchyNode(name="upper_arm", kind="subsystem", project_id=pid)
+        )
+        shoulder = await twin.create_hierarchy_node(
+            HierarchyNode(name="shoulder", kind="subsystem", project_id=pid)
+        )
+        await twin.create_work_product(
+            WorkProduct(
+                name="Arm architecture",
+                type=WorkProductType.SYSTEM_ARCHITECTURE,
+                domain="systems",
+                file_path="",
+                content_hash="deadbeef",
+                format="md",
+                created_by="test",
+                project_id=pid,
+                metadata={
+                    "interfaces": [
+                        {
+                            "from": "upper_arm",
+                            "to": "shoulder",
+                            "interface_type": "mechanical",
+                            "description": "joint",
+                            "quantities": [
+                                {"metric": "tip_deflection", "unit": "mm", "limit": 0.5, "op": "<="}
+                            ],
+                        }
+                    ]
+                },
+            )
+        )
+
+        result = await get_hierarchy_tree(project_id=str(pid))
+        by_id = {n.id: n for n in result.nodes}
+
+        ua_ifaces = by_id[str(upper_arm.id)].interfaces
+        assert len(ua_ifaces) == 1
+        assert ua_ifaces[0].otherComponent == "shoulder"
+        assert ua_ifaces[0].quantities[0].metric == "tip_deflection"
+
+        sh_ifaces = by_id[str(shoulder.id)].interfaces
+        assert len(sh_ifaces) == 1
+        assert sh_ifaces[0].otherComponent == "upper_arm"
+
+    async def test_no_system_architecture_means_empty_interfaces(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        pid = uuid4()
+        node = await twin.create_hierarchy_node(
+            HierarchyNode(name="upper_arm", kind="subsystem", project_id=pid)
+        )
+        result = await get_hierarchy_tree(project_id=str(pid))
+        assert result.nodes[0].id == str(node.id)
+        assert result.nodes[0].interfaces == []

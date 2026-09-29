@@ -14,14 +14,14 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI
 from twin_core.consistency.budgets import budget_from_entity
 from twin_core.consistency.hierarchy_budget import compute_budget_allocation_status
 from twin_core.consistency.hierarchy_rollup import compute_hierarchy_rollup
-from twin_core.models.enums import EdgeType
+from twin_core.models.enums import EdgeType, WorkProductType
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.hierarchy_routes")
@@ -37,6 +37,24 @@ def init_twin(twin: object) -> None:
 
 
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
+
+
+class InterfaceQuantitySummary(BaseModel):
+    metric: str
+    unit: str
+    limit: float | None = None
+    op: str = "<="
+
+
+class InterfaceSummary(BaseModel):
+    """One interface touching a hierarchy node, dashboard-facing summary
+    (not the full predicted/measured detail -- see the SYSTEM_ARCHITECTURE
+    work product itself for that)."""
+
+    otherComponent: str  # noqa: N815
+    interfaceType: str = ""  # noqa: N815
+    description: str = ""
+    quantities: list[InterfaceQuantitySummary] = Field(default_factory=list)
 
 
 class HierarchyNodeResponse(BaseModel):
@@ -57,6 +75,17 @@ class HierarchyNodeResponse(BaseModel):
     massOverBudget: bool | None = None  # noqa: N815
     costBudget: float | None = None  # noqa: N815
     costOverBudget: bool | None = None  # noqa: N815
+    # FORGE-313: who's accountable for this node's allocation, if the
+    # allocation set one. "" (not None) when a mass/cost allocation exists
+    # but named no owner -- distinct from "no allocation at all" (None).
+    massBudgetOwner: str | None = None  # noqa: N815
+    massBudgetDiscipline: str | None = None  # noqa: N815
+    costBudgetOwner: str | None = None  # noqa: N815
+    costBudgetDiscipline: str | None = None  # noqa: N815
+    # FORGE-313: interfaces (from twin.commit_system_architecture's
+    # SYSTEM_ARCHITECTURE work products) touching this node, matched by
+    # component name against HierarchyNode.name.
+    interfaces: list[InterfaceSummary] = Field(default_factory=list)
 
 
 class HierarchyTreeResponse(BaseModel):
@@ -83,6 +112,47 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
             span.set_attribute("hierarchy.project_id", project_id)
 
         nodes = await _twin.list_hierarchy_nodes(project_id=scoped)
+
+        # FORGE-313: interfaces per node, resolved from any SYSTEM_ARCHITECTURE
+        # work product's structured `interfaces` metadata (twin.commit_system_
+        # architecture) by matching a hierarchy node's own name against each
+        # interface's `from`/`to` component name. Project-scoped only, same
+        # posture as the budget lookup below.
+        interfaces_by_node_name: dict[str, list[InterfaceSummary]] = {}
+        if scoped is not None:
+            arch_wps = await _twin.list_work_products(
+                work_product_type=WorkProductType.SYSTEM_ARCHITECTURE, project_id=scoped
+            )
+            for wp in arch_wps:
+                for iface in wp.metadata.get("interfaces") or []:
+                    quantities = [
+                        InterfaceQuantitySummary(
+                            metric=q.get("metric", ""),
+                            unit=q.get("unit", ""),
+                            limit=q.get("limit"),
+                            op=q.get("op", "<="),
+                        )
+                        for q in iface.get("quantities") or []
+                    ]
+                    from_name, to_name = iface.get("from"), iface.get("to")
+                    if from_name:
+                        interfaces_by_node_name.setdefault(from_name, []).append(
+                            InterfaceSummary(
+                                otherComponent=to_name or "",
+                                interfaceType=iface.get("interface_type", ""),
+                                description=iface.get("description", ""),
+                                quantities=quantities,
+                            )
+                        )
+                    if to_name:
+                        interfaces_by_node_name.setdefault(to_name, []).append(
+                            InterfaceSummary(
+                                otherComponent=from_name or "",
+                                interfaceType=iface.get("interface_type", ""),
+                                description=iface.get("description", ""),
+                                quantities=quantities,
+                            )
+                        )
 
         # FORGE-264: mass/cost allocation status per node, from any "budget"
         # entity whose allocation target resolves to a real node here.
@@ -157,6 +227,11 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                     massOverBudget=mass_status.over_budget if mass_status else None,
                     costBudget=cost_status.allocated if cost_status else None,
                     costOverBudget=cost_status.over_budget if cost_status else None,
+                    massBudgetOwner=mass_status.owner if mass_status else None,
+                    massBudgetDiscipline=mass_status.discipline if mass_status else None,
+                    costBudgetOwner=cost_status.owner if cost_status else None,
+                    costBudgetDiscipline=cost_status.discipline if cost_status else None,
+                    interfaces=interfaces_by_node_name.get(node.name, []),
                 )
             )
         span.set_attribute("hierarchy.count", len(result))

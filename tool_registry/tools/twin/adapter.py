@@ -2282,6 +2282,47 @@ class TwinServer(McpToolServer):
                                     "to": {"type": "string"},
                                     "interface_type": {"type": "string"},
                                     "description": {"type": "string"},
+                                    # FORGE-313: the interface's own
+                                    # measurable properties -- e.g. "tip
+                                    # deflection <= 0.5mm", owned by
+                                    # mechanical. Optional.
+                                    "quantities": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "metric": {"type": "string"},
+                                                "unit": {"type": "string"},
+                                                "limit": {"type": ["number", "null"]},
+                                                "op": {"type": "string"},
+                                                "owner": {"type": "string"},
+                                                "discipline": {"type": "string"},
+                                                "predicted": {
+                                                    "type": ["object", "null"],
+                                                    "properties": {
+                                                        "value": {"type": "number"},
+                                                        "band": {"type": ["number", "null"]},
+                                                        "tier": {"type": "string"},
+                                                        "evidence": {"type": "string"},
+                                                    },
+                                                    "required": ["value"],
+                                                },
+                                                "measured": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "value": {"type": "number"},
+                                                            "source": {"type": "string"},
+                                                            "timestamp": {"type": "string"},
+                                                        },
+                                                        "required": ["value"],
+                                                    },
+                                                },
+                                            },
+                                            "required": ["metric"],
+                                        },
+                                    },
                                 },
                                 "required": ["from", "to"],
                             },
