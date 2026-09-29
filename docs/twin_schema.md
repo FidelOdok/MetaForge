@@ -591,6 +591,27 @@ A general per-metric tier *registry* (tier 1 hand-calcs, other metrics) and an a
 
 *Source: `twin_core/prediction/evaluator.py`, `api_gateway/twin/metric_evaluator.py`*
 
+### 2.13 Automatic Revalidation on ECT Commit (FORGE-316)
+
+`EngineeringChangeTransaction` (FORGE-66, `twin_core/models/engineering_change_transaction.py`) gained two fields on top of its existing state machine:
+
+```python
+# Plain dicts (RevalidationStep.model_dump(mode="json")), not a typed
+# field -- avoids an import cycle with twin_core.consistency.impact.
+revalidation_plan: list[dict[str, Any]] = Field(default_factory=list)
+revalidation_result: dict[str, Any] | None = None
+```
+
+`analyze()` stores `ImpactEngine.analyse()`'s full pre-commit PREVIEW plan here (a projection -- nothing has changed yet). A successful `commit()` OVERWRITES it with the REAL plan, built from `StalenessEngine.propagate()`'s actual writes -- this is the fix for a genuine gap: FORGE-66's own `commit()` never called `StalenessEngine` at all, so no ECT-driven change ever marked anything stale for real until this. `commit()` propagates once per REVISE/SUPERSEDE/DEPRECATE/INVALIDATE operation in the patch (best-effort -- a propagation failure never fails an already-successful commit), unions the resulting `StaleMarking`s, and reuses `ImpactEngine.build_revalidation_plan` (now public, shared between the pre-commit preview and this real post-commit build) to turn them into the same `RevalidationStep` shape.
+
+`twin.execute_revalidation_plan(ect_id)` (requires the ECT to be COMMITTED) is the "now actually re-run them" half: for each plan step naming a stale `engineering_entity` whose `entity_type == "evidence"` and whose `metadata["replay"]` is a `{tool_id, args}` dict, it looks `tool_id` up in an injected dispatch table and calls it again with `args` (`api_gateway/twin/revalidation.py`'s `make_revalidation_executor`). A successful replay records a NEW Evidence entity with `supersedes=<old id>` (FORGE-65's own revalidation flow -- never a mutation of the old evidence). Everything else -- a non-evidence entity the impact walk reached (e.g. a Constraint), evidence with no `replay` recipe (hand-authored, or older than this field), or a `tool_id` the caller didn't wire in -- is reported in `manual_review_needed`, never guessed at.
+
+`metadata["replay"]` is a new, optional, unvalidated passthrough on Evidence (`twin.record_evidence`'s `evidence_recorder.py`, stored opaquely -- this module never inspects its shape). Only a caller that actually knows how to re-invoke itself should set it; `api_gateway/twin/metric_evaluator.py` is the first (`{"tool_id": "twin.evaluate_metric", "args": {...the exact original top-level kwargs...}}`). It is NOT derived from `producer.tool`/`inputs` (those are often a descriptive Python dotted path, not an invokable MCP tool id -- guessing replayability from them would be wrong more often than right).
+
+**Deliberately out of scope** (each a separable piece, no acceptance-criterion pressure to build now): property-level impact through `Constraint.dependencies` (that field doesn't exist yet -- explicitly deferred since FORGE-312/Step 2, confirmed still true during this ticket's own scoping); a dashboard UI showing the impact graph and re-run progress (zero existing ECT-related UI surface today -- new work from scratch).
+
+*Source: `twin_core/transactions/ect.py`, `twin_core/consistency/impact.py`, `api_gateway/twin/revalidation.py`*
+
 ---
 
 ## 3. Edge Types

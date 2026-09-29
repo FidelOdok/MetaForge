@@ -40,8 +40,11 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+import structlog
+
 from twin_core.api import TwinAPI
 from twin_core.consistency.impact import ImpactEngine
+from twin_core.consistency.staleness import StaleMarking, StalenessEngine
 from twin_core.hitl.engine import HITLEngine
 from twin_core.hitl.models import HITLLevel
 from twin_core.models.engineering_change_transaction import (
@@ -50,8 +53,10 @@ from twin_core.models.engineering_change_transaction import (
     EngineeringChangeTransaction,
     ImpactSeverity,
 )
-from twin_core.models.patch import Patch
+from twin_core.models.patch import Patch, PatchOp
 from twin_core.transactions.engine import TransactionEngine
+
+logger = structlog.get_logger(__name__)
 
 
 class ECTStateError(Exception):
@@ -162,6 +167,10 @@ async def analyze(
             "affected_objects": affected,
             "impact": _IMPACT_BY_LEVEL[approval.level],
             "approval_required": approval.required,
+            # FORGE-316: the structured plan (not just flat ids) -- a
+            # PRE-commit preview at this point; commit() overwrites it with
+            # the real post-commit one once this ECT actually commits.
+            "revalidation_plan": impact_dict["revalidation_plan"],
         },
     )
 
@@ -207,12 +216,32 @@ async def reject(
 
 
 async def commit(
-    twin: TwinAPI, ect_id: UUID, *, engine: TransactionEngine | None = None
+    twin: TwinAPI,
+    ect_id: UUID,
+    *,
+    engine: TransactionEngine | None = None,
+    staleness_engine: StalenessEngine | None = None,
+    impact_engine: ImpactEngine | None = None,
 ) -> EngineeringChangeTransaction:
     """APPROVED -> COMMITTED. Delegates to ``TransactionEngine.commit`` --
     on a conflict (another change landed on the same entities since this
     ECT was analyzed), the ECT stays APPROVED with the conflict recorded in
     ``committed_patch_result`` rather than being silently marked COMMITTED.
+
+    FORGE-316: a successful commit ALSO propagates staleness for real
+    (``StalenessEngine.propagate``, spec §30's "invalidate downstream
+    evidence automatically") -- FORGE-66's own ``commit`` never did this;
+    it only ever applied the patch. ``analyze()``/``approve()`` already
+    compute a PREVIEW via ``ImpactEngine.preview_impact`` (no writes), but
+    nothing ever ran the real, writing ``propagate()`` this state machine's
+    own commit step is the one true place a REVISE/SUPERSEDE/DEPRECATE/
+    INVALIDATE op's actual downstream impact should be marked -- one
+    ``StalenessEngine.propagate`` call per such op in the patch, in a
+    best-effort try/except per op (a staleness-propagation failure must
+    never make an already-successful graph commit look like it failed).
+    The real post-commit markings replace ``revalidation_plan`` with the
+    plan that's actually true (analyze()'s own version was only ever a
+    projection).
     """
     ect = await _get(twin, ect_id)
     _require_status(ect, ECTStatus.APPROVED)
@@ -222,6 +251,33 @@ async def commit(
     updates: dict[str, Any] = {"committed_patch_result": result.model_dump(mode="json")}
     if result.status == "committed":
         updates["status"] = ECTStatus.COMMITTED
+        if ect.project_id is not None:
+            staleness = staleness_engine or StalenessEngine(twin)
+            markings_by_id: dict[UUID, StaleMarking] = {}
+            for op, applied in zip(ect.patch.operations, result.applied, strict=True):
+                if op.op == PatchOp.ADD or op.entity_kind is None or applied.entity_id is None:
+                    continue
+                try:
+                    markings = await staleness.propagate(
+                        ect.project_id, op.entity_kind, applied.entity_id
+                    )
+                except Exception as exc:  # noqa: BLE001 -- must never fail an already-committed change
+                    logger.warning(
+                        "ect_staleness_propagation_failed",
+                        ect_id=str(ect_id),
+                        entity_kind=op.entity_kind,
+                        entity_id=str(applied.entity_id),
+                        error=str(exc),
+                    )
+                    continue
+                for marking in markings:
+                    markings_by_id.setdefault(marking.entity_id, marking)
+            if markings_by_id:
+                impact = impact_engine or ImpactEngine(twin)
+                plan = await impact.build_revalidation_plan(markings_by_id.values())
+                updates["revalidation_plan"] = [step.model_dump(mode="json") for step in plan]
+            else:
+                updates["revalidation_plan"] = []
     return await twin.update_ect(ect_id, updates)
 
 

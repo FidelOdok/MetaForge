@@ -82,3 +82,18 @@ class EngineeringChangeTransaction(NodeBase):
     # plain dict (not a typed field) so this model doesn't import
     # transactions/engine.py, avoiding a models<->transactions import cycle.
     committed_patch_result: dict[str, Any] | None = None
+    # FORGE-316: RevalidationStep.model_dump(mode="json") list -- plain
+    # dicts (not a typed field) for the same import-cycle reason as
+    # committed_patch_result (this model would otherwise need
+    # twin_core.consistency.impact). analyze() stores ImpactEngine's
+    # PRE-commit preview here; a successful commit() OVERWRITES it with the
+    # REAL post-commit plan built from StalenessEngine.propagate()'s actual
+    # StaleMarking writes -- the two can differ if graph state moved
+    # between analyze and commit, and the post-commit one is the one that's
+    # actually true.
+    revalidation_plan: list[dict[str, Any]] = Field(default_factory=list)
+    # FORGE-316: set by twin.execute_revalidation_plan -- which steps of
+    # revalidation_plan were automatically re-run (new Evidence recorded,
+    # supersedes the stale one) versus need a human (no replayable
+    # provenance, or not an evidence entity at all).
+    revalidation_result: dict[str, Any] | None = None

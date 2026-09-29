@@ -271,6 +271,7 @@ async def bootstrap_tool_registry(
     hierarchy_node_recorder: Any = None,
     hierarchy_rollup_fn: Any = None,
     metric_evaluator: Any = None,
+    revalidation_executor: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -373,6 +374,13 @@ async def bootstrap_tool_registry(
             a real ``calculix.run_fea`` call when the estimate falls
             within its error band of a supplied limit. ``None`` skips
             registration (same pattern as ``document_recorder``).
+        revalidation_executor: Optional async ``execute(ect_id) -> dict``
+            (make_revalidation_executor, FORGE-316). When supplied,
+            registers ``twin.execute_revalidation_plan`` -- re-runs
+            exactly the Evidence a committed ECT's real revalidation_plan
+            marked stale, for entities carrying a replayable provenance
+            recipe. ``None`` skips registration (same pattern as
+            ``document_recorder``).
 
     Returns:
         The populated ToolRegistry.
@@ -548,6 +556,7 @@ async def bootstrap_tool_registry(
                     hierarchy_node_recorder=hierarchy_node_recorder,
                     hierarchy_rollup_fn=hierarchy_rollup_fn,
                     metric_evaluator=metric_evaluator,
+                    revalidation_executor=revalidation_executor,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

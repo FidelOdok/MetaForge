@@ -128,7 +128,7 @@ class ImpactEngine:
                 markings_by_id.setdefault(marking.entity_id, marking)
 
         conflicts = await self._find_conflicts(directly_changed)
-        revalidation_plan = await self._build_revalidation_plan(markings_by_id.values())
+        revalidation_plan = await self.build_revalidation_plan(markings_by_id.values())
 
         return ImpactReport(
             directly_changed=sorted(directly_changed, key=str),
@@ -166,9 +166,16 @@ class ImpactEngine:
                 )
         return conflicts
 
-    async def _build_revalidation_plan(
+    async def build_revalidation_plan(
         self, markings: Iterable[StaleMarking]
     ) -> list[RevalidationStep]:
+        """Public (FORGE-316): also called by ``ect.py``'s ``commit()`` to
+        build the REAL post-commit plan from real ``StaleMarking``s
+        (``StalenessEngine.propagate``'s actual writes), reusing the exact
+        same action-text logic ``analyse()`` uses for its pre-commit
+        preview -- one place decides what a stale entity's revalidation
+        action means, whether computed before or after the commit.
+        """
         steps: list[RevalidationStep] = []
         for marking in markings:
             entity = await self._get(marking.entity_kind, marking.entity_id)
