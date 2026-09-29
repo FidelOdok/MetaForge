@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -212,11 +212,23 @@ async def handle_health_check(
 
 
 class ToolNotFoundError(Exception):
-    """Raised when a tool/call references an unknown tool_id."""
+    """Raised when a tool/call references an unknown tool_id.
 
-    def __init__(self, tool_id: str) -> None:
+    FORGE-343: carries ``did_you_mean`` so the message names tools that do
+    exist. The precedent is FORGE-236 on the harness-side error of the same
+    name (``orchestrator/harness/tools.py``), where a bare "not found" was
+    observed making a model conclude a healthy backend was down — it has no
+    way to distinguish "you typed the name wrong" from "the server is
+    broken" unless the error says which.
+    """
+
+    def __init__(self, tool_id: str, did_you_mean: Sequence[str] = ()) -> None:
         self.tool_id = tool_id
-        super().__init__(f"Tool not found: {tool_id}")
+        self.did_you_mean = list(did_you_mean)
+        message = f"Tool not found: {tool_id}"
+        if self.did_you_mean:
+            message += ". Did you mean: " + ", ".join(self.did_you_mean)
+        super().__init__(message)
 
 
 class ToolHandlerError(Exception):
