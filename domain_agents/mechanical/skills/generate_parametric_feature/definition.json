@@ -1,0 +1,27 @@
+{
+  "name": "generate_parametric_feature",
+  "version": "0.1.0",
+  "domain": "mechanical",
+  "agent": "mechanical",
+  "description": "Generate a named, reusable parametric feature from the feature library (FORGE-269, gap G-D1) -- bolt_pattern (a mounting plate with a circular bolt-hole pattern) or rib (a triangular gusset rib), each a typed-parameter macro over Design IR entities, lowered and committed via the same path generate_cad_ir uses. Growing the library is adding one macro function, not a new skill -- more feature_type values may appear over time.",
+  "phase": 1,
+  "tools_required": [
+    { "tool_id": "cadquery.execute_script", "capability": "cad_script", "required": false },
+    { "tool_id": "freecad.open_session", "capability": "cad_session", "required": true },
+    { "tool_id": "freecad.close_session", "capability": "cad_session", "required": true },
+    { "tool_id": "freecad.create_body", "capability": "cad_author", "required": false },
+    { "tool_id": "freecad.create_sketch", "capability": "cad_author", "required": false },
+    { "tool_id": "freecad.pad_sketch", "capability": "cad_author", "required": false },
+    { "tool_id": "freecad.pocket_sketch", "capability": "cad_author", "required": false },
+    { "tool_id": "freecad.polar_pattern", "capability": "cad_author", "required": false },
+    { "tool_id": "freecad.measure", "capability": "cad_inspect", "required": true },
+    { "tool_id": "freecad.export_model", "capability": "cad_export", "required": true },
+    { "tool_id": "twin.commit_geometry", "capability": "twin_geometry", "required": false }
+  ],
+  "input_schema": "schema.GenerateParametricFeatureInput",
+  "output_schema": "schema.GenerateParametricFeatureOutput",
+  "timeout_seconds": 300,
+  "retries": 1,
+  "idempotent": true,
+  "tags": ["cad", "freecad", "design-ir", "feature-library", "parametric", "generation", "llm"]
+}

@@ -17,6 +17,7 @@ import {
   useStartDesignLoop,
 } from '../hooks/use-design-loop';
 import { useAttemptPromotion, usePromotionHistory } from '../hooks/use-promotion';
+import { useGenerateFeature } from '../hooks/use-features';
 import type {
   EvidenceSummary,
   PassFail,
@@ -26,6 +27,7 @@ import type {
 } from '../types/requirements';
 import type { DesignLoopIteration } from '../types/design-loop';
 import type { AttemptPromotionResult, MaturityLevel } from '../types/promotion';
+import type { FeatureType, GenerateFeatureResult } from '../types/features';
 
 const OPERATORS = ['<=', '>=', '==', '<', '>', '!='] as const;
 
@@ -998,6 +1000,219 @@ function GateReviewSection({
   );
 }
 
+const FEATURE_TYPES: FeatureType[] = ['bolt_pattern', 'rib'];
+
+/** FORGE-269 (gap G-D1): the parametric feature library -- pick a named
+ * feature (bolt_pattern, rib -- see domain_agents/shared/design_ir_macros.py
+ * for the full library and which features remain deferred), fill its typed
+ * parameters, generate a standalone CAD_MODEL work product from it. Does
+ * NOT modify an existing committed part in place -- that is FORGE-270's
+ * own gap ("editable parameters on committed parts"), a separate ticket. */
+function FeatureLibrarySection({ projectId }: { projectId?: string }) {
+  const toast = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [featureType, setFeatureType] = useState<FeatureType>('bolt_pattern');
+  const [name, setName] = useState('');
+  const [plateLength, setPlateLength] = useState('60');
+  const [plateWidth, setPlateWidth] = useState('40');
+  const [plateThickness, setPlateThickness] = useState('5');
+  const [holeDiameter, setHoleDiameter] = useState('4');
+  const [holeCount, setHoleCount] = useState('4');
+  const [patternRadius, setPatternRadius] = useState('15');
+  const [ribLength, setRibLength] = useState('30');
+  const [ribHeight, setRibHeight] = useState('20');
+  const [ribThickness, setRibThickness] = useState('3');
+  const [lastResult, setLastResult] = useState<GenerateFeatureResult | null>(null);
+
+  const generate = useGenerateFeature();
+
+  const canSubmit = name.trim() !== '';
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    const feature =
+      featureType === 'bolt_pattern'
+        ? {
+            feature_type: 'bolt_pattern' as const,
+            plate_length_mm: Number(plateLength),
+            plate_width_mm: Number(plateWidth),
+            plate_thickness_mm: Number(plateThickness),
+            hole_diameter_mm: Number(holeDiameter),
+            hole_count: Number(holeCount),
+            pattern_radius_mm: Number(patternRadius),
+          }
+        : {
+            feature_type: 'rib' as const,
+            length_mm: Number(ribLength),
+            height_mm: Number(ribHeight),
+            thickness_mm: Number(ribThickness),
+          };
+    generate.mutate(
+      { name: name.trim(), feature, projectId, adapter: 'freecad' },
+      {
+        onSuccess: (result) => {
+          setLastResult(result);
+          setShowForm(false);
+          toast.success(`Generated ${result.feature_type}: ${result.entity_count} entities`);
+        },
+        onError: (err) => {
+          const detail =
+            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          toast.error(detail || 'Could not generate the feature');
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="mb-6" data-testid="feature-library-section">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+          Feature library
+        </h2>
+        {!showForm && (
+          <button
+            type="button"
+            data-testid="open-feature-library-button"
+            onClick={() => setShowForm(true)}
+            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            + Generate feature
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <form
+          data-testid="feature-library-form"
+          onSubmit={handleSubmit}
+          className="mb-3 flex flex-wrap items-end gap-2 rounded-lg p-3"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            Feature
+            <select
+              value={featureType}
+              onChange={(e) => setFeatureType(e.target.value as FeatureType)}
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none appearance-none"
+              style={{ ...FIELD_STYLE, width: '140px' }}
+            >
+              {FEATURE_TYPES.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            Name
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Motor mount bolt pattern"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '200px' }}
+            />
+          </label>
+
+          {featureType === 'bolt_pattern' && (
+            <>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Plate length (mm)
+                <input value={plateLength} onChange={(e) => setPlateLength(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Plate width (mm)
+                <input value={plateWidth} onChange={(e) => setPlateWidth(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Plate thickness (mm)
+                <input value={plateThickness} onChange={(e) => setPlateThickness(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Hole diameter (mm)
+                <input value={holeDiameter} onChange={(e) => setHoleDiameter(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Hole count
+                <input value={holeCount} onChange={(e) => setHoleCount(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '70px' }} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Pattern radius (mm)
+                <input value={patternRadius} onChange={(e) => setPatternRadius(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+              </label>
+            </>
+          )}
+
+          {featureType === 'rib' && (
+            <>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Length (mm)
+                <input value={ribLength} onChange={(e) => setRibLength(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Height (mm)
+                <input value={ribHeight} onChange={(e) => setRibHeight(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                Thickness (mm)
+                <input value={ribThickness} onChange={(e) => setRibThickness(e.target.value)} type="number" className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none" style={{ ...FIELD_STYLE, width: '80px' }} />
+              </label>
+            </>
+          )}
+
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={!canSubmit || generate.isPending}>
+              {generate.isPending ? 'Generating…' : 'Generate'}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowForm(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {lastResult && (
+        <div
+          data-testid="feature-library-result"
+          className="rounded-lg p-3"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <Badge variant="success">{lastResult.feature_type}</Badge>
+            <span className="text-xs text-on-surface-variant">
+              {lastResult.entity_count} entities &middot; {lastResult.volume_mm3.toFixed(1)}mm&sup3;
+            </span>
+          </div>
+          {lastResult.committed && lastResult.model_url && (
+            <a
+              href={lastResult.model_url}
+              className="text-xs"
+              style={{ color: 'var(--mf-c-86cfff, #86cfff)' }}
+            >
+              View committed model
+            </a>
+          )}
+          {lastResult.commit_error && (
+            <div className="text-xs text-on-surface-variant">
+              not committed: {lastResult.commit_error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!showForm && !lastResult && (
+        <EmptyState
+          title="No features generated yet"
+          description="Generate a bolt pattern or rib above from the parametric feature library."
+        />
+      )}
+    </div>
+  );
+}
+
 export function RequirementsPage() {
   const { activeProjectId } = useActiveProject();
   const [productType, setProductType] = useState('generic');
@@ -1041,6 +1256,8 @@ export function RequirementsPage() {
       <DesignLoopSection projectId={activeProjectId ?? undefined} />
 
       <GateReviewSection projectId={activeProjectId ?? undefined} requirements={requirements} />
+
+      <FeatureLibrarySection projectId={activeProjectId ?? undefined} />
 
       {completeness && (
         <div
