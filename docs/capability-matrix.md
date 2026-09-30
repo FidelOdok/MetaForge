@@ -258,6 +258,36 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Why a budget cell is blank
+
+Budget allocations roll up mass and cost over the `CONTAINS` tree and
+compare each subsystem's actual against what it was allocated. When the
+comparison cannot be made, the status says which of three reasons it is
+rather than returning a blank:
+
+| `reason` | Means | What to do |
+|---|---|---|
+| `metric_has_no_rollup` | Nothing can compute this metric — `power` today | Nothing; wait for a source |
+| `target_is_not_a_node_id` | `target` is the free-text label the model documents ("frame") | Store a node id if you want it checked |
+| `target_node_not_found` | A well-formed id pointing at nothing | Repair the reference |
+| *(empty)* | The rollup ran | Read `actual` |
+
+A rollup that ran and summed to nothing gives `actual: 0.0`, not `null` —
+a genuine zero is an answer, and under budget.
+
+This matters because all three used to arrive as the same empty cell, and
+they call for different actions: wait for a feature, fix a typo, repair a
+dangling reference. An engineer could not tell them apart, nor from a
+subsystem whose parts simply have no mass recorded yet.
+
+**Power is not checkable today**, and that is the honest state rather than
+a bug to work around: there is no canonical node-level power key, and the
+two keys that exist measure different things — `power_dissipation_w`
+(heat) and `power_mw` (draw, and not on graph nodes at all). Summing them
+would put a wrong number in a budget. Tracked as FORGE-390. The Structure
+tab still drops a budget it cannot roll up, but now logs that it did,
+because a missing row reads as "nobody set one".
+
 ### A requirement something can check
 
 `twin.record_constraint_set` takes a `metric`, `operator`, `limit` and

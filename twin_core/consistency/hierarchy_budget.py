@@ -20,6 +20,12 @@ Only ``mass``/``cost`` metrics can be checked this way -- ``power`` (also
 named in this gap's own capability text) has no rollup source yet
 (``compute_hierarchy_rollup`` doesn't track it), so it always degrades to
 "can't check" too, same as an unresolvable target.
+
+FORGE-345: those degradations are no longer the *same* "can't check".
+``AllocationStatus.reason`` says which of the three happened, because
+"this metric will never be checkable", "you wrote a label where a node id
+goes" and "that node id points at nothing" call for different actions and
+were arriving as one identical blank cell.
 """
 
 from __future__ import annotations
@@ -47,6 +53,23 @@ class AllocationStatus(BaseModel):
     # to know who owns an over-budget subsystem.
     owner: str = ""
     discipline: str = ""
+    reason: str = ""
+    """Why ``actual`` is None, when it is. Empty when the check ran.
+
+    FORGE-345. Three unrelated situations used to arrive as the same blank
+    cell: a metric no rollup can compute, a target that is not a node id at
+    all, and a target id that resolves to nothing. They need different
+    things done about them -- wait for a feature, fix a typo, repair a
+    dangling reference -- and an engineer looking at the allocation table
+    could not tell which they were looking at.
+    """
+
+
+#: Why a rollup could not be computed. Values are stable strings so a UI
+#: can branch on them without parsing prose.
+UNSUPPORTED_METRIC = "metric_has_no_rollup"
+TARGET_NOT_A_NODE_ID = "target_is_not_a_node_id"
+TARGET_NOT_FOUND = "target_node_not_found"
 
 
 async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> list[AllocationStatus]:
@@ -56,13 +79,31 @@ async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> lis
     results: list[AllocationStatus] = []
     for allocation in budget.allocations:
         actual: float | None = None
-        if rollup_field is not None:
+        reason = ""
+        if rollup_field is None:
+            # e.g. `power`, which this gap's own capability text names but
+            # which has no rollup source: no graph node carries a power
+            # value the tree walk could read. Saying so beats a blank that
+            # looks like missing data somebody could go and enter.
+            reason = UNSUPPORTED_METRIC
+        else:
             try:
                 target_id = UUID(allocation.target)
-                rollup = await compute_hierarchy_rollup(twin, target_id)
-                actual = getattr(rollup, rollup_field)
-            except (ValueError, KeyError):
-                actual = None
+            except ValueError:
+                # `target` is documented as a free-text label ("frame"),
+                # reinterpreted as a node id when a caller stores one. A
+                # label is not a mistake -- it just cannot be checked.
+                reason = TARGET_NOT_A_NODE_ID
+            else:
+                try:
+                    rollup = await compute_hierarchy_rollup(twin, target_id)
+                except KeyError:
+                    # A UUID that resolves to nothing, or to something that
+                    # is not a HierarchyNode. Unlike the case above this is
+                    # a broken reference, and worth repairing.
+                    reason = TARGET_NOT_FOUND
+                else:
+                    actual = getattr(rollup, rollup_field)
         over_budget = actual > allocation.amount if actual is not None else None
         results.append(
             AllocationStatus(
@@ -72,6 +113,7 @@ async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> lis
                 over_budget=over_budget,
                 owner=allocation.owner,
                 discipline=allocation.discipline,
+                reason=reason,
             )
         )
     return results
