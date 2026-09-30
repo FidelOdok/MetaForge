@@ -60,6 +60,10 @@ dependencies = [
 [project.scripts]
 forge = "cli.forge_cli.main:main"
 forge-server = "api_gateway.server:main"
+# FORGE-374: the local-first entry point. A packaged plugin launches this by
+# name; `python -m metaforge.mcp` works too but depends on the interpreter
+# and working directory the harness happens to spawn with.
+metaforge-mcp = "metaforge.mcp.__main__:main"
 
 [project.optional-dependencies]
 neo4j = [
