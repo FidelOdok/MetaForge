@@ -55,6 +55,11 @@ class _FakeOAuth:
         # The 401 path builds a WWW-Authenticate pointing at the protected
         # resource metadata, and asks the provider for its issuer first.
         issuer = None
+        # FORGE-330: whether this deployment's login proves *who* is
+        # calling. False here, as for the real shared-secret login: the
+        # token's actor outranks the header either way, which is what
+        # these tests are about.
+        verified_identity = False
 
     def __init__(self, token: str, actor: str) -> None:
         self.config = self._Config()

@@ -36,6 +36,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -112,6 +113,26 @@ def verify_pkce_s256(verifier: str, challenge: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+#: Characters allowed in an operator label. Anything else is dropped --
+#: this ends up in log lines and session records, and a name carrying
+#: newlines or control characters would let a caller forge entries.
+_ACTOR_SAFE = re.compile(r"[^A-Za-z0-9._@+-]")
+
+#: Enough to identify a colleague, short enough not to bloat every event.
+_ACTOR_MAX = 64
+
+
+def _actor_for(operator: str | None, fallback: str) -> str:
+    """``user:<name>`` from what was typed, or the configured default.
+
+    Sanitised, not trusted: the login is one shared secret, so the name is
+    a label for the timeline, never an identity claim the server stands
+    behind.
+    """
+    cleaned = _ACTOR_SAFE.sub("", (operator or "").strip())[:_ACTOR_MAX]
+    return f"user:{cleaned}" if cleaned else fallback
+
+
 @dataclass(frozen=True)
 class OAuthConfig:
     """OAuth server settings, sourced from the environment.
@@ -124,6 +145,16 @@ class OAuthConfig:
     login_secret: str
     issuer: str | None = None
     actor_id: str = "oauth:web"
+    #: Whether this deployment's login proves *who* the caller is.
+    #:
+    #: False for the shared-secret login below, and that is not a
+    #: temporary shortcoming to paper over: one secret shared by a team
+    #: authorises the call and identifies nobody, exactly like the static
+    #: API key. The operator name typed at login is recorded so a timeline
+    #: says something more useful than ``oauth:web`` for everyone, but it
+    #: is a label, not a claim the server stands behind. An upstream
+    #: identity provider (the Phase-2 broker) is what flips this.
+    verified_identity: bool = False
     scope: str = "mcp"
     code_ttl: int = 600
     access_ttl: int = 3600
@@ -181,6 +212,7 @@ class _Code:
     code_challenge: str
     scope: str
     expires_at: float
+    actor_id: str = "oauth:web"
 
 
 @dataclass
@@ -333,8 +365,22 @@ class OAuthProvider:
         return hmac.compare_digest(secret, self.config.login_secret)
 
     def issue_code(
-        self, client: _Client, redirect_uri: str, code_challenge: str, scope: str | None
+        self,
+        client: _Client,
+        redirect_uri: str,
+        code_challenge: str,
+        scope: str | None,
+        operator: str | None = None,
     ) -> str:
+        """Mint an authorization code, optionally labelled with who logged in.
+
+        FORGE-330: ``operator`` is the name typed on the login form. It is
+        NOT a verified identity -- the login is one shared secret, so
+        whoever knows it can type any name -- but a timeline that says
+        "ana" is worth more than one that says ``oauth:web`` for the whole
+        team. It rides through to the token as ``actor_id`` and is marked
+        unverified everywhere it surfaces.
+        """
         code = secrets.token_urlsafe(32)
         self._store.codes[code] = _Code(
             client_id=client.client_id,
@@ -342,6 +388,7 @@ class OAuthProvider:
             code_challenge=code_challenge,
             scope=scope or self.config.scope,
             expires_at=self._now() + self.config.code_ttl,
+            actor_id=_actor_for(operator, self.config.actor_id),
         )
         return code
 
@@ -369,7 +416,7 @@ class OAuthProvider:
         verifier = params.get("code_verifier")
         if not verifier or not verify_pkce_s256(verifier, record.code_challenge):
             raise OAuthError("invalid_grant", "PKCE verification failed")
-        return self._issue_tokens(record.client_id, record.scope)
+        return self._issue_tokens(record.client_id, record.scope, record.actor_id)
 
     def _grant_refresh(self, params: dict[str, str]) -> dict[str, object]:
         token = params.get("refresh_token")
@@ -380,20 +427,23 @@ class OAuthProvider:
             raise OAuthError("invalid_grant", "refresh token expired")
         if params.get("client_id") and params.get("client_id") != record.client_id:
             raise OAuthError("invalid_grant", "client_id mismatch")
-        return self._issue_tokens(record.client_id, record.scope)
+        return self._issue_tokens(record.client_id, record.scope, record.actor_id)
 
-    def _issue_tokens(self, client_id: str, scope: str) -> dict[str, object]:
+    def _issue_tokens(
+        self, client_id: str, scope: str, actor_id: str | None = None
+    ) -> dict[str, object]:
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(32)
         now = self._now()
+        bound_actor = actor_id or self.config.actor_id
         self._store.access[access] = _Token(
-            actor_id=self.config.actor_id,
+            actor_id=bound_actor,
             scope=scope,
             client_id=client_id,
             expires_at=now + self.config.access_ttl,
         )
         self._store.refresh[refresh] = _Refresh(
-            actor_id=self.config.actor_id,
+            actor_id=bound_actor,
             scope=scope,
             client_id=client_id,
             expires_at=now + self.config.refresh_ttl,

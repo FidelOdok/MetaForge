@@ -107,6 +107,10 @@ class AuthPosture:
     api_key: bool = False
     oauth: bool = False
     transport: str = "unknown"
+    #: Whether the configured login establishes *which* person is calling.
+    #: False for a shared credential of any kind; True only under an
+    #: identity provider that authenticates individuals.
+    identifies_caller: bool = False
 
     @property
     def mode(self) -> str:
@@ -128,12 +132,19 @@ class AuthPosture:
         out: dict[str, Any] = {
             "mode": self.mode,
             "transport": self.transport,
-            # A shared API key authorises the call but identifies nobody —
-            # the same distinction the HTTP gate already draws by returning
-            # None for a key match and an actor for an OAuth token. Only
-            # OAuth produces an attributable caller.
-            "identifies_caller": self.oauth,
+            # A shared credential authorises the call and identifies
+            # nobody. FORGE-330: that is true of the shared-secret OAuth
+            # login too, not only the static API key -- one secret held by
+            # a team proves someone on the team, never which one. So the
+            # transport declares whether its login distinguishes people,
+            # instead of this being inferred from "OAuth is on".
+            "identifies_caller": self.identifies_caller,
         }
+        if not self.is_open and not self.identifies_caller:
+            out["detail"] = (
+                "authorised by a shared credential: calls are attributable to "
+                "the credential, not to a person"
+            )
         if self.is_open:
             out["detail"] = (
                 "no API key and no OAuth configured: every connection on this "

@@ -823,11 +823,18 @@ class UnifiedMcpServer:
 
             ctx = current_context()
             actor = ctx.actor_id
+            attributable = ctx.actor_is_attributable
         except Exception:  # noqa: BLE001 — attribution must not break capture
             actor = None
+            attributable = False
         if actor:
             out["actor"] = actor
-            out["actor_verified"] = bool(actor) and actor != "system:unattributed"
+            # FORGE-330: this used to be `actor != "system:unattributed"`,
+            # i.e. "the field is not the default" -- so a client that set
+            # X-MetaForge-Actor to anything at all was recorded as verified.
+            # The flag has to mean the server established it, or an audit
+            # trail cannot tell a proven identity from a typed-in one.
+            out["actor_verified"] = attributable
         if self._client_info:
             name = self._client_info.get("name")
             version = self._client_info.get("version")

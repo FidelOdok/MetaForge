@@ -523,6 +523,7 @@ def build_http_app(
             api_key=bool(api_key),
             oauth=oauth is not None and oauth.config.enabled,
             transport="http",
+            identifies_caller=bool(oauth and oauth.config.verified_identity),
         )
     )
     app = FastAPI(
@@ -652,7 +653,16 @@ def build_http_app(
         # server established cryptographically, or the audit trail records
         # whoever the caller said they were.
         if verified_actor:
-            ctx = ctx.model_copy(update={"actor_id": verified_actor})
+            # FORGE-330: the actor comes from a token this server issued,
+            # so it outranks the header -- but "issued by us" is not the
+            # same as "we know who this is". With the shared-secret login
+            # anyone holding the secret can type any name, so
+            # actor_verified stays False and the name is a label on the
+            # timeline. An upstream identity provider is what makes it an
+            # identity; `OAuthConfig.verified_identity` is where that
+            # switches on.
+            proven = bool(oauth and oauth.config.verified_identity)
+            ctx = ctx.model_copy(update={"actor_id": verified_actor, "actor_verified": proven})
         with with_context(ctx):
             response = await server.handle_request(raw_body.decode("utf-8"))
         # JSON-RPC notifications produce no body — return 204 so the
@@ -780,8 +790,16 @@ def _login_page(action: str, fields: dict[str, str], *, error: str = "") -> str:
 <form method="post" action="{action}">
   <h1>Authorize MetaForge MCP</h1>
   {banner}
+  <label>Your name<br>
+    <input type="text" name="operator" autofocus placeholder="e.g. ana"
+           autocomplete="username">
+  </label>
+  <p style="font-size:.8rem;opacity:.7;margin:.2rem 0 .8rem">
+    Recorded against your work so a reviewer can see who did what. This
+    login is a shared secret, so the name is not verified.
+  </p>
   <label>Access secret<br>
-    <input type="password" name="login_secret" autofocus required>
+    <input type="password" name="login_secret" required>
   </label>
   {hidden}
   <button type="submit">Authorize</button>
@@ -866,7 +884,13 @@ def _mount_oauth_routes(
                 status_code=401,
             )
         redirect_uri = params["redirect_uri"]
-        code = oauth.issue_code(client, redirect_uri, params["code_challenge"], params.get("scope"))
+        code = oauth.issue_code(
+            client,
+            redirect_uri,
+            params["code_challenge"],
+            params.get("scope"),
+            operator=params.get("operator"),
+        )
         query = {"code": code}
         if params.get("state"):
             query["state"] = params["state"]

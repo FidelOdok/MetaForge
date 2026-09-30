@@ -102,12 +102,37 @@ def test_no_handshake_means_no_client_claim() -> None:
     assert "client" not in UnifiedMcpServer([_Adapter()]).attribution()
 
 
-def test_a_verified_actor_is_marked_verified() -> None:
+def test_an_actor_the_server_established_is_marked_verified() -> None:
     server = UnifiedMcpServer([_Adapter()])
-    with with_context(McpCallContext(session_id=uuid.uuid4(), actor_id="user:fidel")):
+    with with_context(
+        McpCallContext(session_id=uuid.uuid4(), actor_id="user:fidel", actor_verified=True)
+    ):
         att = server.attribution()
     assert att["actor"] == "user:fidel"
     assert att["actor_verified"] is True
+
+
+def test_a_self_asserted_actor_is_not_verified() -> None:
+    """FORGE-330. This flag used to be `actor != "system:unattributed"` --
+    "the field is not the default" -- so a client that set
+    X-MetaForge-Actor to anything at all was recorded as verified. An
+    audit trail that cannot tell a proven identity from a typed-in one is
+    not an audit trail."""
+    server = UnifiedMcpServer([_Adapter()])
+    with with_context(McpCallContext(session_id=uuid.uuid4(), actor_id="user:ceo")):
+        att = server.attribution()
+    assert att["actor"] == "user:ceo"  # still recorded -- it is what they said
+    assert att["actor_verified"] is False
+
+
+def test_a_header_supplied_actor_is_not_verified() -> None:
+    """The path that matters: in open mode the actor comes straight off
+    the wire."""
+    from mcp_core.context import context_from_headers
+
+    server = UnifiedMcpServer([_Adapter()])
+    with with_context(context_from_headers({"X-MetaForge-Actor": "user:ceo"})):
+        assert server.attribution()["actor_verified"] is False
 
 
 def test_the_unattributed_sentinel_is_not_verified() -> None:
@@ -151,7 +176,9 @@ def test_a_non_string_model_claim_is_ignored() -> None:
 def _run_one_call(store: _Store, *, client: str = "claude-code") -> None:
     server = UnifiedMcpServer([_Adapter()], session_capture=SessionCapture(store))
     _initialise(server, name=client)
-    with with_context(McpCallContext(session_id=uuid.uuid4(), actor_id="user:fidel")):
+    with with_context(
+        McpCallContext(session_id=uuid.uuid4(), actor_id="user:fidel", actor_verified=True)
+    ):
         asyncio.run(
             server.handle_request(
                 json.dumps(

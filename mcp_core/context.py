@@ -60,6 +60,13 @@ class McpCallContext(BaseModel):
         default_factory=uuid.uuid4,
         description="Per-request id for tying back to the harness's own trace.",
     )
+    actor_verified: bool = Field(
+        default=False,
+        description=(
+            "Whether the SERVER established actor_id, rather than the caller "
+            "asserting it. False unless a transport says otherwise."
+        ),
+    )
 
     model_config = ConfigDict(frozen=True)
 
@@ -67,6 +74,23 @@ class McpCallContext(BaseModel):
     #: it would be process-global by another name, which is the leak the
     #: binding registry below is keyed to avoid.
     _SENTINEL_SESSION = UUID("00000000-0000-0000-0000-000000000000")
+
+    @property
+    def actor_is_attributable(self) -> bool:
+        """Whether this call can be pinned on a particular person.
+
+        FORGE-330. Distinct from "there is an actor_id": the header is a
+        convenience for local use and anyone can put anything in it, so a
+        non-default value proves nothing on its own. Only a transport that
+        checked something sets ``actor_verified``.
+
+        A shared credential -- an API key, or the shared-secret OAuth login
+        -- authorises the call and identifies nobody, so it does not count
+        either. That distinction is the whole reason the field exists: an
+        audit trail that cannot tell a proven identity from a typed-in one
+        is not an audit trail.
+        """
+        return self.actor_verified and self.actor_id != "system:unattributed"
 
     @property
     def session_is_stable(self) -> bool:

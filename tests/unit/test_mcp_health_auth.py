@@ -89,23 +89,45 @@ def test_open_mode_is_reported_and_explained() -> None:
     ("posture", "mode", "identifies"),
     [
         (AuthPosture(api_key=True, transport="http"), "api_key", False),
-        (AuthPosture(oauth=True, transport="http"), "oauth", True),
-        (AuthPosture(api_key=True, oauth=True, transport="http"), "api_key+oauth", True),
+        (AuthPosture(oauth=True, transport="http"), "oauth", False),
+        (AuthPosture(api_key=True, oauth=True, transport="http"), "api_key+oauth", False),
+        (
+            AuthPosture(oauth=True, transport="http", identifies_caller=True),
+            "oauth",
+            True,
+        ),
     ],
 )
 def test_configured_modes(posture: AuthPosture, mode: str, identifies: bool) -> None:
-    """A shared key authorises the call but identifies nobody.
+    """A shared credential authorises the call and identifies nobody.
 
-    The HTTP gate already draws that line -- it returns an actor for an
-    OAuth token and ``None`` for a key match. ``identifies_caller`` is the
-    same distinction where the doctor can see it.
+    FORGE-330: that is true of the shared-secret OAuth login too, not only
+    the static API key -- one secret held by a team proves someone on the
+    team, never which one. So ``identifies_caller`` is declared by the
+    transport rather than inferred from "OAuth is on", and only an
+    identity provider that authenticates individuals sets it.
     """
     server = _server()
     server.declare_auth_posture(posture)
     auth = _health(server)["auth"]
     assert auth["mode"] == mode
     assert auth["identifies_caller"] is identifies
-    assert "detail" not in auth  # nothing to warn about
+
+
+def test_a_shared_credential_says_what_it_can_and_cannot_prove() -> None:
+    """Not silent: a reader seeing `mode: oauth` would otherwise assume
+    the timeline names people."""
+    server = _server()
+    server.declare_auth_posture(AuthPosture(oauth=True, transport="http"))
+    detail = _health(server)["auth"]["detail"]
+    assert "shared credential" in detail
+    assert "not to a person" in detail
+
+
+def test_a_real_identity_provider_has_nothing_to_warn_about() -> None:
+    server = _server()
+    server.declare_auth_posture(AuthPosture(oauth=True, transport="http", identifies_caller=True))
+    assert "detail" not in _health(server)["auth"]
 
 
 # ---------------------------------------------------------------------------

@@ -316,8 +316,7 @@ def client():
 
 def test_http_app_declares_oauth_posture() -> None:
     """The OAuth branch of the posture call, which the fixture exercises
-    but does not check. ``identifies_caller`` is the whole point of OAuth
-    here: a static key authorises, only a token attributes."""
+    but does not check."""
     pytest.importorskip("starlette.testclient")
     from metaforge.mcp.__main__ import build_http_app
 
@@ -338,7 +337,10 @@ def test_http_app_declares_oauth_posture() -> None:
     )
     assert server.posture is not None
     assert server.posture.mode == "oauth"
-    assert server.posture.report()["identifies_caller"] is True
+    # FORGE-330: OAuth alone no longer implies identification. This
+    # deployment's login is one shared secret, so it authorises and names
+    # nobody; only an identity provider flips identifies_caller.
+    assert server.posture.report()["identifies_caller"] is False
 
 
 def test_protected_resource_metadata_served(client) -> None:
