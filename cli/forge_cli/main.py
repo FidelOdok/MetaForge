@@ -40,6 +40,7 @@ from cli.forge_cli.routines import handle_routine
 from cli.forge_cli.runs import handle_design, handle_runs
 from cli.forge_cli.sources import handle_sources
 from cli.forge_cli.sources import register_subparser as register_sources_subparser
+from cli.forge_cli.tunnel import TUNNEL_COMMANDS
 
 # ---------------------------------------------------------------------------
 # Argument parser construction
@@ -66,6 +67,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # -- tunnel ------------------------------------------------------------
+    tunnel_parser = subparsers.add_parser(
+        "tunnel",
+        help="Expose a local gateway to a cloud harness through a tunnel",
+    )
+    tunnel_sub = tunnel_parser.add_subparsers(dest="tunnel_command")
+    tunnel_up = tunnel_sub.add_parser("up", help="Check the gateway, then open a tunnel")
+    tunnel_up.add_argument(
+        "--url",
+        default="http://localhost:8765/mcp",
+        help="The local MCP endpoint to expose (default: http://localhost:8765/mcp).",
+    )
+    tunnel_up.add_argument(
+        "--port", type=int, default=8765, help="Local port to forward (default: 8765)."
+    )
+    tunnel_up.add_argument(
+        "--provider",
+        default=None,
+        choices=sorted(TUNNEL_COMMANDS),
+        help="Which tunnel to use. Default: whichever is installed.",
+    )
+    tunnel_up.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Run the pre-flight and stop, without opening anything.",
+    )
 
     # -- connect -----------------------------------------------------------
     connect_parser = subparsers.add_parser(
@@ -457,6 +485,52 @@ def handle_ingest(args: argparse.Namespace, client: ForgeClient) -> Any:
     return _do_ingest(args, client)
 
 
+def handle_tunnel(args: argparse.Namespace, client: ForgeClient) -> None:
+    """`forge tunnel up` (FORGE-387).
+
+    The pre-flight is the reason this exists rather than a line in the
+    README telling people to run cloudflared themselves. A tunnel does
+    not change what the server enforces; it changes who can reach it,
+    and the moment between "it worked locally" and "it is public" is
+    exactly where nobody re-checks.
+    """
+    import subprocess
+
+    from cli.forge_cli.tunnel import preflight, tunnel_command
+
+    if getattr(args, "tunnel_command", None) != "up":
+        print("usage: forge tunnel up [--url URL] [--port PORT]", file=sys.stderr)
+        sys.exit(1)
+
+    result = preflight(args.url)
+    report = result.report()
+    if report:
+        print(report, file=sys.stderr if result.blockers else sys.stdout)
+    if not result.ok:
+        sys.exit(1)
+    print(f"Gateway at {args.url} is ready to expose.")
+    if args.check_only:
+        return
+
+    found = tunnel_command(args.port, prefer=args.provider)
+    if found is None:
+        installed = ", ".join(sorted(TUNNEL_COMMANDS))
+        print(
+            f"No tunnel client found. Install one of: {installed}.\n"
+            "Not bundled on purpose -- a binary that opens a public hostname "
+            "is something you should choose to have.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    name, argv = found
+    print(f"Starting {name}: {' '.join(argv)}")
+    print("Give the public URL it prints to your harness as the gateway URL.")
+    # Handed over rather than wrapped: the tunnel's own output is what the
+    # user needs (the hostname, the connection state), and re-printing it
+    # through here would only lose detail.
+    raise SystemExit(subprocess.call(argv))
+
+
 def handle_connect(args: argparse.Namespace, client: ForgeClient) -> None:
     """Guided connect (FORGE-329).
 
@@ -505,6 +579,7 @@ def handle_connect(args: argparse.Namespace, client: ForgeClient) -> None:
 
 _HANDLERS = {
     "connect": handle_connect,
+    "tunnel": handle_tunnel,
     "run": handle_run,
     "status": handle_status,
     "twin": handle_twin,

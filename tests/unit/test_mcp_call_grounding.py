@@ -19,6 +19,12 @@ from typing import Any
 import pytest
 
 from api_gateway.sessions.backend import InMemoryAgentSessionStore
+
+# FORGE-387: these exercise tool dispatch, not the write gate. The
+# server used to default to Caller.LOCAL, which exempted their writes
+# by accident; the default is now conservative, so a local session is
+# declared explicitly -- the same thing the stdio transport does.
+from mcp_core.guardrails import Caller
 from metaforge.mcp.capture import SessionCapture
 from metaforge.mcp.server import UnifiedMcpServer
 from tool_registry.mcp_server.handlers import ToolManifest
@@ -72,14 +78,14 @@ async def _events(store: InMemoryAgentSessionStore) -> list[Any]:
 @pytest.mark.asyncio
 class TestTheReference:
     async def test_every_call_comes_back_with_one(self) -> None:
-        server = UnifiedMcpServer(adapters=[_Adapter()])
+        server = UnifiedMcpServer(adapters=[_Adapter()], caller=Caller.LOCAL)
         result = json.loads(await server.handle_request(_req("twin.get_node")))["result"]
         assert result["_meta"]["callId"]
 
     async def test_two_calls_get_different_ones(self) -> None:
         # A shared id would make the timeline ambiguous exactly where it
         # matters: two commits, one cited, no way to tell which.
-        server = UnifiedMcpServer(adapters=[_Adapter()])
+        server = UnifiedMcpServer(adapters=[_Adapter()], caller=Caller.LOCAL)
         first = json.loads(await server.handle_request(_req("twin.get_node", 1)))
         second = json.loads(await server.handle_request(_req("twin.get_node", 2)))
         assert first["result"]["_meta"]["callId"] != second["result"]["_meta"]["callId"]
@@ -87,7 +93,9 @@ class TestTheReference:
     async def test_the_session_records_the_same_id(self) -> None:
         # The claim that carries the feature.
         store = InMemoryAgentSessionStore()
-        server = UnifiedMcpServer(adapters=[_Adapter()], session_capture=SessionCapture(store))
+        server = UnifiedMcpServer(
+            adapters=[_Adapter()], caller=Caller.LOCAL, session_capture=SessionCapture(store)
+        )
         result = json.loads(await server.handle_request(_req("twin.get_node")))["result"]
         call_id = result["_meta"]["callId"]
 
@@ -98,7 +106,9 @@ class TestTheReference:
         # An agent claiming it tried something is as worth checking as one
         # claiming it succeeded.
         store = InMemoryAgentSessionStore()
-        server = UnifiedMcpServer(adapters=[_Adapter()], session_capture=SessionCapture(store))
+        server = UnifiedMcpServer(
+            adapters=[_Adapter()], caller=Caller.LOCAL, session_capture=SessionCapture(store)
+        )
         response = json.loads(await server.handle_request(_req("twin.boom")))
         assert "error" in response
 
@@ -112,7 +122,7 @@ class TestItStaysOutOfTheWay:
         # `_call_id` is protocol bookkeeping. Adapters validate what they are
         # given, and an unexpected key is what a strict schema rejects.
         adapter = _Adapter()
-        server = UnifiedMcpServer(adapters=[adapter])
+        server = UnifiedMcpServer(adapters=[adapter], caller=Caller.LOCAL)
         await server.handle_request(_req("twin.get_node"))
         assert adapter.seen_params, "handler never ran"
         for args in adapter.seen_params:
@@ -121,7 +131,7 @@ class TestItStaysOutOfTheWay:
     async def test_it_is_not_buried_in_the_tool_output(self) -> None:
         # The text payload is the tool's own output. Putting a protocol id
         # inside it would make every adapter's result schema wrong.
-        server = UnifiedMcpServer(adapters=[_Adapter()])
+        server = UnifiedMcpServer(adapters=[_Adapter()], caller=Caller.LOCAL)
         result = json.loads(await server.handle_request(_req("twin.get_node")))["result"]
         payload = json.loads(result["content"][0]["text"])
         assert "callId" not in payload

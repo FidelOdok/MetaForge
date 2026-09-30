@@ -306,6 +306,9 @@ def client():
         def declare_auth_posture(self, posture) -> None:
             self.posture = posture
 
+        def declare_caller(self, caller) -> None:
+            self.caller = caller
+
         async def handle_request(self, raw: str) -> str:
             return '{"jsonrpc":"2.0","id":"health","result":{"status":"ok"}}'
 
@@ -327,6 +330,9 @@ def test_http_app_declares_oauth_posture() -> None:
 
         def declare_auth_posture(self, posture) -> None:
             self.posture = posture
+
+        def declare_caller(self, caller) -> None:
+            self.caller = caller
 
         async def handle_request(self, raw: str) -> str:
             return "{}"

@@ -54,6 +54,26 @@ READ_ONLY: frozenset[str] = frozenset(
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",
+        # FORGE-343 follow-up: the per-distributor lookups. These are
+        # catalog reads against an external API -- they change nothing
+        # here. They were unclassified, not judged: the coverage guard
+        # scans for `tool_id="..."` literals and this adapter builds its
+        # ids with an f-string, so all twelve sat on the destructive
+        # default. Harmless while nothing enforced it; the moment
+        # FORGE-387 made the write gate real over HTTP, a price check
+        # started asking a human for approval.
+        "digikey.search",
+        "digikey.get_product",
+        "digikey.get_pricing",
+        "digikey.get_availability",
+        "mouser.search",
+        "mouser.get_product",
+        "mouser.get_pricing",
+        "mouser.get_availability",
+        "nexar.search",
+        "nexar.get_product",
+        "nexar.get_pricing",
+        "nexar.get_availability",
         "knowledge.search",
         "memory.list_insights",
         "memory.retrieve_similar_experience",
@@ -233,6 +253,20 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",
+        # Same tools, also open-world: they reach a third-party API whose
+        # answer changes without us.
+        "digikey.search",
+        "digikey.get_product",
+        "digikey.get_pricing",
+        "digikey.get_availability",
+        "mouser.search",
+        "mouser.get_product",
+        "mouser.get_pricing",
+        "mouser.get_availability",
+        "nexar.search",
+        "nexar.get_product",
+        "nexar.get_pricing",
+        "nexar.get_availability",
         "knowledge.ingest",
         "web.fetch",
         "web.search",

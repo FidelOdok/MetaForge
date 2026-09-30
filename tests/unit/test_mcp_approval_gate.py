@@ -191,14 +191,33 @@ class TestTheRefusalIsLegible:
 
 @pytest.mark.asyncio
 class TestLocalDefault:
-    async def test_stdio_writes_run_by_default(self) -> None:
-        # stdio has nowhere to answer an approval until elicitation lands
-        # (F2). Holding there with no gate is an outage, not a guardrail.
+    async def test_stdio_writes_run(self) -> None:
+        # stdio has nowhere to answer an approval unless the client can
+        # elicit (F2). Holding there with no gate is an outage, not a
+        # guardrail.
+        #
+        # FORGE-387: this used to construct the server with no caller and
+        # rely on the default being LOCAL. It passed because of the bug,
+        # not because it set up a stdio session -- the default is now
+        # UNTRUSTED and the transport declares what it is, so the test
+        # does too.
         spy = _Spy()
-        server = UnifiedMcpServer(adapters=[spy])
+        server = UnifiedMcpServer(adapters=[spy], caller=Caller.LOCAL)
         response = await _call(server, "twin.commit_geometry")
         assert "error" not in response, response
         assert spy.ran == ["twin.commit_geometry"]
+
+    async def test_an_undeclared_caller_is_not_treated_as_local(self) -> None:
+        """The finding. Nothing ever set `caller`, the default was LOCAL,
+        and `exempt_local_writes` therefore waved every HTTP caller's
+        writes straight through -- so the approval table F1 documents
+        never fired over HTTP at all. A default that is the most
+        permissive value is how that happens quietly."""
+        spy = _Spy()
+        server = UnifiedMcpServer(adapters=[spy])
+        response = await _call(server, "twin.commit_geometry")
+        assert "error" in response, response
+        assert spy.ran == []
 
     async def test_a_deployment_can_turn_the_exemption_off(self) -> None:
         spy = _Spy()

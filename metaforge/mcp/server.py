@@ -141,7 +141,7 @@ class UnifiedMcpServer:
         session_capture: SessionCapture | None = None,
         tool_registry: ToolRegistry | None = None,
         profile: str | None = None,
-        caller: Caller = Caller.LOCAL,
+        caller: Caller = Caller.UNTRUSTED,
         approval_gate: ApprovalGateFn | None = None,
         exempt_local_writes: bool = True,
         auth_posture: AuthPosture | None = None,
@@ -158,10 +158,16 @@ class UnifiedMcpServer:
             tools_for_profile(profile)
         self._profile = profile
         # FORGE-359: who is on the other end, and how a write gets authorised.
-        # `caller` is set per transport today (stdio is the engineer at the
-        # machine; anything remote is not) and becomes per-request identity
-        # when FORGE-330 lands OAuth — the shape does not change, only where
-        # the value comes from.
+        # `caller` is set per transport: stdio is the engineer at the
+        # machine, anything remote is not.
+        #
+        # FORGE-387: the default was LOCAL and **no transport ever set it**,
+        # so every HTTP caller was treated as the engineer at the keyboard
+        # and `exempt_local_writes` waved their writes straight through. The
+        # approval table F1 documents never fired over HTTP at all. A
+        # default that is the most permissive value is how that happens
+        # quietly, so the default is now the most conservative one and the
+        # transports declare what they actually are.
         self._caller = caller
         self._approval_gate = approval_gate
         self._exempt_local_writes = exempt_local_writes
@@ -230,6 +236,16 @@ class UnifiedMcpServer:
         stays False -- which is the honest state, not a degraded one.
         """
         self._elicitor = elicitor
+
+    def declare_caller(self, caller: Caller) -> None:
+        """Say who is on the other end of this transport (FORGE-387).
+
+        Set alongside the auth posture, and for the same reason: only the
+        transport knows. Not calling it leaves the conservative default,
+        which holds writes rather than running them.
+        """
+        self._caller = caller
+        logger.info("unified_mcp_caller", caller=caller.value)
 
     def declare_auth_posture(self, posture: AuthPosture) -> None:
         """Record what the transport in front of this server enforces.
@@ -1473,6 +1489,8 @@ async def build_unified_server(
     brief_provider: Any = None,
     dashboard_url: str | None = None,
     metrics: Any = None,
+    caller: Caller = Caller.UNTRUSTED,
+    approval_gate: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -1540,4 +1558,11 @@ async def build_unified_server(
         profile=profile,
         dashboard_url=dashboard_url,
         metrics=metrics,
+        # FORGE-387: conservative by default, like the constructor. The
+        # sidecar's transport overrides it with declare_caller(); an
+        # in-process caller (a test, an embedding host) says so here.
+        caller=caller,
+        # Where a held write goes. The gateway builds one from its own
+        # approval store; an embedding host supplies its own.
+        approval_gate=approval_gate,
     )

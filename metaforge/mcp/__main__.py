@@ -45,6 +45,7 @@ from fastapi.responses import (
 from mcp_core.auth import AUTH_DENIED, AuthPosture, redact, verify_api_key
 from mcp_core.context import HEADER_SESSION
 from mcp_core.elicitation import ElicitAction, ElicitResult
+from mcp_core.guardrails import Caller
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
 
@@ -342,6 +343,10 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
     server.declare_auth_posture(
         AuthPosture(api_key=reason != "open_mode", oauth=False, transport="stdio")
     )
+    # FORGE-387: stdio is a subprocess this user launched on their own
+    # machine, so it really is them. Declared rather than defaulted, now
+    # that the default is the conservative one.
+    server.declare_caller(Caller.LOCAL)
 
     # MET-387: stdio installs the call context from env vars at boot —
     # one stdio process = one harness session, so a single context
@@ -518,14 +523,20 @@ def build_http_app(
     ``METAFORGE_MCP_API_KEY`` gives you, so it is the state most likely to
     be in force without anyone having chosen it.
     """
+    identifies = bool(oauth and oauth.config.verified_identity)
     server.declare_auth_posture(
         AuthPosture(
             api_key=bool(api_key),
             oauth=oauth is not None and oauth.config.enabled,
             transport="http",
-            identifies_caller=bool(oauth and oauth.config.verified_identity),
+            identifies_caller=identifies,
         )
     )
+    # FORGE-387: an HTTP caller is not the engineer at the keyboard, whether
+    # they are next door or through a tunnel. REMOTE only when the login
+    # establishes who they are; a shared credential, or none, is UNTRUSTED.
+    # Both hold writes -- the difference is what a reviewer is told.
+    server.declare_caller(Caller.REMOTE if identifies else Caller.UNTRUSTED)
     app = FastAPI(
         title="MetaForge MCP",
         version="0.1.0",
