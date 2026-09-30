@@ -209,6 +209,19 @@ The id lives in `_meta`, not inside the text payload — the text is the
 tool's own output, and burying a protocol-level id in it would make every
 adapter's result schema wrong.
 
+### These claims are tested
+
+The guarantees on this page are checked against the HTTP app on every
+test run (`tests/unit/test_documented_contract.py`), not only against
+objects a test constructed.
+
+That distinction is the whole reason the file exists. FORGE-387 found a
+guarantee this page stated and the server did not keep — writes from a
+remote caller were documented as held, and ran — and it survived because
+every test that touched it built the server directly, passing arguments
+the real transport never passed. The contract was verified everywhere
+except where it is assembled.
+
 ### Approval-held writes
 
 A tool that writes is held for a human when the request comes from a
