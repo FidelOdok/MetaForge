@@ -303,19 +303,28 @@ An entry's `./plugins/<name>` resolves from the directory that *contains*
 `.agents/`, not from the marketplace file — so a home-rooted marketplace
 at `~/.agents/plugins/marketplace.json` looks for `~/plugins/<name>`.
 
-It has been loaded end to end against codex-cli 0.118.0, by driving
+It has been loaded and driven end to end against codex-cli 0.118.0 **and
+0.159.2** — the format survived that upgrade unchanged. Checked by driving
 `codex app-server` over stdio: `plugin/list` returns `metaforge@metaforge`
 with no marketplace load errors, `plugin/read` resolves all 30 skills plus
 `mcpServers: ["metaforge"]`, `plugin/install` writes the entry into
-`~/.codex/config.toml`, and Codex's own MCP client then completes the
-handshake with the sidecar — `server_info: Implementation { name:
-"metaforge-mcp" }` at protocol `2025-06-18` — and reads its `tools/list`.
+`~/.codex/config.toml`, and Codex's own MCP client completes the handshake
+with the sidecar — `server_info: Implementation { name: "metaforge-mcp" }`
+at protocol `2025-06-18` — and reads its `tools/list`.
+
+The agent then uses the tools, which is the part a manifest check misses.
+A read goes through: Codex called `project.list` and got a `status:
+success` envelope. A write is held: `project.create` was refused with
+`-32001` / `approval_required`, caller classified untrusted, and a
+follow-up `project.list` came back empty, so the write did not run. That
+distinction is the whole guardrail — an error returned *after* the write
+would be worse than no guardrail, because it would look like it held.
 
 The format is still taken from the program that reads it rather than from
-a published spec, so a Codex upgrade can move it: if `/plugins` stops
-showing the plugin, re-check the manifest against your version first.
-Wiring the MCP server up by hand via `config.toml` needs no plugin and is
-the path this repo has been running.
+a published spec, so a future Codex upgrade can still move it: if
+`/plugins` stops showing the plugin, re-check the manifest against your
+version first. Wiring the MCP server up by hand via `config.toml` needs no
+plugin and is the path this repo has been running.
 
 ### Reaching a local gateway from a hosted harness
 

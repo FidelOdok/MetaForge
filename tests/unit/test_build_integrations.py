@@ -416,8 +416,16 @@ class TestCodexPlugin:
         checked against and the calls that did the checking, so a reader who
         doubts it can repeat them rather than take it on faith."""
         readme = (self._pkg() / "README.md").read_text()
-        assert "codex-cli 0.118.0" in readme
+        for version in ("0.118.0", "0.159.2"):
+            assert version in readme, f"README claims verification without naming {version}"
         for method in ("plugin/list", "plugin/read", "plugin/install"):
             assert method in readme, f"README claims verification without citing {method}"
-        # The MCP server is the half that a manifest check alone would miss.
+        # The MCP server is the half a manifest check alone would miss.
         assert "metaforge-mcp" in readme
+        # And the agent turn is the half an installation check misses. The
+        # write being *held* is the strongest claim on the page, so it is
+        # the one that has to carry its own evidence: the error code, and
+        # that nothing was created.
+        assert "project.list" in readme and "project.create" in readme
+        assert "approval_required" in readme
+        assert "did not run" in readme
