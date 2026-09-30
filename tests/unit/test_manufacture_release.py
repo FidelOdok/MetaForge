@@ -164,3 +164,63 @@ class TestManufactureRelease:
 
     async def test_process_export_formats_map(self) -> None:
         assert PROCESS_EXPORT_FORMATS == {"3d_print": "stl", "cnc": "step"}
+
+    async def test_does_not_pre_create_the_output_directory(
+        self, twin: InMemoryTwinAPI, tmp_path: Path
+    ) -> None:
+        """Regression test for a real cross-container permission bug found
+        during live validation on fidel-dev: the gateway container runs as
+        root, but every adapter container runs as a non-root `metaforge`
+        user. A directory the gateway pre-creates on the shared workspace
+        volume is root-owned 755 -- the adapter can stat/traverse it but
+        not write into it, and CadQuery's OCCT-backed exporter swallows
+        that write failure silently (the file is just never created)
+        rather than raising, surfacing only as a confusing downstream
+        os.path.getsize() ENOENT with no obvious link to ownership.
+        cadquery.export_geometry's own handler already mkdirs its output
+        path itself before exporting -- this evaluator must NOT also
+        create that directory from the gateway side, or it reintroduces
+        the ownership mismatch."""
+        wp = await _seed_wp(twin)
+        stager = _FakeBlobStager(str(tmp_path / "staged" / "upper_arm.step"))
+        # Matches make_manufacture_release's own release_dir computation
+        # (workspace_dir / _RELEASE_SUBDIR / work_product_id) exactly.
+        release_output_dir = tmp_path / "_manufacture_releases" / str(wp.id)
+
+        class _LazyMkdirBridge:
+            """Mirrors the real adapter's timing: the output directory is
+            created only when the export tool actually runs, not upfront."""
+
+            def __init__(self) -> None:
+                self.invoked = False
+
+            async def invoke(
+                self, tool_id: str, params: dict[str, Any], timeout: int | None = None
+            ) -> dict[str, Any]:
+                self.invoked = True
+                # The real assertion: this directory must not already
+                # exist when the "adapter" is invoked -- if it did, the
+                # gateway pre-created it (the bug).
+                assert not release_output_dir.exists(), (
+                    "manufacture_release pre-created the output directory -- "
+                    "this reintroduces the cross-container permission bug"
+                )
+                out = Path(params["output_path"])
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(b"solid demo\nendsolid demo\n")
+                return {
+                    "output_file": str(out),
+                    "file_size_bytes": out.stat().st_size,
+                    "format": "stl",
+                }
+
+        bridge = _LazyMkdirBridge()
+        release = make_manufacture_release(
+            twin, blob_stager=stager, mcp_bridge=bridge, workspace_dir=tmp_path
+        )
+
+        assert not release_output_dir.exists()
+        out = await release(work_product_id=str(wp.id), process="3d_print")
+
+        assert bridge.invoked is True
+        assert out["file_size_bytes"] > 0

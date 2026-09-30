@@ -119,8 +119,23 @@ def make_manufacture_release(
             staged = await blob_stager(work_product_id)
             input_file = staged["file_path"]
 
+            # Deliberately NOT created here: the gateway container runs as
+            # root, but every adapter container runs as a non-root
+            # `metaforge` user (UID 1000) -- a directory this process
+            # creates on the shared volume is root-owned 755, which the
+            # adapter can `stat()`/traverse but not write into. CadQuery's
+            # OCCT-backed STL/STEP writer swallows that write failure
+            # without raising (the file is simply never created), which
+            # only surfaced as a downstream os.path.getsize() ENOENT deep
+            # inside the adapter -- a confusing error with no obvious
+            # connection to file ownership. cadquery.export_geometry's own
+            # handler already calls `_ensure_output_dir` (mkdir with
+            # parents=True, exist_ok=True) INSIDE the adapter process
+            # before exporting, so the directory it creates is
+            # metaforge-owned and writable by the same process that then
+            # writes into it -- letting the adapter create its own output
+            # directory, rather than pre-creating it here, is the fix.
             release_dir = root / _RELEASE_SUBDIR / work_product_id
-            release_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(release_dir / f"release.{output_format}")
 
             export_result = await mcp_bridge.invoke(
