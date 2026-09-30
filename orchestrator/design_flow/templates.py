@@ -47,11 +47,24 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 @dataclass(frozen=True)
 class LoadedTemplate:
-    """A flow plus the version it was declared with."""
+    """A flow plus the metadata that is about the template, not the flow."""
 
     definition: FlowDefinition
     version: str
     source: Path
+
+    #: Short name for a person choosing between flows. ``name`` is the full
+    #: descriptive title and reads as a paragraph in a radio list.
+    #:
+    #: These live in the template rather than the dashboard because that is
+    #: the whole point of FORGE-395: the previous short names existed only in
+    #: the hand-copied TypeScript, so serving `name` alone would have moved
+    #: the drift rather than removed it.
+    label: str = ""
+    description: str = ""
+
+    def display_label(self) -> str:
+        return self.label or self.definition.name
 
 
 def template_path(flow_id: str) -> Path:
@@ -96,7 +109,13 @@ def from_mapping(raw: dict[str, Any]) -> FlowDefinition:
     )
 
 
-def to_mapping(definition: FlowDefinition, *, version: str) -> dict[str, Any]:
+def to_mapping(
+    definition: FlowDefinition,
+    *,
+    version: str,
+    label: str = "",
+    description: str = "",
+) -> dict[str, Any]:
     """The inverse of :func:`from_mapping`.
 
     Used to generate the template files from the Python definitions, and by
@@ -130,12 +149,17 @@ def to_mapping(definition: FlowDefinition, *, version: str) -> dict[str, Any]:
                 gate["gate_id"] = phase.gate.gate_id
             entry["gate"] = gate
         phases.append(entry)
-    return {
+    mapping: dict[str, Any] = {
         "id": definition.id,
         "version": version,
         "name": definition.name,
-        "phases": phases,
     }
+    if label:
+        mapping["label"] = label
+    if description:
+        mapping["description"] = description
+    mapping["phases"] = phases
+    return mapping
 
 
 def load_template(flow_id: str) -> LoadedTemplate:
@@ -153,7 +177,13 @@ def load_template(flow_id: str) -> LoadedTemplate:
         raise ValueError(f"{path} has no 'version'")
     if raw.get("id") != flow_id:
         raise ValueError(f"{path} declares id {raw.get('id')!r}, expected {flow_id!r}")
-    return LoadedTemplate(definition=from_mapping(raw), version=version, source=path)
+    return LoadedTemplate(
+        definition=from_mapping(raw),
+        version=version,
+        source=path,
+        label=str(raw.get("label") or "").strip(),
+        description=str(raw.get("description") or "").strip(),
+    )
 
 
 @lru_cache(maxsize=1)
