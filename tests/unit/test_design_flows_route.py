@@ -203,3 +203,103 @@ class TestTheAcceptanceCriterion:
         # And it had to pass the invariants to be startable -- a new flow does
         # not get to skip the rules just because it is new.
         assert view.valid is True
+
+
+# ── the proposal is a held write (FORGE-398) ─────────────────────────────
+
+
+class TestProposeHoldsForAHuman:
+    def test_a_proposal_creates_an_approval_and_not_a_run(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        """The rule is "nothing starts before approval", and the way it is
+        made true is that this endpoint has no ability to start anything.
+
+        Asserted by counting runs: a proposal must leave the run store as it
+        found it. An endpoint that created a run and marked it pending would
+        satisfy a looser reading and be one bug away from starting it.
+        """
+        import api_gateway.design_flows.routes as routes
+        from api_gateway.runs.routes import get_run_store
+        from orchestrator.design_flow.generator import Operation, OperationKind, build_proposal
+        from orchestrator.design_flow.spec import get_flow
+        from orchestrator.design_flow.templates import load_templates
+
+        async def fake_generate(request):
+            return build_proposal(
+                get_flow("hardware_v1"),
+                base_version=load_templates()["hardware_v1"].version,
+                operations=[
+                    Operation(OperationKind.DROP_PHASE, "firmware", "no firmware in a cabinet")
+                ],
+                intent=request.intent,
+            )
+
+        import api_gateway.design_flows.generate as gen
+
+        monkeypatch.setattr(gen, "generate_proposal", fake_generate)
+
+        runs_before = len(get_run_store().list())
+        response = client.post("/v1/design-flows/propose", json={"intent": "a kitchen cabinet"})
+        assert response.status_code == 201, response.text
+        body = response.json()
+
+        assert body["approvalId"]
+        assert len(get_run_store().list()) == runs_before, "a proposal created a run"
+
+        # The approval is in the queue a human is already watching.
+        pending = client.get("/v1/chat/tool_approvals").json()["runs"]
+        assert any(r["id"] == body["approvalId"] for r in pending)
+
+        del routes  # imported for the monkeypatch target's module identity
+
+    def test_the_proposal_shows_what_changed_and_why(self, client: TestClient, monkeypatch) -> None:
+        import api_gateway.design_flows.generate as gen
+        from orchestrator.design_flow.generator import Operation, OperationKind, build_proposal
+        from orchestrator.design_flow.spec import get_flow
+        from orchestrator.design_flow.templates import load_templates
+
+        async def fake_generate(request):
+            return build_proposal(
+                get_flow("hardware_v1"),
+                base_version=load_templates()["hardware_v1"].version,
+                operations=[
+                    Operation(OperationKind.DROP_PHASE, "firmware", "no firmware in a cabinet")
+                ],
+                intent=request.intent,
+            )
+
+        monkeypatch.setattr(gen, "generate_proposal", fake_generate)
+        body = client.post("/v1/design-flows/propose", json={"intent": "a kitchen cabinet"}).json()
+
+        assert body["baseTemplateId"] == "hardware_v1"
+        assert body["baseVersion"]
+        assert body["changes"] == [
+            {
+                "op": "drop_phase",
+                "phase": "firmware",
+                "value": None,
+                "rationale": "no firmware in a cabinet",
+            }
+        ]
+        assert "firmware" not in {p["id"] for p in body["flow"]["phases"]}
+        assert body["valid"] is True
+
+    def test_an_empty_intent_is_refused(self, client: TestClient) -> None:
+        assert client.post("/v1/design-flows/propose", json={"intent": "  "}).status_code == 400
+
+    def test_no_model_means_no_proposal_rather_than_an_untailored_one(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        """A flow the human believes was tailored, and was not, is worse than
+        being told the generator is down -- they would approve it on the
+        strength of a tailoring that never happened."""
+        import api_gateway.design_flows.generate as gen
+
+        async def unavailable(request):
+            raise gen.GeneratorUnavailableError("connection refused")
+
+        monkeypatch.setattr(gen, "generate_proposal", unavailable)
+        response = client.post("/v1/design-flows/propose", json={"intent": "a drone"})
+        assert response.status_code == 503
+        assert "no untailored fallback" in response.json()["detail"]
