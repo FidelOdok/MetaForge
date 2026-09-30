@@ -1,11 +1,24 @@
 import { useState, useMemo } from 'react';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StatusBadge } from '../components/shared/StatusBadge';
+import { Button } from '../components/ui/Button';
+import { useToast } from '../components/ui/Toast';
 import { useBom, useHierarchicalBom } from '../hooks/use-bom';
 import { useActiveProject } from '../hooks/use-active-project';
+import { useSelectComponent } from '../hooks/use-component-selection';
 import type { BomComponent, HierarchicalBomLine } from '../types/bom';
+import type {
+  Candidate,
+  MarginOp,
+  SelectComponentResult,
+} from '../types/component-selection';
 
 type BomView = 'flat' | 'hierarchical';
+
+const FIELD_STYLE: React.CSSProperties = {
+  background: 'var(--mf-c-191b22)',
+  border: '1px solid var(--mf-r-65-72-90-0p3)',
+};
 
 type SortField = 'designator' | 'partNumber' | 'description' | 'manufacturer' | 'quantity' | 'unitPrice' | 'status';
 type SortDir = 'asc' | 'desc';
@@ -124,6 +137,384 @@ function HierarchicalBomRow({ line }: { line: HierarchicalBomLine }) {
         {line.source === 'instance_of' ? 'COTS' : 'Fabricated'}
       </td>
     </tr>
+  );
+}
+
+interface RequiredSpecRow {
+  name: string;
+  op: MarginOp;
+  value: string;
+}
+
+interface CandidateRow {
+  mpn: string;
+  manufacturer: string;
+  specs: Record<string, string>;
+}
+
+const EMPTY_REQUIRED_SPEC: RequiredSpecRow = { name: '', op: '>=', value: '' };
+const EMPTY_CANDIDATE: CandidateRow = { mpn: '', manufacturer: '', specs: {} };
+
+/** FORGE-265 (gap G-C1): requirement-driven component selection. Unlike
+ * TradeStudySection (RequirementsPage.tsx), there is no list to fetch first
+ * -- a candidate is just an mpn + caller-asserted datasheet specs typed in
+ * here at comparison time, so this form covers "define what's required",
+ * "list the real candidates", and "select one" in a single submit
+ * (POST /v1/component-selection/select). Spec values are real published
+ * datasheet numbers a human/agent types in, not scraped by any pipeline --
+ * see docs/twin_schema.md section 2.23. */
+function ComponentSelectionSection({ projectId }: { projectId?: string }) {
+  const toast = useToast();
+  const [category, setCategory] = useState('servo');
+  const [purchaseUnit, setPurchaseUnit] = useState<'discrete_part' | 'cots_assembly'>(
+    'cots_assembly',
+  );
+  const [title, setTitle] = useState('');
+  const [rationale, setRationale] = useState('');
+  const [requiredSpecs, setRequiredSpecs] = useState<RequiredSpecRow[]>([
+    { ...EMPTY_REQUIRED_SPEC },
+  ]);
+  const [candidates, setCandidates] = useState<CandidateRow[]>([
+    { ...EMPTY_CANDIDATE },
+    { ...EMPTY_CANDIDATE },
+  ]);
+  const [selectedMpn, setSelectedMpn] = useState<string | null>(null);
+  const [result, setResult] = useState<SelectComponentResult | null>(null);
+
+  const select = useSelectComponent();
+  const specNames = requiredSpecs.map((r) => r.name.trim()).filter(Boolean);
+
+  const canSubmit =
+    title.trim() !== '' &&
+    rationale.trim() !== '' &&
+    !!selectedMpn &&
+    specNames.length > 0 &&
+    candidates.filter((c) => c.mpn.trim() && c.manufacturer.trim()).length >= 2;
+
+  const handleSubmit = () => {
+    if (!canSubmit || !selectedMpn) return;
+    const requiredSpecsPayload: Record<string, { op: MarginOp; value: number }> = {};
+    for (const r of requiredSpecs) {
+      const name = r.name.trim();
+      if (!name || r.value === '') continue;
+      requiredSpecsPayload[name] = { op: r.op, value: Number(r.value) };
+    }
+    const candidatesPayload: Candidate[] = candidates
+      .filter((c) => c.mpn.trim() && c.manufacturer.trim())
+      .map((c) => {
+        const specs: Record<string, number> = {};
+        for (const name of specNames) {
+          const v = c.specs[name];
+          if (v !== undefined && v !== '') specs[name] = Number(v);
+        }
+        return { mpn: c.mpn.trim(), manufacturer: c.manufacturer.trim(), specs };
+      });
+
+    select.mutate(
+      {
+        candidates: candidatesPayload,
+        requiredSpecs: requiredSpecsPayload,
+        selectedMpn,
+        category: category.trim(),
+        purchaseUnit,
+        title: title.trim(),
+        rationale: rationale.trim(),
+        projectId,
+      },
+      {
+        onSuccess: (data) => {
+          toast.success('Component selected -- recorded as a Decision + BOM item');
+          setResult(data);
+        },
+        onError: (err) => {
+          const detail =
+            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          toast.error(detail || 'Could not record the selection');
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="mt-6" data-testid="component-selection-section">
+      <h2 className="mb-2 text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+        Requirement-driven component selection
+      </h2>
+      <p className="mb-2 text-xs text-on-surface-variant">
+        Compare real candidate parts against required specs (caller-asserted datasheet values,
+        e.g. a servo's published torque_kg_cm) and select one -- recorded as a real Decision +
+        BOMItem, not just an assertion.
+      </p>
+
+      <div
+        className="rounded-lg p-3"
+        style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+      >
+        <div className="mb-3 flex flex-wrap gap-2">
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            Category
+            <input
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="e.g. servo"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '140px' }}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            Purchase unit
+            <select
+              value={purchaseUnit}
+              onChange={(e) => setPurchaseUnit(e.target.value as 'discrete_part' | 'cots_assembly')}
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '160px' }}
+            >
+              <option value="cots_assembly">cots_assembly</option>
+              <option value="discrete_part">discrete_part</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant" style={{ flex: 1, minWidth: '200px' }}>
+            Title
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Elbow joint actuator"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '100%' }}
+            />
+          </label>
+        </div>
+
+        <div className="mb-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
+              Required specs
+            </span>
+            <button
+              type="button"
+              data-testid="add-required-spec-button"
+              onClick={() => setRequiredSpecs((rs) => [...rs, { ...EMPTY_REQUIRED_SPEC }])}
+              className="rounded px-2 py-0.5 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+            >
+              + Add spec
+            </button>
+          </div>
+          <div className="flex flex-col gap-1">
+            {requiredSpecs.map((r, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  value={r.name}
+                  onChange={(e) =>
+                    setRequiredSpecs((rs) =>
+                      rs.map((row, j) => (j === i ? { ...row, name: e.target.value } : row)),
+                    )
+                  }
+                  placeholder="e.g. torque_kg_cm"
+                  className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                  style={{ ...FIELD_STYLE, width: '160px' }}
+                />
+                <select
+                  value={r.op}
+                  onChange={(e) =>
+                    setRequiredSpecs((rs) =>
+                      rs.map((row, j) => (j === i ? { ...row, op: e.target.value as MarginOp } : row)),
+                    )
+                  }
+                  className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                  style={{ ...FIELD_STYLE, width: '64px' }}
+                >
+                  <option value=">=">&ge;</option>
+                  <option value="<=">&le;</option>
+                </select>
+                <input
+                  value={r.value}
+                  onChange={(e) =>
+                    setRequiredSpecs((rs) =>
+                      rs.map((row, j) => (j === i ? { ...row, value: e.target.value } : row)),
+                    )
+                  }
+                  type="number"
+                  placeholder="required value"
+                  className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                  style={{ ...FIELD_STYLE, width: '120px' }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-3 overflow-x-auto">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-on-surface-variant">
+              Candidates
+            </span>
+            <button
+              type="button"
+              data-testid="add-candidate-button"
+              onClick={() => setCandidates((cs) => [...cs, { ...EMPTY_CANDIDATE }])}
+              className="rounded px-2 py-0.5 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+              style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+            >
+              + Add candidate
+            </button>
+          </div>
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                <th className="px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant" />
+                <th className="px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-left">
+                  MPN
+                </th>
+                <th className="px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-left">
+                  Manufacturer
+                </th>
+                {specNames.map((name) => (
+                  <th
+                    key={name}
+                    className="px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-right"
+                  >
+                    {name}
+                  </th>
+                ))}
+                {result && (
+                  <th className="px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-left">
+                    Margins
+                  </th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {candidates.map((c, i) => {
+                const scored = result?.candidates.find((r) => r.mpn === c.mpn.trim());
+                return (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                    <td className="px-2 py-1">
+                      <input
+                        type="radio"
+                        name="selected-candidate"
+                        checked={!!c.mpn.trim() && selectedMpn === c.mpn.trim()}
+                        onChange={() => setSelectedMpn(c.mpn.trim())}
+                        data-testid={`select-candidate-radio-${i}`}
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        value={c.mpn}
+                        onChange={(e) =>
+                          setCandidates((cs) =>
+                            cs.map((row, j) => (j === i ? { ...row, mpn: e.target.value } : row)),
+                          )
+                        }
+                        placeholder="e.g. MG996R"
+                        className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                        style={{ ...FIELD_STYLE, width: '120px' }}
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        value={c.manufacturer}
+                        onChange={(e) =>
+                          setCandidates((cs) =>
+                            cs.map((row, j) =>
+                              j === i ? { ...row, manufacturer: e.target.value } : row,
+                            ),
+                          )
+                        }
+                        placeholder="e.g. TowerPro"
+                        className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                        style={{ ...FIELD_STYLE, width: '120px' }}
+                      />
+                    </td>
+                    {specNames.map((name) => (
+                      <td key={name} className="px-2 py-1">
+                        <input
+                          value={c.specs[name] ?? ''}
+                          onChange={(e) =>
+                            setCandidates((cs) =>
+                              cs.map((row, j) =>
+                                j === i
+                                  ? { ...row, specs: { ...row.specs, [name]: e.target.value } }
+                                  : row,
+                              ),
+                            )
+                          }
+                          type="number"
+                          className="rounded px-1 py-1 text-xs text-on-surface text-right focus:outline-none"
+                          style={{ ...FIELD_STYLE, width: '80px' }}
+                        />
+                      </td>
+                    ))}
+                    {result && (
+                      <td className="px-2 py-1 text-xs">
+                        {scored ? (
+                          <span
+                            style={{
+                              color: Object.values(scored.margins).every((m) => m.pass)
+                                ? 'var(--mf-c-7ee081, #7ee081)'
+                                : 'var(--mf-c-ff8a80, #ff8a80)',
+                            }}
+                          >
+                            {Object.entries(scored.margins)
+                              .map(
+                                ([name, m]) =>
+                                  `${name}: ${m.pass ? 'PASS' : 'FAIL'}${m.margin !== null ? ` (${m.margin >= 0 ? '+' : ''}${m.margin.toFixed(2)})` : ''}`,
+                              )
+                              .join(', ')}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant" style={{ flex: 1, minWidth: '240px' }}>
+            Rationale
+            <input
+              value={rationale}
+              onChange={(e) => setRationale(e.target.value)}
+              placeholder="Why this part, over the others?"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '100%' }}
+            />
+          </label>
+          <Button
+            size="sm"
+            data-testid="select-component-button"
+            disabled={!canSubmit || select.isPending}
+            onClick={handleSubmit}
+          >
+            {select.isPending ? 'Recording…' : 'Select component'}
+          </Button>
+        </div>
+
+        {result && (
+          <div
+            className="mt-3 rounded px-3 py-2 text-xs"
+            data-testid="component-selection-result"
+            style={{
+              background: 'var(--mf-c-191b22)',
+              border: '1px solid var(--mf-r-65-72-90-0p2)',
+              color: result.selected_meets_requirements
+                ? 'var(--mf-c-7ee081, #7ee081)'
+                : 'var(--mf-c-ff8a80, #ff8a80)',
+            }}
+          >
+            {result.selected_mpn} recorded
+            {result.selected_meets_requirements
+              ? ' -- meets all required specs.'
+              : ' -- selected despite failing one or more required specs (see rationale).'}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -473,6 +864,8 @@ export function BomPage() {
           )}
         </>
       )}
+
+      <ComponentSelectionSection projectId={activeProjectId ?? undefined} />
     </div>
   );
 }

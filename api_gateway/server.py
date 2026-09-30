@@ -27,6 +27,7 @@ from api_gateway.cad_export.routes import router as cad_export_router
 from api_gateway.chat.routes import router as chat_router
 from api_gateway.chat.tool_approvals import router as tool_approvals_router
 from api_gateway.compliance.routes import router as compliance_router
+from api_gateway.component_selection.routes import router as component_selection_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.design_loop.routes import router as design_loop_router
@@ -775,6 +776,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     from api_gateway.twin.claim_recorder import make_claim_recorder
     from api_gateway.twin.component_recorder import make_component_recorder
+    from api_gateway.twin.component_selection import make_component_selector
     from api_gateway.twin.constraint_recorder import make_constraint_recorder
     from api_gateway.twin.decision_recorder import make_decision_recorder
     from api_gateway.twin.design_loop import (
@@ -886,6 +888,21 @@ async def _init_orchestrator(app: FastAPI) -> None:
     engineering_entity_recorder_fn = make_engineering_entity_recorder(twin, project_backend)
     concept_selector_fn = make_trade_study_selector(twin, decision_recorder=decision_recorder)
 
+    # FORGE-265: requirement-driven component selection -- hoisted to a
+    # named variable (unlike every other component_recorder use, which is
+    # constructed inline at the TwinServer(...) call site below) so this
+    # SAME instance can be reused both for twin.record_component_selection
+    # and inside component_selector_fn, and again by the REST route's own
+    # init_component_selector below -- one recording path, not three.
+    component_recorder_fn = make_component_recorder(
+        twin,
+        project_backend,
+        catalog_store=getattr(app.state, "component_catalog_store", None),
+    )
+    component_selector_fn = make_component_selector(
+        twin, decision_recorder=decision_recorder, component_recorder=component_recorder_fn
+    )
+
     # FORGE-319: attempt_promotion is a plain function (twin, ...) -- bind
     # twin once here, same injected-callable shape as every make_X(twin,
     # ...) factory above.
@@ -983,11 +1000,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # Persists a chosen result as a BOMItem work product + project link.
         # catalog_store lets it auto-fill image/footprint/CAD/cost from an
         # already-indexed catalog row when the caller doesn't pass them.
-        component_recorder=make_component_recorder(
-            twin,
-            project_backend,
-            catalog_store=getattr(app.state, "component_catalog_store", None),
-        ),
+        # Hoisted to component_recorder_fn above (FORGE-265) so the SAME
+        # instance is also reused inside component_selector_fn.
+        component_recorder=component_recorder_fn,
         # FORGE-64 (epic FORGE-35, Phase 6: Evidence Integration): persists
         # tool-generated Evidence entities -- the constructive fix for
         # "requirement satisfaction claims" being LLM assertion instead of a
@@ -1036,6 +1051,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         tube_height_design_loop_starter=tube_height_design_loop_starter_fn,
         # FORGE-262: concept generation + trade study (gap G-B2).
         concept_selector=concept_selector_fn,
+        # FORGE-265: requirement-driven component selection (gap G-C1).
+        component_selector=component_selector_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -1082,6 +1099,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.chat.backend import create_backend
     from api_gateway.chat.context_adapter import init_context_assembler
     from api_gateway.chat.routes import init_chat_backend, init_mcp_bridge, init_metrics, init_twin
+    from api_gateway.component_selection.routes import init_component_selector
     from api_gateway.design_loop.routes import init_design_loop_starter
     from api_gateway.design_loop.routes import init_twin as init_design_loop_twin
     from api_gateway.features.routes import init_twin as init_features_twin
@@ -1198,6 +1216,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # REST routes.
     init_concept_selector(concept_selector_fn)
     init_ts_entity_recorder(engineering_entity_recorder_fn)
+    # FORGE-265: the dashboard's BOM-page "Select component" action reuses
+    # the SAME bound callable wired into bootstrap_tool_registry above, so
+    # recording isn't duplicated between the MCP tool and the REST route.
+    init_component_selector(component_selector_fn)
     # FORGE-287: the dashboard's "start closed design loop" action reuses
     # the SAME bound optimizer callable wired into bootstrap_tool_registry
     # above (design_loop_starter_fn), so Evidence/Decision recording isn't
@@ -1681,6 +1703,7 @@ def create_app(
     app.include_router(features_router)
     app.include_router(decisions_router)
     app.include_router(trade_study_router)
+    app.include_router(component_selection_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

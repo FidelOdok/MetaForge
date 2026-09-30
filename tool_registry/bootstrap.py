@@ -283,6 +283,7 @@ async def bootstrap_tool_registry(
     design_loop_approver: Any = None,
     tube_height_design_loop_starter: Any = None,
     concept_selector: Any = None,
+    component_selector: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -442,6 +443,9 @@ async def bootstrap_tool_registry(
         concept_selector: Optional async ``select(...)``
             (make_trade_study_selector, FORGE-262). When supplied, registers
             ``twin.select_concept``. ``None`` skips registration.
+        component_selector: Optional async ``select(...)``
+            (make_component_selector, FORGE-265). When supplied, registers
+            ``twin.select_component``. ``None`` skips registration.
 
     Returns:
         The populated ToolRegistry.
@@ -629,6 +633,7 @@ async def bootstrap_tool_registry(
                     design_loop_approver=design_loop_approver,
                     tube_height_design_loop_starter=tube_height_design_loop_starter,
                     concept_selector=concept_selector,
+                    component_selector=component_selector,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

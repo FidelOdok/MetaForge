@@ -149,6 +149,12 @@ ADDITIVE: frozenset[str] = frozenset(
         # selected concept_option -- pure append, nothing existing is
         # overwritten or removed.
         "twin.select_concept",
+        # FORGE-265: records a Decision (a twin.record_decision call,
+        # already ADDITIVE above) plus the selected candidate as a new
+        # BOMItem (twin.record_component_selection, already ADDITIVE
+        # above) plus one GENERATED_FROM edge -- pure append, nothing
+        # existing is overwritten or removed.
+        "twin.select_component",
     }
 )
 
