@@ -5742,9 +5742,15 @@ class TwinServer(McpToolServer):
         loop_id = arguments.get("loop_id")
         if not loop_id or not isinstance(loop_id, str):
             raise ValueError("twin.approve_design_loop: 'loop_id' is required")
-        approved_by = arguments.get("approved_by")
-        if not approved_by or not isinstance(approved_by, str):
-            raise ValueError("twin.approve_design_loop: 'approved_by' is required")
+        # FORGE-393/400: the approving human comes from the approval record,
+        # not from an argument the model filled in.
+        reject_caller_supplied_approver("twin.approve_design_loop", arguments)
+        approved_by = arguments.get(APPROVED_BY_ARG)
+        if not isinstance(approved_by, str) or not approved_by.strip():
+            raise HumanAuthorityRequiredError(
+                "twin.approve_design_loop",
+                "no approver reached the tool, so nothing was approved",
+            )
         return await self._design_loop_approver(loop_id=loop_id, approved_by=approved_by)
 
     # ------------------------------------------------------------------

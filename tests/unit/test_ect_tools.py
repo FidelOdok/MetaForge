@@ -15,6 +15,7 @@ from uuid import uuid4
 import pytest
 
 from api_gateway.twin.ect_tools import make_ect_bridge
+from mcp_core.guardrails import APPROVED_BY_ARG
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models.constraint import Constraint
@@ -140,7 +141,7 @@ class TestFullLifecycleThroughBridge:
         assert analyzed["status"] == "ready_for_review"
         assert "affected_objects" in analyzed
 
-        approved = await bridge.approve({"ect_id": ect_id, "approver": "reviewer-1"})
+        approved = await bridge.approve({"ect_id": ect_id, APPROVED_BY_ARG: "reviewer-1"})
         assert approved["status"] == "approved"
         assert approved["decided_by"] == "reviewer-1"
 
@@ -175,7 +176,7 @@ class TestFullLifecycleThroughBridge:
         # a violation that can't happen with this patch shape.
         ect_id = proposed["id"]
         await bridge.analyze({"ect_id": ect_id})
-        approved = await bridge.approve({"ect_id": ect_id, "approver": "agent-1"})
+        approved = await bridge.approve({"ect_id": ect_id, APPROVED_BY_ARG: "agent-1"})
         assert approved["status"] == "approved"
 
     async def test_reject_requires_reason(self, twin, project_id):
@@ -223,7 +224,7 @@ class TestFullLifecycleThroughBridge:
         )
         ect_id = proposed["id"]
         await bridge.analyze({"ect_id": ect_id})
-        await bridge.approve({"ect_id": ect_id, "approver": "reviewer-1"})
+        await bridge.approve({"ect_id": ect_id, APPROVED_BY_ARG: "reviewer-1"})
         await bridge.commit({"ect_id": ect_id})
         rolled_back = await bridge.mark_rolled_back(
             {"ect_id": ect_id, "reason": "a compensating change reverted this"}

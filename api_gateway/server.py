@@ -30,6 +30,12 @@ from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.component_selection.routes import router as component_selection_router
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
+from api_gateway.design_flows.mcp_bindings import (
+    make_catalogue_reader,
+    make_proposer,
+    make_run_starter,
+    make_run_status_reader,
+)
 from api_gateway.design_flows.routes import router as design_flows_router
 from api_gateway.design_loop.routes import router as design_loop_router
 from api_gateway.dfm.routes import router as dfm_router
@@ -1132,6 +1138,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
         sensitivity_ranker=sensitivity_ranker_fn,
         # FORGE-319: the first real gate that refuses, not just reports.
         promotion_attempter=promotion_attempter_fn,
+        # FORGE-400: design flows reach the harness plugins. Note the absence
+        # of an approver binding -- there is no tool that approves, so there
+        # is nothing to inject for one.
+        design_flow_catalogue_reader=make_catalogue_reader(),
+        design_flow_proposer=make_proposer(),
+        design_flow_status_reader=make_run_status_reader(),
+        design_flow_run_starter=make_run_starter(),
         # FORGE-355: the project brief as an MCP resource.
         brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness

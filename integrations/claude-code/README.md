@@ -19,6 +19,7 @@ Claude Code asks for your gateway URL on first enable. The default suits a gatew
 - `/metaforge:status`
 - `/metaforge:design`
 - `/metaforge:fea`
+- `/metaforge:flow`
 - `/metaforge:gate`
 - `/metaforge:doctor`
 

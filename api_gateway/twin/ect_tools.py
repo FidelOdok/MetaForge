@@ -27,6 +27,11 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
+    HumanAuthorityRequiredError,
+    reject_caller_supplied_approver,
+)
 from twin_core.api import TwinAPI
 from twin_core.models.engineering_change_transaction import (
     ChangeTrigger,
@@ -117,8 +122,21 @@ class ECTBridge:
         return _serialise(ect)
 
     async def approve(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Approve an ECT, attributed to whoever answered the approval.
+
+        FORGE-393/400: ``approver`` used to be a plain tool argument, so the
+        model named the human recorded as having authorised the change. It
+        now arrives only under the dispatcher-reserved key, and supplying it
+        is an error rather than a silent drop.
+        """
         ect_id = _parse_ect_id(arguments)
-        approver = _require_str(arguments, "approver")
+        reject_caller_supplied_approver("twin.approve_engineering_change", arguments)
+        approver = arguments.get(APPROVED_BY_ARG)
+        if not isinstance(approver, str) or not approver.strip():
+            raise HumanAuthorityRequiredError(
+                "twin.approve_engineering_change",
+                "no approver reached the tool, so nothing was approved",
+            )
         ect = await _approve_ect(self.twin, ect_id, approver=approver)
         return _serialise(ect)
 
