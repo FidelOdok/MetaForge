@@ -4,6 +4,8 @@ import {
   getTwinNode,
   getTwinRelationships,
   getNodeVersionHistory,
+  getRevisionDiff,
+  getGeometryDiff,
   approveSketch,
   updateAssemblyJoints,
   iterateWorkProduct,
@@ -62,6 +64,34 @@ export function useNodeVersionHistory(nodeId: string | undefined) {
   return useQuery({
     queryKey: [...twinKeys.all, nodeId, 'versions'] as const,
     queryFn: () => getNodeVersionHistory(nodeId!),
+    enabled: !!nodeId,
+    staleTime: 15_000,
+  });
+}
+
+/** FORGE-301: metadata diff between two explicitly-picked revisions of the
+ * SAME node. Disabled until both revisions are chosen (there's no sensible
+ * default pair -- unlike history/geometry-diff, this needs user input). */
+export function useRevisionDiff(
+  nodeId: string | undefined,
+  revisionA: number | undefined,
+  revisionB: number | undefined,
+) {
+  return useQuery({
+    queryKey: [...twinKeys.all, nodeId, 'diff', revisionA ?? 0, revisionB ?? 0] as const,
+    queryFn: () => getRevisionDiff(nodeId!, revisionA!, revisionB!),
+    enabled: !!nodeId && !!revisionA && !!revisionB && revisionA !== revisionB,
+    staleTime: 15_000,
+  });
+}
+
+/** FORGE-301: real volume/area/bounding-box delta vs. a SUPERSEDES
+ * predecessor. `null` (a 404) is the expected, common answer for a work
+ * product with no prior version -- not a loading/error state. */
+export function useGeometryDiff(nodeId: string | undefined) {
+  return useQuery({
+    queryKey: [...twinKeys.all, nodeId, 'geometry-diff'] as const,
+    queryFn: () => getGeometryDiff(nodeId!),
     enabled: !!nodeId,
     staleTime: 15_000,
   });

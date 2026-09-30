@@ -814,6 +814,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.engineering_entity_approval import make_engineering_entity_approver
     from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
     from api_gateway.twin.evidence_recorder import make_evidence_recorder
+    from api_gateway.twin.geometry_diff import make_geometry_diff
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
     from api_gateway.twin.hierarchy_recorder import (
@@ -913,6 +914,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin,
         blob_stager=blob_stager_fn,
         mcp_bridge=manufacture_release_bridge,
+    )
+    # FORGE-301: same lazy-bridge seam, for geometry_diff's real
+    # freecad.describe_step_file calls (reuses blob_stager_fn -- both nodes
+    # in a SUPERSEDES pair are resolved by node id, no new staging logic).
+    geometry_diff_bridge = _LazyBridge()
+    geometry_diff_fn = make_geometry_diff(
+        twin,
+        blob_stager=blob_stager_fn,
+        mcp_bridge=geometry_diff_bridge,
     )
     # FORGE-316: dispatch table for twin.execute_revalidation_plan --
     # every tool a stale Evidence's metadata["replay"]["tool_id"] can name.
@@ -1237,6 +1247,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-294: same for manufacture_release_bridge (manufacture_release's
     # cadquery.export_geometry call).
     manufacture_release_bridge.bridge = active_bridge
+    # FORGE-301: same for geometry_diff_bridge (geometry_diff's
+    # freecad.describe_step_file calls).
+    geometry_diff_bridge.bridge = active_bridge
     # FORGE-273: bind the same evaluator closure to the dashboard's REST
     # route (api_gateway/dfm/routes.py) -- only now, after the bridge above
     # is bound, since the closure calls mcp_bridge.invoke internally.
@@ -1248,6 +1261,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.manufacture.routes import init_manufacture_release
 
     init_manufacture_release(manufacture_release_fn)
+    # FORGE-301: bind the geometry-diff evaluator to its route in
+    # api_gateway/twin/routes.py (not a separate module -- it's the direct
+    # sibling of /nodes/{id}/diff there).
+    from api_gateway.twin.routes import init_geometry_diff
+
+    init_geometry_diff(geometry_diff_fn)
     # FORGE-299: bind the release-package creator/lister to the dashboard's
     # REST route (api_gateway/releases/routes.py) -- unlike the evaluators
     # above, this doesn't call mcp_bridge at all (pure graph reads/writes +
