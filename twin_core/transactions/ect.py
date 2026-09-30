@@ -192,6 +192,16 @@ async def approve(
     independence check) and raises ``IndependenceViolation`` if this ECT's
     category requires an approver other than whoever authored the patch.
     """
+    if not approver or not approver.strip():
+        # FORGE-393: an ECT approval records who authorised a change to the
+        # design. A blank approver would both write down an authority that
+        # does not exist and skip the independence check below, which
+        # short-circuits on a falsy approver -- so the one call that most
+        # needs a named human would be the one that gets none.
+        raise ValueError(
+            "ect.approve: 'approver' must be a named human. It comes from whoever "
+            "answered the approval, never from a model-supplied argument."
+        )
     ect = await _get(twin, ect_id)
     _require_status(ect, ECTStatus.READY_FOR_REVIEW)
     engine = hitl or HITLEngine()

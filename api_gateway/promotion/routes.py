@@ -17,9 +17,10 @@ from __future__ import annotations
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from api_gateway.auth.approver import approver_from_request
 from api_gateway.requirement_intelligence.promotion import attempt_promotion
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI
@@ -45,9 +46,10 @@ class AttemptPromotionRequest(BaseModel):
     level: str
     requiredClaimIds: list[str]  # noqa: N815
     k: float = 1.0
-    decidedBy: str | None = None  # noqa: N815
     comment: str | None = None
     reject: bool = False
+    # `decidedBy` was here. It is gone on purpose (FORGE-393): the deciding
+    # human is whoever made this request, never whoever the body names.
 
 
 class RequiredClaimResultView(BaseModel):
@@ -69,10 +71,20 @@ class AttemptPromotionResponse(BaseModel):
 
 
 @router.post("/attempt", response_model=AttemptPromotionResponse)
-async def attempt_promotion_route(payload: AttemptPromotionRequest) -> AttemptPromotionResponse:
+async def attempt_promotion_route(
+    payload: AttemptPromotionRequest, request: Request
+) -> AttemptPromotionResponse:
+    """Promote (or veto), attributed to whoever made this request.
+
+    A dashboard click is a human act, so this route needs no separate
+    approval hop the way the MCP path does — but the authority is still read
+    off the request rather than the body (FORGE-393).
+    """
+    approver = approver_from_request(request)
     with tracer.start_as_current_span("promotion.attempt") as span:
         span.set_attribute("promotion.project_id", payload.projectId)
         span.set_attribute("promotion.level", payload.level)
+        span.set_attribute("promotion.approver_verified", approver.verified)
         try:
             result = await attempt_promotion(
                 _twin,
@@ -80,7 +92,7 @@ async def attempt_promotion_route(payload: AttemptPromotionRequest) -> AttemptPr
                 level=payload.level,
                 required_claim_ids=payload.requiredClaimIds,
                 k=payload.k,
-                decided_by=payload.decidedBy,
+                decided_by=approver.label,
                 comment=payload.comment,
                 reject=payload.reject,
             )
@@ -91,6 +103,8 @@ async def attempt_promotion_route(payload: AttemptPromotionRequest) -> AttemptPr
         project_id=payload.projectId,
         level=payload.level,
         promoted=result["promoted"],
+        decided_by=approver.actor_id,
+        approver_verified=approver.verified,
     )
     return AttemptPromotionResponse(
         gateId=result["gate_id"],

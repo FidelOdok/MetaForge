@@ -37,13 +37,21 @@ from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
 from mcp_core.deeplinks import DeepLinkBuilder, links_for
 from mcp_core.elicitation import ELICITATION_PROTOCOL_VERSION, Elicitor, elicitation_gate
 from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
     ApprovalAsk,
     ApprovalGateFn,
     ApprovalNotConfiguredError,
     ApprovalOutcome,
     ApprovalRejectedError,
+    Approver,
+    ApproverArgumentRejectedError,
     Caller,
+    HumanAuthorityRequiredError,
     decide,
+    reject_caller_supplied_approver,
+    requires_human_authority,
+    resolve_approval,
+    strip_reserved_arguments,
 )
 from mcp_core.profiles import tools_for_profile
 from mcp_core.protocol import (
@@ -403,6 +411,33 @@ class UnifiedMcpServer:
                         _RESOURCE_NOT_FOUND if missing else _TOOL_EXECUTION_ERROR,
                         str(exc),
                         {"uri": getattr(exc, "uri", None), "retryable": False},
+                    )
+                )
+            except (ApproverArgumentRejectedError, HumanAuthorityRequiredError) as exc:
+                self._mark_failed(span, exc)
+                # FORGE-393. Same reasoning as the approval errors below: the
+                # agent has to be told *why*, or it will try again with the
+                # same argument. These two say different things and get
+                # different codes -- "you must not name the approver" is a
+                # fixable mistake, "nobody approved" needs a person.
+                supplied = isinstance(exc, ApproverArgumentRejectedError)
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": (
+                                "approver_not_caller_supplied"
+                                if supplied
+                                else "human_authority_required"
+                            ),
+                            "field": getattr(exc, "field", None),
+                            # Retrying changes nothing until the argument is
+                            # dropped or a human answers.
+                            "retryable": False,
+                        },
                     )
                 )
             except (ApprovalNotConfiguredError, ApprovalRejectedError) as exc:
@@ -1113,13 +1148,20 @@ class UnifiedMcpServer:
         prefix = requested.split(".")[0].split("_")[0].lower()
         return [tid for tid in known if tid.lower().startswith(prefix)][:limit]
 
-    async def _authorise(self, tool_id: str, arguments: dict[str, Any]) -> None:
+    async def _authorise(self, tool_id: str, arguments: dict[str, Any]) -> Approver | None:
         """Hold a write until a human approves it, whoever asked (FORGE-359).
 
         Raises rather than returning a flag: every path out of here that is
         not an approval must stop the call, and an exception cannot be
         forgotten at a call site the way a returned bool can.
+
+        Returns the human who approved, when the gate named one. For most
+        tools that is bookkeeping; for a human-authority tool (FORGE-393) it
+        is the value the tool writes down, so a missing one is fatal here
+        rather than filled in later.
         """
+        # Before anything else: the caller does not get to say who approved.
+        reject_caller_supplied_approver(tool_id, arguments)
         # FORGE-360: the local-write exemption exists only because a stdio
         # session had nowhere to answer an approval -- F1 says so in
         # ``guardrails._EXEMPTIBLE``. A client that can elicit *is* somewhere
@@ -1134,7 +1176,7 @@ class UnifiedMcpServer:
             exempt_local_writes=self._exempt_local_writes and not can_elicit,
         )
         if not decision.requires_approval:
-            return
+            return None
 
         # In-harness first: the person who asked for this is looking at that
         # window. Not a fallback chain -- once a client has been asked, going
@@ -1165,15 +1207,18 @@ class UnifiedMcpServer:
             reason=decision.reason,
             route="elicitation" if can_elicit else "dashboard",
         )
-        outcome = await gate(
-            ApprovalAsk(
-                tool_id=tool_id,
-                arguments=arguments,
-                caller=self._caller,
-                reason=decision.reason,
-                project=_effective_project(arguments),
+        resolution = resolve_approval(
+            await gate(
+                ApprovalAsk(
+                    tool_id=tool_id,
+                    arguments=arguments,
+                    caller=self._caller,
+                    reason=decision.reason,
+                    project=_effective_project(arguments),
+                )
             )
         )
+        outcome = resolution.outcome
         if outcome is not ApprovalOutcome.APPROVED:
             logger.info(
                 "mcp_tool_call_not_approved",
@@ -1182,6 +1227,23 @@ class UnifiedMcpServer:
                 outcome=outcome.value,
             )
             raise ApprovalRejectedError(tool_id, outcome)
+
+        if requires_human_authority(tool_id) and resolution.approver is None:
+            # Approved, but by nobody we can name. For an ordinary write that
+            # would be fine. Here the approver's name *is* the result, so
+            # writing the gate anyway would record an authority that does not
+            # exist -- which is the bug, just arriving by a different door.
+            logger.error(
+                "mcp_human_authority_missing",
+                tool_id=tool_id,
+                caller=self._caller.value,
+            )
+            raise HumanAuthorityRequiredError(
+                tool_id,
+                "the approval was granted but the gate did not identify who granted it",
+            )
+
+        return resolution.approver
 
     async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route ``tool/call`` to the adapter that owns ``tool_id``."""
@@ -1192,7 +1254,16 @@ class UnifiedMcpServer:
         # kind of thing a strict schema rejects.
         params = {k: v for k, v in params.items() if k != "_call_id"}
         params["tool_id"] = tool_id
-        await self._authorise(tool_id, params.get("arguments") or {})
+
+        # Take the reserved key away before it is looked at, so a client
+        # cannot pre-set the field the dispatcher is about to fill.
+        arguments = strip_reserved_arguments(params.get("arguments") or {})
+        params["arguments"] = arguments
+
+        approver = await self._authorise(tool_id, arguments)
+        if approver is not None and requires_human_authority(tool_id):
+            # The tool reads its deciding human from here and nowhere else.
+            arguments[APPROVED_BY_ARG] = approver.label
 
         # Commit-by-reference: fill a commit_geometry call's step_base64 from the
         # last export for this (session_id, obj_id) so agents needn't thread the
@@ -1445,6 +1516,12 @@ _ERROR_CLASSES: tuple[tuple[str, str], ...] = (
     ("ResourceReadError", "resource_read_failed"),
     ("ApprovalNotConfiguredError", "approval_not_configured"),
     ("ApprovalRejectedError", "approval_refused"),
+    # FORGE-393. Separate labels on purpose: a rise in the first means a
+    # client is still passing the old argument, a rise in the second means
+    # approvals are landing without an identified human -- different faults
+    # with different fixes, and folding them together hides both.
+    ("ApproverArgumentRejectedError", "approver_caller_supplied"),
+    ("HumanAuthorityRequiredError", "human_authority_missing"),
     ("ToolHandlerError", "tool_execution_error"),
 )
 

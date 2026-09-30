@@ -481,17 +481,6 @@
             ],
             "title": "Comment"
           },
-          "decidedBy": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Decidedby"
-          },
           "k": {
             "default": 1.0,
             "title": "K",
@@ -3389,6 +3378,165 @@
         "title": "IterateRequest",
         "type": "object"
       },
+      "JointLoadRequest": {
+        "description": "A posed serial chain, base-to-tip: ``links[i]`` is the link driven\nby (immediately outboard of) ``joints[i]``.",
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/JointPositionInput"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/LinkLoadInput"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "payload_mass_kg": {
+            "default": 0.0,
+            "title": "Payload Mass Kg",
+            "type": "number"
+          },
+          "payload_position_world_mm": {
+            "anyOf": [
+              {
+                "maxItems": 3,
+                "minItems": 3,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Position World Mm"
+          }
+        },
+        "required": [
+          "links",
+          "joints"
+        ],
+        "title": "JointLoadRequest",
+        "type": "object"
+      },
+      "JointLoadResponse": {
+        "properties": {
+          "loads": {
+            "items": {
+              "$ref": "#/components/schemas/JointLoadResult"
+            },
+            "title": "Loads",
+            "type": "array"
+          },
+          "worst_joint": {
+            "$ref": "#/components/schemas/JointLoadResult"
+          }
+        },
+        "required": [
+          "loads",
+          "worst_joint"
+        ],
+        "title": "JointLoadResponse",
+        "type": "object"
+      },
+      "JointLoadResult": {
+        "properties": {
+          "joint_name": {
+            "title": "Joint Name",
+            "type": "string"
+          },
+          "reaction_force_n": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Reaction Force N",
+            "type": "array"
+          },
+          "reaction_moment_n_mm": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Reaction Moment N Mm",
+            "type": "array"
+          },
+          "supported_mass_kg": {
+            "title": "Supported Mass Kg",
+            "type": "number"
+          }
+        },
+        "required": [
+          "joint_name",
+          "supported_mass_kg",
+          "reaction_force_n",
+          "reaction_moment_n_mm"
+        ],
+        "title": "JointLoadResult",
+        "type": "object"
+      },
+      "JointPositionInput": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "position_world_mm": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Position World Mm",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "position_world_mm"
+        ],
+        "title": "JointPositionInput",
+        "type": "object"
+      },
       "JointSpec": {
         "description": "One joint between two parts \u2014 the same shape FreeCAD's\n``add_assembly_joint``/``list_joints`` already produce, so a caller can\npass through what MET-721 reads from a live session, or supply a saved\njoint list manually.",
         "properties": {
@@ -3686,6 +3834,42 @@
           "title"
         ],
         "title": "LinkEvidenceRequest",
+        "type": "object"
+      },
+      "LinkLoadInput": {
+        "properties": {
+          "com_world_mm": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Com World Mm",
+            "type": "array"
+          },
+          "mass_kg": {
+            "title": "Mass Kg",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "com_world_mm",
+          "mass_kg"
+        ],
+        "title": "LinkLoadInput",
         "type": "object"
       },
       "LoadCaseListResponse": {
@@ -9242,6 +9426,7 @@
         ]
       },
       "post": {
+        "description": "Record the decision, attributed to whoever made this request.\n\nThe identity comes from the request, not the body (FORGE-393). A client\ncannot nominate the approver, which is the whole point: some tools write\nthe approver's name down as their result.",
         "operationId": "submit_tool_approval_v1_chat_tool_approvals__run_id__post",
         "parameters": [
           {
@@ -11341,6 +11526,7 @@
     },
     "/v1/promotion/attempt": {
       "post": {
+        "description": "Promote (or veto), attributed to whoever made this request.\n\nA dashboard click is a human act, so this route needs no separate\napproval hop the way the MCP path does \u2014 but the authority is still read\noff the request rather than the body (FORGE-393).",
         "operationId": "attempt_promotion_route_v1_promotion_attempt_post",
         "requestBody": {
           "content": {
@@ -11557,6 +11743,47 @@
         "summary": "Propose Requirement Fix",
         "tags": [
           "requirements"
+        ]
+      }
+    },
+    "/v1/robot/joint-loads": {
+      "post": {
+        "operationId": "compute_joint_loads_v1_robot_joint_loads_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JointLoadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JointLoadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compute Joint Loads",
+        "tags": [
+          "robot-loads"
         ]
       }
     },

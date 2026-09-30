@@ -905,7 +905,6 @@ function GateReviewSection({
   const [showForm, setShowForm] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [level, setLevel] = useState<MaturityLevel>('sim_validated');
-  const [decidedBy, setDecidedBy] = useState('');
   const [comment, setComment] = useState('');
   const [lastResult, setLastResult] = useState<AttemptPromotionResult | null>(null);
 
@@ -917,13 +916,12 @@ function GateReviewSection({
   };
 
   const submit = (reject: boolean) => {
-    if (!projectId || selectedIds.length === 0 || !decidedBy.trim()) return;
+    if (!projectId || selectedIds.length === 0) return;
     attempt.mutate(
       {
         projectId,
         level,
         requiredClaimIds: selectedIds,
-        decidedBy: decidedBy.trim(),
         comment: comment.trim() || undefined,
         reject,
       },
@@ -943,7 +941,7 @@ function GateReviewSection({
     );
   };
 
-  const canSubmit = !!projectId && selectedIds.length > 0 && decidedBy.trim() !== '';
+  const canSubmit = !!projectId && selectedIds.length > 0;
 
   return (
     <div className="mb-6" data-testid="gate-review-section">
@@ -1005,16 +1003,6 @@ function GateReviewSection({
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
-              Reviewer
-              <input
-                value={decidedBy}
-                onChange={(e) => setDecidedBy(e.target.value)}
-                placeholder="you@example.com"
-                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
-                style={{ ...FIELD_STYLE, width: '180px' }}
-              />
             </label>
             <label className="flex flex-1 flex-col gap-1 text-xs text-on-surface-variant" style={{ minWidth: '200px' }}>
               Comment

@@ -20,7 +20,8 @@ export interface AttemptPromotionPayload {
   level: MaturityLevel;
   requiredClaimIds: string[];
   k?: number;
-  decidedBy?: string;
+  // FORGE-393: no `decidedBy`. The reviewer is whoever is making the request,
+  // resolved server-side. A field here was a field anything could fill in.
   comment?: string;
   reject?: boolean;
 }

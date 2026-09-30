@@ -131,8 +131,10 @@ WORKFLOWS: dict[str, tuple[str, str]] = {
         "Read `metaforge://twin/requirements/<project_id>` and report each "
         "required claim's status. `uncertain`, `stale` and `no_data` all block; "
         "only an approved waiver naming that requirement overrides a `fail`.\n\n"
-        "`twin.attempt_promotion` refuses rather than warns, and it needs a named "
-        "human in `decided_by`. Do not supply one on the user's behalf.",
+        "`twin.attempt_promotion` refuses rather than warns. Do not pass "
+        "`decided_by` -- it is not an argument and supplying it is an error. "
+        "The call is always held for a person, and whoever approves it is "
+        "recorded as the deciding authority.",
     ),
     "doctor": (
         "Check the connection and what is reachable",
