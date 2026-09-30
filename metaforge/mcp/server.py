@@ -34,6 +34,7 @@ import structlog
 
 from mcp_core.annotations import annotations_for
 from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
+from mcp_core.deeplinks import DeepLinkBuilder, links_for
 from mcp_core.elicitation import ELICITATION_PROTOCOL_VERSION, Elicitor, elicitation_gate
 from mcp_core.guardrails import (
     ApprovalAsk,
@@ -145,6 +146,7 @@ class UnifiedMcpServer:
         exempt_local_writes: bool = True,
         auth_posture: AuthPosture | None = None,
         elicitor: Elicitor | None = None,
+        dashboard_url: str | None = None,
     ) -> None:
         self._adapters = list(adapters)
         # FORGE-339: when set, ``tools/list`` serves only this profile's
@@ -171,6 +173,11 @@ class UnifiedMcpServer:
         # one. Held rather than used -- whether we may actually ask depends
         # on what the client said at initialize.
         self._elicitor = elicitor
+        # FORGE-371: where the dashboard is served from, so a result can
+        # carry a link to the view that shows it. None means no links at
+        # all -- a guessed localhost URL is worse than none, because the
+        # agent states it with the same confidence either way.
+        self._deeplinks = DeepLinkBuilder(dashboard_url)
         # Whoever last completed the `initialize` handshake. Reported by
         # health/check so a version-skew question has an answer other than
         # "ask the user what they are running".
@@ -613,6 +620,10 @@ class UnifiedMcpServer:
             # found" / hard execution failures and Claude Code surfaces
             # both correctly.
             raise
+        meta: dict[str, Any] = {"callId": call_id}
+        links = links_for(self._deeplinks, tool_name, result)
+        if links:
+            meta["links"] = links
         # Body is wrapped in MCP's ``content`` array. We use ``text``
         # type with a JSON-serialised payload — the adapter outputs are
         # structured dicts, and clients can json.parse the text. If we
@@ -628,8 +639,9 @@ class UnifiedMcpServer:
             # The reference lives in `_meta` rather than inside the text
             # payload: the text is the tool's own output and belongs to the
             # tool, and burying a protocol-level id in it would make every
-            # adapter's schema wrong.
-            "_meta": {"callId": call_id},
+            # adapter's schema wrong. Deep links ride here for the same
+            # reason (FORGE-371).
+            "_meta": meta,
         }
 
     # ------------------------------------------------------------------
@@ -1291,6 +1303,13 @@ class UnifiedMcpServer:
                 else dict(UNKNOWN_AUTH)
             ),
             "client": self._client_report(),
+            # FORGE-371: a doctor that cannot say "links are off" leaves the
+            # reader to conclude the tools simply never produce them.
+            "dashboard_links": (
+                "enabled"
+                if self._deeplinks.configured
+                else "disabled (no METAFORGE_DASHBOARD_URL configured)"
+            ),
             "adapters": adapter_health,
         }
         if unreachable:
@@ -1353,6 +1372,7 @@ async def build_unified_server(
     component_intent_llm: Any = None,
     component_recorder: Any = None,
     brief_provider: Any = None,
+    dashboard_url: str | None = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -1418,4 +1438,5 @@ async def build_unified_server(
         session_capture=capture,
         tool_registry=registry,
         profile=profile,
+        dashboard_url=dashboard_url,
     )

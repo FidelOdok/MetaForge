@@ -1363,6 +1363,9 @@ async def _bootstrap(
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         brief_provider=brief_provider,
+        # FORGE-371: unset means no links, reported by health/check. The
+        # server cannot know where the dashboard is served from.
+        dashboard_url=os.environ.get("METAFORGE_DASHBOARD_URL"),
         knowledge_service=knowledge_service,
         twin=twin,
         constraint_engine=twin.constraints,

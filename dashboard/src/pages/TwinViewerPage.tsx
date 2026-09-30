@@ -690,6 +690,13 @@ type InspectorTab = 'overview' | 'constraints' | 'history';
 type NodeScope = 'all' | 'attention' | string;
 
 const TWIN_TABS: TwinTab[] = ['graph', 'structure', 'model', 'sim', 'asm', 'mfg'];
+
+/** A ?tab= value, or 'graph' (FORGE-371). An unknown name is not worth an
+ *  error: the page still works, and the link may come from a build older
+ *  or newer than this one. */
+function parseTwinTab(raw: string | null): TwinTab {
+  return TWIN_TABS.includes(raw as TwinTab) ? (raw as TwinTab) : 'graph';
+}
 const TAB_LABELS: Record<TwinTab, string> = {
   graph: 'Graph',
   structure: 'Structure',
@@ -718,6 +725,10 @@ export function TwinViewerPage() {
   const [chatMax, setChatMax] = useState(false);
   const [chatMin, setChatMin] = useState(!sampleMode);
   const [chatDock, setChatDock] = useState<'overlay' | 'side'>('overlay');
+  // Defaulted plainly, not from searchParams: useSearchParams is declared
+  // further down, and reading it in this initialiser is a temporal-dead-zone
+  // crash at render (invisible to tsc -- the dashboard tests caught it).
+  // The effect below applies ?tab= on mount and on every later change.
   const [tab, setTab] = useState<TwinTab>('graph');
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('overview');
@@ -746,8 +757,12 @@ export function TwinViewerPage() {
   // rejected it" -- a failed conversion must not silently fall back to the
   // generic upload placeholder.
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
-  // Deep-link: /twin?node=<id> preselects a node (MET-514).
-  const [searchParams] = useSearchParams();
+  // Deep-link: /twin?node=<id> preselects a node (MET-514), and
+  // ?tab=<tab> opens on it (FORGE-371). The tab used to be local state
+  // only, so a link naming a tab landed on the page and silently showed
+  // whichever one happened to be the default -- which reads as the link
+  // being wrong rather than unsupported.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // ── project scope ──
   // The single global active-project selection (Topbar switcher). Sample mode
@@ -788,6 +803,13 @@ export function TwinViewerPage() {
   // clears the selection when the param disappears too (MET-686).
   useEffect(() => {
     setSelectedId(searchParams.get('node'));
+  }, [searchParams]);
+
+  // Follow a ?tab= change too, so a second deep link into an already-open
+  // page moves the view rather than appearing to do nothing.
+  useEffect(() => {
+    const wanted = searchParams.get('tab');
+    if (wanted) setTab(parseTwinTab(wanted));
   }, [searchParams]);
 
   // MET-674: clear the selected node (and its cached model) when the active
@@ -902,6 +924,16 @@ export function TwinViewerPage() {
   const switchTab = (next: TwinTab) => {
     setTab(next);
     setViewMode(next === 'model' || next === 'sim' ? '3d' : 'graph');
+    // Mirror the tab into the URL so the address bar is a link someone can
+    // paste back. `replace` keeps clicking through tabs out of history.
+    setSearchParams(
+      (prev) => {
+        const next_ = new URLSearchParams(prev);
+        next_.set('tab', next);
+        return next_;
+      },
+      { replace: true },
+    );
   };
 
   const selectNode = (id: string | null) => {
