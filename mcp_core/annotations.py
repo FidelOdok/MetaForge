@@ -121,6 +121,10 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.commit_hazard_analysis",
         "twin.commit_procurement_record",
         "twin.commit_system_architecture",
+        # FORGE-347: an imported URDF is recorded through the same
+        # architecture recorder, so it is the same kind of write -- it
+        # only ever adds a new reference-design node.
+        "twin.import_urdf",
         "twin.commit_technical_drawing",
         "twin.optimize_parameter",
         "twin.propose_change",

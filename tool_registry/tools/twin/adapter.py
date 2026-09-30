@@ -35,6 +35,7 @@ from tool_registry.tools.twin.queries import (
     serialise_subgraph,
     serialise_violation,
 )
+from tool_registry.tools.twin.urdf import UrdfParseError, parse_urdf
 
 logger = structlog.get_logger()
 tracer = get_tracer("tool_registry.tools.twin.adapter")
@@ -351,6 +352,9 @@ class TwinServer(McpToolServer):
             self._register_commit_hazard_analysis()
         if system_architecture_recorder is not None:
             self._register_commit_system_architecture()
+            # FORGE-347: the import path onto the same recorder -- a URDF
+            # is links and joints, which is components and interfaces.
+            self._register_import_urdf()
         if technical_drawing_recorder is not None:
             self._register_commit_technical_drawing()
         if compliance_checklist_recorder is not None:
@@ -2694,6 +2698,102 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             **({"domain": domain} if isinstance(domain, str) and domain else {}),
         )
+
+    def _register_import_urdf(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.import_urdf",
+                adapter_id="twin",
+                name="Import URDF Reference Design",
+                description=(
+                    "Import a URDF robot description as a reference design: "
+                    "links become components, joints become interfaces, "
+                    "recorded as a system architecture you can design "
+                    "against. Pass the XML in 'urdf'. GEOMETRY IS NOT "
+                    "IMPORTED -- a URDF references meshes by path (usually "
+                    "package:// URIs that only resolve inside a ROS "
+                    "workspace), so every skipped mesh is listed in "
+                    "'not_imported' along with any joint whose type or "
+                    "link references could not be resolved. Read it: the "
+                    "structure came in, the shapes did not."
+                ),
+                capability="twin_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "urdf": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The URDF document's XML.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": (
+                                "Name for the recorded architecture. Defaults to the "
+                                "URDF's own <robot name>."
+                            ),
+                        },
+                        "project_id": {"type": "string", "description": "Project UUID to link."},
+                    },
+                    "required": ["urdf"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "robot_name": {"type": "string"},
+                        "component_count": {"type": "integer"},
+                        "interface_count": {"type": "integer"},
+                        "not_imported": {
+                            "type": "array",
+                            "description": (
+                                "Meshes left behind and joints that could not be "
+                                "mapped, each with a reason. Present only when "
+                                "something was skipped."
+                            ),
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.import_urdf,
+        )
+
+    async def import_urdf(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        source = arguments.get("urdf")
+        if not source or not isinstance(source, str):
+            raise ValueError("twin.import_urdf: 'urdf' is required (non-empty string)")
+        try:
+            model = parse_urdf(source)
+        except UrdfParseError as exc:
+            # A parse failure is the caller's answer, not a crash: they
+            # handed us a file and need to know why it was not a URDF.
+            raise ValueError(f"twin.import_urdf: {exc}") from exc
+
+        project_id = arguments.get("project_id")
+        name = arguments.get("name")
+        recorded = await self._system_architecture_recorder(
+            name=str(name) if isinstance(name, str) and name.strip() else model.name,
+            system_name=model.name,
+            components=model.components,
+            interfaces=model.interfaces or None,
+            project_id=project_id if isinstance(project_id, str) else None,
+        )
+        result: dict[str, Any] = {
+            "node_id": (recorded or {}).get("node_id"),
+            "robot_name": model.name,
+            "component_count": len(model.components),
+            "interface_count": len(model.interfaces),
+        }
+        if model.not_imported:
+            result["not_imported"] = model.not_imported
+            logger.info(
+                "twin_mcp_urdf_partial_import",
+                robot=model.name,
+                skipped=len(model.not_imported),
+            )
+        return result
 
     def _register_commit_technical_drawing(self) -> None:
         self.register_tool(
