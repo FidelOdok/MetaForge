@@ -120,19 +120,35 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
         return result
 
 
-# FORGE-281: a CalculiX *FREQUENCY step's eigenvalues/frequencies are
-# printed to the .dat file (not the .frd) as a block headed by a line
-# containing "F R E Q U E N C I E S" (ccx spaces out section titles), then
-# one data line per mode: mode number, eigenvalue (rad/time)^2, and
-# frequency in cycles/time (== Hz, since the mm-N-s-MPa unit system's time
-# unit is seconds) -- the LAST numeric column. Matched by a general
-# "<int> <float>... " pattern rather than the exact header wording/column
-# count, since the precise ccx-version-dependent spacing isn't something to
-# hardcode brittle-ly; live-validated against a real ccx-generated .dat file
-# on fidel-dev (see the PR/Jira comment) to confirm this reads real output,
-# not just a hand-built fixture's assumed shape.
-_FREQUENCY_HEADER_RE = re.compile(r"F\s*R\s*E\s*Q\s*U\s*E\s*N\s*C\s*I\s*E\s*S", re.IGNORECASE)
-_MODE_LINE_RE = re.compile(r"^\s*(\d+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s*$")
+# FORGE-281 (corrected post-merge after live validation on fidel-dev -- see
+# the Jira comment): a CalculiX *FREQUENCY step's eigenvalues/frequencies
+# are printed to the .dat file (not the .frd) as a block headed by a line
+# containing "E I G E N V A L U E   O U T P U T" (ccx spaces out section
+# titles) -- NOT "FREQUENCIES" as originally assumed before a real capture
+# was available. Confirmed against real ccx 2.20 output:
+#
+#      E I G E N V A L U E   O U T P U T
+#
+#  MODE NO    EIGENVALUE                       FREQUENCY
+#                                      REAL PART            IMAGINARY PART
+#                            (RAD/TIME)      (CYCLES/TIME     (RAD/TIME)
+#
+#       1   0.1012618E+00   0.3182166E+00   0.5064575E-01   0.0000000E+00
+#
+# Each mode line has FOUR numeric columns after the mode number, not one:
+# eigenvalue (== omega^2, (rad/time)^2), frequency real part in rad/time,
+# frequency real part in cycles/time (== Hz, the value this function
+# returns), and frequency imaginary part in rad/time (0 for a real,
+# undamped mode). The Hz value is the THIRD data column, not the last --
+# the original assumption (a 2-column mode/eigenvalue/frequency shape,
+# taking the last column) would have silently returned the imaginary part
+# (always 0.0) instead.
+_FREQUENCY_HEADER_RE = re.compile(
+    r"E\s*I\s*G\s*E\s*N\s*V\s*A\s*L\s*U\s*E\s+O\s*U\s*T\s*P\s*U\s*T", re.IGNORECASE
+)
+_MODE_LINE_RE = re.compile(
+    r"^\s*(\d+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s*$"
+)
 
 
 def parse_frequencies_dat(dat_path: str) -> list[float]:
@@ -172,7 +188,10 @@ def parse_frequencies_dat(dat_path: str) -> list[float]:
         for line in lines[header_idx + 1 :]:
             match = _MODE_LINE_RE.match(line)
             if match:
-                frequencies.append(float(match.group(3)))
+                # group(4): FREQUENCY, REAL PART, (CYCLES/TIME) -- Hz.
+                # group(2)/group(3) are the eigenvalue and rad/time forms;
+                # group(5) is the (always-zero, for a real mode) imaginary part.
+                frequencies.append(float(match.group(4)))
             elif frequencies:
                 # The mode-number sequence ended (next section starts) --
                 # stop rather than scanning the rest of the file for

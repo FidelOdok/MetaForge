@@ -38,6 +38,26 @@ _IDS_PER_LINE = 10
 _VOLUME_ELEMENT_PREFIXES = ("C3D",)
 
 
+def _fmt(value: float) -> str:
+    """Format a float for a CalculiX free-format numeric card.
+
+    Plain Python interpolation (``f"{value}"``) uses ``repr()``, which can
+    emit up to 17 significant digits for a value that doesn't round-trip
+    exactly in binary -- e.g. ``7850 * 1e-12`` prints as
+    ``'7.849999999999999e-09'``. Confirmed live on fidel-dev: CalculiX's
+    Fortran free-format reader silently misparses that exact string in a
+    ``*DENSITY`` card, understating the assembled mass by a factor of
+    ~2.6e8 with NO error or warning -- reporting a modal deck's first
+    natural frequency as 0.05 Hz instead of the correct ~815 Hz (confirmed
+    by re-solving the identical deck with only that one string swapped for
+    a shorter ``7.85E-09``). Bounding to 10 significant digits keeps every
+    value this codebase's own materials/mesh data can produce well within
+    CalculiX's reader while staying far more precise than the parts models
+    this feeds are ever measured to.
+    """
+    return f"{value:.10G}"
+
+
 def _format_id_list(ids: list[int]) -> list[str]:
     """CalculiX/Abaqus data block: comma-separated ids, wrapped at a
     reasonable line width -- the reader just consumes values across lines
@@ -131,7 +151,7 @@ def build_static_stress_deck(
     lines: list[str] = ["*Heading", " MetaForge FORGE-234 static stress deck", "*NODE"]
     for node_id in sorted(kept_node_ids):
         x, y, z = mesh.nodes[node_id]
-        lines.append(f"{node_id}, {x}, {y}, {z}")
+        lines.append(f"{node_id}, {_fmt(x)}, {_fmt(y)}, {_fmt(z)}")
 
     for etype, element_ids in volume_by_type.items():
         lines.append(f"*ELEMENT, TYPE={etype}, ELSET={volume_elset}")
@@ -144,7 +164,7 @@ def build_static_stress_deck(
 
     lines.append("*MATERIAL, NAME=MAT1")
     lines.append("*ELASTIC, TYPE=ISO")
-    lines.append(f"{youngs_modulus_mpa}, {poissons_ratio}")
+    lines.append(f"{_fmt(youngs_modulus_mpa)}, {_fmt(poissons_ratio)}")
     lines.append(f"*SOLID SECTION, ELSET={volume_elset}, MATERIAL=MAT1")
     lines.append("*STEP")
     lines.append("*STATIC")
@@ -153,11 +173,11 @@ def build_static_stress_deck(
     lines.append("*CLOAD")
     for node_id in load_nodes:
         if fx_per_node:
-            lines.append(f"{node_id}, 1, {fx_per_node}")
+            lines.append(f"{node_id}, 1, {_fmt(fx_per_node)}")
         if fy_per_node:
-            lines.append(f"{node_id}, 2, {fy_per_node}")
+            lines.append(f"{node_id}, 2, {_fmt(fy_per_node)}")
         if fz_per_node:
-            lines.append(f"{node_id}, 3, {fz_per_node}")
+            lines.append(f"{node_id}, 3, {_fmt(fz_per_node)}")
     lines.append("*NODE FILE")
     lines.append("U")
     lines.append("*EL FILE")
@@ -244,7 +264,7 @@ def build_modal_deck(
     lines: list[str] = ["*Heading", " MetaForge FORGE-281 modal (natural frequency) deck", "*NODE"]
     for node_id in sorted(kept_node_ids):
         x, y, z = mesh.nodes[node_id]
-        lines.append(f"{node_id}, {x}, {y}, {z}")
+        lines.append(f"{node_id}, {_fmt(x)}, {_fmt(y)}, {_fmt(z)}")
 
     for etype, element_ids in volume_by_type.items():
         lines.append(f"*ELEMENT, TYPE={etype}, ELSET={volume_elset}")
@@ -257,9 +277,9 @@ def build_modal_deck(
 
     lines.append("*MATERIAL, NAME=MAT1")
     lines.append("*ELASTIC, TYPE=ISO")
-    lines.append(f"{youngs_modulus_mpa}, {poissons_ratio}")
+    lines.append(f"{_fmt(youngs_modulus_mpa)}, {_fmt(poissons_ratio)}")
     lines.append("*DENSITY")
-    lines.append(f"{density_tonne_mm3}")
+    lines.append(_fmt(density_tonne_mm3))
     lines.append(f"*SOLID SECTION, ELSET={volume_elset}, MATERIAL=MAT1")
     lines.append("*STEP")
     lines.append("*FREQUENCY")
