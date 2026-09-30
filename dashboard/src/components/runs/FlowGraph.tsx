@@ -131,10 +131,19 @@ function PhaseNode({ data }: { data: PhaseNodeData }) {
             GATE
           </div>
           <div style={{ color: KC.onSurface }}>{phase.gate}</div>
+          {/* `nodrag nopan` are React Flow's own classes for interactive
+              controls inside a node. Without them a press on the button is
+              also a press on the pane: React Flow starts a pan/zoom drag, so
+              a slightly-moved click pans the canvas instead of approving.
+
+              CI found this before a person did — the d3-zoom handler throws
+              in jsdom, which surfaced as an unhandled error on the click test
+              while every assertion still passed. */}
           {phase.status === 'awaiting_gate' && canApprove && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <div className="nodrag nopan" style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               <button
                 type="button"
+                className="nodrag nopan"
                 aria-label={`Approve ${phase.gate}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -145,6 +154,7 @@ function PhaseNode({ data }: { data: PhaseNodeData }) {
               </button>
               <button
                 type="button"
+                className="nodrag nopan"
                 aria-label={`Reject ${phase.gate}`}
                 onClick={(e) => {
                   e.stopPropagation();

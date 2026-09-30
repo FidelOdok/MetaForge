@@ -139,6 +139,26 @@ describe('FlowGraph', () => {
     expect(gateButtonLabels(node)).toEqual([]);
   });
 
+  it('marks the gate controls nodrag/nopan so a press does not pan the canvas', async () => {
+    // React Flow's own mechanism for interactive controls inside a node.
+    render(
+      <FlowGraph
+        phases={[phase({ status: 'awaiting_gate' })]}
+        selectedPhaseId={null}
+        onSelectPhase={vi.fn()}
+        canApprove
+        onApprove={vi.fn()}
+      />,
+    );
+    const node = await screen.findByTestId('phase-node-requirements');
+    const approve = gateButton(node, 'Approve Requirements sign-off');
+    expect(approve.className).toContain('nodrag');
+    expect(approve.className).toContain('nopan');
+    // The wrapper too: a press that lands between the buttons is still a
+    // press on the pane.
+    expect(approve.parentElement?.className).toContain('nopan');
+  });
+
   it('approving from the graph does not also select the phase', async () => {
     const onApprove = vi.fn();
     const onSelectPhase = vi.fn();
