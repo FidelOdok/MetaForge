@@ -175,6 +175,30 @@ Two consequences worth knowing:
 
 ## Commands
 
+### `connect` — find the gateway to point at
+
+```bash
+forge connect                 # probe the usual places
+forge connect --url https://team.example.com/mcp   # check one specific URL
+forge --format json connect   # machine-readable
+```
+
+Prints the MCP endpoint to use, or every candidate it tried and what each
+one said. Exits non-zero when nothing was found, so it works as a
+precondition check in a script.
+
+A candidate only counts when it answers an MCP `initialize` **and names
+itself** `metaforge-mcp`. Something listening on the port is not the same
+thing: another MCP server answers `initialize` perfectly happily, and
+reporting it would send you off to paste a URL that will never work. A
+`401`/`403` counts as found — the URL is right, the token is the next
+step.
+
+Order: the configured gateway (`--gateway-url`, `METAFORGE_GATEWAY_URL`,
+or saved config), then the same host on `:8765` (the MCP sidecar is a
+separate service from the REST gateway in the standard compose file, so
+`<gateway>/mcp` 404s), then the local defaults.
+
 ### `config` — configure the CLI (wizard)
 
 ```

@@ -32,6 +32,7 @@ Persistent stores (Neo4j, Postgres) are optional — without them the twin is in
 
 ## Commands
 
+- `/metaforge:connect`
 - `/metaforge:new`
 - `/metaforge:use`
 - `/metaforge:status`

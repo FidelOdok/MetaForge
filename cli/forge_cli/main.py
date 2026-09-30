@@ -67,6 +67,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
+    # -- connect -----------------------------------------------------------
+    connect_parser = subparsers.add_parser(
+        "connect",
+        help="Find a local MetaForge gateway, or say what to enter instead",
+    )
+    connect_parser.add_argument(
+        "--url",
+        default=None,
+        help="Check one specific URL instead of the usual local candidates.",
+    )
+    connect_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=2.0,
+        help="Seconds to wait per candidate (default: 2).",
+    )
+
     # -- run ---------------------------------------------------------------
     run_parser = subparsers.add_parser("run", help="Invoke a skill via the gateway")
     run_parser.add_argument("skill_name", help="Name of the skill to invoke")
@@ -440,7 +457,54 @@ def handle_ingest(args: argparse.Namespace, client: ForgeClient) -> Any:
     return _do_ingest(args, client)
 
 
+def handle_connect(args: argparse.Namespace, client: ForgeClient) -> None:
+    """Guided connect (FORGE-329).
+
+    Takes a ``client`` only to match every other handler's signature and
+    does not use it: this is the one command that has to work when there
+    is no gateway to talk to, which is the situation it exists for.
+
+    Exits non-zero when nothing was found, so it is usable as a
+    precondition check in a script and not only by eye.
+    """
+    from cli.forge_cli.discover import candidates_for, describe, detect_gateway
+
+    if args.url:
+        candidates: tuple[str, ...] = (args.url,)
+    else:
+        # Whatever this CLI is already configured to talk to comes first:
+        # someone who has set METAFORGE_GATEWAY_URL or saved a config has
+        # already told us where their gateway is, and probing localhost
+        # ahead of it could hand them a different one.
+        candidates = candidates_for(getattr(client, "base_url", "") or "")
+    found, probes = detect_gateway(candidates, timeout=args.timeout)
+    if getattr(args, "format", "table") == "json":
+        print(
+            json.dumps(
+                {
+                    "found": found.url if found else None,
+                    "probes": [
+                        {
+                            "url": p.url,
+                            "reachable": p.reachable,
+                            "is_metaforge": p.is_metaforge,
+                            "requires_auth": p.requires_auth,
+                            "detail": p.detail,
+                        }
+                        for p in probes
+                    ],
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(describe(found, probes))
+    if found is None:
+        sys.exit(1)
+
+
 _HANDLERS = {
+    "connect": handle_connect,
     "run": handle_run,
     "status": handle_status,
     "twin": handle_twin,
