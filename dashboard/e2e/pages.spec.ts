@@ -769,6 +769,23 @@ test.describe('Requirements', () => {
     const newest = section.getByTestId(/^release-package-(?!sample-release-v1)/);
     await expect(newest).not.toContainText('First release');
   });
+
+  test('test plan: shows an honest empty state, then generates a real entry (FORGE-298)', async ({
+    page,
+  }) => {
+    await page.goto('/requirements?demo=1');
+    const section = page.getByTestId('test-plan');
+    await expect(section).toBeVisible();
+
+    // No test-plan entries yet -- an honest empty state, not a fabricated one.
+    await expect(section).toContainText('No test-plan entries yet');
+
+    await section.getByTestId('generate-test-plan-button').click();
+    await expect(section).toContainText('payload_capacity_kg');
+    await expect(section).toContainText('2.0kg');
+    const entries = section.getByTestId(/^test-plan-entry-/);
+    await expect(entries).toHaveCount(1);
+  });
 });
 
 test.describe('Design Assistant', () => {

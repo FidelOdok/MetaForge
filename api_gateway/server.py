@@ -54,6 +54,7 @@ from api_gateway.robot_loads.routes import router as robot_loads_router
 from api_gateway.runs.routes import router as runs_router
 from api_gateway.sessions.routes import router as sessions_router
 from api_gateway.simulation.routes import router as simulation_router
+from api_gateway.testplans.routes import router as testplans_router
 from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
@@ -836,6 +837,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_system_architecture_recorder,
         make_technical_drawing_recorder,
     )
+    from api_gateway.twin.test_plan import make_test_plan_generator, make_test_plan_lister
     from api_gateway.twin.thermal_evidence import make_thermal_evidence_recorder
     from api_gateway.twin.trade_study import make_trade_study_selector
 
@@ -975,6 +977,16 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # project because nothing ever called the pre-existing
     # twin_core.transactions.baseline.create_baseline.
     baseline_creator_fn = make_baseline_creator(twin)
+
+    # FORGE-298: for each Constraint on a project with verification_method
+    # == "test", mechanically derives one verification_case entity from the
+    # requirement's own structured metric/operator/limit/unit/
+    # target_node_type fields. Reuses the SAME engineering_entity_recorder_fn
+    # instance every other entity type goes through.
+    test_plan_generator_fn = make_test_plan_generator(
+        twin, engineering_entity_recorder=engineering_entity_recorder_fn
+    )
+    test_plan_lister_fn = make_test_plan_lister(twin)
 
     # FORGE-265: requirement-driven component selection -- hoisted to a
     # named variable (unlike every other component_recorder use, which is
@@ -1169,6 +1181,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         release_package_creator=release_package_creator_fn,
         # FORGE-405: baseline creation, so G8's baseline check is satisfiable.
         baseline_creator=baseline_creator_fn,
+        # FORGE-298: mechanical test-plan derivation from test-method
+        # requirements (gap G-I2).
+        test_plan_generator=test_plan_generator_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -1225,6 +1240,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.releases.routes import init_release_package
 
     init_release_package(release_package_creator_fn, release_package_lister_fn)
+    # FORGE-298: bind the test-plan generator/lister to the dashboard's REST
+    # route (api_gateway/testplans/routes.py) -- same locality rationale as
+    # release_package above.
+    from api_gateway.testplans.routes import init_test_plan
+
+    init_test_plan(test_plan_generator_fn, test_plan_lister_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -1870,6 +1891,7 @@ def create_app(
     app.include_router(dfm_router)
     app.include_router(manufacture_router)
     app.include_router(releases_router)
+    app.include_router(testplans_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

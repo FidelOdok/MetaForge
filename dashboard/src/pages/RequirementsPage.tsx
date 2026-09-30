@@ -14,6 +14,7 @@ import {
   useCreateConstraint,
 } from '../hooks/use-requirements';
 import { useCreateReleasePackage, useReleasePackages } from '../hooks/use-releases';
+import { useGenerateTestPlan, useTestPlan } from '../hooks/use-test-plan';
 import {
   useApproveDesignLoop,
   useDesignLoop,
@@ -737,6 +738,86 @@ function SnapshotCount({
           {deltaText}
         </span>
       </div>
+    </div>
+  );
+}
+
+// FORGE-298 (gap G-I2): mechanically derives one verification_case per real
+// requirement with verification_method == "test" from the requirement's own
+// metric/operator/limit/unit/target_node_type fields -- a test step plus its
+// acceptance value, no new authoring/synthesis. Generating twice creates
+// duplicate entries per requirement (api_gateway/twin/test_plan.py's own
+// module docstring explains why this mirrors release-package's semantics).
+function TestPlanSection({ projectId }: { projectId?: string }) {
+  const toast = useToast();
+  const { data: entries, isLoading } = useTestPlan(projectId);
+  const generate = useGenerateTestPlan(projectId);
+
+  if (!projectId) return null;
+
+  const handleGenerate = () => {
+    generate.mutate(undefined, {
+      onSuccess: (newEntries) => {
+        toast.success(
+          newEntries.length === 0
+            ? 'No test-method requirements found on this project yet'
+            : `Generated ${newEntries.length} test-plan ${newEntries.length === 1 ? 'entry' : 'entries'}`,
+        );
+      },
+      onError: () => {
+        toast.error('Could not generate a test plan');
+      },
+    });
+  };
+
+  return (
+    <div className="mb-6" data-testid="test-plan">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+          Test plan
+        </h2>
+        <Button
+          onClick={handleGenerate}
+          disabled={generate.isPending}
+          data-testid="generate-test-plan-button"
+        >
+          {generate.isPending ? 'Generating…' : 'Generate test plan'}
+        </Button>
+      </div>
+
+      {isLoading ? null : !entries || entries.length === 0 ? (
+        <EmptyState
+          title="No test-plan entries yet"
+          description="Generated from requirements whose verification method is 'test'. Add one, or generate once this project has requirements declaring verification_method='test'."
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: 'var(--mf-c-282a30)' }}>
+                <th className="px-3 py-2 text-left text-[10px] uppercase tracking-widest text-on-surface-variant">
+                  Step
+                </th>
+                <th className="px-3 py-2 text-left text-[10px] uppercase tracking-widest text-on-surface-variant">
+                  Acceptance value
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr
+                  key={entry.nodeId}
+                  data-testid={`test-plan-entry-${entry.nodeId}`}
+                  style={{ borderTop: '1px solid var(--mf-r-65-72-90-0p1)' }}
+                >
+                  <td className="px-3 py-2 text-on-surface">{entry.step}</td>
+                  <td className="px-3 py-2 font-mono text-on-surface">{entry.acceptanceValue}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1845,6 +1926,8 @@ export function RequirementsPage() {
       <GateReviewSection projectId={activeProjectId ?? undefined} requirements={requirements} />
 
       <ReleasePackagesSection projectId={activeProjectId ?? undefined} />
+
+      <TestPlanSection projectId={activeProjectId ?? undefined} />
 
       <FeatureLibrarySection projectId={activeProjectId ?? undefined} />
 

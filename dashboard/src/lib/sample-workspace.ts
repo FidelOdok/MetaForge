@@ -68,6 +68,17 @@ interface SampleReleasePackage {
   gate_status: string;
 }
 
+// FORGE-298 (gap G-I2): illustrative shape of one generated test-plan
+// entry, mirroring api_gateway/testplans/routes.py's own snake_case
+// response -- same convention SampleReleasePackage above uses.
+interface SampleTestPlanEntry {
+  node_id: string;
+  requirement_id: string;
+  step: string;
+  acceptance_value: string;
+  created_at: string;
+}
+
 interface SampleMaturityGate {
   gateId: string;
   level: string;
@@ -943,6 +954,12 @@ const SAMPLE_WORKSPACE_SEED = {
       gate_status: 'passed',
     },
   ] as SampleReleasePackage[],
+  // FORGE-298 (gap G-I2): empty until "Generate test plan" is clicked --
+  // an honest empty-by-default matching the real system (this sample
+  // workspace's own requirement rows have no verification_method="test"
+  // requirement seeded, same as the real arm project before its own live
+  // validation added one).
+  testPlanEntries: [] as SampleTestPlanEntry[],
   // FORGE-289 (gap G-G3): decisions keyed by the node id they're related
   // to (a hierarchy node's own id, or a converged design loop's winning
   // iteration id) -- mirrors GET /v1/decisions?related_to=<node_id>'s own
@@ -1352,6 +1369,7 @@ function route(
     if (path === '/requirements/matrix') return s.requirementMatrix;
     if (path === '/requirements/coverage') return s.requirementCoverage;
     if (path === '/releases') return { releases: s.releasePackages };
+    if (path === '/testplans') return { entries: s.testPlanEntries };
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     if (path === '/bom') {
       const category = params.category ? String(params.category).toLowerCase() : null;
@@ -1919,6 +1937,21 @@ function route(
       };
       s.releasePackages.push(created);
       return created;
+    }
+    if (path === '/testplans') {
+      // FORGE-298: sample mode has no real Constraint objects with
+      // structured metric/operator/limit/unit/target_node_type to derive
+      // from -- one illustrative entry per click, same "every create
+      // succeeds" honesty as /releases above (no real gate to fail on).
+      const created: SampleTestPlanEntry = {
+        node_id: `sample-verification-case-${Date.now()}`,
+        requirement_id: 'sample-req-payload-capacity',
+        step: 'Measure payload_capacity_kg on robot_description; acceptance: payload_capacity_kg >= 2.0kg',
+        acceptance_value: '2.0kg',
+        created_at: new Date().toISOString(),
+      };
+      s.testPlanEntries.push(created);
+      return { project_id: s.project.id, entries: [created] };
     }
   }
   if (method === 'patch') {
