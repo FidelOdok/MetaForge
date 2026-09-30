@@ -272,6 +272,7 @@ async def bootstrap_tool_registry(
     hierarchy_rollup_fn: Any = None,
     hierarchy_geometry_linker: Any = None,
     metric_evaluator: Any = None,
+    thermal_evaluator: Any = None,
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
@@ -387,6 +388,13 @@ async def bootstrap_tool_registry(
             a real ``calculix.run_fea`` call when the estimate falls
             within its error band of a supplied limit. ``None`` skips
             registration (same pattern as ``document_recorder``).
+        thermal_evaluator: Optional async ``evaluate_thermal(...)``
+            (make_thermal_evidence_recorder, FORGE-297). When supplied,
+            registers ``twin.evaluate_thermal_metric`` -- runs a real
+            ``calculix.run_thermal`` call and records its output as
+            Evidence, single-tier (no hand-calc-gated escalation like
+            metric_evaluator). ``None`` skips registration (same pattern
+            as ``document_recorder``).
         revalidation_executor: Optional async ``execute(ect_id) -> dict``
             (make_revalidation_executor, FORGE-316). When supplied,
             registers ``twin.execute_revalidation_plan`` -- re-runs
@@ -627,6 +635,7 @@ async def bootstrap_tool_registry(
                     hierarchy_rollup_fn=hierarchy_rollup_fn,
                     hierarchy_geometry_linker=hierarchy_geometry_linker,
                     metric_evaluator=metric_evaluator,
+                    thermal_evaluator=thermal_evaluator,
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,
                     promotion_attempter=promotion_attempter,

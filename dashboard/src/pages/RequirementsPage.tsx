@@ -7,6 +7,7 @@ import { DecisionList } from '../components/shared/DecisionList';
 import { useToast } from '../components/ui/Toast';
 import { useActiveProject } from '../hooks/use-active-project';
 import {
+  useRequirementCoverage,
   useRequirementMatrix,
   useRequirementQuality,
   useProposeRequirementFix,
@@ -27,6 +28,7 @@ import {
 import type {
   EvidenceSummary,
   PassFail,
+  RequirementCoverage,
   RequirementMatrixRow,
   RequirementMatrixStatus,
   RequirementRecord,
@@ -537,6 +539,65 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// FORGE-297 (gap G-I1): coverage heatmap tiles for the 5 TraceabilityAgent
+// percentages. Color bands are advisory only -- no gate reads this
+// component; `attempt_promotion` (FORGE-290/319) is the real live gate and
+// consumes the evidence matrix above, not this coverage summary.
+const COVERAGE_TILES: { key: keyof RequirementCoverage; label: string }[] = [
+  { key: 'needs_to_requirements', label: 'Needs → Requirements' },
+  { key: 'requirements_to_architecture', label: 'Requirements → Architecture' },
+  { key: 'requirements_to_verification', label: 'Requirements → Verification' },
+  { key: 'verification_to_evidence', label: 'Verification → Evidence' },
+  { key: 'critical_requirements_to_evidence', label: 'Critical Reqs → Evidence' },
+];
+
+function coverageTileColor(value: number | null): string {
+  if (value === null) return 'var(--mf-r-65-72-90-0p3)';
+  if (value >= 80) return 'var(--mf-c-success, #4caf7d)';
+  if (value >= 50) return 'var(--mf-c-warning, #d4a843)';
+  return 'var(--mf-c-error, #d4595e)';
+}
+
+function CoverageHeatmapSection({ projectId }: { projectId?: string }) {
+  const { data: coverage, isLoading } = useRequirementCoverage(projectId);
+
+  if (!projectId || isLoading || !coverage) return null;
+
+  return (
+    <div className="mb-6" data-testid="requirements-coverage">
+      <h2 className="mb-2 text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+        Traceability coverage
+      </h2>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {COVERAGE_TILES.map((tile) => {
+          const value = coverage[tile.key];
+          return (
+            <div
+              key={tile.key}
+              data-testid={`coverage-tile-${tile.key}`}
+              className="rounded-lg p-3"
+              style={{
+                background: 'var(--mf-r-30-31-38-0p85)',
+                border: `1px solid ${coverageTileColor(value)}`,
+              }}
+            >
+              <div className="text-[10px] uppercase tracking-widest text-on-surface-variant">
+                {tile.label}
+              </div>
+              <div
+                className="mt-1 text-lg font-mono"
+                style={{ color: value === null ? 'var(--mf-c-on-surface-variant)' : coverageTileColor(value) }}
+              >
+                {value === null ? 'N/A' : `${value}%`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1635,6 +1696,8 @@ export function RequirementsPage() {
           ))}
         </select>
       </div>
+
+      <CoverageHeatmapSection projectId={activeProjectId ?? undefined} />
 
       <RequirementMatrixSection projectId={activeProjectId ?? undefined} />
 

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createConstraint,
+  getRequirementCoverage,
   getRequirementMatrix,
   getRequirementQuality,
   proposeRequirementFix,
@@ -13,6 +14,8 @@ export const requirementKeys = {
     [...requirementKeys.all, projectId, productType] as const,
   matrixAll: ['requirements', 'matrix'] as const,
   matrixProject: (projectId: string) => [...requirementKeys.matrixAll, projectId] as const,
+  coverageAll: ['requirements', 'coverage'] as const,
+  coverageProject: (projectId: string) => [...requirementKeys.coverageAll, projectId] as const,
 };
 
 export function useRequirementQuality(projectId?: string, productType = 'generic') {
@@ -28,6 +31,16 @@ export function useRequirementMatrix(projectId?: string) {
   return useQuery({
     queryKey: projectId ? requirementKeys.matrixProject(projectId) : requirementKeys.matrixAll,
     queryFn: () => getRequirementMatrix(projectId),
+    staleTime: 30_000,
+  });
+}
+
+/** FORGE-297 (gap G-I1): the 5 traceability coverage percentages, derived
+ * live from real Constraint/EngineeringEntity/edge state. */
+export function useRequirementCoverage(projectId?: string) {
+  return useQuery({
+    queryKey: projectId ? requirementKeys.coverageProject(projectId) : requirementKeys.coverageAll,
+    queryFn: () => getRequirementCoverage(projectId),
     staleTime: 30_000,
   });
 }

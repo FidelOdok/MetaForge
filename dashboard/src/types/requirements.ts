@@ -74,6 +74,20 @@ export interface RequirementMatrixReport {
   rows: RequirementMatrixRow[];
 }
 
+/** FORGE-297 (gap G-I1): the 5 traceability coverage percentages, computed
+ * live by TraceabilityAgent.coverage() (FORGE-56/73). `null` when the
+ * denominator is zero -- an empty set has no meaningful coverage ratio,
+ * not 0% or 100%. Field names are snake_case, matching the Python
+ * TraceabilityCoverage model's actual wire format (unlike
+ * RequirementMatrixRow above, this model isn't camelCase-aliased). */
+export interface RequirementCoverage {
+  needs_to_requirements: number | null;
+  requirements_to_architecture: number | null;
+  requirements_to_verification: number | null;
+  verification_to_evidence: number | null;
+  critical_requirements_to_evidence: number | null;
+}
+
 /** FORGE-259: the dashboard constraint editor's payload -- a structured
  * measured-key binding (metric/operator/limit/unit/target node), no
  * hand-typed Python expression. */

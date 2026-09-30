@@ -380,6 +380,24 @@ test.describe('Requirements', () => {
     });
   });
 
+  test('coverage heatmap shows the 5 traceability percentages (FORGE-297)', async ({ page }) => {
+    await page.goto('/requirements?demo=1');
+    const coverage = page.getByTestId('requirements-coverage');
+    await expect(coverage).toBeVisible();
+
+    await expect(coverage.getByTestId('coverage-tile-needs_to_requirements')).toContainText(
+      '100%',
+    );
+    await expect(
+      coverage.getByTestId('coverage-tile-critical_requirements_to_evidence'),
+    ).toContainText('50%');
+    // A genuinely empty denominator (no verification_case entities in the
+    // sample workspace) reports N/A, not 0% or 100%.
+    await expect(coverage.getByTestId('coverage-tile-verification_to_evidence')).toContainText(
+      'N/A',
+    );
+  });
+
   test('evidence matrix shows fail/pass/stale status with click-through evidence (FORGE-318)', async ({
     page,
   }) => {

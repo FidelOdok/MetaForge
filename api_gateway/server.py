@@ -819,6 +819,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_system_architecture_recorder,
         make_technical_drawing_recorder,
     )
+    from api_gateway.twin.thermal_evidence import make_thermal_evidence_recorder
     from api_gateway.twin.trade_study import make_trade_study_selector
 
     decision_recorder = make_decision_recorder(twin, project_backend)
@@ -836,6 +837,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-315: same lazy-bridge seam, for twin.evaluate_metric's tier-2
     # escalation (a real calculix.run_fea call).
     metric_evaluator_bridge = _LazyBridge()
+    # FORGE-297: same lazy-bridge seam, for twin.evaluate_thermal_metric's
+    # real calculix.run_thermal / calculix.cross_check_thermal_steady_state
+    # calls.
+    thermal_evaluator_bridge = _LazyBridge()
     evidence_recorder_fn = make_evidence_recorder(twin, project_backend)
     # FORGE-321: a real measurement history overrides evaluate_metric's
     # fixed-prior band once enough of it exists for a given metric/tier --
@@ -846,6 +851,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         evidence_recorder=evidence_recorder_fn,
         mcp_bridge=metric_evaluator_bridge,
         calibrated_band_lookup=calibrated_band_lookup_fn,
+    )
+    # FORGE-297: single-tier thermal analysis evaluator -- runs a real
+    # calculix.run_thermal call and records its output as Evidence, closing
+    # the gap where FORGE-282's thermal analysis had no path into the
+    # requirements matrix/coverage numbers.
+    thermal_evaluator_fn = make_thermal_evidence_recorder(
+        twin,
+        evidence_recorder=evidence_recorder_fn,
+        mcp_bridge=thermal_evaluator_bridge,
     )
     # FORGE-316: dispatch table for twin.execute_revalidation_plan --
     # every tool a stale Evidence's metadata["replay"]["tool_id"] can name.
@@ -1036,6 +1050,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # (spec §30, minimum sufficient fidelity). metric_evaluator_bridge
         # is bound to the real active_bridge below, once it exists.
         metric_evaluator=metric_evaluator_fn,
+        # FORGE-297: single-tier thermal analysis evaluator + evidence
+        # recorder. thermal_evaluator_bridge is bound to the real
+        # active_bridge below, once it exists.
+        thermal_evaluator=thermal_evaluator_fn,
         # FORGE-316: automatic selective re-run of exactly what a
         # committed ECT's real revalidation_plan marked stale.
         revalidation_executor=revalidation_executor_fn,
@@ -1091,6 +1109,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-315: same for metric_evaluator_bridge (twin.evaluate_metric's
     # tier-2 escalation to calculix.run_fea).
     metric_evaluator_bridge.bridge = active_bridge
+    # FORGE-297: same for thermal_evaluator_bridge (twin.
+    # evaluate_thermal_metric's calculix.run_thermal call).
+    thermal_evaluator_bridge.bridge = active_bridge
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,

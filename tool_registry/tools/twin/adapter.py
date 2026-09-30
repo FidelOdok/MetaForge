@@ -112,6 +112,7 @@ class TwinServer(McpToolServer):
         hierarchy_rollup_fn: Any = None,
         hierarchy_geometry_linker: Any = None,
         metric_evaluator: Any = None,
+        thermal_evaluator: Any = None,
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
@@ -277,6 +278,16 @@ class TwinServer(McpToolServer):
         # Same injection seam as every recorder above; None keeps
         # tool_registry free of twin_core.prediction imports.
         self._metric_evaluator = metric_evaluator
+        # FORGE-297: an injected async ``evaluate_thermal(...)``
+        # (make_thermal_evidence_recorder) -- runs a real calculix.
+        # run_thermal call (via a lazily-bound MCP bridge, same seam as
+        # metric_evaluator's tier-2) and records its real output as
+        # Evidence against a work product. Deliberately single-tier (no
+        # hand-calc-first escalation ladder like tip_deflection) -- see
+        # api_gateway/twin/thermal_evidence.py's module docstring. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of api_gateway imports.
+        self._thermal_evaluator = thermal_evaluator
         # FORGE-316: an injected async ``execute(ect_id) -> dict``
         # (make_revalidation_executor) -- re-runs exactly the Evidence a
         # committed ECT's real revalidation_plan marked stale, for any
@@ -390,6 +401,8 @@ class TwinServer(McpToolServer):
             self._register_realize_hierarchy_node()
         if metric_evaluator is not None:
             self._register_evaluate_metric()
+        if thermal_evaluator is not None:
+            self._register_evaluate_thermal_metric()
         if revalidation_executor is not None:
             self._register_execute_revalidation_plan()
         if sensitivity_ranker is not None:
@@ -4053,6 +4066,162 @@ class TwinServer(McpToolServer):
             band_fraction=float(band_fraction),
             escalation_k=float(escalation_k),
             tier2=tier2 if isinstance(tier2, dict) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.evaluate_thermal_metric (FORGE-297)
+    # ------------------------------------------------------------------
+
+    def _register_evaluate_thermal_metric(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.evaluate_thermal_metric",
+                adapter_id="twin",
+                name="Evaluate Thermal Metric",
+                description=(
+                    "Runs a real calculix.run_thermal steady-state conduction "
+                    "analysis and records its real peak-temperature result as "
+                    "Evidence pinned to a work product's current revision -- the "
+                    "same 'run a real tool, record its output as graph-checkable "
+                    "Evidence' pattern twin.evaluate_metric established for "
+                    "tip_deflection (FORGE-315), applied to thermal analysis "
+                    "(FORGE-297). Unlike evaluate_metric, this is single-tier: "
+                    "there is no cheap hand-calc gate before running the real "
+                    "solver -- every call invokes calculix.run_thermal directly. "
+                    "Pass 'cross_check' to also run calculix."
+                    "cross_check_thermal_steady_state against the same result."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id the analysis validates.",
+                        },
+                        "project_id": {"type": "string"},
+                        "mesh_file": {
+                            "type": "string",
+                            "description": "Mesh file path from freecad.generate_mesh.",
+                        },
+                        "material": {
+                            "type": "object",
+                            "description": (
+                                "{'name': <materials.py name>} or explicit "
+                                "{'thermal_conductivity_w_mk': ...} (SI W/(m*K))."
+                            ),
+                        },
+                        "heat_source_node_set": {
+                            "type": "string",
+                            "description": "Element set where power_dissipation_w is applied.",
+                        },
+                        "power_dissipation_w": {
+                            "type": "number",
+                            "description": (
+                                "TOTAL heat generation in Watts -- typically a BOM "
+                                "component's specifications.powerDissipationW."
+                            ),
+                        },
+                        "sink_node_set": {
+                            "type": "string",
+                            "description": "Element set held at a fixed sink_temp_c.",
+                        },
+                        "sink_temp_c": {
+                            "type": "number",
+                            "description": "Fixed temperature (Celsius) of sink_node_set.",
+                        },
+                        "rated_max_temp_c": {
+                            "type": "number",
+                            "description": (
+                                "The analyzed component's rated max operating "
+                                "temperature, Celsius -- if given, the result "
+                                "reports within_rating (peak <= rated_max_temp_c)."
+                            ),
+                        },
+                        "cross_check": {
+                            "type": "object",
+                            "description": (
+                                "Optional. Runs calculix.cross_check_thermal_"
+                                "steady_state against this same result -- needs "
+                                "'conduction_length_mm' and 'cross_section_area_"
+                                "mm2' (power_dissipation_w/sink_temp_c/"
+                                "fea_peak_temp_c are filled in automatically)."
+                            ),
+                            "properties": {
+                                "conduction_length_mm": {"type": "number"},
+                                "cross_section_area_mm2": {"type": "number"},
+                                "tolerance_pct": {"type": "number"},
+                            },
+                        },
+                    },
+                    "required": [
+                        "work_product_id",
+                        "mesh_file",
+                        "material",
+                        "heat_source_node_set",
+                        "power_dissipation_w",
+                        "sink_node_set",
+                        "sink_temp_c",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "result": {"type": "object"},
+                        "peak_temperature_c": {"type": ["number", "null"]},
+                        "rated_max_temp_c": {"type": "number"},
+                        "within_rating": {"type": "boolean"},
+                        "cross_check": {"type": "object"},
+                        "evidence_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=600),
+            ),
+            handler=self.evaluate_thermal_metric,
+        )
+
+    async def evaluate_thermal_metric(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.evaluate_thermal_metric: 'work_product_id' is required")
+        mesh_file = arguments.get("mesh_file")
+        if not mesh_file or not isinstance(mesh_file, str):
+            raise ValueError("twin.evaluate_thermal_metric: 'mesh_file' is required")
+        material = arguments.get("material")
+        if not isinstance(material, dict):
+            raise ValueError("twin.evaluate_thermal_metric: 'material' must be an object")
+        heat_source_node_set = arguments.get("heat_source_node_set")
+        power_dissipation_w = arguments.get("power_dissipation_w")
+        sink_node_set = arguments.get("sink_node_set")
+        sink_temp_c = arguments.get("sink_temp_c")
+        if not isinstance(heat_source_node_set, str) or not heat_source_node_set:
+            raise ValueError("twin.evaluate_thermal_metric: 'heat_source_node_set' is required")
+        if not isinstance(sink_node_set, str) or not sink_node_set:
+            raise ValueError("twin.evaluate_thermal_metric: 'sink_node_set' is required")
+        if not isinstance(power_dissipation_w, (int, float)) or not isinstance(
+            sink_temp_c, (int, float)
+        ):
+            raise ValueError(
+                "twin.evaluate_thermal_metric: 'power_dissipation_w' and 'sink_temp_c' "
+                "are required numbers"
+            )
+        project_id = arguments.get("project_id")
+        rated_max_temp_c = arguments.get("rated_max_temp_c")
+        cross_check = arguments.get("cross_check")
+        return await self._thermal_evaluator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+            mesh_file=mesh_file,
+            material=material,
+            heat_source_node_set=heat_source_node_set,
+            power_dissipation_w=float(power_dissipation_w),
+            sink_node_set=sink_node_set,
+            sink_temp_c=float(sink_temp_c),
+            rated_max_temp_c=(
+                float(rated_max_temp_c) if isinstance(rated_max_temp_c, (int, float)) else None
+            ),
+            cross_check=cross_check if isinstance(cross_check, dict) else None,
         )
 
     # ------------------------------------------------------------------
