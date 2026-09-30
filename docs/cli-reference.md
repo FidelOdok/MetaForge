@@ -175,6 +175,27 @@ Two consequences worth knowing:
 
 ## Commands
 
+### `tunnel` — expose a local gateway to a hosted harness
+
+```bash
+forge tunnel up --check-only   # pre-flight, change nothing
+forge tunnel up                # pre-flight, then run the tunnel
+```
+
+ChatGPT and claude.ai cannot reach `localhost`. This runs `cloudflared`
+or `ngrok` (whichever is installed — neither is bundled) and gives you the
+public URL to put in the harness.
+
+It refuses to open one over a gateway that is not fit to be public:
+nothing listening, something that is not a MetaForge gateway, or a
+gateway that accepts unauthenticated connections. A tunnel does not
+change what the server enforces; it changes who can reach it, and an open
+gateway that is fine on a laptop is an unauthenticated write endpoint on
+the internet.
+
+Writes from a tunnelled caller are held for approval — answer them in the
+dashboard, or from a client that supports MCP elicitation.
+
 ### `connect` — find the gateway to point at
 
 ```bash

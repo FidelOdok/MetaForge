@@ -11,6 +11,11 @@ from typing import Any
 
 import pytest
 
+# FORGE-387: these exercise tool dispatch, not the write gate. The
+# server used to default to Caller.LOCAL, which exempted their writes
+# by accident; the default is now conservative, so a local session is
+# declared explicitly -- the same thing the stdio transport does.
+from mcp_core.guardrails import Caller
 from metaforge.mcp.server import UnifiedMcpServer
 from tool_registry.mcp_server.handlers import ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
@@ -58,7 +63,7 @@ def _call(tool_id: str, arguments: dict[str, Any]) -> str:
 @pytest.mark.asyncio
 async def test_commit_by_reference_fills_step_from_prior_export() -> None:
     twin = _TwinStub()
-    server = UnifiedMcpServer(adapters=[_FreecadStub(), twin])
+    server = UnifiedMcpServer(adapters=[_FreecadStub(), twin], caller=Caller.LOCAL)
 
     # 1) export the assembly — the stash remembers its STEP by (session_id, obj_id)
     await server.handle_request(
@@ -83,7 +88,7 @@ async def test_commit_by_reference_fills_step_from_prior_export() -> None:
 @pytest.mark.asyncio
 async def test_commit_without_export_still_fails_cleanly() -> None:
     twin = _TwinStub()
-    server = UnifiedMcpServer(adapters=[_FreecadStub(), twin])
+    server = UnifiedMcpServer(adapters=[_FreecadStub(), twin], caller=Caller.LOCAL)
     resp = json.loads(
         await server.handle_request(
             _call("twin.commit_geometry", {"session_id": "s1", "obj_id": "never", "name": "x"})

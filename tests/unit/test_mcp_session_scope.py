@@ -171,6 +171,11 @@ def _app():
         def declare_auth_posture(self, posture) -> None:
             pass
 
+        # FORGE-387: the transport declares who is on the other end,
+        # so a stand-in for the server has to be able to hear it.
+        def declare_caller(self, caller) -> None:
+            pass
+
         async def handle_request(self, raw: str) -> str:
             message = json.loads(raw)
             return json.dumps({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})

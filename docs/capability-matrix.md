@@ -232,6 +232,14 @@ held.
 | Remote (OAuth identity) | runs | **held** |
 | Untrusted (tunnel, no identity) | runs | **held** |
 
+Until FORGE-387 those last two rows never happened. `caller` defaulted to
+`local` and **no transport ever set it**, so every HTTP caller was treated
+as the engineer at the keyboard and the local-write exemption waved their
+writes through. The default is now `untrusted` — a default that is the
+most permissive value is how a guardrail goes missing quietly — and each
+transport declares what it is: stdio `local`, HTTP `remote` when the login
+identifies the caller and `untrusted` otherwise.
+
 Held calls land in the same queue as chat approvals and appear on the
 dashboard's Approvals page, recorded with `caller` and `source: mcp` —
 the same write from a remote harness and from the dashboard are not the
@@ -257,6 +265,37 @@ outage, not a guardrail. A client that supports elicitation *is*
 somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
+
+### Reaching a local gateway from a hosted harness
+
+ChatGPT and claude.ai cannot reach `localhost`. `forge tunnel up` runs an
+off-the-shelf tunnel (`cloudflared` or `ngrok`, whichever is installed)
+and, first, checks the gateway is fit to be public:
+
+```
+$ forge tunnel up --check-only
+Refusing to open a tunnel:
+  - this gateway accepts unauthenticated connections. On your own machine
+    that is fine; through a tunnel it is an open endpoint on the internet.
+    Set METAFORGE_MCP_API_KEY (or configure OAuth) and restart it before
+    exposing it.
+```
+
+**The pre-flight is the reason this is a command rather than a line in a
+README telling people to run `cloudflared` themselves.** A tunnel does not
+change what the server enforces; it changes who can reach it, and the
+moment between "it worked locally" and "it is public" is exactly where
+nobody re-checks.
+
+It refuses four things: nothing listening, something that is not a
+MetaForge gateway (tunnelling it would publish a stranger's service), a
+gateway that accepts unauthenticated connections, and — implicitly — an
+un-installed tunnel binary, which it will not install for you. A binary
+that opens a public hostname is something you should have chosen to have.
+
+A passing check still warns that writes from a tunnelled caller are held
+for approval, so the first held write does not look like the tunnel
+breaking.
 
 ### Installing it
 

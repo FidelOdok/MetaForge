@@ -13,6 +13,11 @@ from typing import Any
 
 import pytest
 
+# FORGE-387: these exercise tool dispatch, not the write gate. The
+# server used to default to Caller.LOCAL, which exempted their writes
+# by accident; the default is now conservative, so a local session is
+# declared explicitly -- the same thing the stdio transport does.
+from mcp_core.guardrails import Caller
 from metaforge.mcp.server import UnifiedMcpServer
 from tool_registry.mcp_server.handlers import ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
@@ -60,7 +65,7 @@ class _BetaServer(McpToolServer):
 
 @pytest.fixture
 def server() -> UnifiedMcpServer:
-    return UnifiedMcpServer(adapters=[_AlphaServer(), _BetaServer()])
+    return UnifiedMcpServer(adapters=[_AlphaServer(), _BetaServer()], caller=Caller.LOCAL)
 
 
 def _request(method: str, params: dict[str, Any] | None = None, id_: str = "1") -> str:
@@ -277,9 +282,9 @@ class TestConstruction:
         # Build a second alpha-named server that re-registers alpha.add
         clone = _AlphaServer()
         with pytest.raises(ValueError, match="collision"):
-            UnifiedMcpServer(adapters=[a, clone])
+            UnifiedMcpServer(adapters=[a, clone], caller=Caller.LOCAL)
 
     def test_empty_adapter_list_is_legal(self) -> None:
-        server = UnifiedMcpServer(adapters=[])
+        server = UnifiedMcpServer(adapters=[], caller=Caller.LOCAL)
         assert server.tool_ids == []
         assert server.adapters == []
