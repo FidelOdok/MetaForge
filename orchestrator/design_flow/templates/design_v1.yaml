@@ -1,0 +1,144 @@
+# design_v1 flow template (FORGE-397).
+#
+# Generated from the Python definition this replaced, not retyped --
+# see orchestrator/design_flow/templates.py for why, and
+# tests/unit/test_flow_templates.py for the round-trip that proves it.
+#
+# `version` is recorded on every run started from this template. Bump it
+# when the phases or gates change, so a completed run can still say what
+# it actually ran.
+id: design_v1
+version: 1.0.0
+name: Design vertical (Requirements -> Design -> Simulation)
+phases:
+- id: intent
+  title: Intent
+  objective: >-
+    Establish WHY this product is being built, before any requirements. From the stated goal,
+    identify: the system's purpose, its primary stakeholder(s), the initial operating context,
+    the system boundary (what's in scope vs out of scope), and the desired outcome. Record
+    ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'),
+    scoped to the project.
+  expected_artifacts:
+  - intent
+  required_deliverables:
+  - intent
+  gate:
+    name: Intent sign-off
+    criteria:
+    - System purpose stated
+    - Primary stakeholder(s) identified
+    - System boundary (in/out of scope) defined
+    - Desired outcome stated
+- id: needs
+  title: Stakeholder Needs
+  objective: >-
+    Identify the stakeholder needs this product must satisfy, tracing back to the recorded
+    intent. For each stakeholder, capture their need in plain language -- avoid premature
+    implementation detail (that's what requirements are for, next phase). Record each with
+    the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's
+    title], relation='motivates'), scoped to the project.
+  expected_artifacts:
+  - stakeholder_need
+  required_deliverables:
+  - stakeholder_need
+  gate:
+    name: Needs sign-off
+    criteria:
+    - Stakeholder set identified
+    - Each stakeholder's need captured in plain language
+    - Needs trace to the recorded intent
+- id: requirements
+  title: Requirements
+  objective: >-
+    Establish the engineering requirements for the product from the stated goal. Capture functional
+    requirements, key constraints (mass, envelope, load, power, cost as applicable), and the
+    primary load/use cases. Record the requirements and the top design decisions into the
+    digital twin (use the record-decision tool), scoped to the project.
+  expected_artifacts:
+  - prd
+  - constraint_set
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Requirements sign-off
+    criteria:
+    - Functional requirements enumerated
+    - Key constraints quantified
+    - Primary load/use case defined
+    - Parent traceability exists (requirements trace to a need)
+- id: feasibility
+  title: Preliminary Feasibility
+  objective: >-
+    Sanity-check feasibility before committing to detailed design. Check the requirement's
+    mass, cost, and power/energy budgets against a first-order estimate; assess first-order
+    structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility;
+    confirm the key technologies involved are actually available; and identify the major risks
+    to the project, each with an owner and a mitigation. Record a feasibility summary as a
+    decision (record-decision tool), scoped to the project -- flag anything infeasible or
+    high-risk explicitly rather than silently proceeding.
+  expected_artifacts:
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Preliminary Feasibility Gate (G3)
+    criteria:
+    - Mass budget checked
+    - Cost budget checked
+    - Power/energy budget checked
+    - First-order structural feasibility assessed
+    - Actuator sizing assessed (where applicable)
+    - Thermal plausibility assessed
+    - Geometry feasibility assessed
+    - Key technologies confirmed available
+    - Major risks identified, each with an owner and mitigation
+    gate_id: G3
+- id: design
+  title: Detailed Design
+  objective: >-
+    Produce the detailed design that satisfies the approved requirements. Author the primary
+    geometry / schematic for the load-bearing or functionally-critical subsystem using the
+    available CAD/EDA tools, name every part meaningfully, and record the design rationale
+    (material, dimensions, safety factor target) into the twin. If sizing derives a specific
+    numeric spec, record it with `twin.record_constraint_set` and set `parent_refs` to the
+    requirement it implements.
+  expected_artifacts:
+  - cad_model
+  - schematic
+  - design_decision
+  required_deliverables:
+  - cad_model
+  disciplines:
+  - mechanical
+  gate:
+    name: Design review (G6)
+    criteria:
+    - Critical subsystem geometry/schematic authored
+    - Material + key dimensions chosen with rationale
+    - Design traces to a requirement
+    gate_id: G6
+- id: simulation
+  title: Simulation & V&V
+  objective: >-
+    Validate the design against its requirements. Run the appropriate analysis (FEA stress
+    for mechanical, ERC/DRC for electronics) on the critical subsystem, extract the key result
+    (max stress / safety factor / violation count), and record a pass/fail verdict against
+    the requirement into the twin.
+  expected_artifacts:
+  - simulation_result
+  - test_result
+  - design_decision
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - simulation
+  gate:
+    name: V&V sign-off (G7)
+    criteria:
+    - Analysis executed on the critical subsystem
+    - Key result extracted
+    - Verdict recorded against requirement
+    enforce_constraints: true
+    gate_id: G7

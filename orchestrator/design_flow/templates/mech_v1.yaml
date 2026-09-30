@@ -1,0 +1,142 @@
+# mech_v1 flow template (FORGE-397).
+#
+# Generated from the Python definition this replaced, not retyped --
+# see orchestrator/design_flow/templates.py for why, and
+# tests/unit/test_flow_templates.py for the round-trip that proves it.
+#
+# `version` is recorded on every run started from this template. Bump it
+# when the phases or gates change, so a completed run can still say what
+# it actually ran.
+id: mech_v1
+version: 1.0.0
+name: Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven
+phases:
+- id: intent
+  title: Intent
+  objective: >-
+    Establish WHY this product is being built, before any requirements. From the stated goal,
+    identify: the system's purpose, its primary stakeholder(s), the initial operating context,
+    the system boundary (what's in scope vs out of scope), and the desired outcome. Record
+    ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'),
+    scoped to the project.
+  expected_artifacts:
+  - intent
+  required_deliverables:
+  - intent
+  gate:
+    name: Intent sign-off
+    criteria:
+    - System purpose stated
+    - Primary stakeholder(s) identified
+    - System boundary (in/out of scope) defined
+    - Desired outcome stated
+- id: needs
+  title: Stakeholder Needs
+  objective: >-
+    Identify the stakeholder needs this product must satisfy, tracing back to the recorded
+    intent. For each stakeholder, capture their need in plain language -- avoid premature
+    implementation detail (that's what requirements are for, next phase). Record each with
+    the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's
+    title], relation='motivates'), scoped to the project.
+  expected_artifacts:
+  - stakeholder_need
+  required_deliverables:
+  - stakeholder_need
+  gate:
+    name: Needs sign-off
+    criteria:
+    - Stakeholder set identified
+    - Each stakeholder's need captured in plain language
+    - Needs trace to the recorded intent
+- id: requirements
+  title: Requirements
+  objective: >-
+    Establish the mechanical requirements from the goal. Quantify the load case (magnitude
+    and where it acts / moment arm), the material class, the safety-factor target, and the
+    mass/envelope budget. Record the requirements and load case as a design decision, scoped
+    to the project.
+  expected_artifacts:
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Requirements sign-off
+    criteria:
+    - Load case quantified (magnitude + location)
+    - Material class and safety-factor target stated
+    - Mass / envelope budget stated
+    - Parent traceability exists (requirements trace to a need)
+- id: feasibility
+  title: Preliminary Feasibility
+  objective: >-
+    Sanity-check feasibility before committing to detailed design. Check the requirement's
+    mass, cost, and power/energy budgets against a first-order estimate; assess first-order
+    structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility;
+    confirm the key technologies involved are actually available; and identify the major risks
+    to the project, each with an owner and a mitigation. Record a feasibility summary as a
+    decision (record-decision tool), scoped to the project -- flag anything infeasible or
+    high-risk explicitly rather than silently proceeding.
+  expected_artifacts:
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Preliminary Feasibility Gate (G3)
+    criteria:
+    - Mass budget checked
+    - Cost budget checked
+    - Power/energy budget checked
+    - First-order structural feasibility assessed
+    - Actuator sizing assessed (where applicable)
+    - Thermal plausibility assessed
+    - Geometry feasibility assessed
+    - Key technologies confirmed available
+    - Major risks identified, each with an owner and mitigation
+    gate_id: G3
+- id: design
+  title: Mechanical Design
+  objective: >-
+    Design the part THE GOAL DESCRIBES — not a generic or example part. Author its geometry
+    with the FreeCAD tools, sized to the requirements; name the part after what it actually
+    is; choose the material; then PERSIST it with the commit-geometry tool so it becomes a
+    viewable cad_model (a described-but-uncommitted model does NOT count). Record the design
+    rationale: the dimensions, the material, and how the section carries the load. If sizing
+    this part derives a specific numeric spec (e.g. a section dimension driven by the load
+    case), record it with `twin.record_constraint_set` and set `parent_refs` to the system
+    requirement it implements.
+  expected_artifacts:
+  - cad_model
+  - design_decision
+  required_deliverables:
+  - cad_model
+  disciplines:
+  - mechanical
+  gate:
+    name: Mechanical design review (G6)
+    criteria:
+    - The committed geometry is the part the goal asked for
+    - Sized to the requirements; material chosen with rationale
+    - Committed as a viewable cad_model
+    gate_id: G6
+- id: simulation
+  title: Simulation & V&V
+  objective: >-
+    Validate the part against its safety-factor requirement. Mesh the committed geometry and
+    run CalculiX FEA under the load case; extract the max stress and safety factor; record
+    a pass/fail verdict against the requirement. If FEA tooling is unavailable, say so explicitly
+    — do NOT present a hand-calc as FEA.
+  expected_artifacts:
+  - simulation_result
+  - design_decision
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - simulation
+  gate:
+    name: V&V sign-off (G7)
+    criteria:
+    - FEA executed on the committed geometry
+    - Max stress / safety factor extracted
+    - Pass/fail verdict recorded against the requirement
+    enforce_constraints: true
+    gate_id: G7

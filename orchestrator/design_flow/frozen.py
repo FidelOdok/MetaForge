@@ -66,7 +66,7 @@ class FrozenFlow:
 
     #: Template version this was tailored from. ``"builtin"`` until FORGE-397
     #: moves the built-in flows into versioned template files.
-    version: str = "builtin"
+    version: str = "unversioned"
 
     #: SHA-256 over the phase content. Set by :func:`freeze_flow`; recomputed
     #: and compared by :meth:`verify`, so a flow edited between approval and

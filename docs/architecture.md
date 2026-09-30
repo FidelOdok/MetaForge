@@ -107,6 +107,37 @@ Four things are worth knowing about the shape:
   `continue_as_new` with the new frozen flow. No phase is in flight there, so
   nothing half-done is orphaned.
 
+### Flow templates and invariants (FORGE-397)
+
+The built-in flows live in `orchestrator/design_flow/templates/*.yaml`, one
+file per flow, each carrying a `version`. They were 530 lines of Python
+literals in `spec.py`; that was fine while flows were fixed and stops being
+fine once a flow can be tailored, because a generated or edited flow is data
+and has to be diffable against the template it came from.
+
+Every run records the template id, its version and the content hash of the
+frozen flow, so *"which flow did this run use"* has an answer that survives
+the template being edited afterwards.
+
+**Invariants are server-enforced** (`invariants.py`), checked before a flow is
+approved and again when a run starts — not as a lint somebody can skip. A
+violation names the rule and the phase, and the validator reports all of them
+at once rather than the first:
+
+| Rule | Why it exists |
+| --- | --- |
+| `release-gate-exists` | otherwise a flow runs to completion with nobody approving the result |
+| `no-pass-without-data` | a gate with no required deliverables cannot tell an empty phase from a complete one, and neither can the human answering it |
+| `gates-enforce-what-they-require` | `enforce_deliverables: false` under a gate is a decorative gate — worse than none, because the approval then looks like evidence |
+| `deliverable-is-producible` | a gate requiring `simulation_result` before any simulation phase is not a strict flow, it is one that always fails — and it fails at the gate rather than where somebody could have seen it |
+| `requirements-are-verified` | a twin full of claims nothing checks reads, on every dashboard, exactly like a product that passed |
+| `unique-phase-ids` | readiness, activity history and the live view all key on the phase id |
+| `has-phases` | — |
+
+Auto-approved gates are exempt from the human-gate rules: they are
+checkpoints, not decisions, and holding them to rules about what a person can
+tell apart would force deliverables onto phases nobody reviews.
+
 **If Temporal is unreachable, starting a run fails with a 503 and no run
 record is created.** There is deliberately no fall-through to the in-process
 executor. That fallback would work, which is the problem: runs keep starting
