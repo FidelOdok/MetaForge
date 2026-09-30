@@ -93,12 +93,27 @@ async def test_a_genuine_zero_is_not_a_missing_value(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_an_unrollable_metric_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`power` is named in D2's own capability text and has no rollup
-    source: no graph node carries a power value the tree walk can read.
-    A blank here looks like data somebody could go and enter."""
-    [status] = await _run(monkeypatch, _budget("power", str(uuid.uuid4())))
+    """A metric nothing can compute. A blank here looks like data somebody
+    could go and enter."""
+    [status] = await _run(monkeypatch, _budget("vibration", str(uuid.uuid4())))
     assert status.actual is None
     assert status.reason == UNSUPPORTED_METRIC
+
+
+@pytest.mark.asyncio
+async def test_a_bare_power_metric_is_refused_as_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FORGE-390: `power` is two budgets checked against different limits.
+    Picking one is wrong in a way nothing later catches -- a thermal budget
+    checked against draw passes designs that overheat, and a supply budget
+    checked against dissipation passes designs that brown out."""
+    from twin_core.consistency.hierarchy_budget import AMBIGUOUS_METRIC
+
+    [status] = await _run(monkeypatch, _budget("power", str(uuid.uuid4())))
+    assert status.actual is None
+    assert status.reason == AMBIGUOUS_METRIC
+    assert "power_dissipation" in status.detail
 
 
 @pytest.mark.asyncio
@@ -155,4 +170,65 @@ def test_a_dropped_budget_metric_is_logged_not_silent() -> None:
     route = (
         Path(__file__).resolve().parents[2] / "api_gateway" / "twin" / "hierarchy_routes.py"
     ).read_text()
-    assert "hierarchy_budget_metric_not_rollable" in route
+    assert "hierarchy_budget_metric_not_rendered" in route
+    # FORGE-390: and it must not claim there is no rollup for a metric that
+    # now has one -- that would send someone looking for what is already
+    # there.
+    assert "has_rollup=rollable" in route or "has_rollup" in route
+
+
+# ---------------------------------------------------------------------------
+# Two power budgets, checked against different limits (FORGE-390)
+# ---------------------------------------------------------------------------
+
+
+class _PowerRollup:
+    def __init__(self, peak: float, average: float, dissipation: float) -> None:
+        self.mass_kg = 0.0
+        self.cost = 0.0
+        self.draw_peak_w = peak
+        self.draw_average_w = average
+        self.dissipation_w = dissipation
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metric", "expected"),
+    [
+        ("power_draw_peak", 12.0),
+        ("power_draw_average", 3.0),
+        ("power_dissipation", 0.9),
+    ],
+)
+async def test_each_power_budget_reads_its_own_number(
+    monkeypatch: pytest.MonkeyPatch, metric: str, expected: float
+) -> None:
+    """A motor-bearing branch: 12 W peak, 3 W average, 0.9 W of heat. Three
+    different answers, and a budget that took the wrong one would be
+    checking against a limit it was never written for."""
+    node = str(uuid.uuid4())
+    [status] = await _run(
+        monkeypatch,
+        _budget(metric, node, amount=100.0),
+        _PowerRollup(peak=12.0, average=3.0, dissipation=0.9),
+    )
+    assert status.actual == expected
+    assert status.reason == ""
+
+
+@pytest.mark.asyncio
+async def test_a_thermal_budget_is_not_judged_on_draw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The failure merging them causes. This branch draws 12 W and sheds
+    0.9 W; an enclosure rated for 1 W passes on dissipation and would fail
+    on draw. Getting that backwards either over-specifies the enclosure or
+    passes a design that overheats."""
+    node = str(uuid.uuid4())
+    rollup = _PowerRollup(peak=12.0, average=3.0, dissipation=0.9)
+
+    [thermal] = await _run(monkeypatch, _budget("power_dissipation", node, amount=1.0), rollup)
+    assert thermal.over_budget is False
+
+    [supply] = await _run(monkeypatch, _budget("power_draw_peak", node, amount=1.0), rollup)
+    assert supply.over_budget is True

@@ -515,13 +515,59 @@ they call for different actions: wait for a feature, fix a typo, repair a
 dangling reference. An engineer could not tell them apart, nor from a
 subsystem whose parts simply have no mass recorded yet.
 
-**Power is not checkable today**, and that is the honest state rather than
-a bug to work around: there is no canonical node-level power key, and the
-two keys that exist measure different things — `power_dissipation_w`
-(heat) and `power_mw` (draw, and not on graph nodes at all). Summing them
-would put a wrong number in a budget. Tracked as FORGE-390. The Structure
-tab still drops a budget it cannot roll up, but now logs that it did,
-because a missing row reads as "nobody set one".
+### Power is two budgets, not one
+
+Draw and dissipation are different quantities checked against different
+limits, and both roll up the hierarchy:
+
+| Budget metric | Rolls up | Checked against |
+|---|---|---|
+| `power_draw_peak` | `draw_peak_w` | supply or rail capacity — brown-outs, inrush |
+| `power_draw_average` | `draw_average_w` | battery capacity — runtime |
+| `power_dissipation` | `dissipation_w` | what the enclosure can shed |
+
+They are linked by one derived relationship:
+
+```
+dissipation = draw − output
+```
+
+For most electronics the useful output is near zero and the two nearly
+coincide, which is why merging them looks harmless. For a motor, an LED,
+a transmitter or a converter it is not — much of the draw leaves as work,
+light or RF. **Merging gets one budget wrong every time:** thermal
+overestimated, or supply underestimated.
+
+Per component, declare `draw_w` (or `draw_peak_w`/`draw_average_w`) and
+`output_w`, on a work product's metadata or a BOM item's specifications.
+`dissipation_w` is **derived, never read** — a stated dissipation that
+disagrees with `draw − output` is two sources of truth.
+
+A bare `draw_w` counts as both peak and average: a caller who gave one
+number has not distinguished them, and treating it as only one would
+understate the other budget.
+
+**An unknown `output_w` defaults dissipation to the full draw, and says
+so.** That is the right default and it is wrong for anything that does
+useful work, so it lands in `power_assumptions` rather than being applied
+silently — an unknown is an assumption, never data (F3).
+
+A budget whose metric is bare `power` is **refused as ambiguous**, not
+guessed:
+
+```json
+{"reason": "metric_is_ambiguous",
+ "detail": "'power' is two budgets: power_draw_peak / power_draw_average (against supply) and power_dissipation (against thermal capacity). Say which."}
+```
+
+Choosing on the caller's behalf is wrong in a way nothing later catches:
+a thermal budget checked against draw passes designs that overheat, and a
+supply budget checked against dissipation passes designs that brown out.
+
+The Structure tab renders mass and cost columns only, so a power budget
+still does not appear there — tracked separately. It is logged with
+`has_rollup: true` so nobody goes looking for a rollup that already
+exists.
 
 ### A requirement something can check
 
