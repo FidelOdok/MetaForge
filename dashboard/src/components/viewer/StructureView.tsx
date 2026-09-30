@@ -6,6 +6,7 @@ import { useHierarchyTree, useRealizeHierarchyNode } from '../../hooks/use-hiera
 import { useBom } from '../../hooks/use-bom';
 import { useOverhangCheck } from '../../hooks/use-dfm';
 import { useManufactureRelease } from '../../hooks/use-manufacture';
+import { useBringupChecklists, useCreateBringupChecklist } from '../../hooks/use-bringup';
 import type { ManufactureProcess } from '../../api/endpoints/manufacture';
 import { iconForHierarchyKind } from '../../utils/wp-icons';
 import { DecisionList } from '../shared/DecisionList';
@@ -465,6 +466,90 @@ function ManufactureReleasePanel({
   );
 }
 
+/** FORGE-295 (gap G-H3): "Bring-up checklist" -- derive a step-by-step
+ * assembly sequence from a hierarchy node's real committed
+ * metadata.assembly.joints via a topological sort, and list any
+ * previously-generated checklists. Renders a plain ordered table rather
+ * than a 3D exploded/cross-highlighted view -- neither exists as reusable
+ * infrastructure in this dashboard yet (see this component's own module
+ * comment on the Structure tab's deliberate trim), so that's deferred. */
+function BringupChecklistPanel({
+  node,
+  projectId,
+  onClose,
+}: {
+  node: HierarchyNode;
+  projectId: string | null;
+  onClose: () => void;
+}) {
+  const workProductId = node.realizedByWorkProductId ?? undefined;
+  const { data: checklists, isLoading } = useBringupChecklists(workProductId);
+  const create = useCreateBringupChecklist(workProductId, projectId ?? undefined);
+
+  const latest = checklists && checklists.length > 0 ? checklists[checklists.length - 1] : null;
+
+  return (
+    <div
+      data-testid="bringup-checklist-panel"
+      className="mt-2 rounded-lg p-3"
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-on-surface">Bring-up checklist: {node.name}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-on-surface-variant hover:text-on-surface"
+        >
+          Close
+        </button>
+      </div>
+
+      <Button
+        size="sm"
+        data-testid="run-bringup-checklist"
+        disabled={!workProductId || create.isPending}
+        onClick={() => create.mutate()}
+      >
+        {create.isPending ? 'Generating…' : 'Generate checklist'}
+      </Button>
+
+      {create.isError && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--mf-c-ff-b4-ab)' }}>
+          Could not generate a checklist -- the assembly's joint graph may be cyclic, or it may
+          have no assembly.joints metadata yet.
+        </p>
+      )}
+
+      {!isLoading && !create.data && latest && (
+        <div className="mt-3" data-testid="bringup-checklist-steps">
+          <p className="mb-2 text-xs text-on-surface-variant">{latest.statement}</p>
+          <ol className="flex flex-col gap-1">
+            {latest.steps.map((s) => (
+              <li key={s.stepNumber} className="text-xs text-on-surface">
+                {s.instruction}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {create.data && (
+        <div className="mt-3" data-testid="bringup-checklist-steps">
+          <p className="mb-2 text-xs text-on-surface-variant">{create.data.statement}</p>
+          <ol className="flex flex-col gap-1">
+            {create.data.steps.map((s) => (
+              <li key={s.stepNumber} className="text-xs text-on-surface">
+                {s.instruction}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TreeRow({
   node,
   depth,
@@ -478,6 +563,8 @@ function TreeRow({
   onToggleDfmCheck,
   releasingId,
   onToggleRelease,
+  bringupCheckingId,
+  onToggleBringupCheck,
 }: {
   node: TreeNode;
   depth: number;
@@ -491,6 +578,8 @@ function TreeRow({
   onToggleDfmCheck: (id: string) => void;
   releasingId: string | null;
   onToggleRelease: (id: string) => void;
+  bringupCheckingId: string | null;
+  onToggleBringupCheck: (id: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
@@ -499,6 +588,7 @@ function TreeRow({
   const isRealizing = realizingId === node.id;
   const isDfmChecking = dfmCheckingId === node.id;
   const isReleasing = releasingId === node.id;
+  const isBringupChecking = bringupCheckingId === node.id;
 
   return (
     <>
@@ -586,6 +676,17 @@ function TreeRow({
             Release for manufacture
           </button>
         )}
+        {node.realizedByWorkProductId && (
+          <button
+            type="button"
+            data-testid={`bringup-checklist-button-${node.id}`}
+            onClick={() => onToggleBringupCheck(node.id)}
+            className="rounded px-2 py-0.5 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            Bring-up checklist
+          </button>
+        )}
       </div>
       {isRealizing && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
@@ -600,6 +701,15 @@ function TreeRow({
       {isReleasing && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
           <ManufactureReleasePanel node={node} onClose={() => onToggleRelease(node.id)} />
+        </div>
+      )}
+      {isBringupChecking && (
+        <div style={{ paddingLeft: depth * 20 + 28 }}>
+          <BringupChecklistPanel
+            node={node}
+            projectId={projectId}
+            onClose={() => onToggleBringupCheck(node.id)}
+          />
         </div>
       )}
       {hasChildren && !isCollapsed && (
@@ -619,6 +729,8 @@ function TreeRow({
               onToggleDfmCheck={onToggleDfmCheck}
               releasingId={releasingId}
               onToggleRelease={onToggleRelease}
+              bringupCheckingId={bringupCheckingId}
+              onToggleBringupCheck={onToggleBringupCheck}
             />
           ))}
         </div>
@@ -651,6 +763,9 @@ export function StructureView({
   // FORGE-294 (gap G-H2): which node's "Release for manufacture" panel is
   // open, at most one at a time (independent of the others above).
   const [releasingId, setReleasingId] = useState<string | null>(null);
+  // FORGE-295 (gap G-H3): which node's "Bring-up checklist" panel is open,
+  // at most one at a time (independent of the others above).
+  const [bringupCheckingId, setBringupCheckingId] = useState<string | null>(null);
 
   const forest = useMemo(() => buildForest(nodes ?? []), [nodes]);
 
@@ -720,6 +835,8 @@ export function StructureView({
               onToggleDfmCheck={(id) => setDfmCheckingId((cur) => (cur === id ? null : id))}
               releasingId={releasingId}
               onToggleRelease={(id) => setReleasingId((cur) => (cur === id ? null : id))}
+              bringupCheckingId={bringupCheckingId}
+              onToggleBringupCheck={(id) => setBringupCheckingId((cur) => (cur === id ? null : id))}
             />
           ))}
         </div>

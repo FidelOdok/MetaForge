@@ -22,6 +22,7 @@ from api_gateway.auth import (
     load_auth_settings,
 )
 from api_gateway.bom.routes import router as bom_router
+from api_gateway.bringup.routes import router as bringup_router
 from api_gateway.cad.routes import router as cad_router
 from api_gateway.cad_export.routes import router as cad_export_router
 from api_gateway.chat.routes import router as chat_router
@@ -783,6 +784,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.baseline import make_baseline_creator
     from api_gateway.twin.blob_stager import make_blob_stager
+    from api_gateway.twin.bringup_checklist import (
+        make_bringup_checklist_creator,
+        make_bringup_checklist_lister,
+    )
     from api_gateway.twin.calibration import (
         make_calibrated_band_lookup,
         make_calibration_recorder,
@@ -988,6 +993,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     test_plan_lister_fn = make_test_plan_lister(twin)
 
+    # FORGE-295: derives a step-by-step assembly sequence from a work
+    # product's real metadata.assembly.joints (gap G-H3). Reuses the SAME
+    # engineering_entity_recorder_fn instance every other entity type goes
+    # through.
+    bringup_checklist_creator_fn = make_bringup_checklist_creator(
+        twin, engineering_entity_recorder=engineering_entity_recorder_fn
+    )
+    bringup_checklist_lister_fn = make_bringup_checklist_lister(twin)
+
     # FORGE-265: requirement-driven component selection -- hoisted to a
     # named variable (unlike every other component_recorder use, which is
     # constructed inline at the TwinServer(...) call site below) so this
@@ -1184,6 +1198,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # FORGE-298: mechanical test-plan derivation from test-method
         # requirements (gap G-I2).
         test_plan_generator=test_plan_generator_fn,
+        # FORGE-295: bring-up checklist derived from assembly joints (gap G-H3).
+        bringup_checklist_creator=bringup_checklist_creator_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -1246,6 +1262,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.testplans.routes import init_test_plan
 
     init_test_plan(test_plan_generator_fn, test_plan_lister_fn)
+    # FORGE-295: bind the bring-up checklist creator/lister to the
+    # dashboard's REST route (api_gateway/bringup/routes.py) -- same
+    # locality rationale as release_package/test_plan above.
+    from api_gateway.bringup.routes import init_bringup_checklist
+
+    init_bringup_checklist(bringup_checklist_creator_fn, bringup_checklist_lister_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -1892,6 +1914,7 @@ def create_app(
     app.include_router(manufacture_router)
     app.include_router(releases_router)
     app.include_router(testplans_router)
+    app.include_router(bringup_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

@@ -71,6 +71,14 @@ EngineeringEntityType = Literal[
     # (twin_core.consistency.gates) returning PASSED -- see
     # api_gateway/twin/release_package.py's module docstring.
     "release_package",
+    # FORGE-295 (gap G-H3): a step-by-step assembly sequence derived from a
+    # work product's real `metadata.assembly.joints` (FORGE-271/245) --
+    # metadata carries `work_product_id` and an ordered `steps` list (each
+    # `{step_number, joint_name, joint_type, base, follower, instruction}`),
+    # produced by topologically sorting the joints' base->follower
+    # dependency graph. One entity per checklist (not one per step) -- see
+    # api_gateway/twin/bringup_checklist.py's module docstring.
+    "bringup_checklist",
 ]
 
 

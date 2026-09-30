@@ -79,6 +79,26 @@ interface SampleTestPlanEntry {
   created_at: string;
 }
 
+// FORGE-295 (gap G-H3): illustrative shape of one generated bring-up
+// checklist, mirroring api_gateway/bringup/routes.py's own snake_case
+// response -- same convention SampleTestPlanEntry above uses.
+interface SampleBringupStep {
+  step_number: number;
+  joint_name: string;
+  joint_type: string;
+  base: string;
+  follower: string;
+  instruction: string;
+}
+
+interface SampleBringupChecklist {
+  node_id: string;
+  created_at: string;
+  title: string | null;
+  statement: string;
+  steps: SampleBringupStep[];
+}
+
 interface SampleMaturityGate {
   gateId: string;
   level: string;
@@ -960,6 +980,7 @@ const SAMPLE_WORKSPACE_SEED = {
   // requirement seeded, same as the real arm project before its own live
   // validation added one).
   testPlanEntries: [] as SampleTestPlanEntry[],
+  bringupChecklists: [] as SampleBringupChecklist[],
   // FORGE-289 (gap G-G3): decisions keyed by the node id they're related
   // to (a hierarchy node's own id, or a converged design loop's winning
   // iteration id) -- mirrors GET /v1/decisions?related_to=<node_id>'s own
@@ -1370,6 +1391,7 @@ function route(
     if (path === '/requirements/coverage') return s.requirementCoverage;
     if (path === '/releases') return { releases: s.releasePackages };
     if (path === '/testplans') return { entries: s.testPlanEntries };
+    if (path === '/bringup') return { entries: s.bringupChecklists };
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     if (path === '/bom') {
       const category = params.category ? String(params.category).toLowerCase() : null;
@@ -1952,6 +1974,55 @@ function route(
       };
       s.testPlanEntries.push(created);
       return { project_id: s.project.id, entries: [created] };
+    }
+    if (path === '/bringup') {
+      // FORGE-295: real topological-sort math (mirroring
+      // api_gateway/twin/bringup_checklist.py's own base->follower
+      // dependency sort) over a small illustrative two-joint chain --
+      // provided here in reverse dependency order to prove the sort
+      // actually runs rather than just echoing input order, same "real
+      // math over canned/illustrative input" honesty
+      // /dfm/overhang-check above uses.
+      type Joint = { name: string; type: string; base: string; follower: string };
+      const joints: Joint[] = [
+        { name: 'joint_2', type: 'revolute', base: 'upper_arm_link', follower: 'elbow_actuator' },
+        { name: 'joint_1', type: 'revolute', base: 'shoulder_mount', follower: 'upper_arm_link' },
+      ];
+      const bases = new Set(joints.map((j) => j.base));
+      const followers = new Set(joints.map((j) => j.follower));
+      const placed = new Set([...bases].filter((b) => !followers.has(b)));
+      const remaining = [...joints];
+      const ordered: (Joint & { step_number: number })[] = [];
+      let stepNo = 1;
+      while (remaining.length > 0) {
+        const buildable = remaining
+          .filter((j) => placed.has(j.base))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (buildable.length === 0) break; // cyclic -- won't happen for this illustrative chain
+        for (const j of buildable) {
+          ordered.push({ ...j, step_number: stepNo });
+          placed.add(j.follower);
+          stepNo += 1;
+          remaining.splice(remaining.indexOf(j), 1);
+        }
+      }
+      const steps: SampleBringupStep[] = ordered.map((j) => ({
+        step_number: j.step_number,
+        joint_name: j.name,
+        joint_type: j.type,
+        base: j.base,
+        follower: j.follower,
+        instruction: `Step ${j.step_number}: attach ${j.follower} to ${j.base} via ${j.name} (${j.type} joint)`,
+      }));
+      const created: SampleBringupChecklist = {
+        node_id: `sample-bringup-checklist-${Date.now()}`,
+        created_at: new Date().toISOString(),
+        title: 'Bring-up checklist: upper_arm',
+        statement: `Bring-up checklist: ${steps.length} step(s) derived from ${joints.length} assembly joint(s) on upper_arm`,
+        steps,
+      };
+      s.bringupChecklists.push(created);
+      return { node_id: created.node_id, statement: created.statement, steps: created.steps };
     }
   }
   if (method === 'patch') {

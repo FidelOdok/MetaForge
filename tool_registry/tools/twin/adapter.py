@@ -130,6 +130,7 @@ class TwinServer(McpToolServer):
         release_package_creator: Any = None,
         baseline_creator: Any = None,
         test_plan_generator: Any = None,
+        bringup_checklist_creator: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -390,6 +391,14 @@ class TwinServer(McpToolServer):
         # seam as every recorder above; None keeps tool_registry free of
         # api_gateway imports.
         self._test_plan_generator = test_plan_generator
+        # FORGE-295: an injected async ``create(*, work_product_id,
+        # project_id=None) -> dict`` (make_bringup_checklist_creator) --
+        # topologically sorts a work product's real
+        # metadata.assembly.joints (base->follower dependency) into a real
+        # step order and records one new bringup_checklist entity. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of api_gateway imports.
+        self._bringup_checklist_creator = bringup_checklist_creator
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -475,6 +484,8 @@ class TwinServer(McpToolServer):
             self._register_create_baseline()
         if test_plan_generator is not None:
             self._register_generate_test_plan()
+        if bringup_checklist_creator is not None:
+            self._register_create_bringup_checklist()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4570,6 +4581,72 @@ class TwinServer(McpToolServer):
         if not project_id or not isinstance(project_id, str):
             raise ValueError("twin.generate_test_plan: 'project_id' is required")
         return await self._test_plan_generator(project_id=project_id)
+
+    # ------------------------------------------------------------------
+    # twin.create_bringup_checklist (FORGE-295)
+    # ------------------------------------------------------------------
+
+    def _register_create_bringup_checklist(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.create_bringup_checklist",
+                adapter_id="twin",
+                name="Create Bring-up Checklist",
+                description=(
+                    "Derives a step-by-step assembly sequence from a work "
+                    "product's real metadata.assembly.joints (FORGE-271) by "
+                    "topologically sorting the base->follower dependency "
+                    "graph, then records one new bringup_checklist entity "
+                    "whose metadata carries the ordered steps (each "
+                    "'attach {follower} to {base} via {name} ({type} "
+                    "joint)'). Raises if the joint graph is cyclic rather "
+                    "than guessing at an order. Out of scope: any 3D "
+                    "visualization (exploded or cross-highlight -- neither "
+                    "exists as reusable infrastructure in this codebase); "
+                    "EVT/DVT/PVT staging distinctions; writing to the "
+                    "literal tests/bringup.md project-structure file."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "Work product carrying metadata.assembly.joints "
+                                "to derive a checklist from."
+                            ),
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Optional project to scope the recorded entity to.",
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "statement": {"type": "string"},
+                        "steps": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.create_bringup_checklist,
+        )
+
+    async def create_bringup_checklist(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.create_bringup_checklist: 'work_product_id' is required")
+        project_id = arguments.get("project_id")
+        return await self._bringup_checklist_creator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+        )
 
     # ------------------------------------------------------------------
     # twin.execute_revalidation_plan (FORGE-316)
