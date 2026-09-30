@@ -999,6 +999,30 @@ Dashboard: `StructureView.tsx`'s tree rows gained a "Replace placeholder"/"Repla
 
 ---
 
+### 2.25 Robot pose presets: drag-to-pose + saved poses (FORGE-250, gap G-J4)
+
+A `robot_description` work product's `metadata` gained one new optional field:
+
+```
+metadata.poses: {
+  [poseName: string]: { [jointName: string]: number }  // radians (revolute/continuous) or mm (prismatic)
+}
+```
+
+No new node type, no new MCP tool, and no new gateway route -- "Save current pose" reuses the existing generic `POST /v1/twin/nodes/{id}/iterate` revision endpoint (MET-251) exactly as-is: `metadata_updates={"poses": {...existing, <name>: <values>}}` merges one named pose into whatever's already saved (never dropping the others) and, because `/iterate` always appends a `WorkProductRevision`, the save shows up in the node's version history for free -- the same "persist + version" behavior `api_gateway/twin/routes.py`'s `update_assembly_joints` route already established for a different `robot_description` metadata field (`metadata.assembly`). `TwinNodeResponse.poses` (populated in `_wp_to_response` from `wp.metadata.get("poses")`) surfaces it back to the dashboard on every node fetch, `None` for every node type or a `robot_description` with no saved poses yet.
+
+The three other pieces of FORGE-250 are entirely client-side, reading/writing the existing `robotJointValues` slice on `viewer-store.ts` (unchanged since MET-747/FORGE-283) rather than any new server state:
+
+- **Drag-to-pose**: `dashboard/src/lib/robot-drag-controls.ts`'s `RobotPoseDragControls` subclasses `urdf-loader`'s own `PointerURDFDragControls` (raycast + joint-axis projection + URDF-limit clamping, all already implemented there) to report the resulting joint value back into the store and highlight the dragged link's meshes. Mounted by `RobotSceneContents.tsx` only while kinematic control is active (`!robotPhysicsEnabled` -- physics mode drives joints itself); an imperative `viewer-store` bridge (`setOrbitControlsEnabled`, same registration pattern as `_cameraResetFn`) suspends `<OrbitControls>` for the drag's duration so the camera doesn't orbit mid-manipulation.
+- **Built-in presets**: Zero, Home (the midpoint of each joint's exported range -- no separate canonical "home" pose exists anywhere in this codebase to read instead), Min, Max -- pure functions of the already-known joint list (`dashboard/src/lib/robot-poses.ts`), nothing to persist.
+- **Animated transitions**: a ~600ms ease-in-out interpolation (`runPoseAnimation`/`interpolatePose`/`easeInOutCubic`) driving the same `setRobotJointValue` calls a manual slider drag would, so a preset-selected pose animates in exactly like MET-747's existing kinematic-posing effect already expects.
+
+**Deliberately out of scope** (see FORGE-250's own ticket "Out of scope (separate stories)" line, and FORGE-303's follow-up comment): inverse kinematics (dragging the end-effector, solving every upstream joint to reach it) -- no IK solver exists anywhere in this codebase, only the forward "analytic live-solve kinematics" in `api_gateway/constraint/kinematics.py`; posing from a natural-language chat command; trajectory playback (animating through a *sequence* of poses over time) -- depends on FORGE-284's not-yet-built multibody-dynamics/trajectory work, itself flagged in Jira as "not in the Phase 3 stack" per MetaForge-Planner.
+
+*Source: `dashboard/src/lib/robot-poses.ts`, `dashboard/src/lib/robot-drag-controls.ts`, `dashboard/src/components/viewer/RobotSceneContents.tsx`, `dashboard/src/components/viewer/RobotControlsOverlay.tsx`, `dashboard/src/components/viewer/R3FViewer.tsx`, `dashboard/src/store/viewer-store.ts`, `dashboard/src/hooks/use-twin.ts`, `dashboard/src/api/endpoints/twin.ts`, `api_gateway/twin/schemas.py`, `api_gateway/twin/routes.py`*
+
+---
+
 ## 3. Edge Types
 
 Edges are directed relationships between nodes. Each edge type has defined source and target node types.

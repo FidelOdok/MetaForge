@@ -39,6 +39,12 @@ class TwinNodeResponse(BaseModel):
     # round trip and no live FreeCAD session required. None for every other
     # node type.
     assembly: dict[str, Any] | None = None
+    # FORGE-250: a robot_description node's saved named poses
+    # (metadata.poses -- {pose_name: {joint_name: value}}), written via the
+    # generic POST /nodes/{id}/iterate revision endpoint's metadata_updates.
+    # None for every other node type, or a robot_description with no saved
+    # poses yet.
+    poses: dict[str, dict[str, float]] | None = None
 
 
 class AssemblyJoint(BaseModel):

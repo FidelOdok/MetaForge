@@ -86,6 +86,26 @@ interface ViewerState {
   setRobotPhysicsEnabled: (enabled: boolean) => void;
   setRobotError: (message: string | null) => void;
 
+  /** FORGE-250: name of the joint currently hovered by drag-to-pose (an
+   * HTML sibling can't read the Canvas-child's raycast hit directly, same
+   * reason `_computeJointLoadChainFn` exists below), and whether a drag is
+   * actively in progress (used to disable preset buttons + sliders while
+   * dragging, matching "disabled in physics mode" for the same reason:
+   * two things fighting over robotJointValues at once). */
+  robotHoveredJoint: string | null;
+  robotDragging: boolean;
+  setRobotHoveredJoint: (jointName: string | null) => void;
+  setRobotDragging: (dragging: boolean) => void;
+
+  /** FORGE-250: imperative bridge so drag-to-pose can suspend/restore
+   * `<OrbitControls>` the instant a drag starts/ends -- a React-state round
+   * trip through `robotDragging` above would lose a frame (OrbitControls'
+   * own pointerdown listener fires in the same event before a re-render
+   * could flip its `enabled` prop), same rationale as `_cameraResetFn`. */
+  _orbitControlsEnabledSetterFn: ((enabled: boolean) => void) | null;
+  registerOrbitControlsEnabledSetter: (fn: ((enabled: boolean) => void) | null) => void;
+  setOrbitControlsEnabled: (enabled: boolean) => void;
+
   /** FORGE-283: same Canvas-child-registers/HTML-sibling-calls pattern as
    * `_cameraResetFn` above -- RobotSceneContents owns the live URDFRobot
    * object (never put directly in this store) and registers a closure that
@@ -161,6 +181,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       robotJoints: null,
       robotJointValues: {},
       robotPhysicsEnabled: false,
+      robotHoveredJoint: null,
+      robotDragging: false,
       robotError: null,
       viewMode: '3d',
       // Mutually exclusive with the GLB path — same Canvas, one at a time.
@@ -178,6 +200,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       robotJoints: null,
       robotJointValues: {},
       robotPhysicsEnabled: false,
+      robotHoveredJoint: null,
+      robotDragging: false,
       robotError: null,
     }),
 
@@ -193,6 +217,18 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setRobotPhysicsEnabled: (enabled) => set({ robotPhysicsEnabled: enabled }),
 
   setRobotError: (message) => set({ robotError: message }),
+
+  robotHoveredJoint: null,
+  robotDragging: false,
+  setRobotHoveredJoint: (jointName) => set({ robotHoveredJoint: jointName }),
+  setRobotDragging: (dragging) => set({ robotDragging: dragging }),
+
+  _orbitControlsEnabledSetterFn: null,
+  registerOrbitControlsEnabledSetter: (fn) => set({ _orbitControlsEnabledSetterFn: fn }),
+  setOrbitControlsEnabled: (enabled) => {
+    const fn = get()._orbitControlsEnabledSetterFn;
+    if (fn) fn(enabled);
+  },
 
   _computeJointLoadChainFn: null,
   registerJointLoadChainCompute: (fn) => set({ _computeJointLoadChainFn: fn }),
@@ -215,6 +251,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       robotJoints: null,
       robotJointValues: {},
       robotPhysicsEnabled: false,
+      robotHoveredJoint: null,
+      robotDragging: false,
       robotError: null,
     }),
 
@@ -272,6 +310,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       robotJoints: null,
       robotJointValues: {},
       robotPhysicsEnabled: false,
+      robotHoveredJoint: null,
+      robotDragging: false,
       robotError: null,
     }),
 

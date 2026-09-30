@@ -290,6 +290,51 @@ class TestVersionEndpoints:
         assert wp is not None
         assert wp.metadata["custom_field"] == "hello"
 
+    async def test_iterate_saves_a_robot_pose_readable_from_get_node(self, client, twin):
+        """FORGE-250: "Save current pose" reuses this generic /iterate
+        endpoint -- metadata_updates={"poses": {...}} merges into the
+        node's metadata and the new `poses` field on GET /nodes/{id}
+        (TwinNodeResponse.poses) surfaces it back to the dashboard."""
+        async with client:
+            wp_id = await self._import_step(client)
+
+            resp = await client.get(f"/v1/twin/nodes/{wp_id}")
+            assert resp.json()["poses"] is None
+
+            await client.post(
+                f"/v1/twin/nodes/{wp_id}/iterate",
+                json={
+                    "change_description": 'Saved pose "Home"',
+                    "metadata_updates": {"poses": {"Home": {"joint_1": 0.0, "joint_2": 2.0}}},
+                },
+            )
+            resp = await client.get(f"/v1/twin/nodes/{wp_id}")
+
+        assert resp.json()["poses"] == {"Home": {"joint_1": 0.0, "joint_2": 2.0}}
+
+    async def test_iterate_saving_a_second_pose_does_not_drop_the_first(self, client, twin):
+        async with client:
+            wp_id = await self._import_step(client)
+            await client.post(
+                f"/v1/twin/nodes/{wp_id}/iterate",
+                json={
+                    "change_description": 'Saved pose "Home"',
+                    "metadata_updates": {"poses": {"Home": {"joint_1": 0.0}}},
+                },
+            )
+            await client.post(
+                f"/v1/twin/nodes/{wp_id}/iterate",
+                json={
+                    "change_description": 'Saved pose "Extended"',
+                    "metadata_updates": {
+                        "poses": {"Home": {"joint_1": 0.0}, "Extended": {"joint_1": 1.0}}
+                    },
+                },
+            )
+            resp = await client.get(f"/v1/twin/nodes/{wp_id}")
+
+        assert resp.json()["poses"] == {"Home": {"joint_1": 0.0}, "Extended": {"joint_1": 1.0}}
+
     async def test_diff_between_revisions(self, client, twin):
         async with client:
             wp_id = await self._import_step(client)

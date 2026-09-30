@@ -147,6 +147,9 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         assembly=wp.metadata.get("assembly")
         if isinstance(wp.metadata.get("assembly"), dict)
         else None,
+        # FORGE-250: {pose_name: {joint_name: value}} -- None for every
+        # other node type, or a robot_description with no saved poses yet.
+        poses=wp.metadata.get("poses") if isinstance(wp.metadata.get("poses"), dict) else None,
     )
 
 

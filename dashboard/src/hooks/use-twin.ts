@@ -6,8 +6,10 @@ import {
   getNodeVersionHistory,
   approveSketch,
   updateAssemblyJoints,
+  iterateWorkProduct,
 } from '../api/endpoints/twin';
 import type { AssemblyDescription } from '../types/twin';
+import { upsertNamedPose, type PoseValues } from '../lib/robot-poses';
 
 export const twinKeys = {
   all: ['twin'] as const,
@@ -94,6 +96,37 @@ export function useApproveSketch() {
   return useMutation({
     mutationFn: ({ nodeId, approvedBy }: { nodeId: string; approvedBy?: string }) =>
       approveSketch(nodeId, approvedBy),
+    onSuccess: (_data, { nodeId }) => {
+      queryClient.invalidateQueries({ queryKey: twinKeys.node(nodeId) });
+      queryClient.invalidateQueries({ queryKey: [...twinKeys.all, nodeId, 'versions'] });
+      queryClient.invalidateQueries({ queryKey: twinKeys.all });
+    },
+  });
+}
+
+/** FORGE-250: "Save current pose" — merges one named pose into the
+ * robot_description node's existing `metadata.poses` (never overwriting
+ * other saved poses) via the generic iterate/revision endpoint, so the
+ * save survives a reload and shows up in the node's version history
+ * (acceptance criteria). Invalidates the same node + versions queries as
+ * `useApproveSketch` above, for the same reason. */
+export function useSaveRobotPose() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      nodeId,
+      existingPoses,
+      poseName,
+      values,
+    }: {
+      nodeId: string;
+      existingPoses: Record<string, PoseValues> | undefined;
+      poseName: string;
+      values: PoseValues;
+    }) =>
+      iterateWorkProduct(nodeId, `Saved pose "${poseName}"`, {
+        poses: upsertNamedPose(existingPoses, poseName, values),
+      }),
     onSuccess: (_data, { nodeId }) => {
       queryClient.invalidateQueries({ queryKey: twinKeys.node(nodeId) });
       queryClient.invalidateQueries({ queryKey: [...twinKeys.all, nodeId, 'versions'] });
