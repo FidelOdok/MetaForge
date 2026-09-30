@@ -88,7 +88,18 @@ class HealthChecker:
         self._checks: list[tuple[str, HealthCheckFn]] = []
 
     def register_check(self, name: str, check_fn: HealthCheckFn) -> None:
-        """Register an async health-check callable under *name*."""
+        """Register an async health-check callable under *name*.
+
+        Replaces an existing check of the same name rather than appending
+        a second one (FORGE-391). Appending looked harmless and was not:
+        ``create_app()`` registers ``postgres``, ``neo4j`` and the rest at
+        startup, so any process that builds the app twice probed each
+        dependency twice and **counted it twice in the aggregation**. One
+        unreachable database registered twice satisfies
+        ``unhealthy_count == len(components)``, which reports the whole
+        gateway ``unhealthy`` rather than ``degraded``.
+        """
+        self._checks = [(n, fn) for n, fn in self._checks if n != name]
         self._checks.append((name, check_fn))
 
     async def check_all(self) -> HealthResponse:
@@ -147,6 +158,22 @@ def set_health_checker(checker: HealthChecker) -> None:
     """Replace the module-level health checker (useful for tests)."""
     global _health_checker  # noqa: PLW0603
     _health_checker = checker
+
+
+def reset_health_checker() -> HealthChecker:
+    """Install a fresh checker and return it (FORGE-391).
+
+    Health checks belong to an application, not to the process: they are
+    registered while ``create_app`` wires up its backends, and they close
+    over that app's connections. Leaving the previous app's checks in
+    place meant a second app inherited probes for dependencies it never
+    configured -- which is how the gateway smoke tests came to report
+    ``degraded`` when run after the unit suite, and would equally affect
+    any host that builds the app more than once.
+    """
+    global _health_checker  # noqa: PLW0603
+    _health_checker = HealthChecker()
+    return _health_checker
 
 
 # The auth mode is resolved by ``create_app`` and published here rather than

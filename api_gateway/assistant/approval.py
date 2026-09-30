@@ -45,6 +45,20 @@ class ApprovalWorkflow:
     # Event broadcasting
     # ------------------------------------------------------------------
 
+    def reset(self) -> None:
+        """Drop every proposal and listener (FORGE-391).
+
+        The module keeps one ``ApprovalWorkflow`` for the process and
+        ``create_app`` reuses it, so a second app inherited the first
+        app's pending proposals -- which is how the gateway smoke test
+        came to see a proposal it never created when run after the unit
+        suite. Cleared in place rather than replaced: ``server.py`` binds
+        this instance by name at import, and rebinding the module global
+        would leave that reference pointing at the old object.
+        """
+        self._proposals.clear()
+        self._listeners.clear()
+
     def subscribe(self, session_id: UUID) -> asyncio.Queue[WebSocketEvent]:
         """Register a new listener for *session_id* and return its queue."""
         queue: asyncio.Queue[WebSocketEvent] = asyncio.Queue()

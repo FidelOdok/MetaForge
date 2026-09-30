@@ -34,7 +34,7 @@ from api_gateway.design_loop.routes import router as design_loop_router
 from api_gateway.evals.routes import router as evals_router
 from api_gateway.features.routes import router as features_router
 from api_gateway.harness import router as harness_router
-from api_gateway.health import health_router, set_reported_auth_mode
+from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
 from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
@@ -1628,6 +1628,17 @@ def create_app(
     scheduler:
         Optional pre-built scheduler (for testing).
     """
+    # FORGE-391: per-app state that used to live for the whole process.
+    # Health checks are registered as this app wires up its backends and
+    # close over its connections; the approval workflow holds pending
+    # proposals. Inheriting either from a previous app meant reporting on
+    # dependencies this one never configured, and listing proposals it
+    # never received.
+    reset_health_checker()
+    from api_gateway.assistant.routes import workflow as _approval_workflow
+
+    _approval_workflow.reset()
+
     app = FastAPI(
         title="MetaForge Gateway",
         version="0.1.0",
