@@ -1117,6 +1117,36 @@ class TwinServer(McpToolServer):
                         "mpn": {"type": "string"},
                         "category": {"type": "string"},
                         "project_linked": {"type": "boolean"},
+                        "requirement_margins": {
+                            "type": "array",
+                            "description": (
+                                "FORGE-346: each typed project requirement this part's "
+                                "specs could be held against, with signed headroom in "
+                                "the requirement's own unit. `unit_assumed` means the "
+                                "spec was a bare number read as that unit."
+                            ),
+                        },
+                        "unchecked_requirements": {
+                            "type": "array",
+                            "description": (
+                                "Requirements no margin could be computed for, each "
+                                "with a reason: no_matching_spec, spec_not_numeric, "
+                                "incompatible_units, requirement_not_bound. Reported "
+                                "rather than skipped -- 'no margin shown' and 'no "
+                                "requirement' otherwise look the same."
+                            ),
+                        },
+                        "violates": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Requirements this part does NOT meet. The selection is "
+                                "still recorded -- choosing the best available part and "
+                                "then revising the requirement is normal -- but the "
+                                "violation is named here rather than first surfacing at "
+                                "a gate with nothing linking it to this decision."
+                            ),
+                        },
                         "bom_work_product_id": {
                             "type": ["string", "null"],
                             "description": (
