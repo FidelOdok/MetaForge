@@ -865,6 +865,20 @@ const SAMPLE_WORKSPACE_SEED = {
       },
     ],
   },
+  // FORGE-297 (gap G-I1): illustrative traceability coverage -- mixed
+  // percentages (not all 100%, not all 0%) so the heatmap's color banding
+  // is visible in the sample workspace without a live gateway.
+  // verification_to_evidence is deliberately null: no verification_case
+  // entities exist in this sample workspace, so that ratio's denominator
+  // is genuinely zero (not 0%, matching TraceabilityCoverage's own
+  // "empty denominator" discipline).
+  requirementCoverage: {
+    needs_to_requirements: 100,
+    requirements_to_architecture: 66.7,
+    requirements_to_verification: 33.3,
+    verification_to_evidence: null,
+    critical_requirements_to_evidence: 50,
+  },
   // FORGE-287 (gap G-G1): started design loops live here, keyed by
   // loop_id -- empty until the dashboard's "Start design loop" action
   // creates one (see the POST /design-loop/start handler below).
@@ -1281,6 +1295,7 @@ function route(
     }
     if (path === '/requirements/quality') return s.requirementsReport;
     if (path === '/requirements/matrix') return s.requirementMatrix;
+    if (path === '/requirements/coverage') return s.requirementCoverage;
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     if (path === '/bom') return { components: s.bomComponents, total: s.bomComponents.length };
     if (/^\/design-loop\/[^/]+$/.test(path)) return s.designLoops[segment(path, 2)];

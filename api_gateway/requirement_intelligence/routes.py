@@ -36,6 +36,10 @@ from api_gateway.requirement_intelligence.set_quality import (
     RequirementSetQualityReport,
     build_requirement_set_quality_report,
 )
+from api_gateway.requirement_intelligence.traceability import (
+    TraceabilityAgent,
+    TraceabilityCoverage,
+)
 from api_gateway.twin.constraint_recorder import make_constraint_recorder
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI
@@ -85,6 +89,22 @@ async def get_requirement_matrix(project_id: str) -> RequirementMatrixResponse:
     with tracer.start_as_current_span("requirements.matrix"):
         rows = await build_requirement_matrix(_twin, pid)
         return RequirementMatrixResponse(rows=rows)
+
+
+@router.get("/coverage", response_model=TraceabilityCoverage)
+async def get_requirement_coverage(project_id: str) -> TraceabilityCoverage:
+    """FORGE-297 (gap G-I1): the 5 traceability coverage percentages
+    (needs->requirements, requirements->architecture, requirements->
+    verification, verification->evidence, critical_requirements->evidence),
+    computed live by ``TraceabilityAgent`` (FORGE-56/73) -- previously real,
+    tested code with no gateway route exposing it at all."""
+    try:
+        pid = UUID(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid project_id") from exc
+    with tracer.start_as_current_span("requirements.coverage"):
+        agent = TraceabilityAgent(_twin)
+        return await agent.coverage(str(pid))
 
 
 class FixRequirementResponse(BaseModel):

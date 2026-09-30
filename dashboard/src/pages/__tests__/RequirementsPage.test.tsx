@@ -6,6 +6,7 @@ const mockUseProposeRequirementFix = vi.fn();
 vi.mock('../../hooks/use-requirements', () => ({
   useRequirementQuality: vi.fn(),
   useRequirementMatrix: vi.fn(),
+  useRequirementCoverage: vi.fn(),
   useProposeRequirementFix: () => mockUseProposeRequirementFix(),
 }));
 
@@ -20,10 +21,15 @@ vi.mock('../../hooks/use-active-project', () => ({
 }));
 
 import { RequirementsPage } from '../RequirementsPage';
-import { useRequirementMatrix, useRequirementQuality } from '../../hooks/use-requirements';
+import {
+  useRequirementCoverage,
+  useRequirementMatrix,
+  useRequirementQuality,
+} from '../../hooks/use-requirements';
 
 const mockUseRequirementQuality = vi.mocked(useRequirementQuality);
 const mockUseRequirementMatrix = vi.mocked(useRequirementMatrix);
+const mockUseRequirementCoverage = vi.mocked(useRequirementCoverage);
 
 const REPORT = {
   requirements: [
@@ -111,6 +117,16 @@ describe('RequirementsPage', () => {
       data: { rows: [] },
       isLoading: false,
     } as unknown as ReturnType<typeof useRequirementMatrix>);
+    mockUseRequirementCoverage.mockReturnValue({
+      data: {
+        needs_to_requirements: null,
+        requirements_to_architecture: null,
+        requirements_to_verification: null,
+        verification_to_evidence: null,
+        critical_requirements_to_evidence: null,
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementCoverage>);
   });
 
   it('shows loading state', () => {
@@ -251,5 +267,46 @@ describe('RequirementsPage', () => {
     } as unknown as ReturnType<typeof useRequirementQuality>);
     render(<RequirementsPage />);
     expect(screen.queryByTestId('requirements-matrix')).not.toBeInTheDocument();
+  });
+
+  it('does not render the coverage heatmap without an active project', () => {
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    render(<RequirementsPage />);
+    expect(screen.queryByTestId('requirements-coverage')).not.toBeInTheDocument();
+  });
+
+  it('renders the coverage heatmap with real percentages for the active project', () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'proj-1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    mockUseRequirementCoverage.mockReturnValue({
+      data: {
+        needs_to_requirements: 100,
+        requirements_to_architecture: 40,
+        requirements_to_verification: 20,
+        verification_to_evidence: null,
+        critical_requirements_to_evidence: 0,
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementCoverage>);
+
+    render(<RequirementsPage />);
+
+    expect(screen.getByTestId('requirements-coverage')).toBeInTheDocument();
+    expect(screen.getByTestId('coverage-tile-needs_to_requirements')).toHaveTextContent('100%');
+    expect(screen.getByTestId('coverage-tile-critical_requirements_to_evidence')).toHaveTextContent(
+      '0%',
+    );
+    expect(screen.getByTestId('coverage-tile-verification_to_evidence')).toHaveTextContent('N/A');
   });
 });

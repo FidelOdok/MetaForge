@@ -175,6 +175,83 @@ class TestRequirementMatrixRoute:
         assert resp.status_code == 400
 
 
+class TestRequirementCoverageRoute:
+    """GET /v1/requirements/coverage (FORGE-297)."""
+
+    @pytest.fixture
+    def app(self):
+        from fastapi import FastAPI
+
+        from api_gateway.requirement_intelligence.routes import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return app
+
+    @pytest.fixture
+    def client(self, app):
+        from httpx import ASGITransport, AsyncClient
+
+        transport = ASGITransport(app=app)
+        return AsyncClient(transport=transport, base_url="http://test")
+
+    @pytest.fixture
+    def twin(self):
+        from api_gateway.requirement_intelligence.routes import _twin
+
+        _twin._graph._nodes.clear()
+        _twin._graph._outgoing.clear()
+        _twin._graph._incoming.clear()
+        return _twin
+
+    async def test_coverage_empty_project_returns_none_percentages(self, client, twin) -> None:
+        project_id = uuid4()
+        async with client:
+            resp = await client.get(
+                "/v1/requirements/coverage", params={"project_id": str(project_id)}
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        # An empty project has no requirements at all -- None (not 0%),
+        # same "empty denominator" discipline TraceabilityCoverage itself
+        # documents.
+        assert body["requirements_to_verification"] is None
+        assert body["critical_requirements_to_evidence"] is None
+
+    async def test_coverage_reflects_real_requirement_state(self, client, twin) -> None:
+        project_id = uuid4()
+        await twin.create_constraint(
+            Constraint(
+                name="mass_budget",
+                expression="True",
+                severity=ConstraintSeverity.ERROR,
+                domain="mechanical",
+                source="user",
+                project_id=project_id,
+                message="<= 4.5 kg",
+                metadata={"verification_method": "analysis"},
+            )
+        )
+        async with client:
+            resp = await client.get(
+                "/v1/requirements/coverage", params={"project_id": str(project_id)}
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        # One requirement, verification_method declared -> 100% covered.
+        assert body["requirements_to_verification"] == 100.0
+        # Critical (ERROR severity) with no evidence linked -> 0%, not None
+        # (denominator is 1, not 0).
+        assert body["critical_requirements_to_evidence"] == 0.0
+
+    async def test_invalid_project_id_400s(self, client, twin) -> None:
+        async with client:
+            resp = await client.get(
+                "/v1/requirements/coverage", params={"project_id": "not-a-uuid"}
+            )
+        assert resp.status_code == 400
+
+
 class TestCreateConstraintRoute:
     """POST /v1/requirements/constraints (FORGE-259)."""
 

@@ -2,6 +2,7 @@ import apiClient from '../client';
 import type {
   CreateConstraintPayload,
   CreateConstraintResult,
+  RequirementCoverage,
   RequirementFixProposal,
   RequirementMatrixReport,
   RequirementSetQualityReport,
@@ -14,6 +15,14 @@ const EMPTY_REPORT: RequirementSetQualityReport = {
 };
 
 const EMPTY_MATRIX: RequirementMatrixReport = { rows: [] };
+
+const EMPTY_COVERAGE: RequirementCoverage = {
+  needs_to_requirements: null,
+  requirements_to_architecture: null,
+  requirements_to_verification: null,
+  verification_to_evidence: null,
+  critical_requirements_to_evidence: null,
+};
 
 export async function getRequirementQuality(
   projectId?: string,
@@ -39,6 +48,20 @@ export async function getRequirementMatrix(projectId?: string): Promise<Requirem
     return data;
   } catch {
     return EMPTY_MATRIX;
+  }
+}
+
+export async function getRequirementCoverage(
+  projectId?: string,
+): Promise<RequirementCoverage> {
+  if (!projectId) return EMPTY_COVERAGE;
+  try {
+    const { data } = await apiClient.get<RequirementCoverage>('/requirements/coverage', {
+      params: { project_id: projectId },
+    });
+    return data;
+  } catch {
+    return EMPTY_COVERAGE;
   }
 }
 
