@@ -74,6 +74,32 @@ So Temporal is **runnable and registered**, owns the consolidation pass when
 you hand it over, and as of FORGE-401 is the execution path for design-flow
 runs.
 
+### Where a held write actually waits (FORGE-406)
+
+FORGE-359 built an approval gate. Nothing outside the test suite ever
+constructed one, so the MCP sidecar ran with `approval_gate=None` and **every
+write from a plugin was refused** with *"no approval gate is configured"*.
+The guardrail was present, correct, thoroughly tested and unreachable.
+
+Underneath that was a second problem it had been hiding: the approval store
+is a process-level `InMemoryRunStore` in the *gateway*. Even once wired, a
+call held inside the sidecar would sit in a queue the dashboard cannot see.
+
+So the sidecar parks held calls in the gateway's ledger over HTTP
+(`POST /v1/chat/tool_approvals`), and polls for the decision. There is
+exactly **one** ledger. A second store per process would have been the more
+obvious fix and the wrong one: two queues means a reviewer clearing one while
+the other fills, and no page that shows both.
+
+`METAFORGE_GATEWAY_URL` selects it. Unset, the sidecar falls back to its own
+in-process queue — correct when the MCP server runs *inside* the gateway,
+wrong in a sidecar — and **logs that choice on every start-up**, because the
+whole reason this went unnoticed is that the absence was only observable at
+the moment somebody tried to write.
+
+The approver comes back off the ledger entry (FORGE-393), so identity
+survives the process boundary without anything being asserted across it.
+
 ### Flows through the harness plugins (FORGE-400)
 
 Flows were dashboard-only: an agent in Claude Code or Codex could not see

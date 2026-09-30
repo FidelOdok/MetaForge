@@ -3096,6 +3096,40 @@
         "title": "GenerateFeatureRequest",
         "type": "object"
       },
+      "GenerateTestPlanRequest": {
+        "properties": {
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "GenerateTestPlanRequest",
+        "type": "object"
+      },
+      "GenerateTestPlanResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TestPlanEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "entries"
+        ],
+        "title": "GenerateTestPlanResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3446,6 +3480,62 @@
           "nodes"
         ],
         "title": "HierarchyTreeResponse",
+        "type": "object"
+      },
+      "HoldToolCallRequest": {
+        "description": "Park a tool call from another process in this ledger (FORGE-406).",
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "caller": {
+            "default": "untrusted",
+            "title": "Caller",
+            "type": "string"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "source": {
+            "default": "mcp",
+            "title": "Source",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "reason"
+        ],
+        "title": "HoldToolCallRequest",
         "type": "object"
       },
       "Hole": {
@@ -6283,6 +6373,22 @@
             ],
             "title": "Approval Reason"
           },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "approver_verified": {
+            "default": false,
+            "title": "Approver Verified",
+            "type": "boolean"
+          },
           "created_at": {
             "title": "Created At",
             "type": "number"
@@ -7867,6 +7973,83 @@
           "suggestion"
         ],
         "title": "SynthesizeResponse",
+        "type": "object"
+      },
+      "TestPlanEntry": {
+        "properties": {
+          "acceptance_value": {
+            "title": "Acceptance Value",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "requirement_id": {
+            "title": "Requirement Id",
+            "type": "string"
+          },
+          "step": {
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "requirement_id",
+          "step",
+          "acceptance_value"
+        ],
+        "title": "TestPlanEntry",
+        "type": "object"
+      },
+      "TestPlanListEntry": {
+        "properties": {
+          "acceptance_value": {
+            "title": "Acceptance Value",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "requirement_id": {
+            "title": "Requirement Id",
+            "type": "string"
+          },
+          "step": {
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "requirement_id",
+          "step",
+          "acceptance_value",
+          "created_at"
+        ],
+        "title": "TestPlanListEntry",
+        "type": "object"
+      },
+      "TestPlanListResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TestPlanListEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "TestPlanListResponse",
         "type": "object"
       },
       "ThreadListResponse": {
@@ -10504,6 +10687,46 @@
           }
         },
         "summary": "List Pending Approvals",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      },
+      "post": {
+        "description": "Create a held approval and return it.\n\nThis exists because the approval store is process-level (an\n``InMemoryRunStore`` in *this* process), and the MCP sidecar is a\ndifferent process. Before FORGE-406 a sidecar could only hold calls in\nits own memory, where the dashboard \u2014 served from here \u2014 would never see\nthem. So the sidecar parks them here instead, and there is exactly one\nledger rather than one per process.\n\nA second store would have been the more obvious fix and the wrong one:\ntwo queues means a reviewer clearing one while the other fills, and no\npage that shows both.",
+        "operationId": "hold_tool_call_v1_chat_tool_approvals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldToolCallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hold Tool Call",
         "tags": [
           "chat-tool-approvals"
         ]
@@ -14018,6 +14241,87 @@
         "summary": "List Simulation Results",
         "tags": [
           "simulation"
+        ]
+      }
+    },
+    "/v1/testplans": {
+      "get": {
+        "operationId": "list_test_plan_v1_testplans_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestPlanListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Test Plan",
+        "tags": [
+          "testplans"
+        ]
+      },
+      "post": {
+        "operationId": "generate_test_plan_v1_testplans_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateTestPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateTestPlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Test Plan",
+        "tags": [
+          "testplans"
         ]
       }
     },

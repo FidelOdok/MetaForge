@@ -15,8 +15,11 @@ just without a frontend wired to it yet.
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from api_gateway.auth.approver import approver_from_request
 from api_gateway.runs.schemas import ApprovalRequest, RunListResponse, RunResponse
@@ -119,6 +122,55 @@ def get_approval(run_id: str) -> RunResponse:
         return RunResponse.from_run(_approval_store.get(run_id))
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"approval '{run_id}' not found") from exc
+
+
+class HoldToolCallRequest(BaseModel):
+    """Park a tool call from another process in this ledger (FORGE-406)."""
+
+    tool: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    reason: str
+    caller: str = "untrusted"
+    source: str = "mcp"
+    session_id: str | None = None
+    project: str | None = None
+
+
+@router.post("", response_model=RunResponse, status_code=201)
+def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
+    """Create a held approval and return it.
+
+    This exists because the approval store is process-level (an
+    ``InMemoryRunStore`` in *this* process), and the MCP sidecar is a
+    different process. Before FORGE-406 a sidecar could only hold calls in
+    its own memory, where the dashboard — served from here — would never see
+    them. So the sidecar parks them here instead, and there is exactly one
+    ledger rather than one per process.
+
+    A second store would have been the more obvious fix and the wrong one:
+    two queues means a reviewer clearing one while the other fills, and no
+    page that shows both.
+    """
+    run = _approval_store.create(
+        {
+            "tool": body.tool,
+            "arguments": body.arguments,
+            "caller": body.caller,
+            "source": body.source,
+            "session_id": body.session_id,
+            "project": body.project,
+        }
+    )
+    _approval_store.start(run.id)
+    run = _approval_store.request_approval(run.id, reason=body.reason)
+    logger.info(
+        "tool_approval_held",
+        run_id=run.id,
+        tool=body.tool,
+        caller=body.caller,
+        source=body.source,
+    )
+    return RunResponse.from_run(run)
 
 
 @router.post("/{run_id}", response_model=RunResponse)
