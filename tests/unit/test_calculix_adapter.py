@@ -744,6 +744,47 @@ class TestExecuteThermalSolverParsesRealResults:
         assert result["min_temperature_c"] == pytest.approx(20.0)
         # FORGE-239: same frd_path surfacing as _execute_solver.
         assert result["frd_path"] == str(frd_path)
+        # Surface1/Surface2 are real, legitimately small end-caps here --
+        # no sanity-check warning.
+        assert "warnings" not in result
+
+    async def test_a_node_set_spanning_the_whole_part_warns(
+        self, server: CalculixServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-282 follow-up's core regression: a real live-validation run
+        picked a sink_node_set that turned out to be a full-length SIDE face
+        (not the intended small end-cap), collapsing the effective
+        conduction path and silently reporting a peak temperature far below
+        the real one -- no error, no warning, at the time. Volume1 (all 10
+        nodes, x spans the whole part) reproduces that same "picked the
+        wrong, too-large group" shape for both node-set arguments."""
+        mesh_path = tmp_path / "box.inp"
+        mesh_path.write_text(self._MESH_INP, encoding="utf-8")
+        frd_path = tmp_path / "box_solved.frd"
+        frd_path.write_text(REAL_CCX_THERMAL_FRD, encoding="utf-8")
+
+        async def _fake_solver_run_fea(**_kwargs: Any) -> dict[str, Any]:
+            return {"solver_time_s": 0.01, "result_files": [str(frd_path)]}
+
+        monkeypatch.setattr(
+            "tool_registry.tools.calculix.adapter.solver_run_fea", _fake_solver_run_fea
+        )
+
+        result = await server._execute_thermal_solver(
+            str(mesh_path),
+            {
+                "conductivity_w_mm_k": 0.235,
+                "heat_source_node_set": "Surface2",
+                "power_dissipation_w": 5.0,
+                "sink_node_set": "Volume1",
+                "sink_temp_c": 20.0,
+            },
+        )
+
+        assert "warnings" in result
+        assert len(result["warnings"]) == 1
+        assert result["warnings"][0].startswith("sink_node_set 'Volume1'")
+        assert "100%" in result["warnings"][0]
 
 
 class TestEmptyResultIsNeverReportedAsSuccess:
@@ -989,6 +1030,17 @@ class TestFixedNodeSetSpanWarning:
         assert warning is not None
         assert "Volume1" in warning
         assert "axis, x:" in warning
+
+    def test_role_parameter_labels_the_message_for_non_static_callers(self, tmp_path: Path) -> None:
+        """FORGE-282 follow-up: thermal's heat_source_node_set/sink_node_set
+        reuse this same check -- the message must name the actual argument
+        that was wrong, not always say "fixed_node_set"."""
+        from tool_registry.tools.calculix.adapter import _fixed_node_set_span_warning
+
+        mesh = self._mesh(tmp_path)
+        warning = _fixed_node_set_span_warning(mesh, "Volume1", role="sink_node_set")
+        assert warning is not None
+        assert warning.startswith("sink_node_set 'Volume1'")
 
     def test_an_unknown_elset_name_returns_none_not_an_exception(self, tmp_path: Path) -> None:
         """Let run_fea's own downstream error paths report an unknown

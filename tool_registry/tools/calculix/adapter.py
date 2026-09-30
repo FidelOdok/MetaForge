@@ -74,15 +74,30 @@ _MESH_FILE_DESCRIPTION = (
 _FIXED_SET_SPAN_WARNING_THRESHOLD = 0.5
 
 
-def _fixed_node_set_span_warning(mesh: MeshData, fixed_node_set: str) -> str | None:
+def _fixed_node_set_span_warning(
+    mesh: MeshData, fixed_node_set: str, *, role: str = "fixed_node_set"
+) -> str | None:
     """None if fixed_node_set's bbox looks like a real face; else a warning
-    naming how much of the part's longest axis it suspiciously spans."""
+    naming how much of the part's longest axis it suspiciously spans.
+
+    FORGE-282: ``role`` lets callers outside the static/modal path (e.g.
+    thermal's ``heat_source_node_set``/``sink_node_set``) reuse this same
+    check under their own node-set's real name in the message -- caught
+    live: a real thermal analysis picked a node set that turned out to be
+    a full-length SIDE face (not the intended small end-cap) as its
+    fixed-temperature sink, putting the "sink" immediately adjacent (in a
+    cross-axis direction) to the heat source along its entire length and
+    collapsing the effective conduction path from ~360mm to a few mm --
+    reporting a peak temperature 5.5C above ambient instead of the ~55C a
+    correct end-cap-to-end-cap path actually produces. No error, no
+    warning, just a confidently wrong (and much too comfortable) number.
+    """
     try:
         fixed_ids = mesh.node_ids_for_elset(fixed_node_set)
         fixed_bbox = mesh.bounding_box_for_nodes(fixed_ids)
         whole_bbox = mesh.bounding_box_for_nodes(list(mesh.nodes))
     except (KeyError, ValueError):
-        return None  # let run_fea's own error paths report the real problem
+        return None  # let the caller's own error paths report the real problem
 
     extents = {
         axis: whole_bbox[f"max_{axis}"] - whole_bbox[f"min_{axis}"] for axis in ("x", "y", "z")
@@ -95,11 +110,11 @@ def _fixed_node_set_span_warning(mesh: MeshData, fixed_node_set: str) -> str | N
     ratio = fixed_extent / whole_extent
     if ratio > _FIXED_SET_SPAN_WARNING_THRESHOLD:
         return (
-            f"fixed_node_set {fixed_node_set!r} spans {ratio:.0%} of the part's length "
+            f"{role} {fixed_node_set!r} spans {ratio:.0%} of the part's length "
             f"(its longest axis, {axis}: {fixed_extent:.3g}mm of {whole_extent:.3g}mm) -- "
             "this usually means the wrong face was picked (e.g. a whole side instead "
-            "of just one end), which silently over-constrains the model and "
-            "understates stress/deflection. Use freecad.generate_mesh's own 'faces' "
+            "of just one end), which silently misrepresents the boundary condition and "
+            "produces a confidently wrong result. Use freecad.generate_mesh's own 'faces' "
             "table (bbox/centroid per named face) to pick the intended one by its "
             "real coordinates before re-running."
         )
@@ -356,6 +371,18 @@ class CalculixServer(McpToolServer):
                         "min_temperature_c": {"type": "number"},
                         "solver_time": {"type": "number"},
                         "frd_path": {"type": "string"},
+                        "warnings": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Present only when heat_source_node_set or "
+                                "sink_node_set looks suspect (spans most of the "
+                                "part along one axis, usually the wrong face). "
+                                "The solve still completed -- but don't trust the "
+                                "reported temperature without addressing the "
+                                "warning first."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -1356,6 +1383,36 @@ class CalculixServer(McpToolServer):
 
             try:
                 mesh = parse_mesh_inp(mesh_file)
+                # FORGE-282 follow-up: same FORGE-239 wrong-face check
+                # run_fea's fixed_node_set already gets, applied to BOTH
+                # thermal node sets -- checked BEFORE solving, since this is
+                # about the boundary-condition choice itself, not the
+                # result. See _fixed_node_set_span_warning's own docstring
+                # for the real live-validation miss this closes.
+                span_warnings = [
+                    warning
+                    for warning in (
+                        _fixed_node_set_span_warning(
+                            mesh,
+                            deck_spec["heat_source_node_set"],
+                            role="heat_source_node_set",
+                        ),
+                        _fixed_node_set_span_warning(
+                            mesh, deck_spec["sink_node_set"], role="sink_node_set"
+                        ),
+                    )
+                    if warning is not None
+                ]
+                if span_warnings:
+                    span.set_attribute("calculix.node_set_warnings", span_warnings)
+                    logger.warning(
+                        "run_thermal_node_set_span_suspect",
+                        mesh_file=mesh_file,
+                        heat_source_node_set=deck_spec["heat_source_node_set"],
+                        sink_node_set=deck_spec["sink_node_set"],
+                        warnings=span_warnings,
+                    )
+
                 deck_text = build_thermal_deck(mesh, **deck_spec)
                 solved_path = Path(mesh_file).with_name(f"{Path(mesh_file).stem}_solved.inp")
                 solved_path.write_text(deck_text, encoding="utf-8")
@@ -1389,13 +1446,16 @@ class CalculixServer(McpToolServer):
                         "has no NDTEMP (temperature) block -- the thermal deck's *NODE "
                         "FILE request must be missing NT."
                     )
-                return {
+                result: dict[str, Any] = {
                     "max_temperature_c": temperature.get("max", 0.0),
                     "min_temperature_c": temperature.get("min", 0.0),
                     "solver_time": solver_result["solver_time_s"],
                     "result_files": solver_result["result_files"],
                     "frd_path": frd_path,
                 }
+                if span_warnings:
+                    result["warnings"] = span_warnings
+                return result
 
             except Exception as exc:
                 span.record_exception(exc)
