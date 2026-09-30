@@ -144,6 +144,11 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-288: same family as twin.start_design_loop -- a second real
         # parameter (height_mm) over the same append-only persistence.
         "twin.start_tube_height_design_loop",
+        # FORGE-262: records a Decision (a twin.record_decision call,
+        # already ADDITIVE above) plus one GENERATED_FROM edge to the
+        # selected concept_option -- pure append, nothing existing is
+        # overwritten or removed.
+        "twin.select_concept",
     }
 )
 

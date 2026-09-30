@@ -42,6 +42,7 @@ from api_gateway.requirement_intelligence.routes import router as requirements_r
 from api_gateway.runs.routes import router as runs_router
 from api_gateway.sessions.routes import router as sessions_router
 from api_gateway.simulation.routes import router as simulation_router
+from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
 from api_gateway.twin.routes import router as twin_router
@@ -814,6 +815,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_system_architecture_recorder,
         make_technical_drawing_recorder,
     )
+    from api_gateway.twin.trade_study import make_trade_study_selector
 
     decision_recorder = make_decision_recorder(twin, project_backend)
     git_registry = GitRepoRegistry.from_env(twin.graph)
@@ -874,6 +876,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         parameter_name="height_mm",
         candidate_mapper=tube_height_candidate_mapper,
     )
+    # FORGE-262: trade-study selection over recorded concept_option
+    # entities -- reuses decision_recorder unchanged (no new "Decision-like"
+    # node type), same precedent as parameter_optimizer_fn above. Also
+    # reuses the SAME engineering_entity_recorder_fn instance
+    # bootstrap_tool_registry wires up below, so a concept_option created
+    # via the dashboard's REST route and via an agent's own MCP call are
+    # indistinguishable afterward.
+    engineering_entity_recorder_fn = make_engineering_entity_recorder(twin, project_backend)
+    concept_selector_fn = make_trade_study_selector(twin, decision_recorder=decision_recorder)
 
     # FORGE-319: attempt_promotion is a plain function (twin, ...) -- bind
     # twin once here, same injected-callable shape as every make_X(twin,
@@ -931,7 +942,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # entities (intent/need/objective/assumption/question/risk/
         # verification_case/evidence) -- the "why" a requirement exists,
         # recorded before/alongside the quantified requirements themselves.
-        engineering_entity_recorder=make_engineering_entity_recorder(twin, project_backend),
+        engineering_entity_recorder=engineering_entity_recorder_fn,
         # FORGE-73 (waiver/release model): a real approval step distinct from
         # creation, so a waiver/release_approval only counts once actually
         # approved, never just because it was recorded.
@@ -1023,6 +1034,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         design_loop_approver=design_loop_approver_fn,
         # FORGE-288: a second real parameter (height_mm) over the same loop.
         tube_height_design_loop_starter=tube_height_design_loop_starter_fn,
+        # FORGE-262: concept generation + trade study (gap G-B2).
+        concept_selector=concept_selector_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -1077,6 +1090,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.promotion.routes import init_twin as init_promotion_twin
     from api_gateway.requirement_intelligence.routes import init_twin as init_requirements_twin
     from api_gateway.simulation.routes import init_twin as init_simulation_twin
+    from api_gateway.trade_study.routes import init_concept_selector
+    from api_gateway.trade_study.routes import init_entity_recorder as init_ts_entity_recorder
+    from api_gateway.trade_study.routes import init_twin as init_trade_study_twin
     from api_gateway.twin.decision_routes import init_twin as init_decisions_twin
     from api_gateway.twin.hierarchy_routes import init_twin as init_hierarchy_twin
     from api_gateway.twin.routes import init_design_sketch_approver
@@ -1175,6 +1191,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_promotion_twin(twin)
     init_features_twin(twin)
     init_decisions_twin(twin)
+    init_trade_study_twin(twin)
+    # FORGE-262: the dashboard's "Select concept"/"+ add option" actions
+    # reuse the SAME bound callables wired into bootstrap_tool_registry
+    # above, so recording isn't duplicated between the MCP tools and the
+    # REST routes.
+    init_concept_selector(concept_selector_fn)
+    init_ts_entity_recorder(engineering_entity_recorder_fn)
     # FORGE-287: the dashboard's "start closed design loop" action reuses
     # the SAME bound optimizer callable wired into bootstrap_tool_registry
     # above (design_loop_starter_fn), so Evidence/Decision recording isn't
@@ -1657,6 +1680,7 @@ def create_app(
     app.include_router(promotion_router)
     app.include_router(features_router)
     app.include_router(decisions_router)
+    app.include_router(trade_study_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

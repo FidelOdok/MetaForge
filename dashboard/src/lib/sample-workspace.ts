@@ -65,6 +65,15 @@ interface SampleDecision {
   created_at: string | null;
 }
 
+// FORGE-262 (gap G-B2): illustrative concept_option shape -- mirrors
+// GET /v1/trade-study/options's own pass-through (snake_case).
+interface SampleConceptOption {
+  id: string;
+  title: string;
+  criteria_scores: Record<string, number>;
+  evidence_backed_criteria: string[];
+}
+
 // Generated from the hosted console sample workspace (illustrative Drone FC data).
 const SAMPLE_WORKSPACE_SEED = {
   nodes: [
@@ -928,6 +937,24 @@ const SAMPLE_WORKSPACE_SEED = {
       { run: '20260928-020000', suite: 'runs_v1', scenarios: 6, completed_rate: 0.83 },
     ],
   },
+  // FORGE-262 (gap G-B2): two candidate upper-arm architectures -- only
+  // mass_kg is evidence-backed (from a real committed CAD work product);
+  // cost/risk/performance are always asserted, matching the real route's
+  // own honesty discipline.
+  conceptOptions: [
+    {
+      id: 'sample-concept-solid-bar',
+      title: 'Solid bar',
+      criteria_scores: { mass_kg: 3.2, cost_usd: 40, risk: 2, performance: 6 },
+      evidence_backed_criteria: [],
+    },
+    {
+      id: 'sample-concept-hollow-tube',
+      title: 'Hollow tube',
+      criteria_scores: { mass_kg: 1.6, cost_usd: 55, risk: 3, performance: 8 },
+      evidence_backed_criteria: ['mass_kg'],
+    },
+  ] as SampleConceptOption[],
   // FORGE-313: a small product hierarchy for the Structure tab -- mirrors
   // the ticket's own acceptance example (an "upper_arm"/"shoulder"
   // interface with a tip_deflection quantity, a mass allocation with an
@@ -1188,6 +1215,7 @@ function route(
       return { related_to: relatedTo, decisions: s.decisions[relatedTo] ?? [] };
     }
     if (path === '/evals') return s.evals;
+    if (path === '/trade-study/options') return { options: s.conceptOptions };
     return undefined;
   }
   if (method === 'post') {
@@ -1338,6 +1366,50 @@ function route(
         max_iterations: (body.maxIterations as number) ?? 60,
         duplicate: false,
       };
+    }
+    if (path === '/trade-study/options') {
+      const optionId = `sample-concept-${Date.now()}`;
+      const option: SampleConceptOption = {
+        id: optionId,
+        title: (body.title as string) ?? 'Untitled option',
+        criteria_scores: (body.criteriaScores as Record<string, number>) ?? {},
+        evidence_backed_criteria: (body.evidenceBackedCriteria as string[]) ?? [],
+      };
+      s.conceptOptions.push(option);
+      return { node_id: optionId, entity_type: 'concept_option', project_linked: true };
+    }
+    if (path === '/trade-study/select') {
+      const optionIds = (body.optionIds as string[]) ?? [];
+      const selectedOptionId = body.selectedOptionId as string;
+      const weights = (body.weights as Record<string, number>) ?? {};
+      const options = s.conceptOptions.filter((o) => optionIds.includes(o.id));
+      const scored = options
+        .map((o) => ({
+          ...o,
+          weighted_score: Object.entries(weights).reduce(
+            (sum, [k, w]) => sum + w * (o.criteria_scores[k] ?? 0),
+            0,
+          ),
+        }))
+        .sort((a, b) => b.weighted_score - a.weighted_score);
+      const selected = scored.find((o) => o.id === selectedOptionId);
+      const rejected = scored.filter((o) => o.id !== selectedOptionId);
+      const decisionId = `sample-decision-concept-${Date.now()}`;
+      s.decisions[selectedOptionId] = [
+        {
+          id: decisionId,
+          title: (body.title as string) ?? 'Concept selection',
+          rationale: (body.rationale as string) ?? '',
+          alternatives: rejected.map((o) => ({
+            option: o.title,
+            reason_rejected: `weighted score ${o.weighted_score.toFixed(3)} vs selected ${(selected?.weighted_score ?? 0).toFixed(3)}`,
+          })),
+          parent_refs: [],
+          evidence_refs: [],
+          created_at: now,
+        },
+      ];
+      return { node_id: decisionId, selected_option_id: selectedOptionId, scores: scored };
     }
     if (path === '/promotion/attempt') {
       // FORGE-290: illustrative evidence-gated approval -- looks each
