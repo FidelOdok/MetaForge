@@ -111,6 +111,60 @@ class TestRoute:
             await list_bom(project_id="not-a-uuid")
         assert exc.value.status_code == 400
 
+    async def test_category_filter_returns_only_matching_rows(self) -> None:
+        """FORGE-294 (gap G-H2): a fastener list is `category=fastener`
+        over the same BOM data -- no new schema, just a filter param."""
+        twin = InMemoryTwinAPI.create()
+        await twin._graph.add_node(
+            BOMItem(part_number="M3x10", manufacturer="m", specifications={"category": "fastener"})
+        )
+        await twin._graph.add_node(
+            BOMItem(part_number="STM32", manufacturer="m", specifications={"category": "ic"})
+        )
+        init_twin(twin)
+
+        result = await list_bom(category="fastener")
+
+        assert result.total == 1
+        assert result.components[0].partNumber == "M3x10"
+
+    async def test_category_filter_is_case_insensitive(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        await twin._graph.add_node(
+            BOMItem(part_number="M3x10", manufacturer="m", specifications={"category": "Fastener"})
+        )
+        init_twin(twin)
+
+        result = await list_bom(category="FASTENER")
+
+        assert result.total == 1
+
+    async def test_category_filter_with_no_matches_returns_empty(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        await twin._graph.add_node(
+            BOMItem(part_number="STM32", manufacturer="m", specifications={"category": "ic"})
+        )
+        init_twin(twin)
+
+        result = await list_bom(category="fastener")
+
+        assert result.total == 0
+        assert result.components == []
+
+    async def test_no_category_filter_returns_all(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        await twin._graph.add_node(
+            BOMItem(part_number="M3x10", manufacturer="m", specifications={"category": "fastener"})
+        )
+        await twin._graph.add_node(
+            BOMItem(part_number="STM32", manufacturer="m", specifications={"category": "ic"})
+        )
+        init_twin(twin)
+
+        result = await list_bom()
+
+        assert result.total == 2
+
 
 class _FakeTwinWithABareNodeBase:
     """FORGE-242: InMemoryTwinAPI stores objects by reference (no

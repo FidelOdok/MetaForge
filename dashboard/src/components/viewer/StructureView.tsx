@@ -5,6 +5,8 @@ import { Boxes } from 'lucide-react';
 import { useHierarchyTree, useRealizeHierarchyNode } from '../../hooks/use-hierarchy';
 import { useBom } from '../../hooks/use-bom';
 import { useOverhangCheck } from '../../hooks/use-dfm';
+import { useManufactureRelease } from '../../hooks/use-manufacture';
+import type { ManufactureProcess } from '../../api/endpoints/manufacture';
 import { iconForHierarchyKind } from '../../utils/wp-icons';
 import { DecisionList } from '../shared/DecisionList';
 import { ImportZone } from '../ImportZone';
@@ -386,6 +388,83 @@ function DfmOverhangPanel({
   );
 }
 
+/** FORGE-294 (gap G-H2): "Release for manufacture" -- chain a hierarchy
+ * node's real committed geometry into a real manufacturing output file
+ * (STL for 3D printing, STEP for CNC) via the gateway's
+ * twin.stage_work_product_file -> cadquery.export_geometry pipeline, and
+ * trigger the browser's own download of the real returned bytes. */
+function ManufactureReleasePanel({
+  node,
+  onClose,
+}: {
+  node: HierarchyNode;
+  onClose: () => void;
+}) {
+  const [process, setProcess] = useState<ManufactureProcess>('3d_print');
+  const release = useManufactureRelease();
+
+  const runRelease = () => {
+    if (!node.realizedByWorkProductId) return;
+    release.mutate({ workProductId: node.realizedByWorkProductId, process });
+  };
+
+  return (
+    <div
+      data-testid="manufacture-release-panel"
+      className="mt-2 rounded-lg p-3"
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-on-surface">Release for manufacture: {node.name}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-on-surface-variant hover:text-on-surface"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+          Process
+          <select
+            value={process}
+            onChange={(e) => setProcess(e.target.value as ManufactureProcess)}
+            data-testid="manufacture-process-select"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, minWidth: '180px' }}
+          >
+            <option value="3d_print">3D print (STL)</option>
+            <option value="cnc">CNC (STEP)</option>
+          </select>
+        </label>
+        <Button
+          size="sm"
+          data-testid="run-manufacture-release"
+          disabled={release.isPending}
+          onClick={runRelease}
+        >
+          {release.isPending ? 'Releasing…' : 'Release'}
+        </Button>
+      </div>
+
+      {release.isError && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--mf-c-ff-b4-ab)' }}>
+          Could not release this part for manufacture.
+        </p>
+      )}
+
+      {release.data && (
+        <p className="mt-2 text-xs" data-testid="manufacture-release-result" style={{ color: 'var(--mf-c-a6-d6-a1)' }}>
+          Downloaded {release.data.filename} ({release.data.fileSizeBytes} bytes,{' '}
+          {release.data.format.toUpperCase()})
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TreeRow({
   node,
   depth,
@@ -397,6 +476,8 @@ function TreeRow({
   onToggleRealize,
   dfmCheckingId,
   onToggleDfmCheck,
+  releasingId,
+  onToggleRelease,
 }: {
   node: TreeNode;
   depth: number;
@@ -408,6 +489,8 @@ function TreeRow({
   onToggleRealize: (id: string) => void;
   dfmCheckingId: string | null;
   onToggleDfmCheck: (id: string) => void;
+  releasingId: string | null;
+  onToggleRelease: (id: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
@@ -415,6 +498,7 @@ function TreeRow({
   const hasGeometry = !!node.realizedByWorkProductId || !!node.instanceOfBomItemId;
   const isRealizing = realizingId === node.id;
   const isDfmChecking = dfmCheckingId === node.id;
+  const isReleasing = releasingId === node.id;
 
   return (
     <>
@@ -491,6 +575,17 @@ function TreeRow({
             DFM check
           </button>
         )}
+        {node.realizedByWorkProductId && (
+          <button
+            type="button"
+            data-testid={`manufacture-release-button-${node.id}`}
+            onClick={() => onToggleRelease(node.id)}
+            className="rounded px-2 py-0.5 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            Release for manufacture
+          </button>
+        )}
       </div>
       {isRealizing && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
@@ -500,6 +595,11 @@ function TreeRow({
       {isDfmChecking && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
           <DfmOverhangPanel node={node} projectId={projectId} onClose={() => onToggleDfmCheck(node.id)} />
+        </div>
+      )}
+      {isReleasing && (
+        <div style={{ paddingLeft: depth * 20 + 28 }}>
+          <ManufactureReleasePanel node={node} onClose={() => onToggleRelease(node.id)} />
         </div>
       )}
       {hasChildren && !isCollapsed && (
@@ -517,6 +617,8 @@ function TreeRow({
               onToggleRealize={onToggleRealize}
               dfmCheckingId={dfmCheckingId}
               onToggleDfmCheck={onToggleDfmCheck}
+              releasingId={releasingId}
+              onToggleRelease={onToggleRelease}
             />
           ))}
         </div>
@@ -546,6 +648,9 @@ export function StructureView({
   // at most one at a time (independent of realizingId -- both could
   // theoretically be open on different nodes, just not the same node).
   const [dfmCheckingId, setDfmCheckingId] = useState<string | null>(null);
+  // FORGE-294 (gap G-H2): which node's "Release for manufacture" panel is
+  // open, at most one at a time (independent of the others above).
+  const [releasingId, setReleasingId] = useState<string | null>(null);
 
   const forest = useMemo(() => buildForest(nodes ?? []), [nodes]);
 
@@ -613,6 +718,8 @@ export function StructureView({
               onToggleRealize={(id) => setRealizingId((cur) => (cur === id ? null : id))}
               dfmCheckingId={dfmCheckingId}
               onToggleDfmCheck={(id) => setDfmCheckingId((cur) => (cur === id ? null : id))}
+              releasingId={releasingId}
+              onToggleRelease={(id) => setReleasingId((cur) => (cur === id ? null : id))}
             />
           ))}
         </div>

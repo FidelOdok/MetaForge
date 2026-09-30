@@ -1300,7 +1300,33 @@ function route(
     if (path === '/requirements/matrix') return s.requirementMatrix;
     if (path === '/requirements/coverage') return s.requirementCoverage;
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
-    if (path === '/bom') return { components: s.bomComponents, total: s.bomComponents.length };
+    if (path === '/bom') {
+      const category = params.category ? String(params.category).toLowerCase() : null;
+      const components = category
+        ? s.bomComponents.filter((c) => c.category.toLowerCase() === category)
+        : s.bomComponents;
+      return { components, total: components.length };
+    }
+    if (path === '/manufacture/release') {
+      // FORGE-294: illustrative placeholder bytes, not real geometry --
+      // sample mode has no backend/cadquery to actually export from. Real
+      // (non-demo) requests hit api_gateway.twin.manufacture_release,
+      // which stages and exports a real committed STEP file.
+      const process = String(params.process ?? '3d_print');
+      const format = process === 'cnc' ? 'step' : 'stl';
+      const placeholder =
+        format === 'stl'
+          ? 'solid demo\nendsolid demo\n'
+          : 'ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n';
+      return {
+        work_product_id: String(params.work_product_id ?? ''),
+        process,
+        format,
+        filename: `release.${format}`,
+        file_size_bytes: placeholder.length,
+        content_base64: btoa(placeholder),
+      };
+    }
     if (/^\/design-loop\/[^/]+$/.test(path)) return s.designLoops[segment(path, 2)];
     if (path === '/promotion') return { gates: s.promotionGates };
     if (path === '/decisions') {

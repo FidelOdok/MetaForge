@@ -211,6 +211,40 @@ test.describe('Digital Twin Viewer', () => {
     await expect(panel.getByTestId('dfm-flagged-faces')).toContainText('Surface2');
   });
 
+  test('Structure tab: Release for manufacture (FORGE-294)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await expect(upperArmRow).toBeVisible();
+    await expect(upperArmRow.getByTestId(/^manufacture-release-button-/)).toBeVisible();
+
+    await upperArmRow.getByTestId(/^manufacture-release-button-/).click();
+    const panel = page.getByTestId('manufacture-release-panel');
+    await expect(panel).toBeVisible();
+
+    // Defaults to 3D print (STL); release triggers a real browser download.
+    const select = panel.getByTestId('manufacture-process-select');
+    await expect(select).toHaveValue('3d_print');
+    const [stlDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      panel.getByTestId('run-manufacture-release').click(),
+    ]);
+    expect(stlDownload.suggestedFilename()).toBe('release.stl');
+    await expect(panel.getByTestId('manufacture-release-result')).toContainText('STL');
+
+    // Switching to CNC and releasing again downloads a STEP file instead.
+    await select.selectOption('cnc');
+    const [stepDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      panel.getByTestId('run-manufacture-release').click(),
+    ]);
+    expect(stepDownload.suggestedFilename()).toBe('release.step');
+    await expect(panel.getByTestId('manufacture-release-result')).toContainText('STEP');
+  });
+
   test('Assembly tab: joints are editable and persist', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the graph canvas.
