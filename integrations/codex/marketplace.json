@@ -1,0 +1,20 @@
+{
+  "name": "metaforge",
+  "interface": {
+    "displayName": "MetaForge"
+  },
+  "plugins": [
+    {
+      "name": "metaforge",
+      "source": {
+        "source": "local",
+        "path": "./plugins/metaforge"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Engineering"
+    }
+  ]
+}

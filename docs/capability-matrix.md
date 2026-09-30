@@ -279,6 +279,37 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### The Codex package
+
+`integrations/codex/` carries a plugin manifest at
+`.codex-plugin/plugin.json`, a marketplace entry, an `.mcp.json`, the
+skills, and an `AGENTS.md`.
+
+The format did not come from the documentation, which describes
+installing Codex plugins but not the manifest's filename, location or
+fields — the developer guide it links 404s. It came from **codex-cli
+0.118.0 itself**: `codex features list` reports `plugins  stable  true`,
+and the binary embeds the scaffolding script that writes these files.
+
+| | |
+|---|---|
+| Manifest | `<plugin>/.codex-plugin/plugin.json` |
+| Marketplace | `.agents/plugins/marketplace.json` |
+| Entry source | `{"source": "local", "path": "./plugins/<name>"}` |
+| Install policy | `NOT_AVAILABLE` \| `AVAILABLE` \| `INSTALLED_BY_DEFAULT` |
+| Auth policy | `ON_INSTALL` \| `ON_USE` |
+
+An entry's `./plugins/<name>` resolves from the directory that *contains*
+`.agents/`, not from the marketplace file — so a home-rooted marketplace
+at `~/.agents/plugins/marketplace.json` looks for `~/plugins/<name>`.
+
+**It has not been loaded end to end.** That needs a signed-in Codex, and
+the CLI available here has an expired token. The shape is taken from the
+program that reads it, which is a better source than the docs, but one
+version of one program: if `/plugins` does not show it, the format is the
+first thing to re-check. Wiring the MCP server up by hand via
+`config.toml` needs no plugin and is the path this repo has been running.
+
 ### Reaching a local gateway from a hosted harness
 
 ChatGPT and claude.ai cannot reach `localhost`. `forge tunnel up` runs an
@@ -337,7 +368,7 @@ this:
 | Channel | State |
 |---|---|
 | Claude Code marketplace | shipped |
-| Codex `/plugins` | blocked on the plugin manifest format (FORGE-383) — the public docs describe installing plugins but not the manifest's filename, location or fields |
+| Codex `/plugins` | shipped, **not verified end to end** — see below |
 | ChatGPT app directory | needs a public HTTPS endpoint and OAuth, which is the tunnel/broker work |
 | Hermes Skills Hub | MCP + skills; not yet packaged |
 

@@ -363,21 +363,26 @@ def build_claude_code_local() -> Path:
 # Codex (FORGE-383)
 # ---------------------------------------------------------------------------
 #
-# Codex CLI supports plugins -- `/plugins` opens a browser, and a plugin can
-# carry skills, MCP servers and hooks. The *packaging* format is another
-# matter: the public docs describe installing plugins but not the manifest
-# filename, its location or its fields, and the developer guide they point to
-# 404s.
+# FORGE-383. The public docs describe installing Codex plugins but not the
+# manifest's filename, location or fields, and the developer guide they link
+# 404s -- so this shipped without one for a long time rather than with a
+# guess.
 #
-# So this generates what can be verified rather than a manifest shaped like a
-# guess. An invented plugin.json that happens to validate against nothing is
-# worse than no plugin.json: it looks authoritative, someone builds on it, and
-# the first real format check is a rewrite.
+# The format came from the shipped CLI instead. `codex features list` reports
+# `plugins  stable  true`, and the binary embeds its own scaffolding script,
+# which is where every name below comes from:
 #
-# What is here works today: the MCP block for ~/.codex/config.toml (the shape
-# docs/integrations/codex.md documents and this repo has running), an
-# AGENTS.md, and the same skills. When the manifest format is confirmed, it
-# slots in beside them.
+#   plugin manifest   <plugin-root>/.codex-plugin/plugin.json
+#   marketplace       .agents/plugins/marketplace.json  (cwd- or home-rooted)
+#   entry source      {"source": "local", "path": "./plugins/<name>"}
+#   install policy    NOT_AVAILABLE | AVAILABLE | INSTALLED_BY_DEFAULT
+#   auth policy       ON_INSTALL | ON_USE
+#   plugin name       lowercase hyphen-case
+#
+# Verified against codex-cli 0.118.0. That is a stronger source than the
+# docs -- it is what the program reads -- but it is still one version, so the
+# generator writes the manifest and a test pins the field names, rather than
+# anything here assuming the shape is eternal.
 
 
 def build_codex(*, default_gateway_url: str) -> Path:
@@ -398,6 +403,74 @@ def build_codex(*, default_gateway_url: str) -> Path:
         f'url  = "{default_gateway_url}"\n'
         '# authorization = "Bearer ${METAFORGE_MCP_API_KEY}"\n'
     )
+
+    manifest = {
+        "name": PLUGIN_NAME,
+        "version": VERSION,
+        "description": (
+            "Engineer hardware against a digital twin: requirements, CAD, "
+            "simulation and evidence, with writes held for human approval."
+        ),
+        "author": {"name": "MetaForge", "url": "https://www.metaforge.uk"},
+        "homepage": "https://fidelodok.github.io/MetaForge/",
+        "repository": "https://github.com/FidelOdok/MetaForge",
+        "license": "Apache-2.0",
+        "keywords": ["hardware", "cad", "simulation", "digital-twin", "engineering"],
+        # Paths, relative to the plugin root. Codex reads skills from a
+        # directory and MCP servers from a file.
+        "skills": "./skills/",
+        "mcpServers": "./.mcp.json",
+        "interface": {
+            "displayName": "MetaForge",
+            "shortDescription": "Hardware engineering against a digital twin",
+            "longDescription": (
+                "Turn intent into reviewable, manufacturable deliverables: typed "
+                "requirements, CAD through a design IR, simulation, component "
+                "selection with margins, and evidence pinned to the revision it "
+                "came from. Writes are held for a human."
+            ),
+            "developerName": "MetaForge",
+            "category": "Engineering",
+            "websiteURL": "https://www.metaforge.uk",
+            "defaultPrompt": [
+                "Open my arm project and tell me where it stands.",
+                "Record the requirements from this brief, with units and how each is verified.",
+            ],
+        },
+    }
+    (root / ".codex-plugin").mkdir(parents=True)
+    (root / ".codex-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+    # The MCP server the plugin brings with it. Same endpoint as the
+    # config.toml block below, which stays for anyone wiring Codex up by
+    # hand rather than installing the plugin.
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "metaforge": {
+                        "url": default_gateway_url,
+                    }
+                }
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    marketplace = {
+        "name": "metaforge",
+        "interface": {"displayName": "MetaForge"},
+        "plugins": [
+            {
+                "name": PLUGIN_NAME,
+                "source": {"source": "local", "path": f"./plugins/{PLUGIN_NAME}"},
+                "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"},
+                "category": "Engineering",
+            }
+        ],
+    }
+    (root / "marketplace.json").write_text(json.dumps(marketplace, indent=2) + "\n")
 
     (root / "AGENTS.md").write_text(
         "# MetaForge\n\n"
@@ -430,21 +503,35 @@ def build_codex(*, default_gateway_url: str) -> Path:
     (root / "README.md").write_text(
         "# MetaForge for Codex\n\n"
         "**Generated by `scripts/build_integrations.py` — do not edit by hand.**\n\n"
-        "## Install\n\n"
-        "1. Append `config.toml` to `~/.codex/config.toml` and set the `url` to "
-        "your gateway.\n"
-        "2. Copy `AGENTS.md` into your project root.\n"
-        "3. Restart Codex CLI.\n\n"
-        f"## Skills\n\n{len(skills)} engineering skills are included under "
-        "`skills/`, the same procedures the MetaForge agents follow.\n\n"
-        "## Why there is no plugin manifest here\n\n"
-        "Codex CLI supports plugins, but the packaging format is not publicly "
-        "documented — the install flow is described, the manifest is not, and "
-        "the developer guide the docs link to returns 404. Rather than ship a "
-        "manifest shaped like a guess, this package contains the parts that are "
-        "verified and work today. The manifest slots in beside them once the "
-        "format is confirmed (FORGE-383).\n"
+        "## As a plugin\n\n"
+        "Codex reads a marketplace at `.agents/plugins/marketplace.json`, and an\n"
+        "entry's `./plugins/<name>` resolves from the directory that *contains*\n"
+        "`.agents/`, not from the marketplace file:\n\n"
+        "```\n"
+        "<root>/.agents/plugins/marketplace.json   <- copy marketplace.json here\n"
+        "<root>/plugins/metaforge/                 <- copy this directory here\n"
+        "```\n\n"
+        "`<root>` is either your project or your home directory. Restart Codex,\n"
+        "then `/plugins`.\n\n"
+        "## Or wire the MCP server up by hand\n\n"
+        "Append `config.toml` to `~/.codex/config.toml` and restart. This needs no\n"
+        "plugin and is the path this repo has been running.\n\n"
+        "## What is verified, and what is not\n\n"
+        "The manifest layout comes from codex-cli 0.118.0 itself — `codex features\n"
+        "list` reports `plugins  stable  true`, and the binary embeds the\n"
+        "scaffolding script every field name here was taken from. That is a\n"
+        "stronger source than the published docs, which describe installing\n"
+        "plugins but not the manifest.\n\n"
+        "**It has not been loaded end to end.** Doing that needs a signed-in\n"
+        "Codex (`codex login`), and the CLI on the machine this was generated on\n"
+        "has an expired token. The shape is right; whether Codex accepts it is\n"
+        "untested. Say so rather than assuming, and if it fails, the format is\n"
+        "the first thing to re-check against your Codex version.\n\n"
+        "## Skills\n\n"
+        f"{len(skills)} engineering skills are bundled. Codex prefixes a plugin's\n"
+        "skills with its name, so they appear as `metaforge:<skill>`.\n"
     )
+
     return root
 
 
