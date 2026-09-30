@@ -48,3 +48,20 @@ class IterateRequest(BaseModel):
 
     change_description: str
     metadata_updates: dict[str, Any] = {}
+
+
+class GeometryDiffResponse(BaseModel):
+    """Real volume/area/bounding-box delta vs. a SUPERSEDES predecessor
+    (FORGE-301) -- distinct from ``RevisionDiff`` above, which diffs one
+    node's own metadata revisions and never sees geometry changes."""
+
+    current_work_product_id: str
+    previous_work_product_id: str
+    current_volume_mm3: float
+    previous_volume_mm3: float
+    volume_delta_mm3: float
+    current_area_mm2: float
+    previous_area_mm2: float
+    area_delta_mm2: float
+    current_bounding_box: dict[str, Any]
+    previous_bounding_box: dict[str, Any]

@@ -6,6 +6,8 @@ vi.mock('../../hooks/use-twin', () => ({
   useTwinNode: vi.fn(),
   useTwinRelationships: vi.fn(() => ({ data: [] })),
   useNodeVersionHistory: vi.fn(() => ({ data: [], isLoading: false })),
+  useRevisionDiff: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+  useGeometryDiff: vi.fn(() => ({ data: undefined, isLoading: false })),
 }));
 
 vi.mock('../../hooks/use-conversion', () => ({
@@ -75,7 +77,14 @@ vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
 }));
 
 import { TwinViewerPage } from '../TwinViewerPage';
-import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../../hooks/use-twin';
+import {
+  useTwinNodes,
+  useTwinNode,
+  useTwinRelationships,
+  useNodeVersionHistory,
+  useRevisionDiff,
+  useGeometryDiff,
+} from '../../hooks/use-twin';
 import { fireEvent, act, within } from '@testing-library/react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../../store/project-store';
@@ -86,6 +95,8 @@ const mockUseTwinNodes = vi.mocked(useTwinNodes);
 const mockUseTwinNode = vi.mocked(useTwinNode);
 const mockUseTwinRelationships = vi.mocked(useTwinRelationships);
 const mockUseNodeVersionHistory = vi.mocked(useNodeVersionHistory);
+const mockUseRevisionDiff = vi.mocked(useRevisionDiff);
+const mockUseGeometryDiff = vi.mocked(useGeometryDiff);
 
 // MET-686: a harness for simulating an in-SPA navigation that changes the
 // ?node= query string on the SAME /twin path -- react-router does not
@@ -213,6 +224,124 @@ describe('TwinViewerPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
 
     expect(screen.queryByText(/History ·/)).not.toBeInTheDocument();
+  });
+
+  it('shows a revision compare picker when 2+ revisions exist, and diffs on selection (FORGE-301)', () => {
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({
+      data: [
+        { revision: 2, created_at: new Date().toISOString(), content_hash: 'abcdef1234', change_description: 'Widened mounting hole', metadata_snapshot: { wall_mm: 2 } },
+        { revision: 1, created_at: new Date().toISOString(), content_hash: '0123456789', change_description: 'Initial import', metadata_snapshot: { wall_mm: 3 } },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseRevisionDiff.mockReturnValue({
+      data: {
+        work_product_id: 'n1',
+        revision_a: 1,
+        revision_b: 2,
+        changed: { wall_mm: { from_value: 3, to_value: 2 } },
+        added: {},
+        removed: {},
+      },
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useRevisionDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+
+    fireEvent.change(screen.getByTestId('revision-diff-select-a'), { target: { value: '1' } });
+    fireEvent.change(screen.getByTestId('revision-diff-select-b'), { target: { value: '2' } });
+
+    expect(screen.getByTestId('revision-diff-view')).toBeInTheDocument();
+    expect(screen.getByText('wall_mm:')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+  });
+
+  it('shows a real volume/area delta vs. a SUPERSEDES predecessor (FORGE-301)', () => {
+    const node = {
+      id: 'n1',
+      name: 'enclosure-v2.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseGeometryDiff.mockReturnValue({
+      data: {
+        current_work_product_id: 'n1',
+        previous_work_product_id: 'n0',
+        current_volume_mm3: 1500,
+        previous_volume_mm3: 1000,
+        volume_delta_mm3: 500,
+        current_area_mm2: 900,
+        previous_area_mm2: 700,
+        area_delta_mm2: 200,
+        current_bounding_box: {},
+        previous_bounding_box: {},
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useGeometryDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /enclosure-v2\.step/ }));
+
+    expect(screen.getByTestId('geometry-version-diff')).toBeInTheDocument();
+    expect(screen.getByText('1,000 mm³')).toBeInTheDocument();
+    expect(screen.getByText('1,500 mm³')).toBeInTheDocument();
+    expect(screen.getByText('(+500)')).toBeInTheDocument();
+  });
+
+  it('renders nothing for geometry diff when there is no SUPERSEDES predecessor', () => {
+    const node = {
+      id: 'n1',
+      name: 'bracket-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseGeometryDiff.mockReturnValue({ data: undefined, isLoading: false } as unknown as ReturnType<typeof useGeometryDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
+
+    expect(screen.queryByTestId('geometry-version-diff')).not.toBeInTheDocument();
   });
 
   it('clears the selected node (detail panel + breadcrumb) when the active project changes', () => {

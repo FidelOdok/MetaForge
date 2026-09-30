@@ -21,7 +21,14 @@ import {
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatRelativeTime } from '../utils/format-time';
-import { useTwinNodes, useTwinNode, useTwinRelationships, useNodeVersionHistory } from '../hooks/use-twin';
+import {
+  useTwinNodes,
+  useTwinNode,
+  useTwinRelationships,
+  useNodeVersionHistory,
+  useRevisionDiff,
+  useGeometryDiff,
+} from '../hooks/use-twin';
 import { useFeatureDiff } from '../hooks/use-features';
 import { useActiveProject } from '../hooks/use-active-project';
 import { R3FViewer } from '../components/viewer/R3FViewer';
@@ -521,6 +528,9 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
         {/* Parameter diff vs. a SUPERSEDES predecessor (FORGE-270) */}
         <FeatureVersionSection nodeId={node.id} />
 
+        {/* Geometry (volume/area/bounding-box) diff vs. a SUPERSEDES predecessor (FORGE-301) */}
+        <GeometryDiffSection nodeId={node.id} />
+
         {/* Pending design-change proposals for this node (gated apply, MET-548) */}
         <div className="px-3 py-2 flex-shrink-0">
           <NodeProposals nodeId={node.id} onApplied={isCAD ? handleView3D : undefined} />
@@ -582,6 +592,8 @@ function RobotDescriptionViewSection({ node }: { node: TwinNode }) {
 function NodeHistorySection({ nodeId }: { nodeId: string }) {
   const { data: revisions, isLoading } = useNodeVersionHistory(nodeId);
   const [expanded, setExpanded] = useState(false);
+  const [revA, setRevA] = useState<number | undefined>(undefined);
+  const [revB, setRevB] = useState<number | undefined>(undefined);
 
   if (isLoading || !revisions || revisions.length === 0) return null;
 
@@ -622,6 +634,112 @@ function NodeHistorySection({ nodeId }: { nodeId: string }) {
           </div>
         ))}
       </div>
+
+      {/* FORGE-301: compare any two revisions' metadata (GET /nodes/{id}/diff,
+          real and already built -- this is its first dashboard consumer). */}
+      {revisions.length >= 2 && (
+        <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${KC.border}` }}>
+          <div className="flex items-center gap-1.5" style={{ fontSize: 11 }}>
+            <span style={{ color: KC.onSurfaceVariant }}>Compare</span>
+            <select
+              data-testid="revision-diff-select-a"
+              value={revA ?? ''}
+              onChange={(e) => setRevA(e.target.value ? Number(e.target.value) : undefined)}
+              className="font-mono rounded px-1"
+              style={{ background: KC.surfaceHigh, color: KC.onSurface, border: `1px solid ${KC.border}`, fontSize: 10 }}
+            >
+              <option value="">v?</option>
+              {sorted.map((r) => (
+                <option key={r.revision} value={r.revision}>
+                  v{r.revision}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+            <select
+              data-testid="revision-diff-select-b"
+              value={revB ?? ''}
+              onChange={(e) => setRevB(e.target.value ? Number(e.target.value) : undefined)}
+              className="font-mono rounded px-1"
+              style={{ background: KC.surfaceHigh, color: KC.onSurface, border: `1px solid ${KC.border}`, fontSize: 10 }}
+            >
+              <option value="">v?</option>
+              {sorted.map((r) => (
+                <option key={r.revision} value={r.revision}>
+                  v{r.revision}
+                </option>
+              ))}
+            </select>
+          </div>
+          <RevisionDiffView nodeId={nodeId} revisionA={revA} revisionB={revB} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── RevisionDiffView ─────────────────────────────────────────────────────────
+/** FORGE-301: renders GET /nodes/{id}/diff?v1=A&v2=B for the two revisions
+ * picked in NodeHistorySection above. Same changed/added/removed visual
+ * pattern as FeatureVersionSection below, generalized to any two revisions
+ * of any work product (not just a SUPERSEDES-linked parametric feature). */
+function RevisionDiffView({
+  nodeId,
+  revisionA,
+  revisionB,
+}: {
+  nodeId: string;
+  revisionA: number | undefined;
+  revisionB: number | undefined;
+}) {
+  const { data: diff, isLoading, isError } = useRevisionDiff(nodeId, revisionA, revisionB);
+
+  if (!revisionA || !revisionB || revisionA === revisionB) return null;
+  if (isLoading) return null;
+  if (isError) {
+    return (
+      <div className="mt-1.5 font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+        Could not diff v{revisionA} &rarr; v{revisionB}
+      </div>
+    );
+  }
+  if (!diff) return null;
+
+  const changedKeys = Object.keys(diff.changed);
+  const addedKeys = Object.keys(diff.added);
+  const removedKeys = Object.keys(diff.removed);
+  if (changedKeys.length === 0 && addedKeys.length === 0 && removedKeys.length === 0) {
+    return (
+      <div className="mt-1.5 font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
+        No metadata differences
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="revision-diff-view" className="mt-1.5 space-y-1" style={{ fontSize: 11 }}>
+      {changedKeys.map((key) => {
+        const delta = diff.changed[key];
+        if (!delta) return null;
+        return (
+          <div key={key} className="flex items-center gap-1.5 font-mono" style={{ color: KC.onSurface }}>
+            <span style={{ color: KC.onSurfaceVariant }}>{key}:</span>
+            <span>{String(delta.from_value)}</span>
+            <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+            <span style={{ color: KC.teal }}>{String(delta.to_value)}</span>
+          </div>
+        );
+      })}
+      {addedKeys.map((key) => (
+        <div key={key} className="font-mono" style={{ color: KC.green }}>
+          + {key}: {String(diff.added[key])}
+        </div>
+      ))}
+      {removedKeys.map((key) => (
+        <div key={key} className="font-mono" style={{ color: KC.orange }}>
+          - {key}: {String(diff.removed[key])}
+        </div>
+      ))}
     </div>
   );
 }
@@ -678,6 +796,63 @@ function FeatureVersionSection({ nodeId }: { nodeId: string }) {
             - {key}: {String(diff.removed[key])}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── GeometryDiffSection ──────────────────────────────────────────────────────
+/**
+ * FORGE-301 (gap G-J2): the geometry half of "versioning and diff of
+ * geometry and parameters across work-product versions." ``/iterate``
+ * (NodeHistorySection/RevisionDiffView above) only ever changes a node's
+ * METADATA -- it never re-uploads a blob, so no two revisions of the same
+ * node ever have different geometry. The real "geometry changed" case is a
+ * SUPERSEDES edge between two separate nodes (the same edge
+ * FeatureVersionSection's parameter diff already walks) -- this renders the
+ * real volume/area/bounding-box delta between this node's actual committed
+ * STEP file and its predecessor's. `null` (no prior version) is the common,
+ * expected answer, not a loading/error state -- same convention as
+ * FeatureVersionSection.
+ */
+function GeometryDiffSection({ nodeId }: { nodeId: string }) {
+  const { data: diff, isLoading } = useGeometryDiff(nodeId);
+
+  if (isLoading || !diff) return null;
+
+  const volumeUp = diff.volume_delta_mm3 >= 0;
+  const areaUp = diff.area_delta_mm2 >= 0;
+
+  return (
+    <div
+      data-testid="geometry-version-diff"
+      className="px-3 py-2 flex-shrink-0"
+      style={{ borderBottom: `1px solid ${KC.border}` }}
+    >
+      <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+        Geometry changes vs. previous version
+      </div>
+      <div className="space-y-1" style={{ fontSize: 11 }}>
+        <div className="flex items-center gap-1.5 font-mono" style={{ color: KC.onSurface }}>
+          <span style={{ color: KC.onSurfaceVariant }}>Volume:</span>
+          <span>{diff.previous_volume_mm3.toLocaleString()} mm&sup3;</span>
+          <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+          <span style={{ color: KC.teal }}>{diff.current_volume_mm3.toLocaleString()} mm&sup3;</span>
+          <span style={{ color: volumeUp ? KC.green : KC.orange }}>
+            ({volumeUp ? '+' : ''}
+            {diff.volume_delta_mm3.toLocaleString()})
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 font-mono" style={{ color: KC.onSurface }}>
+          <span style={{ color: KC.onSurfaceVariant }}>Surface area:</span>
+          <span>{diff.previous_area_mm2.toLocaleString()} mm&sup2;</span>
+          <span style={{ color: KC.onSurfaceVariant }}>&rarr;</span>
+          <span style={{ color: KC.teal }}>{diff.current_area_mm2.toLocaleString()} mm&sup2;</span>
+          <span style={{ color: areaUp ? KC.green : KC.orange }}>
+            ({areaUp ? '+' : ''}
+            {diff.area_delta_mm2.toLocaleString()})
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -1392,6 +1567,7 @@ export function TwinViewerPage() {
                 <>
                   <NodeHistorySection nodeId={node.id} />
                   <FeatureVersionSection nodeId={node.id} />
+                  <GeometryDiffSection nodeId={node.id} />
                 </>
               ) : (
                 <div className="tw-constraints">

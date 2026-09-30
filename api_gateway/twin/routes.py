@@ -55,6 +55,7 @@ from api_gateway.twin.schemas import (
     UpdateAssemblyJointsResponse,
 )
 from api_gateway.twin.version_schemas import (
+    GeometryDiffResponse,
     IterateRequest,
     RevisionDiff,
     WorkProductRevision,
@@ -100,6 +101,18 @@ def init_design_sketch_approver(approver: Any) -> None:
     """Wire in the design-sketch approval callable (server lifespan)."""
     global _design_sketch_approver  # noqa: PLW0603
     _design_sketch_approver = approver
+
+
+# FORGE-301: an injected async ``diff(*, work_product_id) -> dict`` (built in
+# server.py over ``geometry_diff.make_geometry_diff``) -- real volume/area/
+# bounding-box delta between a work product and its SUPERSEDES predecessor.
+_geometry_diff: Any = None
+
+
+def init_geometry_diff(differ: Any) -> None:
+    """Wire in the geometry-diff callable (server lifespan)."""
+    global _geometry_diff  # noqa: PLW0603
+    _geometry_diff = differ
 
 
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
@@ -941,6 +954,33 @@ async def diff_versions(node_id: UUID, v1: int = Query(...), v2: int = Query(...
         return VersionService.diff(history, v1, v2)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/nodes/{node_id}/geometry-diff", response_model=GeometryDiffResponse)
+async def diff_geometry(node_id: str) -> GeometryDiffResponse:
+    """Diff a work product's real geometry against its SUPERSEDES predecessor.
+
+    Unlike ``/diff`` above (a metadata-revision diff on the SAME node --
+    ``/iterate`` never changes the underlying blob, so no two revisions of one
+    node ever have different geometry), this walks the real SUPERSEDES edge a
+    re-committed, same-named CAD_MODEL gets (``api_gateway.twin.geometry_
+    recorder``) and compares the two NODES' actual STEP files.
+    """
+    if _geometry_diff is None:
+        raise HTTPException(status_code=503, detail="geometry diff is not configured")
+    with tracer.start_as_current_span("twin.diff_geometry") as span:
+        span.set_attribute("twin.node_id", node_id)
+        try:
+            result = await _geometry_diff(work_product_id=node_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 -- surface a clean 502 with the cause
+            logger.warning("geometry_diff_failed", node_id=node_id, error=str(exc))
+            span.record_exception(exc)
+            raise HTTPException(status_code=502, detail=f"geometry diff failed: {exc}") from exc
+        return GeometryDiffResponse(**result)
 
 
 @router.post("/nodes/{node_id}/approve-sketch", response_model=ApproveSketchResponse)

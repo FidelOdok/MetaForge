@@ -1268,16 +1268,32 @@ const SAMPLE_REVISIONS = [
     created_at: '2026-09-22T11:00:00Z',
     content_hash: 'sample-r3',
     change_description: 'Sample: connector and telemetry revision',
-    metadata_snapshot: {},
+    metadata_snapshot: { wall_thickness_mm: 2.4, connector_count: 3 },
   },
   {
     revision: 2,
     created_at: '2026-09-20T10:00:00Z',
     content_hash: 'sample-r2',
     change_description: 'Sample: baseline evidence attached',
-    metadata_snapshot: {},
+    metadata_snapshot: { wall_thickness_mm: 3.0, connector_count: 2 },
   },
 ];
+
+// FORGE-301 (gap G-J2): illustrative geometry delta for the sample
+// SUPERSEDES-linked enclosure (the same pair FORGE-270's feature diff above
+// uses) -- every other sample node correctly has none (404/null).
+const SAMPLE_GEOMETRY_DIFF = {
+  current_work_product_id: 'sample-enclosure',
+  previous_work_product_id: 'sample-enclosure-v2',
+  current_volume_mm3: 48200,
+  previous_volume_mm3: 51500,
+  volume_delta_mm3: -3300,
+  current_area_mm2: 9840,
+  previous_area_mm2: 10120,
+  area_delta_mm2: -280,
+  current_bounding_box: { x_min: 0, x_max: 80, y_min: 0, y_max: 60, z_min: 0, z_max: 25 },
+  previous_bounding_box: { x_min: 0, x_max: 80, y_min: 0, y_max: 60, z_min: 0, z_max: 27 },
+};
 
 const SCRIPTED_REPLY = `Scripted sample response — no live agent or solver was called.
 
@@ -1309,6 +1325,40 @@ function route(
     if (/^\/twin\/nodes\/[^/]+$/.test(path)) return s.nodes.find((n) => n.id === segment(path, 3));
     if (path.endsWith('/versions')) {
       return { work_product_id: segment(path, 3), revisions: SAMPLE_REVISIONS, total: SAMPLE_REVISIONS.length };
+    }
+    if (path.endsWith('/diff') && path.startsWith('/twin/nodes/')) {
+      // FORGE-301: metadata diff between two of SAMPLE_REVISIONS' own
+      // entries -- real added/changed/removed computed from the same two
+      // snapshots /versions above already returns, not hand-duplicated.
+      const v1 = Number(params.v1);
+      const v2 = Number(params.v2);
+      const a = SAMPLE_REVISIONS.find((r) => r.revision === v1);
+      const b = SAMPLE_REVISIONS.find((r) => r.revision === v2);
+      if (!a || !b) return undefined;
+      const keysA = Object.keys(a.metadata_snapshot);
+      const keysB = Object.keys(b.metadata_snapshot);
+      const changed: Record<string, { from_value: unknown; to_value: unknown }> = {};
+      for (const key of keysA.filter((k) => keysB.includes(k))) {
+        const av = (a.metadata_snapshot as Record<string, unknown>)[key];
+        const bv = (b.metadata_snapshot as Record<string, unknown>)[key];
+        if (av !== bv) changed[key] = { from_value: av, to_value: bv };
+      }
+      return {
+        work_product_id: segment(path, 3),
+        revision_a: v1,
+        revision_b: v2,
+        changed,
+        added: Object.fromEntries(
+          keysB.filter((k) => !keysA.includes(k)).map((k) => [k, (b.metadata_snapshot as Record<string, unknown>)[k]]),
+        ),
+        removed: Object.fromEntries(
+          keysA.filter((k) => !keysB.includes(k)).map((k) => [k, (a.metadata_snapshot as Record<string, unknown>)[k]]),
+        ),
+      };
+    }
+    if (path.endsWith('/geometry-diff') && path.startsWith('/twin/nodes/')) {
+      if (segment(path, 3) !== 'sample-enclosure') return undefined;
+      return SAMPLE_GEOMETRY_DIFF;
     }
     if (path.endsWith('/diff') && path.startsWith('/features/')) {
       // FORGE-270 (gap G-D2): the sample enclosure is the only node with an

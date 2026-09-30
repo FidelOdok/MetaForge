@@ -1487,6 +1487,14 @@ The `regenerate_geometry`/`script_source` flow above (MET-630) is one real editi
 
 **Deliberately out of scope**: widening `ControlledEntityKind` (`twin_core/transactions/patch.py`) to cover `work_product` so an edit could go through a real ECT proposal/approval cycle instead of an immediate re-commit -- the same nontrivial, separate transaction-engine widening FORGE-320 already deferred; a "propose, then apply" gate for macro-parameter edits (unlike script edits) would need it. Reviving `twin_core.versioning`'s branch/git `VersionEngine` for this -- confirmed zero consumers outside its own tests, a much larger lift than this ticket's real, minimal gap needed.
 
+### Geometry diff across a SUPERSEDES chain (FORGE-301, gap G-J2)
+
+`GET /v1/twin/nodes/{id}/diff` (`VersionService.diff`, above) diffs a work product's own `_revisions` -- but `/nodes/{id}/iterate` only ever merges `metadata_updates` into existing metadata, it never re-uploads a blob or changes `metadata["minio_object_key"]`. So no two *revisions* of the same node ever have different geometry; that mechanism is metadata-only by construction.
+
+`GET /v1/twin/nodes/{id}/geometry-diff` (`api_gateway/twin/geometry_diff.py`) is the real "geometry changed" case: it walks the same `SUPERSEDES` edge the feature-parameter diff above already walks, resolves BOTH nodes' actual committed STEP blobs (`digital_twin.storage.work_product_blobs.resolve_work_product_blob` -- safe here since each `SUPERSEDES`-linked node has its own independent object key, unlike a same-node revision), and calls the real `freecad.describe_step_file` on each. When a STEP export includes both named leaf parts and a top-level assembly compound (their volumes overlapping), the component with the largest volume is taken as "the whole part" -- the same ambiguity `describe_step_file`'s own docstring already documents. Returns a `volume_mm3`/`area_mm2`/`bounding_box` delta; 404s with no prior version, 400s if either side isn't a STEP file. No MCP tool registration (REST-only, like `manufacture_release`), so it carries none of `bootstrap_tool_registry`'s signature-drift risk.
+
+**Deliberately out of scope**: a true volumetric/mesh boolean diff visualization (a 3D "added/removed volume" highlight) -- no boolean-diff utility exists anywhere in this codebase (confirmed independently during FORGE-273/282/294's own scoping), the same class of gap as those tickets' deferred 3D-result visualizations; a numeric delta is shipped instead.
+
 ---
 
 ## 5. Constraint Engine

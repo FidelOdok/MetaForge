@@ -365,3 +365,109 @@ class TestVersionEndpoints:
                 "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/diff?v1=1&v2=2"
             )
         assert resp.status_code == 404
+
+
+class TestGeometryDiffEndpoint:
+    """GET /v1/twin/nodes/{id}/geometry-diff (FORGE-301) -- the route layer
+    over api_gateway.twin.geometry_diff; the evaluator itself is unit-tested
+    directly in tests/unit/test_geometry_diff.py."""
+
+    @pytest.fixture
+    def app(self):
+        from fastapi import FastAPI
+
+        from api_gateway.twin.routes import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return app
+
+    @pytest.fixture
+    def client(self, app):
+        from httpx import ASGITransport, AsyncClient
+
+        transport = ASGITransport(app=app)
+        return AsyncClient(transport=transport, base_url="http://test")
+
+    @pytest.fixture(autouse=True)
+    def _reset_geometry_diff(self):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        yield
+        init_geometry_diff(None)  # never leak a test double into another test module
+
+    async def test_not_configured_returns_503(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        init_geometry_diff(None)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 503
+
+    async def test_lookup_error_returns_404(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            raise LookupError("work product has no prior version (no SUPERSEDES edge)")
+
+        init_geometry_diff(fake_diff)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 404
+
+    async def test_value_error_returns_400(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            raise ValueError("current work product has format 'stl', expected step")
+
+        init_geometry_diff(fake_diff)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 400
+
+    async def test_unexpected_error_returns_502(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            raise RuntimeError("adapter unreachable")
+
+        init_geometry_diff(fake_diff)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 502
+
+    async def test_happy_path_returns_real_shape(self, client):
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            return {
+                "current_work_product_id": work_product_id,
+                "previous_work_product_id": "11111111-1111-1111-1111-111111111111",
+                "current_volume_mm3": 1500.0,
+                "previous_volume_mm3": 1000.0,
+                "volume_delta_mm3": 500.0,
+                "current_area_mm2": 900.0,
+                "previous_area_mm2": 700.0,
+                "area_delta_mm2": 200.0,
+                "current_bounding_box": {"x_min": 0, "x_max": 10},
+                "previous_bounding_box": {"x_min": 0, "x_max": 8},
+            }
+
+        init_geometry_diff(fake_diff)
+        node_id = "00000000-0000-0000-0000-000000000099"
+        async with client:
+            resp = await client.get(f"/v1/twin/nodes/{node_id}/geometry-diff")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["current_work_product_id"] == node_id
+        assert body["volume_delta_mm3"] == 500.0
+        assert body["current_bounding_box"] == {"x_min": 0, "x_max": 10}

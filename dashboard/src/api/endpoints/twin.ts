@@ -242,6 +242,62 @@ export async function iterateWorkProduct(
   return data;
 }
 
+/** One field's before/after value in a ``RevisionDiff``. */
+export interface FieldDelta {
+  from_value: unknown;
+  to_value: unknown;
+}
+
+/** Metadata diff between two of a work product's own revisions (FORGE-301,
+ * gap G-J2) -- backed by ``GET /v1/twin/nodes/{id}/diff``, real and
+ * previously unconsumed anywhere in the dashboard. */
+export interface RevisionDiff {
+  work_product_id: string;
+  revision_a: number;
+  revision_b: number;
+  changed: Record<string, FieldDelta>;
+  added: Record<string, unknown>;
+  removed: Record<string, unknown>;
+}
+
+export async function getRevisionDiff(
+  nodeId: string,
+  revisionA: number,
+  revisionB: number,
+): Promise<RevisionDiff> {
+  const { data } = await apiClient.get<RevisionDiff>(`/twin/nodes/${nodeId}/diff`, {
+    params: { v1: revisionA, v2: revisionB },
+  });
+  return data;
+}
+
+/** Real volume/area/bounding-box delta between a work product and its
+ * SUPERSEDES predecessor (FORGE-301) -- unlike ``RevisionDiff`` above,
+ * this compares two DIFFERENT nodes' actual STEP geometry, since
+ * ``/iterate`` never changes a node's own blob. ``null`` (a 404) is the
+ * expected, common answer for a work product with no prior version. */
+export interface GeometryDiff {
+  current_work_product_id: string;
+  previous_work_product_id: string;
+  current_volume_mm3: number;
+  previous_volume_mm3: number;
+  volume_delta_mm3: number;
+  current_area_mm2: number;
+  previous_area_mm2: number;
+  area_delta_mm2: number;
+  current_bounding_box: Record<string, number>;
+  previous_bounding_box: Record<string, number>;
+}
+
+export async function getGeometryDiff(nodeId: string): Promise<GeometryDiff | null> {
+  try {
+    const { data } = await apiClient.get<GeometryDiff>(`/twin/nodes/${nodeId}/geometry-diff`);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 // ── Work-product file download / open / preview (MET-483) ───────────────────
 // The browser fetches blobs straight from the gateway, so these are full URLs
 // (not the apiClient base-relative paths) suitable for <a href>, <img src>,

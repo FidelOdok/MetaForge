@@ -441,6 +441,37 @@ test.describe('Digital Twin Viewer', () => {
     await expect(diff).toContainText('3');
     await expect(diff).toContainText('2');
   });
+
+  test('History tab shows a real geometry delta against a superseded version (FORGE-301)', async ({
+    page,
+  }) => {
+    await page.goto('/twin?demo=1');
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByText('enclosure.step').click();
+    await page.getByRole('button', { name: 'history' }).click();
+
+    const geometryDiff = page.getByTestId('geometry-version-diff');
+    await expect(geometryDiff).toBeVisible();
+    await expect(geometryDiff).toContainText('48,200');
+    await expect(geometryDiff).toContainText('51,500');
+    await expect(geometryDiff).toContainText('-3,300');
+  });
+
+  test('History tab: pick two revisions to diff their metadata (FORGE-301)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByText('enclosure.step').click();
+    await page.getByRole('button', { name: 'history' }).click();
+
+    await page.getByTestId('revision-diff-select-a').selectOption('2');
+    await page.getByTestId('revision-diff-select-b').selectOption('3');
+
+    const revisionDiff = page.getByTestId('revision-diff-view');
+    await expect(revisionDiff).toBeVisible();
+    await expect(revisionDiff).toContainText('wall_thickness_mm');
+    await expect(revisionDiff).toContainText('3');
+    await expect(revisionDiff).toContainText('2.4');
+  });
 });
 
 test.describe('Requirements', () => {
