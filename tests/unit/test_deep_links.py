@@ -212,5 +212,9 @@ def test_the_twin_tab_param_is_honoured_by_the_page() -> None:
     page = (
         Path(__file__).resolve().parents[2] / "dashboard" / "src" / "pages" / "TwinViewerPage.tsx"
     ).read_text()
-    assert "parseTwinTab(searchParams.get('tab'))" in page
+    # Applied by an effect, not in the useState initialiser: useSearchParams
+    # is declared below the tab state, and reading it there is a
+    # temporal-dead-zone crash at render that tsc does not catch.
+    assert "parseTwinTab(wanted)" in page
+    assert "searchParams.get('tab')" in page
     assert "searchParams.get('node')" in page
