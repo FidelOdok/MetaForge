@@ -2,8 +2,8 @@
 
 Two responsibilities:
 
-1. **Mutation detection** for ``twin.query_cypher`` — reject Cypher
-   that would change graph state unless the caller explicitly opts in.
+1. **Mutation detection** for ``twin.query_cypher`` — re-exported from
+   ``mcp_core.cypher``, where it moved so the approval gate can use it.
 2. **Subgraph serialisation** — flatten ``SubGraph`` (nodes + edges)
    into a JSON-friendly dict the harness can read without importing
    ``twin_core`` types.
@@ -14,47 +14,14 @@ existing twin_core types. No reach upward.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
-# Cypher mutation keywords. The check is case-insensitive and looks
-# for the word as a token (whitespace / start-of-line on both sides) so
-# legitimate property names containing the substring don't trip it
-# (e.g. ``RETURN n.created_at`` doesn't match ``CREATE``).
-_MUTATION_KEYWORDS: tuple[str, ...] = (
-    "CREATE",
-    "DELETE",
-    "DETACH",
-    "DROP",
-    "MERGE",
-    "SET",
-    "REMOVE",
-    "FOREACH",  # only used inside mutating loops in practice
-    "LOAD",  # LOAD CSV
-)
+from mcp_core.cypher import detect_mutations
 
-# ``\b`` is fine for Cypher because it's ASCII-only.
-_MUTATION_PATTERN: re.Pattern[str] = re.compile(
-    r"\b(" + "|".join(_MUTATION_KEYWORDS) + r")\b",
-    re.IGNORECASE,
-)
-
-
-def detect_mutations(cypher: str) -> list[str]:
-    """Return the lowercased mutation keywords found in ``cypher``.
-
-    Empty list = read-only. Caller decides what to do with the
-    detected list (raise to reject, or log to audit).
-    """
-    if not cypher:
-        return []
-    matches = _MUTATION_PATTERN.findall(cypher)
-    # Dedupe while preserving discovery order so audit logs read
-    # naturally.
-    seen: dict[str, None] = {}
-    for m in matches:
-        seen.setdefault(m.upper(), None)
-    return list(seen.keys())
+# Mutation detection moved to ``mcp_core.cypher`` (FORGE-407): the approval
+# gate needs it to classify a ``twin.query_cypher`` call per query rather than
+# per tool, and ``mcp_core`` cannot import this layer. Re-exported here so
+# existing callers keep working and there stays exactly one implementation.
 
 
 def serialise_subgraph(subgraph: Any) -> dict[str, Any]:

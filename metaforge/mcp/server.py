@@ -1174,6 +1174,11 @@ class UnifiedMcpServer:
             caller=self._caller,
             twin_mutations_enabled=self._twin_mutations_enabled(),
             exempt_local_writes=self._exempt_local_writes and not can_elicit,
+            # FORGE-407: `twin.query_cypher` is a read or a write depending on
+            # the query. Without the arguments the gate can only judge the
+            # tool, which refused every `MATCH ... RETURN` on any deployment
+            # with twin mutations enabled.
+            arguments=arguments,
         )
         if not decision.requires_approval:
             return None
