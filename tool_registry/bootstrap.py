@@ -288,6 +288,7 @@ async def bootstrap_tool_registry(
     concept_selector: Any = None,
     component_selector: Any = None,
     release_package_creator: Any = None,
+    baseline_creator: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -468,6 +469,10 @@ async def bootstrap_tool_registry(
         release_package_creator: Optional async ``create(*, project_id, notes=None)``
             (make_release_package_creator, FORGE-299). When supplied, registers
             ``twin.create_release_package``. ``None`` skips registration.
+        baseline_creator: Optional async ``create(*, project_id, approved_by,
+            reason, name=None)`` (make_baseline_creator, FORGE-405). When
+            supplied, registers ``twin.create_baseline``. ``None`` skips
+            registration.
         hierarchy_geometry_linker: Optional async ``realize(...)``
             (make_hierarchy_geometry_linker, FORGE-266). When supplied,
             registers ``twin.realize_hierarchy_node``. ``None`` skips
@@ -664,6 +669,7 @@ async def bootstrap_tool_registry(
                     concept_selector=concept_selector,
                     component_selector=component_selector,
                     release_package_creator=release_package_creator,
+                    baseline_creator=baseline_creator,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
