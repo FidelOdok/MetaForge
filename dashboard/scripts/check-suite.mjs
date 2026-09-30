@@ -17,14 +17,32 @@
  * reading the summary is, which is the gap this closes.
  */
 import { spawnSync } from 'node:child_process';
-import { globSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPORT = resolve(ROOT, 'node_modules/.vitest-suite-report.json');
 
-const onDisk = globSync('src/**/*.test.{ts,tsx}', { cwd: ROOT }).sort();
+/**
+ * Walk for test files rather than using `fs.globSync`: that export is not
+ * available on every Node 22 build, and the first CI run of this script
+ * died on `does not provide an export named 'globSync'` while passing
+ * locally. A directory walk works everywhere.
+ */
+function findTests(dir, found = []) {
+  for (const entry of readdirSync(resolve(ROOT, dir), { withFileTypes: true })) {
+    const rel = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (entry.name !== 'node_modules') findTests(rel, found);
+    } else if (/\.test\.tsx?$/.test(entry.name)) {
+      found.push(rel);
+    }
+  }
+  return found;
+}
+
+const onDisk = findTests('src').sort();
 if (onDisk.length === 0) {
   console.error('check-suite: found no test files at all — is the glob still right?');
   process.exit(1);
