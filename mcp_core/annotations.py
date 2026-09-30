@@ -174,6 +174,10 @@ ADDITIVE: frozenset[str] = frozenset(
         # verification_case entity -- a pure append, never overwrites an
         # existing Constraint or entity.
         "twin.generate_test_plan",
+        # FORGE-295: records one new bringup_checklist entity derived from
+        # a work product's existing assembly.joints metadata -- a pure
+        # append, never overwrites the source work product or its joints.
+        "twin.create_bringup_checklist",
         "twin.optimize_parameter",
         "twin.propose_change",
         "twin.propose_engineering_change",

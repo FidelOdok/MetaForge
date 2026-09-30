@@ -55,6 +55,7 @@ _ENTITY_TYPES = frozenset(
         "release_approval",
         "concept_option",
         "release_package",
+        "bringup_checklist",
     }
 )
 

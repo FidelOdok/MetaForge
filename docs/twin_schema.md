@@ -1079,6 +1079,35 @@ For every `Constraint` on a project with `verification_method == "test"` (FORGE-
 
 *Source: `api_gateway/twin/test_plan.py`, `api_gateway/testplans/routes.py`, `twin_core/models/engineering_entity.py`, `twin_core/models/constraint.py`, `dashboard/src/pages/RequirementsPage.tsx`, `dashboard/src/api/endpoints/testplans.ts`, `dashboard/src/hooks/use-test-plan.ts`*
 
+### 2.28 Bring-up checklists: mechanical derivation from assembly joints (FORGE-295, gap G-H3)
+
+`bringup_checklist` is a new `EngineeringEntityType` -- a step-by-step assembly sequence derived from a work product's real `metadata.assembly.joints` (FORGE-271/245's `AssemblyJoint` list: `name`, `type`, `base`, `follower`, `axis`, `anchor`, `limits`). That list is flat and unordered -- there is no sequence field anywhere in this codebase -- so `twin.create_bringup_checklist` (`api_gateway/twin/bringup_checklist.py`) topologically sorts the `base`->`follower` dependency graph (a part that never appears as a `follower` is already placed; a joint becomes buildable once its `base` part is placed) into a real build order, then formats one instruction per joint. One entity holds the whole ordered checklist (not one entity per step, unlike `verification_case`'s per-requirement convention -- a checklist's steps are read together, not tracked/verified independently):
+
+```
+metadata: {
+  work_product_id: string  // the source assembly's node id
+  steps: [
+    {
+      step_number: integer
+      joint_name: string
+      joint_type: string
+      base: string
+      follower: string
+      instruction: string   // "Step {n}: attach {follower} to {base} via {joint_name} ({joint_type} joint)"
+    },
+    ...
+  ]
+}
+```
+
+A cyclic joint graph (some joint's `base` never becomes reachable by placing joints starting from the real root part(s)) raises a clear error rather than guessing at a partial/wrong order. Multiple independent root parts (e.g. two parallel subassemblies) are valid and supported -- that is a disconnected-but-acyclic graph, not an error.
+
+`GET /v1/bringup?work_product_id=` lists a work product's generated checklists (oldest first, filtered client-side by `metadata.work_product_id` since checklists aren't project-scoped the way test plans are -- a work product may exist before/without a project association), `POST /v1/bringup` generates one. The dashboard's Structure tab ("Bring-up checklist" panel, mirroring FORGE-273's DFM-check button placement) renders the ordered instructions as a table.
+
+**Deliberately out of scope**: any 3D visualization (exploded-per-step or even a simple current-step cross-highlight) -- neither exists as reusable infrastructure in this codebase (`StructureView.tsx`'s own header comment states FORGE-261's Structure tab was "deliberately trimmed... no 3D cross-highlight"); EVT/DVT/PVT staging distinctions (one flat checklist per call, not staged variants); writing to the literal `tests/bringup.md` file in a user's `forge setup`-created project repo (a different mechanism than this Twin-graph-backed capability -- the gateway has no filesystem access pattern to that path, and this is an intentional mismatch, not a gap to bridge).
+
+*Source: `api_gateway/twin/bringup_checklist.py`, `api_gateway/bringup/routes.py`, `twin_core/models/engineering_entity.py`, `api_gateway/twin/schemas.py` (`AssemblyJoint`)*
+
 ---
 
 ## 3. Edge Types

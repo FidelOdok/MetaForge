@@ -245,6 +245,36 @@ test.describe('Digital Twin Viewer', () => {
     await expect(panel.getByTestId('manufacture-release-result')).toContainText('STEP');
   });
 
+  test('Structure tab: Bring-up checklist (FORGE-295)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await expect(upperArmRow).toBeVisible();
+    await expect(upperArmRow.getByTestId(/^bringup-checklist-button-/)).toBeVisible();
+
+    await upperArmRow.getByTestId(/^bringup-checklist-button-/).click();
+    const panel = page.getByTestId('bringup-checklist-panel');
+    await expect(panel).toBeVisible();
+
+    await panel.getByTestId('run-bringup-checklist').click();
+
+    const steps = panel.getByTestId('bringup-checklist-steps');
+    await expect(steps).toBeVisible({ timeout: 10_000 });
+    // The demo's two joints are provided in reverse dependency order, so
+    // this proves a real topological sort ran rather than an echo of
+    // input order -- joint_1 (shoulder_mount -> upper_arm_link) must come
+    // before joint_2 (upper_arm_link -> elbow_actuator).
+    await expect(steps).toContainText(
+      'Step 1: attach upper_arm_link to shoulder_mount via joint_1 (revolute joint)',
+    );
+    await expect(steps).toContainText(
+      'Step 2: attach elbow_actuator to upper_arm_link via joint_2 (revolute joint)',
+    );
+  });
+
   test('Assembly tab: joints are editable and persist', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the graph canvas.
