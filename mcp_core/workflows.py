@@ -45,7 +45,16 @@ WORKFLOWS: dict[str, tuple[str, str]] = {
         "kg payload', '6-DOF', a reach, a duty cycle — are requirements, and "
         "belong in the twin as constraints rather than only in the chat, or "
         "the first gate has nothing to check against. Do not invent values "
-        "they did not give, and do not round the ones they did.",
+        "they did not give, and do not round the ones they did.\n\n"
+        "Give each one a `metric`, `operator`, `limit` and `unit` so a gate "
+        "can evaluate it, plus `verification_method` (how it will be shown "
+        "to hold) and `acceptance_criteria` (what counts as meeting it). "
+        "`twin.record_constraint_set` returns `incomplete` naming anything "
+        "you left out — read it. A requirement with no limit or no "
+        "verification method is recorded but uncheckable, and in the matrix "
+        "it is indistinguishable from one still waiting for evidence. If "
+        "the user has not said enough to fill a field, ask rather than "
+        "guessing a plausible value.",
     ),
     "use": (
         "Pick the project to work in for this session",

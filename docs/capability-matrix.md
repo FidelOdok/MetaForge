@@ -258,6 +258,46 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### A requirement something can check
+
+`twin.record_constraint_set` takes a `metric`, `operator`, `limit` and
+`unit` so a gate can evaluate the requirement, plus `verification_method`
+(how it will be shown to hold) and `acceptance_criteria` (what counts as
+meeting it).
+
+Those last two were already real typed fields on `Constraint`, read by
+the recorder and by the gate engine — and **absent from the tool's input
+schema** until FORGE-344. Supported, undocumented, invisible to any
+client reading `tools/list`, so the only way to use them was to already
+know the key.
+
+`verification_method` and `expected_evidence` are different questions:
+*analysis* is the method, *simulation* is the kind of artefact that would
+count.
+
+Only `name` is required, which is right — a half-specified requirement is
+a normal step in a conversation. What was missing is anyone saying so, so
+the result now names what it could not check:
+
+```json
+{
+  "node_id": "wp-1",
+  "constraint_ids": ["c-1"],
+  "incomplete": [
+    {"name": "be_light", "missing": ["expression or metric+limit", "verification_method"]}
+  ]
+}
+```
+
+An untyped requirement records happily, then sits in the evidence matrix
+as `no_data` indefinitely — indistinguishable from a properly-specified
+one whose evidence has not arrived yet. `incomplete` is what tells the
+two apart at the moment of writing. It is absent, not empty, when there
+is nothing to report.
+
+A `limit` with no `unit` is called out on its own: the matrix compares
+margins, and it cannot compare a bare number to a quantity.
+
 ### When a plugin call fails
 
 The MCP surface publishes four metrics. It had none before FORGE-379 —

@@ -40,6 +40,40 @@ logger = structlog.get_logger()
 tracer = get_tracer("tool_registry.tools.twin.adapter")
 
 
+def undeclared_requirement_fields(constraints: list[Any]) -> list[dict[str, Any]]:
+    """Per constraint, which checkable fields were not declared (FORGE-344).
+
+    D1 asks for "typed requirements with units, acceptance criteria and
+    verification method". Two of those three were real fields on
+    ``Constraint``, read by the recorder and by the gate engine, and absent
+    from this tool's input schema -- supported, undocumented, invisible to
+    any client reading ``tools/list``.
+    """
+    out: list[dict[str, Any]] = []
+    for entry in constraints:
+        if not isinstance(entry, dict):
+            continue
+        missing: list[str] = []
+        has_binding = bool(entry.get("expression")) or (
+            bool(entry.get("metric")) and entry.get("limit") is not None
+        )
+        if not has_binding:
+            # Neither an expression nor a metric/limit pair: nothing to
+            # evaluate, so this one can never pass or fail.
+            missing.append("expression or metric+limit")
+        elif entry.get("limit") is not None and not entry.get("unit"):
+            # A limit of 1 is not a requirement. The matrix compares
+            # margins and cannot compare a bare number to a quantity.
+            missing.append("unit")
+        if not entry.get("verification_method"):
+            missing.append("verification_method")
+        if not entry.get("acceptance_criteria"):
+            missing.append("acceptance_criteria")
+        if missing:
+            out.append({"name": str(entry.get("name") or "?"), "missing": missing})
+    return out
+
+
 class TwinServer(McpToolServer):
     """MCP adapter wrapping ``TwinAPI`` for harness consumption."""
 
@@ -1258,6 +1292,30 @@ class TwinServer(McpToolServer):
                                             "(e.g. 'cad_model'). Free text, not enforced."
                                         ),
                                     },
+                                    "acceptance_criteria": {
+                                        "type": "string",
+                                        "description": (
+                                            "FORGE-344: what counts as meeting this "
+                                            "requirement, in the engineer's own words "
+                                            "(e.g. 'tip deflection under 0.5 mm at rated "
+                                            "load, measured at the end effector'). A real "
+                                            "typed field on Constraint, read by the gate "
+                                            "engine -- supported since FORGE-312 but not "
+                                            "declared here, so no client could discover it."
+                                        ),
+                                    },
+                                    "verification_method": {
+                                        "type": "string",
+                                        "description": (
+                                            "FORGE-344: HOW it will be shown to hold -- "
+                                            "test, analysis, inspection, demonstration. "
+                                            "Distinct from 'expected_evidence', which is "
+                                            "the kind of artefact that would count: "
+                                            "'analysis' is the method, 'simulation' the "
+                                            "evidence. Free text, like the gate engine "
+                                            "reads it."
+                                        ),
+                                    },
                                     "expected_evidence": {
                                         "type": "string",
                                         "enum": [
@@ -1326,6 +1384,25 @@ class TwinServer(McpToolServer):
                         "minio_object_key": {"type": ["string", "null"]},
                         "content_hash": {"type": "string"},
                         "project_linked": {"type": "boolean"},
+                        "incomplete": {
+                            "type": "array",
+                            "description": (
+                                "FORGE-344: constraints that were recorded but cannot "
+                                "be checked yet, each with the fields it is missing. "
+                                "Present only when something is missing. A requirement "
+                                "with no limit or no verification method sits in the "
+                                "matrix as `no_data` indefinitely, which looks the same "
+                                "as one whose evidence has not arrived -- so say which "
+                                "it is rather than letting the caller assume."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "missing": {"type": "array", "items": {"type": "string"}},
+                                },
+                            },
+                        },
                     },
                 },
                 phase=1,
@@ -1345,12 +1422,25 @@ class TwinServer(McpToolServer):
             )
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
-        return await self._constraint_recorder(
+        result = await self._constraint_recorder(
             title=title,
             constraints=constraints,
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
         )
+        gaps = undeclared_requirement_fields(constraints)
+        if gaps:
+            # FORGE-344: the write succeeded, and some of what was written
+            # cannot be checked by anything. Only `name` is required, which
+            # is right -- a half-specified requirement is a normal step in a
+            # conversation. What was missing is anyone saying so: an untyped
+            # one is written, appears in the matrix as `no_data`, and looks
+            # exactly like a properly-specified requirement whose evidence
+            # has not arrived yet.
+            result = dict(result)
+            result["incomplete"] = gaps
+            logger.info("twin_mcp_constraints_incomplete", title=title, count=len(gaps))
+        return result
 
     # ------------------------------------------------------------------
     # twin.record_engineering_entity (FORGE-45/47, epic FORGE-35)
