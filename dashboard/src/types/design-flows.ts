@@ -46,3 +46,29 @@ export interface DesignFlowCatalog {
   flows: DesignFlow[];
   defaultFlowId: string;
 }
+
+/** A saved, immutable flow version awaiting or carrying a decision (FORGE-399). */
+export interface FlowVersion {
+  versionId: string;
+  approvalId: string;
+  baseTemplateId: string;
+  baseVersion: string;
+  status: 'proposed' | 'approved' | 'rejected';
+  origin: string;
+  changes: string[];
+  flow: DesignFlow;
+  valid: boolean;
+  violations: string[];
+}
+
+export interface FlowValidation {
+  valid: boolean;
+  violations: string[];
+}
+
+/** The editable shape the canvas sends back. */
+export interface EditFlowRequest {
+  baseTemplateId: string;
+  phases: DesignFlowPhase[];
+  name?: string;
+}

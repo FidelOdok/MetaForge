@@ -21,6 +21,7 @@ const ProjectDetailPage = page(() => import('./pages/ProjectDetailPage'), 'Proje
 const SessionsPage = page(() => import('./pages/SessionsPage'), 'SessionsPage');
 const SessionDetailPage = page(() => import('./pages/SessionDetailPage'), 'SessionDetailPage');
 const NewRunPage = page(() => import('./pages/NewRunPage'), 'NewRunPage');
+const FlowEditorPage = page(() => import('./pages/FlowEditorPage'), 'FlowEditorPage');
 const RunsPage = page(() => import('./pages/RunsPage'), 'RunsPage');
 const RunDetailPage = page(() => import('./pages/RunDetailPage'), 'RunDetailPage');
 const ApprovalsPage = page(() => import('./pages/ApprovalsPage'), 'ApprovalsPage');
@@ -46,6 +47,7 @@ const ROUTES: Array<[path: string, Page: ComponentType]> = [
   ['sessions/:id', SessionDetailPage],
   ['runs', RunsPage],
   ['runs/new', NewRunPage],
+  ['flows/edit', FlowEditorPage],
   ['runs/:id', RunDetailPage],
   ['approvals', ApprovalsPage],
   ['requirements', RequirementsPage],

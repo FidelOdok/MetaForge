@@ -303,3 +303,120 @@ class TestProposeHoldsForAHuman:
         response = client.post("/v1/design-flows/propose", json={"intent": "a drone"})
         assert response.status_code == 503
         assert "no untailored fallback" in response.json()["detail"]
+
+
+# ── editing a flow (FORGE-399) ───────────────────────────────────────────
+
+
+def _phase_payload(phase) -> dict:
+    return {
+        "id": phase.id,
+        "title": phase.title,
+        "objective": phase.objective,
+        "expectedArtifacts": list(phase.expected_artifacts),
+        "requiredDeliverables": list(phase.required_deliverables),
+        "enforceDeliverables": phase.enforce_deliverables,
+        "disciplines": list(phase.disciplines),
+        "gate": (
+            None
+            if phase.gate is None
+            else {
+                "name": phase.gate.name,
+                "autoApprove": phase.gate.auto_approve,
+                "criteria": list(phase.gate.criteria),
+                "enforceConstraints": phase.gate.enforce_constraints,
+                "gateId": phase.gate.gate_id,
+            }
+        ),
+    }
+
+
+def _edit_body(drop: str | None = None) -> dict:
+    from orchestrator.design_flow.spec import get_flow
+
+    phases = [_phase_payload(p) for p in get_flow("hardware_v1").phases if p.id != drop]
+    return {"baseTemplateId": "hardware_v1", "phases": phases}
+
+
+class TestLiveValidation:
+    def test_a_sound_edit_validates(self, client: TestClient) -> None:
+        body = client.post("/v1/design-flows/validate", json=_edit_body(drop="firmware")).json()
+        assert body["valid"] is True
+        assert body["violations"] == []
+
+    def test_a_broken_edit_names_the_rule_while_you_are_looking_at_it(
+        self, client: TestClient
+    ) -> None:
+        """Validation happens as the canvas changes, not at save -- by save
+        time a person has made five more edits and has to work out which one
+        the message is about."""
+        edit = _edit_body()
+        edit["phases"][0]["enforceDeliverables"] = False
+        body = client.post("/v1/design-flows/validate", json=edit).json()
+        assert body["valid"] is False
+        assert any("gates-enforce-what-they-require" in v for v in body["violations"])
+
+    def test_validating_does_not_save(self, client: TestClient) -> None:
+        from orchestrator.design_flow.versions import get_version_store
+
+        before = len(get_version_store().list())
+        client.post("/v1/design-flows/validate", json=_edit_body(drop="firmware"))
+        assert len(get_version_store().list()) == before
+
+    def test_an_unknown_template_is_a_404(self, client: TestClient) -> None:
+        assert (
+            client.post(
+                "/v1/design-flows/validate", json={"baseTemplateId": "nope", "phases": []}
+            ).status_code
+            == 404
+        )
+
+
+class TestSavingAnEdit:
+    def test_a_save_creates_a_version_held_for_approval(self, client: TestClient) -> None:
+        response = client.post("/v1/design-flows/versions", json=_edit_body(drop="firmware"))
+        assert response.status_code == 201, response.text
+        body = response.json()
+
+        assert body["versionId"].startswith("flowv_")
+        assert body["status"] == "proposed"
+        assert body["origin"] == "edited"
+        assert any("removed phase 'firmware'" in c for c in body["changes"])
+        assert "firmware" not in {p["id"] for p in body["flow"]["phases"]}
+
+        pending = client.get("/v1/chat/tool_approvals").json()["runs"]
+        assert any(r["id"] == body["approvalId"] for r in pending)
+
+    def test_an_edit_that_breaks_an_invariant_cannot_be_saved(self, client: TestClient) -> None:
+        """The acceptance criterion. 422 rather than 400: the request was
+        well-formed, the flow was not."""
+        edit = _edit_body()
+        edit["phases"][0]["enforceDeliverables"] = False
+        response = client.post("/v1/design-flows/versions", json=edit)
+        assert response.status_code == 422
+        assert "gates-enforce-what-they-require" in response.json()["detail"]
+
+    def test_nothing_is_stored_when_the_save_is_refused(self, client: TestClient) -> None:
+        from orchestrator.design_flow.versions import get_version_store
+
+        before = len(get_version_store().list())
+        edit = _edit_body()
+        edit["phases"][0]["enforceDeliverables"] = False
+        client.post("/v1/design-flows/versions", json=edit)
+        assert len(get_version_store().list()) == before
+
+    def test_saving_an_unchanged_flow_is_refused(self, client: TestClient) -> None:
+        """An approval with nothing to approve teaches reviewers to click
+        through, which is how a real one later gets clicked through too."""
+        response = client.post("/v1/design-flows/versions", json=_edit_body())
+        assert response.status_code == 400
+        assert "nothing to approve" in response.json()["detail"]
+
+    def test_a_saved_version_can_be_fetched(self, client: TestClient) -> None:
+        saved = client.post("/v1/design-flows/versions", json=_edit_body(drop="electronics")).json()
+        fetched = client.get(f"/v1/design-flows/versions/{saved['versionId']}").json()
+        assert fetched["versionId"] == saved["versionId"]
+        assert fetched["changes"] == saved["changes"]
+
+    def test_an_unknown_version_is_a_404(self, client: TestClient) -> None:
+        assert client.get("/v1/design-flows/versions/flowv_nope").status_code == 404

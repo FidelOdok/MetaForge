@@ -2082,6 +2082,139 @@
         "title": "DesignFlowView",
         "type": "object"
       },
+      "EditFlowRequest": {
+        "description": "A whole edited flow, plus the template it descends from.\n\nThe editor sends the full flow rather than a patch. A patch would need the\nclient and server to agree on how to apply it, and a disagreement there is\na flow that is not what the person on the canvas was looking at when they\npressed save.",
+        "properties": {
+          "baseTemplateId": {
+            "title": "Basetemplateid",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/EditPhase"
+            },
+            "title": "Phases",
+            "type": "array"
+          }
+        },
+        "required": [
+          "baseTemplateId",
+          "phases"
+        ],
+        "title": "EditFlowRequest",
+        "type": "object"
+      },
+      "EditGate": {
+        "properties": {
+          "autoApprove": {
+            "default": false,
+            "title": "Autoapprove",
+            "type": "boolean"
+          },
+          "criteria": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Criteria",
+            "type": "array"
+          },
+          "enforceConstraints": {
+            "default": false,
+            "title": "Enforceconstraints",
+            "type": "boolean"
+          },
+          "gateId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gateid"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "EditGate",
+        "type": "object"
+      },
+      "EditPhase": {
+        "properties": {
+          "disciplines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Disciplines",
+            "type": "array"
+          },
+          "enforceDeliverables": {
+            "default": true,
+            "title": "Enforcedeliverables",
+            "type": "boolean"
+          },
+          "expectedArtifacts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expectedartifacts",
+            "type": "array"
+          },
+          "gate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditGate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "objective": {
+            "title": "Objective",
+            "type": "string"
+          },
+          "requiredDeliverables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requireddeliverables",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "objective"
+        ],
+        "title": "EditPhase",
+        "type": "object"
+      },
       "EmittedJoint": {
         "description": "What was actually written for one joint, post type-resolution\n(FORGE-240) -- e.g. a revolute joint with caller-supplied limits is\nemitted as a real bounded ``revolute`` type, not the unlimited\n``continuous``/``PhysicsRevoluteJoint``-without-limits a caller might\notherwise assume from the input alone. Lets the reporting agent state\nwhat the file actually contains instead of guessing or fabricating.",
         "properties": {
@@ -2522,6 +2655,10 @@
             "title": "Valid",
             "type": "boolean"
           },
+          "versionId": {
+            "title": "Versionid",
+            "type": "string"
+          },
           "violations": {
             "items": {
               "type": "string"
@@ -2532,6 +2669,7 @@
         },
         "required": [
           "approvalId",
+          "versionId",
           "baseTemplateId",
           "baseVersion",
           "intent",
@@ -2539,6 +2677,67 @@
           "valid"
         ],
         "title": "FlowProposalView",
+        "type": "object"
+      },
+      "FlowVersionView": {
+        "properties": {
+          "approvalId": {
+            "title": "Approvalid",
+            "type": "string"
+          },
+          "baseTemplateId": {
+            "title": "Basetemplateid",
+            "type": "string"
+          },
+          "baseVersion": {
+            "title": "Baseversion",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "flow": {
+            "$ref": "#/components/schemas/DesignFlowView"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "versionId": {
+            "title": "Versionid",
+            "type": "string"
+          },
+          "violations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Violations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "versionId",
+          "approvalId",
+          "baseTemplateId",
+          "baseVersion",
+          "status",
+          "origin",
+          "flow",
+          "valid"
+        ],
+        "title": "FlowVersionView",
         "type": "object"
       },
       "FromTextRequest": {
@@ -4187,6 +4386,44 @@
           "updatedAt"
         ],
         "title": "LoadCaseResponse",
+        "type": "object"
+      },
+      "ManufactureReleaseResponse": {
+        "properties": {
+          "content_base64": {
+            "title": "Content Base64",
+            "type": "string"
+          },
+          "file_size_bytes": {
+            "title": "File Size Bytes",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "process": {
+            "title": "Process",
+            "type": "string"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id",
+          "process",
+          "format",
+          "filename",
+          "file_size_bytes",
+          "content_base64"
+        ],
+        "title": "ManufactureReleaseResponse",
         "type": "object"
       },
       "MaturityGateSummary": {
@@ -8457,6 +8694,26 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "ValidationView": {
+        "properties": {
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "violations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Violations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "valid"
+        ],
+        "title": "ValidationView",
+        "type": "object"
+      },
       "WorkProductRevision": {
         "description": "A single snapshot in a work product's revision history.",
         "properties": {
@@ -8884,7 +9141,7 @@
     },
     "/v1/bom": {
       "get": {
-        "description": "List BOM components, optionally scoped to a project.\n\nEmpty (``{components: [], total: 0}``) when the project has no BOM \u2014 not a\n404, so the dashboard renders a clean empty state.",
+        "description": "List BOM components, optionally scoped to a project and/or filtered\nby ``category`` (case-insensitive exact match against\n``BOMItem.specifications.category``, e.g. ``category=fastener`` for a\nfastener list -- FORGE-294, gap G-H2).\n\nEmpty (``{components: [], total: 0}``) when the project has no BOM \u2014 not a\n404, so the dashboard renders a clean empty state.",
         "operationId": "list_bom_v1_bom_get",
         "parameters": [
           {
@@ -8901,6 +9158,22 @@
                 }
               ],
               "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
             }
           }
         ],
@@ -10639,6 +10912,132 @@
         ]
       }
     },
+    "/v1/design-flows/validate": {
+      "post": {
+        "description": "Check an edit without saving it.\n\nThe editor calls this as the canvas changes, so a person sees a rule break\nwhile they are looking at the thing that broke it -- rather than at save,\nby which point they have made five more changes and have to work out which\none the message is about.",
+        "operationId": "validate_edited_flow_v1_design_flows_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditFlowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Edited Flow",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
+    "/v1/design-flows/versions": {
+      "post": {
+        "description": "Save an edit as a new version, held for approval.\n\nNever mutates an existing version. A run pins the version it started on,\nso a version changing underneath would make a completed run's provenance\na lie -- and an approval that can be edited afterwards is not an approval.",
+        "operationId": "save_edited_flow_v1_design_flows_versions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditFlowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowVersionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Edited Flow",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
+    "/v1/design-flows/versions/{version_id}": {
+      "get": {
+        "operationId": "get_flow_version_v1_design_flows_versions__version_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowVersionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Flow Version",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
     "/v1/design-flows/{flow_id}": {
       "get": {
         "description": "One flow, for the run detail view and the plan canvas.",
@@ -11667,6 +12066,59 @@
         "summary": "Get Knowledge Entry",
         "tags": [
           "knowledge"
+        ]
+      }
+    },
+    "/v1/manufacture/release": {
+      "get": {
+        "operationId": "release_for_manufacture_v1_manufacture_release_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "'3d_print' (-> STL) or 'cnc' (-> STEP)",
+            "in": "query",
+            "name": "process",
+            "required": true,
+            "schema": {
+              "description": "'3d_print' (-> STL) or 'cnc' (-> STEP)",
+              "title": "Process",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManufactureReleaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release For Manufacture",
+        "tags": [
+          "manufacture"
         ]
       }
     },

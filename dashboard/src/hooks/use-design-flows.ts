@@ -1,6 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { getDesignFlows } from '../api/endpoints/design-flows';
+import {
+  getDesignFlows,
+  saveFlowVersion,
+  validateFlowEdit,
+} from '../api/endpoints/design-flows';
 
 export const designFlowKeys = {
   all: ['design-flows'] as const,
@@ -19,5 +23,27 @@ export function useDesignFlows() {
     queryKey: designFlowKeys.all,
     queryFn: getDesignFlows,
     staleTime: 60_000,
+  });
+}
+
+/**
+ * Live invariant validation for the flow editor (FORGE-399).
+ *
+ * A mutation rather than a query: it is driven by edits, not by a cache key,
+ * and the answer is about the flow in front of the person right now.
+ */
+export function useValidateFlowEdit() {
+  return useMutation({ mutationFn: validateFlowEdit });
+}
+
+/** Save an edit as a new version, held for approval. */
+export function useSaveFlowVersion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: saveFlowVersion,
+    onSuccess: () => {
+      // The approvals queue just gained an entry.
+      queryClient.invalidateQueries({ queryKey: ['approvals'] });
+    },
   });
 }
