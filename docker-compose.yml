@@ -424,6 +424,53 @@ services:
       - metaforge
     restart: unless-stopped
 
+  # ── Design-flow worker (FORGE-401) ──────────────────────────────
+  # A second worker, on its own task queue. Design-flow phases are long
+  # agent loops (minutes to hours); sharing a queue with the short agent
+  # tasks would let one slow phase starve them, and the two have completely
+  # different scaling shapes.
+  #
+  # Without this service, runs start and then sit forever: the workflow is
+  # durably created, and nothing polls the queue to advance it. That failure
+  # is quiet by construction, which is why the gateway refuses to start a run
+  # when Temporal itself is unreachable -- the loud half of the same problem.
+  design-flow-worker:
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "api_gateway.runs.flow_worker"]
+    environment:
+      - METAFORGE_ENV=docker
+      - TEMPORAL_HOST=temporal:7233
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://metaforge:metaforge@postgres:5432/metaforge}
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OCCT_CONVERTER_URL=http://occt-converter:8100
+      - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
+      - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
+    # Inherits the gateway image's HEALTHCHECK, which curls :8000 -- this
+    # serves no HTTP, so it would report unhealthy while running perfectly.
+    # Same fix and same reasoning as temporal-worker above (MET-726).
+    healthcheck:
+      test:
+        ["CMD-SHELL", "python -m orchestrator.worker_healthcheck --task-queue metaforge-design-flows || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── KiCad Adapter (Phase 1 — read-only ERC/DRC/BOM/Gerber) ──────
   kicad-adapter:
     build:

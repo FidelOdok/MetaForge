@@ -68,12 +68,57 @@ gateway and read by no Python code.
 | --- | --- | --- |
 | **Event bus** | ✅ wired | `create_kafka_bus()` when `KAFKA_BOOTSTRAP_SERVERS` is set — dispatches in-process to every subscriber **and** persists to the topic. Falls back to the in-process bus if the broker is unreachable. |
 | **Consolidation cadence** | ✅ two drivers, pick one | the gateway's asyncio `ConsolidationScheduler` (default), or `ConsolidationWorkflow` on the Temporal worker with `METAFORGE_CONSOLIDATION_INTERVAL_SECONDS=0` |
-| **Design-flow runs** (`/v1/runs`) | ⚠️ **still in-process** | `InMemoryWorkflowEngine` — `SingleAgentWorkflow` / `HardwareDesignWorkflow` are registered on the worker but nothing starts them, so runs still do not survive a gateway restart |
+| **Design-flow runs** (`/v1/runs`) | ✅ wired (FORGE-401) | `DesignFlowWorkflow` on the `metaforge-design-flows` queue, served by the `design-flow-worker` service. Runs survive a gateway or worker restart, including runs parked at a gate. The in-process executor remains as the test double behind `METAFORGE_FLOW_ENGINE=in_process`, and there is **no automatic fallback** to it. |
 
-So Temporal is **runnable and registered**, and owns the consolidation pass
-when you hand it over; it is not yet the execution path for design-flow runs.
-Moving those over is a separate change — the gateway would start a Temporal
-workflow instead of calling the in-house engine.
+So Temporal is **runnable and registered**, owns the consolidation pass when
+you hand it over, and as of FORGE-401 is the execution path for design-flow
+runs.
+
+### Design flows on Temporal (FORGE-401)
+
+`/v1/runs` used to start a design flow as an `asyncio.create_task` in the
+gateway process against an `InMemoryRunStore`. A restart lost every in-flight
+run, and the runs it lost most expensively were the ones parked at a gate —
+those have a human already committed to them.
+
+```
+POST /v1/runs ──> freeze_flow() ──> DesignFlowWorkflow (Temporal)
+                  template id,          │
+                  version,              ├─ phase ──> run_phase activity
+                  content hash          │             (heartbeats, 3 retries)
+                                        ├─ gate ───> wait_condition + durable timer
+                                        │             answered by a signal from
+                                        │             the approval ledger
+                                        └─ change ─> continue_as_new
+```
+
+Four things are worth knowing about the shape:
+
+- **One workflow, not one per flow.** `DesignFlowWorkflow` is an interpreter
+  over the approved flow, passed in as *data*. A new template is a data
+  change, and every run replays against the same definition.
+- **The flow is frozen and hashed at approval.** The workflow verifies the
+  hash before it starts. Editing `spec.py` cannot change what an in-flight
+  run is doing, and a completed run stays replayable.
+- **A gate that expires is a rejection**, on a durable timer. Not "carry on",
+  which would promote work nobody read; not "wait forever", which leaves a
+  run that reads as live.
+- **A mid-run flow change is only applied at a gate boundary**, via
+  `continue_as_new` with the new frozen flow. No phase is in flight there, so
+  nothing half-done is orphaned.
+
+**If Temporal is unreachable, starting a run fails with a 503 and no run
+record is created.** There is deliberately no fall-through to the in-process
+executor. That fallback would work, which is the problem: runs keep starting
+and nobody discovers the engine is not durable until a restart eats a day's
+work. `METAFORGE_FLOW_ENGINE=in_process` selects the old executor explicitly,
+warns on every run start that runs are not durable, and is there for tests and
+for contributors without Docker.
+
+Running it needs two services: `temporal` and `design-flow-worker`. Without
+the worker, runs are created durably and then sit forever, because nothing
+polls the queue — which is the quiet half of the same failure the 503 makes
+loud.
 
 Both cadence drivers build the tier through one factory,
 `digital_twin.memory.consolidation.bootstrap.build_consolidation_stack()`

@@ -90,10 +90,11 @@ class TestAlertingRules:
         # + 3 KB storage (MinIO bucket size / write latency / access errors,
         #   MET-476)
         # + 2 harness (production-harness audit follow-up)
-        # + 4 MCP surface (FORGE-379).
+        # + 4 MCP surface (FORGE-379)
+        # + 2 design-flow engine (FORGE-401).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 27
+        assert len(rules) == 29
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -111,11 +112,11 @@ class TestAlertingRules:
             )
 
     def test_six_critical_rules(self) -> None:
-        """There must be exactly 6 critical rules (3 original + 3 fleet)."""
+        """7 critical: 3 original + 3 fleet + 1 design-flow engine (FORGE-401)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         critical = [r for r in rules if r["labels"]["severity"] == "critical"]
-        assert len(critical) == 6
+        assert len(critical) == 7
 
     def test_seven_warning_rules(self) -> None:
         # 17 warning: 5 original + 2 fleet + 2 retrieval-quality
@@ -124,11 +125,13 @@ class TestAlertingRules:
         # + 3 KB-storage (MinIO bucket size / write latency / access errors,
         #   MET-476)
         # + 2 harness (production-harness audit follow-up)
-        # + 3 MCP surface (FORGE-379; the fourth is severity: info).
+        # + 3 MCP surface (FORGE-379; the fourth is severity: info)
+        # + 1 design-flow gates-never-answered (FORGE-401; the engine-down
+        #   rule alongside it is critical).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 20
+        assert len(warnings) == 21
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -143,6 +146,10 @@ class TestAlertingRules:
                 "KafkaConsumerStopped",
                 "Neo4jUnreachable",
                 "TSDBIngestionFailing",
+                # FORGE-401: runs cannot start at all, and deliberately do not
+                # fall back to a non-durable engine -- so this is an outage
+                # with a hard 503, not a degradation.
+                "DesignFlowEngineUnavailable",
             ]
         )
 
@@ -155,6 +162,11 @@ class TestAlertingRules:
             [
                 "ConsolidationContradictionsRising",
                 "ContextTruncationSpike",
+                # FORGE-401: an unanswered gate ends the run rejected, so a
+                # sustained rate means the approval queue is unattended --
+                # counted apart from outcome="rejected", which is a reviewer
+                # actually deciding.
+                "DesignFlowGatesNeverAnswered",
                 "McpAdapterUnreachable",
                 "McpErrorRateHigh",
                 "McpUnexpectedErrors",

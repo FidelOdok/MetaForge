@@ -215,6 +215,20 @@ class InMemoryRunStore:
         run.approver_verified = approver_verified
         return run
 
+    def delete(self, run_id: str) -> None:
+        """Remove a run outright.
+
+        Only for a run that was created and then could not be started at all
+        (FORGE-401: the workflow engine was unreachable). A record left in
+        ``queued`` that nothing will ever pick up reads as "starting" to
+        everyone looking at the list, and nothing ever notices that it does
+        not move. Deleting is honest; a phantom run is not.
+
+        Not a general-purpose delete: a run that has begun belongs in the
+        ledger whatever happened to it.
+        """
+        self._runs.pop(run_id, None)
+
     def complete(self, run_id: str, result: dict[str, Any] | None = None) -> Run:
         run = self._transition(run_id, RunStatus.COMPLETED)
         run.result = result

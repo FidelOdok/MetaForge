@@ -402,6 +402,26 @@ class MetricsRegistry:
         labels=[],
     )
 
+    # ── Design-flow engine metrics (FORGE-401) ─────────────────────────
+    DESIGN_FLOW_ENGINE_UNAVAILABLE = MetricDefinition(
+        name="metaforge_design_flow_engine_unavailable_total",
+        type="counter",
+        description=("Design-flow run starts refused because the workflow engine was unreachable"),
+        labels=["target"],
+    )
+    DESIGN_FLOW_RUN_STARTED = MetricDefinition(
+        name="metaforge_design_flow_run_started_total",
+        type="counter",
+        description="Design-flow runs started, by engine and flow template",
+        labels=["engine", "flow"],
+    )
+    DESIGN_FLOW_GATE_TOTAL = MetricDefinition(
+        name="metaforge_design_flow_gate_total",
+        type="counter",
+        description="Design-flow gate outcomes",
+        labels=["gate", "outcome"],
+    )
+
     # ── Chat harness loop metrics (production-harness audit follow-up) ─
     HARNESS_TURN_DURATION = MetricDefinition(
         name="metaforge_harness_turn_duration_seconds",
@@ -504,7 +524,17 @@ class MetricsRegistry:
             + cls.consolidation_metrics()
             + cls.harness_metrics()
             + cls.mcp_metrics()
+            + cls.design_flow_metrics()
         )
+
+    @classmethod
+    def design_flow_metrics(cls) -> list[MetricDefinition]:
+        """Design-flow engine metrics (FORGE-401)."""
+        return [
+            cls.DESIGN_FLOW_ENGINE_UNAVAILABLE,
+            cls.DESIGN_FLOW_RUN_STARTED,
+            cls.DESIGN_FLOW_GATE_TOTAL,
+        ]
 
     @classmethod
     def mcp_metrics(cls) -> list[MetricDefinition]:
@@ -1071,6 +1101,29 @@ class MetricsCollector:
         hist = self._instruments.get(MetricsRegistry.MCP_TOOL_CALL_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes={"tool_id": tool_id, "status": status})
+
+    def record_design_flow_started(self, engine: str, flow: str) -> None:
+        """One design-flow run handed to an engine (FORGE-401)."""
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_RUN_STARTED.name)
+        if counter is not None:
+            counter.add(1, attributes={"engine": engine, "flow": flow})
+
+    def record_design_flow_engine_unavailable(self, target: str) -> None:
+        """A run start refused because the workflow engine was unreachable.
+
+        The signal that matters most in FORGE-401. Without it, "Temporal is
+        down" shows up as users reporting that runs will not start, which is
+        both slower and less specific than a counter that says so.
+        """
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_ENGINE_UNAVAILABLE.name)
+        if counter is not None:
+            counter.add(1, attributes={"target": target})
+
+    def record_design_flow_gate(self, gate: str, outcome: str) -> None:
+        """One gate outcome: approved, rejected, timed_out or not_ready."""
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_GATE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"gate": gate, "outcome": outcome})
 
     def record_mcp_error(self, tool_id: str, error_class: str, client: str = "unknown") -> None:
         """Record one MCP error, classified."""

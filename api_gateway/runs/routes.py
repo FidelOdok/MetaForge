@@ -18,9 +18,11 @@ import asyncio
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
+from api_gateway.auth.approver import approver_from_request
+from api_gateway.runs.engine import FlowEngine, resolve_flow_engine, temporal_target
 from api_gateway.runs.schemas import (
     ApprovalRequest,
     CreateRunRequest,
@@ -28,7 +30,15 @@ from api_gateway.runs.schemas import (
     RunResponse,
 )
 from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
+from observability.metrics import MetricsCollector
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
+from orchestrator.design_flow.frozen import freeze_flow
+from orchestrator.design_flow.launcher import (
+    DesignFlowLauncher,
+    TemporalUnavailableError,
+    connect_temporal,
+)
+from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, get_flow
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
     ApprovalDecision,
@@ -70,6 +80,48 @@ _store = InMemoryRunStore(on_transition=_on_transition)
 
 # Background executor tasks, kept referenced so they aren't GC'd mid-run.
 _flow_tasks: set[asyncio.Task[None]] = set()
+
+
+_collector: MetricsCollector | None = None
+
+
+def set_metrics_collector(collector: MetricsCollector | None) -> None:
+    """Wire the gateway's collector in (``server.py`` at start-up)."""
+    global _collector  # noqa: PLW0603
+    _collector = collector
+
+
+def _metrics() -> MetricsCollector:
+    """The collector, or a no-op one.
+
+    A no-op collector is the right default here and not a silent fallback:
+    it is what ``MetricsCollector()`` does without an OTel SDK, and the
+    gateway already logs which of the two it built at start-up.
+    """
+    return _collector if _collector is not None else MetricsCollector()
+
+
+_launcher: DesignFlowLauncher | None = None
+
+
+async def get_flow_launcher() -> DesignFlowLauncher:
+    """The Temporal launcher, connected on first use.
+
+    Connecting lazily rather than at import keeps the gateway startable with
+    Temporal down — a gateway that cannot serve reads because the workflow
+    engine is unreachable is a worse outage than one that cannot start runs.
+    What it does *not* do is let a run start anyway: see ``_launch_flow``.
+    """
+    global _launcher  # noqa: PLW0603
+    if _launcher is None:
+        _launcher = DesignFlowLauncher(client=await connect_temporal(temporal_target()))
+    return _launcher
+
+
+def set_flow_launcher(launcher: DesignFlowLauncher | None) -> None:
+    """Inject a launcher (tests, and the worker bootstrap)."""
+    global _launcher  # noqa: PLW0603
+    _launcher = launcher
 
 
 def get_run_store() -> InMemoryRunStore:
@@ -171,8 +223,14 @@ async def _ensure_run_project(run: Any, project_backend: Any) -> None:
     logger.info("design_flow_project_autocreated", run_id=run.id, project_id=project.id)
 
 
-async def _launch_flow(run_id: str) -> None:
-    """Spawn the design-flow executor for ``run_id`` as a tracked background task.
+async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) -> Any:
+    """The brain a phase runs on, for whichever engine is driving it.
+
+    Extracted from ``_launch_flow`` (FORGE-401) rather than copied into the
+    Temporal worker. Two copies of this routing would diverge, and the
+    divergence would show up as "the same flow behaves differently on the
+    durable engine" — the most confusing possible bug to inherit from a
+    migration whose whole selling point is that nothing else changes.
 
     The brain is a HybridBrain: deterministic handlers drive the mechanical
     phases (requirements / design / simulation) so their deliverables reliably
@@ -185,11 +243,6 @@ async def _launch_flow(run_id: str) -> None:
     from api_gateway.runs.elec_handlers import GoalDrivenElectronicsHandler
     from api_gateway.runs.flow_brain import ReActPhaseBrain
     from api_gateway.runs.fw_handlers import GoalDrivenFirmwareHandler
-    from api_gateway.runs.gate_eval import (
-        ProjectGateEvaluator,
-        TwinConsistencyGateChecker,
-        TwinConstraintChecker,
-    )
     from api_gateway.runs.mech_handlers import (
         GoalDrivenMechanicalHandler,
         HybridBrain,
@@ -212,9 +265,6 @@ async def _launch_flow(run_id: str) -> None:
     doc_recorder = make_document_recorder(get_twin(), project_backend)
     react = ReActPhaseBrain(mcp_bridge=bridge, session_id=f"flow:{run_id}")
 
-    run = _store.get(run_id)
-    await _ensure_run_project(run, project_backend)
-
     # Per-flow brain routing:
     #  - design_v1: deterministic quadruped-demo handlers (reliable, hardcoded).
     #  - mech_v1:   goal-driven hybrid — the LLM specs the part, a deterministic
@@ -222,7 +272,6 @@ async def _launch_flow(run_id: str) -> None:
     #  - hardware_v1: electronics uses a deterministic handler (guaranteed BOM +
     #               closed power budget); other phases stay native.
     #  - others: the native brain drives every phase.
-    flow_id = run.request.get("flow")
     if flow_id == "design_v1":
         handlers: dict[str, Any] = {
             "requirements": RequirementsHandler(bridge),
@@ -251,7 +300,90 @@ async def _launch_flow(run_id: str) -> None:
         }
     else:
         handlers = {}
-    hybrid = HybridBrain(handlers=handlers, fallback=react)
+    return HybridBrain(handlers=handlers, fallback=react)
+
+
+class _GateCheckers:
+    """The three gate evaluations, in one place for both engines."""
+
+    def __init__(self, evaluator: Any, constraints: Any, consistency: Any) -> None:
+        self._evaluator = evaluator
+        self._constraints = constraints
+        self._consistency = consistency
+
+    async def evaluate(self, phase: Any, project_id: str | None) -> Any:
+        from orchestrator.design_flow.temporal_flow import GateCheck
+
+        if project_id is None:
+            # No project means nothing to evaluate against. Say so rather
+            # than returning a clean result nobody looked for.
+            return GateCheck(checked=False, constraints_checked=False, reason="run has no project")
+        required = list(getattr(phase, "required_deliverables", []) or [])
+        # ``since_ts=0`` asks "what has this project ever recorded", which is
+        # the right question for a durable engine: the phase that produced the
+        # deliverable may have run in a different process, hours earlier and
+        # on another host, so a window anchored to this evaluation's own start
+        # would miss it.
+        present = await self._evaluator.present_types(project_id, 0.0)
+        missing = [d for d in required if d not in present]
+
+        constraints = await self._constraints.check(project_id)
+        return GateCheck(
+            ready=not missing,
+            checked=bool(required),
+            missing=missing,
+            present=sorted(present),
+            constraints_passed=constraints.passed,
+            constraints_checked=constraints.checked,
+            violations=list(constraints.violations),
+            reason=(
+                f"{len(present)} deliverable type(s) recorded; "
+                f"{len(constraints.violations)} constraint violation(s)"
+                + ("" if constraints.checked else " (constraints not evaluated)")
+            ),
+        )
+
+
+async def build_gate_checkers() -> _GateCheckers | None:
+    """Gate evaluators bound to the live twin, or ``None`` if unavailable."""
+    from api_gateway.projects.routes import get_project_backend
+    from api_gateway.runs.gate_eval import (
+        ProjectGateEvaluator,
+        TwinConsistencyGateChecker,
+        TwinConstraintChecker,
+    )
+    from api_gateway.twin.routes import get_twin
+
+    twin = get_twin()
+    if twin is None:
+        return None
+    backend = get_project_backend()
+    return _GateCheckers(
+        ProjectGateEvaluator(backend, twin=twin),
+        TwinConstraintChecker(twin, backend),
+        TwinConsistencyGateChecker(twin),
+    )
+
+
+async def _launch_flow(run_id: str) -> None:
+    """Spawn the in-process executor for ``run_id`` as a tracked background task.
+
+    The test double (FORGE-401). Durable runs go through Temporal; this exists
+    so the flow logic can be exercised without a server, and so a contributor
+    with no Docker is not blocked.
+    """
+    from api_gateway.projects.routes import get_project_backend
+    from api_gateway.runs.gate_eval import (
+        ProjectGateEvaluator,
+        TwinConsistencyGateChecker,
+        TwinConstraintChecker,
+    )
+    from api_gateway.twin.routes import get_twin
+
+    project_backend = get_project_backend()
+    run = _store.get(run_id)
+    await _ensure_run_project(run, project_backend)
+    hybrid = await build_phase_brain(run_id, run.request.get("flow"))
     executor = DesignFlowExecutor(
         store=_store,
         brain=hybrid,
@@ -271,13 +403,55 @@ async def _launch_flow(run_id: str) -> None:
     task.add_done_callback(_flow_tasks.discard)
 
 
+async def _start_on_temporal(run_id: str) -> None:
+    """Hand the run to the real engine (FORGE-401).
+
+    Raises :class:`TemporalUnavailableError` if there is no engine. The
+    caller deletes the run record rather than leaving one that looks started
+    and never will be.
+    """
+    run = _store.get(run_id)
+    flow_id = run.request.get("flow") or DEFAULT_FLOW_ID
+    frozen = freeze_flow(get_flow(flow_id))
+    launcher = await get_flow_launcher()
+    await launcher.start(
+        run_id=run_id,
+        goal=str(run.request.get("goal") or "").strip(),
+        flow=frozen,
+        project_id=run.request.get("project_id"),
+        session_id=run.request.get("session_id"),
+    )
+    _metrics().record_design_flow_started(FlowEngine.TEMPORAL.value, flow_id)
+
+
 @router.post("", response_model=RunResponse, status_code=201)
 async def create_run(body: CreateRunRequest) -> RunResponse:
     run = _store.create(body.request)
     if _is_design_flow(body.request) and body.start:
-        # The executor owns the lifecycle (start -> phases -> gates -> terminal).
-        await _launch_flow(run.id)
-        logger.info("run_api_created", run_id=run.id, started=True, kind="design_flow")
+        engine = resolve_flow_engine()
+        if engine is FlowEngine.TEMPORAL:
+            try:
+                await _start_on_temporal(run.id)
+            except TemporalUnavailableError as exc:
+                # No run is left behind. A record sitting in `queued` that
+                # nothing will ever pick up is worse than no record: it reads
+                # as "starting" to everyone looking at the list, and there is
+                # nothing to notice that it never moves.
+                _store.delete(run.id)
+                _metrics().record_design_flow_engine_unavailable(temporal_target())
+                logger.error("design_flow_engine_unavailable", error=str(exc))
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+        else:
+            # The in-process double. `resolve_flow_engine` has already warned
+            # that runs started this way are not durable.
+            await _launch_flow(run.id)
+        logger.info(
+            "run_api_created",
+            run_id=run.id,
+            started=True,
+            kind="design_flow",
+            engine=engine.value,
+        )
     elif body.start:
         run = _store.start(run.id)
         logger.info("run_api_created", run_id=run.id, started=True, kind="plain")
@@ -329,15 +503,61 @@ async def stream_run_ws(websocket: WebSocket, run_id: str) -> None:
 
 
 @router.post("/{run_id}/approval", response_model=RunResponse)
-async def submit_approval(run_id: str, body: ApprovalRequest) -> RunResponse:
-    # Async so the store transition — which resolves the design-flow gate's
-    # asyncio.Future via the coordinator — runs on the event-loop thread (future
-    # resolution is not thread-safe from FastAPI's sync worker pool).
+async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) -> RunResponse:
+    """Answer the gate this run is parked at.
+
+    Async so the store transition — which resolves the in-process executor's
+    gate future via the coordinator — runs on the event-loop thread (future
+    resolution is not thread-safe from FastAPI's sync worker pool).
+
+    On Temporal the decision is also *signalled* into the workflow, which is
+    what actually resumes it (FORGE-401). The store transition stays, because
+    the run list, the SSE stream and the ledger all read from it.
+
+    The deciding human comes from the request, never the body (FORGE-393).
+    """
+    approver = approver_from_request(request)
     try:
-        run = _store.submit_approval(run_id, ApprovalDecision(body.decision))
+        run = _store.submit_approval(
+            run_id,
+            ApprovalDecision(body.decision),
+            approved_by=approver.label,
+            approver_verified=approver.verified,
+        )
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
     except InvalidTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    logger.info("run_api_approval", run_id=run_id, decision=body.decision)
+
+    approved = ApprovalDecision(body.decision) is ApprovalDecision.APPROVE
+    if _is_design_flow(run.request) and resolve_flow_engine() is FlowEngine.TEMPORAL:
+        try:
+            launcher = await get_flow_launcher()
+            await launcher.answer_gate(run_id, approved=approved, decided_by=approver.label)
+        except TemporalUnavailableError as exc:
+            # The store already moved, but the run itself did not hear the
+            # decision. Saying so is the only honest answer: reporting 200
+            # would leave a reviewer believing they had unblocked a run that
+            # is still sitting at its gate.
+            _metrics().record_design_flow_engine_unavailable(temporal_target())
+            logger.error("design_flow_approval_not_delivered", run_id=run_id, error=str(exc))
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"The decision was recorded but could not be delivered to the run: "
+                    f"{exc}. The run is still waiting at its gate."
+                ),
+            ) from exc
+
+    _metrics().record_design_flow_gate(
+        str(run.request.get("flow") or DEFAULT_FLOW_ID),
+        "approved" if approved else "rejected",
+    )
+    logger.info(
+        "run_api_approval",
+        run_id=run_id,
+        decision=body.decision,
+        decided_by=approver.actor_id,
+        approver_verified=approver.verified,
+    )
     return RunResponse.from_run(run)
