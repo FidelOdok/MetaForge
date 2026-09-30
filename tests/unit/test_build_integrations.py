@@ -247,3 +247,80 @@ class TestLocalFirstPackage:
         assert sorted(p.name for p in (local / "commands").iterdir()) == sorted(
             p.name for p in (hosted / "commands").iterdir()
         )
+
+
+# ---------------------------------------------------------------------------
+# One-step install (FORGE-328)
+# ---------------------------------------------------------------------------
+
+
+class TestMarketplace:
+    """Both READMEs have told people to run
+
+        /plugin marketplace add FidelOdok/MetaForge
+
+    since the packages existed, and there was no marketplace file, so the
+    command failed. A documented install path with nothing behind it is
+    worse than none: the first thing a new user does is the thing that
+    does not work.
+    """
+
+    def _catalog(self) -> dict:
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / ".claude-plugin" / "marketplace.json"
+        if not path.exists():  # pragma: no cover - generated artefact
+            pytest.skip("marketplace.json not generated in this checkout")
+        return json.loads(path.read_text())
+
+    def test_it_exists_where_claude_code_looks(self) -> None:
+        """`.claude-plugin/marketplace.json` at the repo root. Anywhere
+        else and each user has to declare it in extraKnownMarketplaces by
+        hand, which is not a one-step install."""
+        assert self._catalog()["name"] == "metaforge"
+
+    def test_the_required_fields_are_there(self) -> None:
+        catalog = self._catalog()
+        assert catalog["owner"]["name"]
+        assert catalog["plugins"]
+
+    def test_it_lists_both_packages(self) -> None:
+        from scripts.build_integrations import LOCAL_PLUGIN_NAME, PLUGIN_NAME
+
+        names = {p["name"] for p in self._catalog()["plugins"]}
+        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME}
+
+    def test_each_source_is_a_relative_path_that_exists(self) -> None:
+        """A relative source resolves from the marketplace root, and must
+        start with './' or it matches no source type at all."""
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parents[2]
+        for entry in self._catalog()["plugins"]:
+            source = entry["source"]
+            assert source.startswith("./"), f"{entry['name']}: {source}"
+            assert ".." not in source
+            assert (repo / source).is_dir(), f"{entry['name']} points at nothing"
+            assert (repo / source / ".claude-plugin" / "plugin.json").is_file()
+
+    def test_every_entry_describes_itself(self) -> None:
+        """Both packages install the same tools; the description is the
+        only thing telling someone which one they want."""
+        for entry in self._catalog()["plugins"]:
+            assert entry.get("description")
+
+    def test_the_readmes_name_a_marketplace_that_exists(self) -> None:
+        """The pairing that broke. If either side is renamed without the
+        other, the advertised command silently stops working again."""
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parents[2]
+        catalog = self._catalog()
+        for package in ("claude-code", "claude-code-local"):
+            readme = repo / "integrations" / package / "README.md"
+            if not readme.exists():  # pragma: no cover
+                continue
+            text = readme.read_text()
+            assert "/plugin marketplace add" in text
+            installed = [p["name"] for p in catalog["plugins"] if f"install {p['name']}" in text]
+            assert installed, f"{package} README installs no plugin this marketplace lists"

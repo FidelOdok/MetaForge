@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "metaforge",
+  "owner": {
+    "name": "MetaForge",
+    "url": "https://www.metaforge.uk"
+  },
+  "description": "Engineer hardware against a digital twin from your harness: requirements, CAD, simulation and evidence, with writes held for human approval.",
+  "plugins": [
+    {
+      "name": "metaforge",
+      "source": "./integrations/claude-code",
+      "description": "Connects to a MetaForge gateway over HTTP. Choose this for a team or hosted gateway, or a local one you already run.",
+      "category": "engineering",
+      "tags": [
+        "hardware",
+        "cad",
+        "simulation",
+        "digital-twin"
+      ]
+    },
+    {
+      "name": "metaforge-local",
+      "source": "./integrations/claude-code-local",
+      "description": "Runs MetaForge as a local process over stdio. No gateway, no account, no network. Needs `pip install metaforge`.",
+      "category": "engineering",
+      "tags": [
+        "hardware",
+        "cad",
+        "simulation",
+        "local-first"
+      ]
+    }
+  ]
+}
