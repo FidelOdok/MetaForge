@@ -249,6 +249,13 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # forward (concept -> sim_validated -> ... -> released). It refuses
         # rather than warns, and it persists the attempt either way.
         "twin.attempt_promotion",
+        # FORGE-405: revises every existing Constraint/EngineeringEntity
+        # currently recorded for the project, advancing authority to
+        # 'baselined' -- the same "mutates existing nodes' state" family as
+        # twin.approve_engineering_entity above, not a pure append (it also
+        # creates one new Baseline node, but that's incidental to the real
+        # effect: every member entity's authority moves forward).
+        "twin.create_baseline",
         "twin.execute_revalidation_plan",
         "twin.mark_engineering_change_rolled_back",
         "twin.reject_engineering_change",

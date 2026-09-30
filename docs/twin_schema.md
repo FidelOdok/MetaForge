@@ -1055,6 +1055,10 @@ metadata: {
 
 *Source: `api_gateway/twin/release_package.py`, `api_gateway/releases/routes.py`, `twin_core/models/engineering_entity.py`, `twin_core/consistency/gates.py`, `dashboard/src/pages/RequirementsPage.tsx`, `dashboard/src/api/endpoints/releases.ts`, `dashboard/src/hooks/use-releases.ts`*
 
+**FORGE-405 follow-up: `twin.create_baseline` (the G8 "configuration baseline fixed" check this all gates on).** `Baseline` (`twin_core/models/baseline.py`, a `BASELINE`-typed node, not an `EngineeringEntity`) was already real and built via `twin_core.transactions.baseline.create_baseline` -- but before this follow-up, nothing in `tool_registry`/`api_gateway` ever called it, so `evaluate_g8_release`'s baseline check could never actually pass on a real project. `twin.create_baseline` (`api_gateway/twin/baseline.py`) auto-discovers the project's current `Constraint`s and `EngineeringEntity`s (the only two `ControlledEntityKind`s a Baseline can pin) via the same project-scoped list calls `release_package.py` uses for its own snapshot, then atomically pins each member's current revision and advances its `authority` to `AuthorityState.BASELINED` (reusing the real optimistic-concurrency `TransactionEngine.commit` path -- a member that changed underneath the call aborts the whole baseline with no partial write). Required inputs: `project_id`, `approved_by` (non-empty list of names), `reason`; optional `name` (defaults to `"Baseline <timestamp>"`). A project with zero constraints/entities is rejected rather than producing a vacuous baseline. Multiple baselines per project are valid (each is a new pin of the then-current revisions).
+
+*Source: `api_gateway/twin/baseline.py`, `twin_core/transactions/baseline.py`, `twin_core/models/baseline.py`*
+
 ---
 
 ## 3. Edge Types
