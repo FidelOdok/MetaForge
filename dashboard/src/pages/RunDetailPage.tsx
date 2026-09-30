@@ -3,7 +3,10 @@ import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight, RefreshCw, ShieldCheck, X } from 'lucide-react';
 
 import { StatusBadge } from '../components/shared/StatusBadge';
+import { FlowGraph } from '../components/runs/FlowGraph';
+import { PhaseActivity } from '../components/runs/PhaseActivity';
 import { useDesignFlows } from '../hooks/use-design-flows';
+import { useFlowState } from '../hooks/use-flow-state';
 import { useRun, useSubmitApproval } from '../hooks/use-runs';
 import type { ApprovalDecision } from '../types/run';
 
@@ -17,6 +20,13 @@ export function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const runQuery = useRun(id);
   const designFlows = useDesignFlows();
+  const [selectedPhaseId, setSelectedPhaseId] = useState<string | null>(null);
+  // Only poll while the run can still change. A finished run polling
+  // forever is a request every two seconds forever, per open tab.
+  const runActive = !['completed', 'failed', 'rejected', 'canceled'].includes(
+    String(runQuery.data?.status ?? ''),
+  );
+  const flowState = useFlowState(id, runActive);
   const approval = useSubmitApproval();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [decision, setDecision] = useState<ApprovalDecision>('approve');
@@ -106,6 +116,36 @@ export function RunDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* FORGE-396: phases and gates as a graph, with the selected phase's
+          activity beside it. Rendered whenever the run is a design flow --
+          including when the engine cannot be queried, because "unknown"
+          is information and a missing panel is not. */}
+      {flowState.data && flowState.data.phases.length > 0 && (
+        <div className="flow-run-view">
+          {!flowState.data.live && (
+            <p role="status" className="field-help" data-testid="flow-state-degraded">
+              {flowState.data.detail}
+            </p>
+          )}
+          <FlowGraph
+            phases={flowState.data.phases}
+            selectedPhaseId={selectedPhaseId}
+            onSelectPhase={setSelectedPhaseId}
+            canApprove={awaiting && !approval.isPending}
+            onApprove={(decision) => openDecision(decision)}
+          />
+          <PhaseActivity
+            phase={
+              flowState.data.phases.find((p) => p.id === selectedPhaseId) ??
+              flowState.data.phases.find((p) => p.id === flowState.data?.currentPhase) ??
+              null
+            }
+            events={flowState.data.events}
+            live={flowState.data.live}
+          />
+        </div>
+      )}
 
       <dl className="run-facts flow-panel">
         <div>

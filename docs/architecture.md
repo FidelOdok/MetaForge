@@ -74,6 +74,40 @@ So Temporal is **runnable and registered**, owns the consolidation pass when
 you hand it over, and as of FORGE-401 is the execution path for design-flow
 runs.
 
+### Watching a run (FORGE-396)
+
+`GET /v1/runs/{id}/flow-state` returns phase-by-phase state, queried from the
+Temporal workflow rather than from a projection of it. A cache that can be
+stale is a live view that is sometimes wrong, with nothing on the page saying
+which.
+
+The dashboard draws it as a graph (`@xyflow/react`): a node per phase coloured
+by status, the gate card on the node, and approval answerable from the graph
+so a reviewer does not navigate away from the thing being approved. Selecting
+a phase shows its activity beside it.
+
+**The distinction the whole view turns on is `unknown` versus `pending`.** A
+workflow *query* is answered by a worker, so with none running there is nobody
+to answer — and an engine that is down renders identically to a flow that has
+not started if "could not read" is allowed to become "not yet". One of those
+is an outage. So the response carries `live: false` and a reason, the phases
+still list (a run whose shape is known and whose progress is not should show
+the shape), and every status reads `unknown`.
+
+Known gaps, stated rather than papered over:
+
+- **The activity lane does not yet show tool calls, decisions, evidence or
+  token cost.** Those come from session capture and twin commits, which the
+  workflow's event log does not carry. The panel names what is missing instead
+  of rendering empty headings — an empty "Tool calls" section reads as "this
+  phase made none".
+- **It polls at 2s rather than streaming.** The run SSE stream carries status
+  transitions only: it is fired by the run store's `on_transition`, which a
+  phase starting inside the workflow never touches. Publishing phase events
+  into that stream is its own change. A poll is honest about being a poll; an
+  SSE subscription that silently only updated on status changes would look
+  live and not be.
+
 ### Editing a flow, and where an edited flow lives (FORGE-399)
 
 FORGE-398 generated a proposal, held it for approval, and stored only a *text
