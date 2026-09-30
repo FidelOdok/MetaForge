@@ -103,6 +103,7 @@ READ_ONLY: frozenset[str] = frozenset(
         "twin.constraint_violations",
         "twin.evaluate_metric",
         "twin.evaluate_thermal_metric",
+        "twin.evaluate_overhang_metric",
         "twin.find_by_property",
         "twin.get_design_loop",
         "twin.get_node",

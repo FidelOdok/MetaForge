@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '../../../test/test-utils';
+import { render, screen, fireEvent } from '../../../test/test-utils';
 
 vi.mock('../../../hooks/use-hierarchy', () => ({
   useHierarchyTree: vi.fn(),
@@ -82,6 +82,37 @@ describe('StructureView', () => {
     } as unknown as ReturnType<typeof useHierarchyTree>);
     render(<StructureView projectId="p1" onSelect={() => {}} />);
     expect(screen.queryByLabelText(/interface/)).not.toBeInTheDocument();
+  });
+
+  it('shows a DFM check button only for a node with real geometry', () => {
+    mockUseHierarchyTree.mockReturnValue({
+      data: [
+        node({ id: 'n1', name: 'realized', realizedByWorkProductId: 'wp-1' }),
+        node({ id: 'n2', name: 'placeholder' }),
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchyTree>);
+    render(<StructureView projectId="p1" onSelect={() => {}} />);
+    expect(screen.getByTestId('dfm-check-button-n1')).toBeInTheDocument();
+    expect(screen.queryByTestId('dfm-check-button-n2')).not.toBeInTheDocument();
+  });
+
+  it('opens the DFM overhang panel with a disabled run button until a mesh file is entered', () => {
+    mockUseHierarchyTree.mockReturnValue({
+      data: [node({ id: 'n1', name: 'upper_arm', realizedByWorkProductId: 'wp-1' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchyTree>);
+    render(<StructureView projectId="p1" onSelect={() => {}} />);
+
+    fireEvent.click(screen.getByTestId('dfm-check-button-n1'));
+    expect(screen.getByTestId('dfm-overhang-panel')).toBeInTheDocument();
+    const runButton = screen.getByTestId('run-dfm-check');
+    expect(runButton).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('dfm-mesh-file-input'), {
+      target: { value: '/workspace/upper_arm.inp' },
+    });
+    expect(runButton).not.toBeDisabled();
   });
 
   it('shows the allocation owner as a title on the mass cell', () => {

@@ -31,6 +31,7 @@ from api_gateway.component_selection.routes import router as component_selection
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.design_loop.routes import router as design_loop_router
+from api_gateway.dfm.routes import router as dfm_router
 from api_gateway.evals.routes import router as evals_router
 from api_gateway.features.routes import router as features_router
 from api_gateway.harness import router as harness_router
@@ -791,6 +792,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_design_sketch_recorder,
     )
     from api_gateway.twin.device_instance_recorder import make_device_instance_registrar
+    from api_gateway.twin.dfm_evidence import make_overhang_evidence_recorder
     from api_gateway.twin.document_recorder import make_document_recorder
     from api_gateway.twin.ect_tools import make_ect_bridge
     from api_gateway.twin.engineering_entity_approval import make_engineering_entity_approver
@@ -841,6 +843,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # real calculix.run_thermal / calculix.cross_check_thermal_steady_state
     # calls.
     thermal_evaluator_bridge = _LazyBridge()
+    # FORGE-273: same lazy-bridge seam, for twin.evaluate_overhang_metric's
+    # real freecad.list_named_faces call.
+    overhang_evaluator_bridge = _LazyBridge()
     evidence_recorder_fn = make_evidence_recorder(twin, project_backend)
     # FORGE-321: a real measurement history overrides evaluate_metric's
     # fixed-prior band once enough of it exists for a given metric/tier --
@@ -860,6 +865,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin,
         evidence_recorder=evidence_recorder_fn,
         mcp_bridge=thermal_evaluator_bridge,
+    )
+    # FORGE-273: 3D-print overhang DFM check -- runs a real
+    # freecad.list_named_faces mesh lookup and records the flagged-face
+    # result as Evidence (gap G-D5).
+    overhang_evaluator_fn = make_overhang_evidence_recorder(
+        twin,
+        evidence_recorder=evidence_recorder_fn,
+        mcp_bridge=overhang_evaluator_bridge,
     )
     # FORGE-316: dispatch table for twin.execute_revalidation_plan --
     # every tool a stale Evidence's metadata["replay"]["tool_id"] can name.
@@ -1054,6 +1067,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # recorder. thermal_evaluator_bridge is bound to the real
         # active_bridge below, once it exists.
         thermal_evaluator=thermal_evaluator_fn,
+        # FORGE-273: 3D-print overhang DFM check + evidence recorder.
+        # overhang_evaluator_bridge is bound to the real active_bridge
+        # below, once it exists.
+        overhang_evaluator=overhang_evaluator_fn,
         # FORGE-316: automatic selective re-run of exactly what a
         # committed ECT's real revalidation_plan marked stale.
         revalidation_executor=revalidation_executor_fn,
@@ -1112,6 +1129,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-297: same for thermal_evaluator_bridge (twin.
     # evaluate_thermal_metric's calculix.run_thermal call).
     thermal_evaluator_bridge.bridge = active_bridge
+    # FORGE-273: same for overhang_evaluator_bridge (twin.
+    # evaluate_overhang_metric's freecad.list_named_faces call).
+    overhang_evaluator_bridge.bridge = active_bridge
+    # FORGE-273: bind the same evaluator closure to the dashboard's REST
+    # route (api_gateway/dfm/routes.py) -- only now, after the bridge above
+    # is bound, since the closure calls mcp_bridge.invoke internally.
+    from api_gateway.dfm.routes import init_overhang_evaluator
+
+    init_overhang_evaluator(overhang_evaluator_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -1753,6 +1779,7 @@ def create_app(
     app.include_router(decisions_router)
     app.include_router(trade_study_router)
     app.include_router(component_selection_router)
+    app.include_router(dfm_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:
