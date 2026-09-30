@@ -113,6 +113,7 @@ class TwinServer(McpToolServer):
         hierarchy_geometry_linker: Any = None,
         metric_evaluator: Any = None,
         thermal_evaluator: Any = None,
+        overhang_evaluator: Any = None,
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
@@ -288,6 +289,14 @@ class TwinServer(McpToolServer):
         # injection seam as every recorder above; None keeps tool_registry
         # free of api_gateway imports.
         self._thermal_evaluator = thermal_evaluator
+        # FORGE-273: an injected async ``evaluate_overhang(...)``
+        # (make_overhang_evidence_recorder) -- runs a real freecad.
+        # list_named_faces call (via a lazily-bound MCP bridge, same seam
+        # as metric_evaluator/thermal_evaluator) and records the per-face
+        # 3D-print overhang check as Evidence against a work product. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of api_gateway imports.
+        self._overhang_evaluator = overhang_evaluator
         # FORGE-316: an injected async ``execute(ect_id) -> dict``
         # (make_revalidation_executor) -- re-runs exactly the Evidence a
         # committed ECT's real revalidation_plan marked stale, for any
@@ -403,6 +412,8 @@ class TwinServer(McpToolServer):
             self._register_evaluate_metric()
         if thermal_evaluator is not None:
             self._register_evaluate_thermal_metric()
+        if overhang_evaluator is not None:
+            self._register_evaluate_overhang_metric()
         if revalidation_executor is not None:
             self._register_execute_revalidation_plan()
         if sensitivity_ranker is not None:
@@ -4222,6 +4233,102 @@ class TwinServer(McpToolServer):
                 float(rated_max_temp_c) if isinstance(rated_max_temp_c, (int, float)) else None
             ),
             cross_check=cross_check if isinstance(cross_check, dict) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.evaluate_overhang_metric (FORGE-273)
+    # ------------------------------------------------------------------
+
+    def _register_evaluate_overhang_metric(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.evaluate_overhang_metric",
+                adapter_id="twin",
+                name="Evaluate Overhang Metric",
+                description=(
+                    "Runs a real freecad.list_named_faces mesh face-table lookup "
+                    "and flags faces tilted more than a threshold (default 45 "
+                    "degrees) from the vertical build axis as 3D-print overhang "
+                    "risks, recording the result as Evidence pinned to a work "
+                    "product's current revision -- the same 'run a real tool, "
+                    "record its output as graph-checkable Evidence' pattern "
+                    "twin.evaluate_thermal_metric established (FORGE-297), "
+                    "applied to DFM (FORGE-273, gap G-D5). Deliberately "
+                    "undirected (see api_gateway/twin/dfm_evidence.py's module "
+                    "docstring): the underlying mesh normal isn't guaranteed to "
+                    "point outward, so this flags any near-horizontal face -- "
+                    "both real unsupported overhangs and harmless flat top "
+                    "surfaces -- rather than risk a confidently-wrong directed "
+                    "check. Advisory only, not wired into twin.attempt_promotion."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "CAD_MODEL work product id the check validates.",
+                        },
+                        "project_id": {"type": "string"},
+                        "mesh_file": {
+                            "type": "string",
+                            "description": "Mesh file path from freecad.generate_mesh.",
+                        },
+                        "build_axis": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Unit build-up direction. Default [0, 0, 1] (Z-up).",
+                        },
+                        "threshold_deg": {
+                            "type": "number",
+                            "description": (
+                                "Max printable tilt from vertical, degrees. Default 45.0 "
+                                "(the standard FDM self-supporting overhang convention)."
+                            ),
+                        },
+                    },
+                    "required": ["work_product_id", "mesh_file"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "faces": {"type": "array"},
+                        "flagged_count": {"type": "integer"},
+                        "total_faces": {"type": "integer"},
+                        "threshold_deg": {"type": "number"},
+                        "build_axis": {"type": "array"},
+                        "dfm_pass": {"type": "boolean"},
+                        "evidence_node_id": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=120),
+            ),
+            handler=self.evaluate_overhang_metric,
+        )
+
+    async def evaluate_overhang_metric(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.evaluate_overhang_metric: 'work_product_id' is required")
+        mesh_file = arguments.get("mesh_file")
+        if not mesh_file or not isinstance(mesh_file, str):
+            raise ValueError("twin.evaluate_overhang_metric: 'mesh_file' is required")
+        project_id = arguments.get("project_id")
+        build_axis = arguments.get("build_axis")
+        if build_axis is not None and (not isinstance(build_axis, list) or len(build_axis) != 3):
+            raise ValueError(
+                "twin.evaluate_overhang_metric: 'build_axis' must be a 3-element array"
+            )
+        threshold_deg = arguments.get("threshold_deg")
+        return await self._overhang_evaluator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+            mesh_file=mesh_file,
+            build_axis=[float(v) for v in build_axis] if build_axis is not None else None,
+            threshold_deg=float(threshold_deg) if isinstance(threshold_deg, (int, float)) else None,
         )
 
     # ------------------------------------------------------------------

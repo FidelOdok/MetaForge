@@ -4,6 +4,7 @@ import { OrbitControls, useGLTF } from '@react-three/drei';
 import { Boxes } from 'lucide-react';
 import { useHierarchyTree, useRealizeHierarchyNode } from '../../hooks/use-hierarchy';
 import { useBom } from '../../hooks/use-bom';
+import { useOverhangCheck } from '../../hooks/use-dfm';
 import { iconForHierarchyKind } from '../../utils/wp-icons';
 import { DecisionList } from '../shared/DecisionList';
 import { ImportZone } from '../ImportZone';
@@ -280,6 +281,111 @@ function RealizeNodePanel({
   );
 }
 
+/** FORGE-273 (gap G-D5): "DFM check" -- run the 3D-print overhang check
+ * against a hierarchy node's real committed geometry. Requires an
+ * already-generated mesh file (no mesh-generation UI exists in this
+ * dashboard yet -- see api_gateway/twin/dfm_evidence.py's module
+ * docstring for the underlying check's scope/limitations); the mesh path
+ * is a real, explicit input rather than a hidden assumption. Renders a
+ * face-by-face list rather than a 3D-highlighted contour (a full 3D
+ * overlay is explicitly deferred, see the ticket's own scope note). */
+function DfmOverhangPanel({
+  node,
+  projectId,
+  onClose,
+}: {
+  node: HierarchyNode;
+  projectId: string | null;
+  onClose: () => void;
+}) {
+  const [meshFile, setMeshFile] = useState('');
+  const check = useOverhangCheck();
+
+  const runCheck = () => {
+    if (!meshFile.trim() || !node.realizedByWorkProductId) return;
+    check.mutate({
+      workProductId: node.realizedByWorkProductId,
+      projectId: projectId ?? undefined,
+      meshFile: meshFile.trim(),
+    });
+  };
+
+  const result = check.data;
+
+  return (
+    <div
+      data-testid="dfm-overhang-panel"
+      className="mt-2 rounded-lg p-3"
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-on-surface">3D-print overhang check: {node.name}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-on-surface-variant hover:text-on-surface"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant" style={{ flex: 1, minWidth: '220px' }}>
+          Mesh file (from freecad.generate_mesh)
+          <input
+            type="text"
+            value={meshFile}
+            onChange={(e) => setMeshFile(e.target.value)}
+            placeholder="/workspace/upper_arm.inp"
+            data-testid="dfm-mesh-file-input"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, width: '100%' }}
+          />
+        </label>
+        <Button
+          size="sm"
+          data-testid="run-dfm-check"
+          disabled={!meshFile.trim() || check.isPending}
+          onClick={runCheck}
+        >
+          {check.isPending ? 'Checking…' : 'Run check'}
+        </Button>
+      </div>
+
+      {check.isError && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--mf-c-ff-b4-ab)' }}>
+          Could not run the overhang check.
+        </p>
+      )}
+
+      {result && (
+        <div className="mt-3" data-testid="dfm-result-summary">
+          <p
+            className="mb-2 text-xs font-medium"
+            style={{ color: result.dfmPass ? 'var(--mf-c-a6-d6-a1)' : 'var(--mf-c-ff-b4-ab)' }}
+          >
+            {result.dfmPass ? 'DFM PASS' : 'DFM issues found'} -- {result.flaggedCount}/
+            {result.totalFaces} faces flagged (tilt &gt; {result.thresholdDeg}° from vertical)
+          </p>
+          {result.flaggedCount > 0 && (
+            <ul className="flex flex-col gap-1" data-testid="dfm-flagged-faces">
+              {result.faces
+                .filter((f) => f.flagged)
+                .map((f) => (
+                  <li key={f.name ?? Math.random()} className="text-xs text-on-surface-variant">
+                    <span className="text-on-surface">{f.name ?? '(unnamed face)'}</span> --{' '}
+                    {f.tiltFromVerticalDeg.toFixed(1)}° from vertical
+                    {f.areaMm2 != null ? `, ${f.areaMm2.toFixed(1)} mm²` : ''}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TreeRow({
   node,
   depth,
@@ -289,6 +395,8 @@ function TreeRow({
   projectId,
   realizingId,
   onToggleRealize,
+  dfmCheckingId,
+  onToggleDfmCheck,
 }: {
   node: TreeNode;
   depth: number;
@@ -298,12 +406,15 @@ function TreeRow({
   projectId: string | null;
   realizingId: string | null;
   onToggleRealize: (id: string) => void;
+  dfmCheckingId: string | null;
+  onToggleDfmCheck: (id: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
   const overBudget = node.massOverBudget === true || node.costOverBudget === true;
   const hasGeometry = !!node.realizedByWorkProductId || !!node.instanceOfBomItemId;
   const isRealizing = realizingId === node.id;
+  const isDfmChecking = dfmCheckingId === node.id;
 
   return (
     <>
@@ -369,10 +480,26 @@ function TreeRow({
         >
           {hasGeometry ? 'Replace part' : 'Replace placeholder'}
         </button>
+        {node.realizedByWorkProductId && (
+          <button
+            type="button"
+            data-testid={`dfm-check-button-${node.id}`}
+            onClick={() => onToggleDfmCheck(node.id)}
+            className="rounded px-2 py-0.5 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            DFM check
+          </button>
+        )}
       </div>
       {isRealizing && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
           <RealizeNodePanel node={node} projectId={projectId} onClose={() => onToggleRealize(node.id)} />
+        </div>
+      )}
+      {isDfmChecking && (
+        <div style={{ paddingLeft: depth * 20 + 28 }}>
+          <DfmOverhangPanel node={node} projectId={projectId} onClose={() => onToggleDfmCheck(node.id)} />
         </div>
       )}
       {hasChildren && !isCollapsed && (
@@ -388,6 +515,8 @@ function TreeRow({
               projectId={projectId}
               realizingId={realizingId}
               onToggleRealize={onToggleRealize}
+              dfmCheckingId={dfmCheckingId}
+              onToggleDfmCheck={onToggleDfmCheck}
             />
           ))}
         </div>
@@ -413,6 +542,10 @@ export function StructureView({
   // FORGE-266 (gap G-C2): which node's "Replace placeholder with part"
   // panel is open, at most one at a time.
   const [realizingId, setRealizingId] = useState<string | null>(null);
+  // FORGE-273 (gap G-D5): which node's DFM overhang-check panel is open,
+  // at most one at a time (independent of realizingId -- both could
+  // theoretically be open on different nodes, just not the same node).
+  const [dfmCheckingId, setDfmCheckingId] = useState<string | null>(null);
 
   const forest = useMemo(() => buildForest(nodes ?? []), [nodes]);
 
@@ -478,6 +611,8 @@ export function StructureView({
               projectId={projectId}
               realizingId={realizingId}
               onToggleRealize={(id) => setRealizingId((cur) => (cur === id ? null : id))}
+              dfmCheckingId={dfmCheckingId}
+              onToggleDfmCheck={(id) => setDfmCheckingId((cur) => (cur === id ? null : id))}
             />
           ))}
         </div>

@@ -181,6 +181,36 @@ test.describe('Digital Twin Viewer', () => {
     await expect(actuatorRow.getByTestId(/^realize-node-button-/)).toHaveText('Replace part');
   });
 
+  test('Structure tab: DFM overhang check (FORGE-273)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await expect(upperArmRow).toBeVisible();
+    await expect(upperArmRow.getByTestId(/^dfm-check-button-/)).toBeVisible();
+
+    await upperArmRow.getByTestId(/^dfm-check-button-/).click();
+    const panel = page.getByTestId('dfm-overhang-panel');
+    await expect(panel).toBeVisible();
+
+    const runButton = panel.getByTestId('run-dfm-check');
+    await expect(runButton).toBeDisabled();
+    await panel.getByTestId('dfm-mesh-file-input').fill('/workspace/elbow_actuator.inp');
+    await expect(runButton).not.toBeDisabled();
+    await runButton.click();
+
+    const summary = panel.getByTestId('dfm-result-summary');
+    await expect(summary).toBeVisible({ timeout: 10_000 });
+    // The demo mesh's two illustrative faces are both perfectly horizontal
+    // (normals (0,0,-1)/(0,0,1)), so both are flagged past the 45-degree
+    // threshold -- a real, non-canned computation over the mocked mesh.
+    await expect(summary).toContainText('2/2 faces flagged');
+    await expect(panel.getByTestId('dfm-flagged-faces')).toContainText('Surface1');
+    await expect(panel.getByTestId('dfm-flagged-faces')).toContainText('Surface2');
+  });
+
   test('Assembly tab: joints are editable and persist', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the graph canvas.

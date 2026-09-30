@@ -273,6 +273,7 @@ async def bootstrap_tool_registry(
     hierarchy_geometry_linker: Any = None,
     metric_evaluator: Any = None,
     thermal_evaluator: Any = None,
+    overhang_evaluator: Any = None,
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
@@ -395,6 +396,14 @@ async def bootstrap_tool_registry(
             Evidence, single-tier (no hand-calc-gated escalation like
             metric_evaluator). ``None`` skips registration (same pattern
             as ``document_recorder``).
+        overhang_evaluator: Optional async ``evaluate_overhang(...)``
+            (make_overhang_evidence_recorder, FORGE-273). When supplied,
+            registers ``twin.evaluate_overhang_metric`` -- runs a real
+            ``freecad.list_named_faces`` mesh lookup, flags faces tilted
+            past a threshold from vertical as 3D-print overhang risks, and
+            records the result as Evidence. Advisory only (not wired into
+            ``twin.attempt_promotion``). ``None`` skips registration (same
+            pattern as ``document_recorder``).
         revalidation_executor: Optional async ``execute(ect_id) -> dict``
             (make_revalidation_executor, FORGE-316). When supplied,
             registers ``twin.execute_revalidation_plan`` -- re-runs
@@ -636,6 +645,7 @@ async def bootstrap_tool_registry(
                     hierarchy_geometry_linker=hierarchy_geometry_linker,
                     metric_evaluator=metric_evaluator,
                     thermal_evaluator=thermal_evaluator,
+                    overhang_evaluator=overhang_evaluator,
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,
                     promotion_attempter=promotion_attempter,

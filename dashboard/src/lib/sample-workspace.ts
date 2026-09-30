@@ -1023,7 +1023,10 @@ const SAMPLE_WORKSPACE_SEED = {
           quantities: [{ metric: 'tip_deflection', unit: 'mm', limit: 0.5, op: '<=' }],
         },
       ],
-      realizedByWorkProductId: null,
+      // FORGE-273 (gap G-D5): real committed geometry, so the sample
+      // workspace demonstrates the "DFM check" button (which needs a real
+      // CAD_MODEL work product id, unlike a BOMItem-only INSTANCE_OF).
+      realizedByWorkProductId: 'sample-wp-upper-arm',
       instanceOfBomItemId: null,
     },
     {
@@ -1759,6 +1762,48 @@ function route(
         Math.hypot(...b.reaction_moment_n_mm) > Math.hypot(...a.reaction_moment_n_mm) ? b : a,
       );
       return { loads, worst_joint: worst };
+    }
+    if (path === '/dfm/overhang-check') {
+      // FORGE-273: mirrors api_gateway.twin.dfm_evidence's real undirected
+      // tilt-from-vertical math (not a canned pass/fail) over the same
+      // illustrative two-face box mesh /simulation/named-faces uses above --
+      // Surface1's normal (0,0,-1) is a perfectly horizontal face (90 deg
+      // tilt, flagged); Surface2's normal (0,0,1) is the same story
+      // (also 90 deg, since the check is undirected -- see the real
+      // module's docstring on why the mesh normal's sense isn't trusted).
+      const buildAxis = (body.build_axis as [number, number, number] | undefined) ?? [0, 0, 1];
+      const thresholdDeg = (body.threshold_deg as number | undefined) ?? 45.0;
+      const faces = [
+        { name: 'Surface1', area_mm2: 100, normal: [0, 0, -1] as [number, number, number] },
+        { name: 'Surface2', area_mm2: 100, normal: [0, 0, 1] as [number, number, number] },
+      ];
+      const mag = (v: [number, number, number]) => Math.hypot(v[0], v[1], v[2]);
+      const dot = (a: [number, number, number], b: [number, number, number]) =>
+        a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      const bMag = mag(buildAxis);
+      const checked = faces.map((f) => {
+        const nMag = mag(f.normal);
+        const cos = nMag > 1e-12 && bMag > 1e-12 ? Math.abs(dot(f.normal, buildAxis)) / (nMag * bMag) : 0;
+        const angleFromAxisDeg = (Math.acos(Math.min(1, Math.max(-1, cos))) * 180) / Math.PI;
+        const tilt = 90 - angleFromAxisDeg;
+        return {
+          name: f.name,
+          area_mm2: f.area_mm2,
+          normal: f.normal,
+          tilt_from_vertical_deg: Math.round(tilt * 1000) / 1000,
+          flagged: tilt > thresholdDeg,
+        };
+      });
+      const flagged = checked.filter((f) => f.flagged);
+      return {
+        faces: checked,
+        flagged_count: flagged.length,
+        total_faces: checked.length,
+        threshold_deg: thresholdDeg,
+        build_axis: buildAxis,
+        dfm_pass: flagged.length === 0,
+        evidence_node_id: 'evidence-dfm-demo',
+      };
     }
   }
   if (method === 'patch') {
