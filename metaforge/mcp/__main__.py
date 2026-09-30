@@ -46,6 +46,7 @@ from mcp_core.auth import AUTH_DENIED, AuthPosture, redact, verify_api_key
 from mcp_core.context import HEADER_SESSION
 from mcp_core.elicitation import ElicitAction, ElicitResult
 from mcp_core.guardrails import Caller
+from mcp_core.protocol import AUTH_DENIED as AUTH_DENIED_CODE
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
 
@@ -146,7 +147,10 @@ def _auth_error_response(request_id: str, reason: str) -> str:
             "jsonrpc": "2.0",
             "id": request_id,
             "error": {
-                "code": -32002,
+                # FORGE-388: the shared table, not a literal. -32002 is
+                # the spec's "Resource not found"; a rejected credential
+                # is AUTH_DENIED.
+                "code": AUTH_DENIED_CODE,
                 "message": "Authentication failed",
                 "data": {"error_type": AUTH_DENIED, "reason": reason},
             },

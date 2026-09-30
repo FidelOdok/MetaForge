@@ -46,6 +46,13 @@ from mcp_core.guardrails import (
     decide,
 )
 from mcp_core.profiles import tools_for_profile
+from mcp_core.protocol import (
+    AUTH_DENIED,
+    INVALID_REQUEST,
+    METHOD_NOT_FOUND,
+    RESOURCE_NOT_FOUND,
+    TOOL_EXECUTION_ERROR,
+)
 from mcp_core.resources import ResourceUriError, parse_resource_uri
 from mcp_core.workflows import WORKFLOWS, prompt_body, prompt_manifest
 from metaforge.mcp.capture import SessionCapture
@@ -69,12 +76,16 @@ tracer = get_tracer("metaforge.mcp.server")
 
 # JSON-RPC error codes (mirrors ``tool_registry.mcp_server.server`` so
 # clients see consistent codes regardless of which entry point they hit).
-_INVALID_REQUEST = -32600
-_METHOD_NOT_FOUND = -32601
-_TOOL_EXECUTION_ERROR = -32001
-# MET-338: dedicated code for failed API-key auth so clients can branch
-# on it without parsing message strings.
-_AUTH_DENIED = -32002
+# FORGE-388: one error-code table, imported rather than restated. These
+# used to be redefined here, and `_AUTH_DENIED = -32002` collided with
+# both `mcp_core.protocol.TOOL_TIMEOUT` and the code the MCP spec assigns
+# to "Resource not found". A second copy of a table is a copy that can
+# disagree, and this one did.
+_INVALID_REQUEST = INVALID_REQUEST
+_METHOD_NOT_FOUND = METHOD_NOT_FOUND
+_TOOL_EXECUTION_ERROR = TOOL_EXECUTION_ERROR
+_RESOURCE_NOT_FOUND = RESOURCE_NOT_FOUND
+_AUTH_DENIED = AUTH_DENIED
 
 
 # MET-503: returned in the ``initialize`` handshake so any MCP client learns
@@ -389,7 +400,7 @@ class UnifiedMcpServer:
                 return json.dumps(
                     make_error(
                         request_id,
-                        _METHOD_NOT_FOUND if missing else _TOOL_EXECUTION_ERROR,
+                        _RESOURCE_NOT_FOUND if missing else _TOOL_EXECUTION_ERROR,
                         str(exc),
                         {"uri": getattr(exc, "uri", None), "retryable": False},
                     )
@@ -1035,7 +1046,16 @@ class UnifiedMcpServer:
         payload = json.loads(raw)
         if "error" in payload:
             err = payload["error"]
-            raise ResourceReadError(uri, err.get("message", "resource read failed"))
+            message = err.get("message", "resource read failed")
+            # FORGE-388: honour the adapter's own code. This used to raise
+            # ResourceReadError whatever came back, so an adapter saying
+            # "this resource does not exist" reached the client as an
+            # execution error carrying the words "Resource not found" --
+            # the code contradicting its own message, and a client
+            # branching on the code drawing the wrong conclusion.
+            if err.get("code") == _RESOURCE_NOT_FOUND:
+                raise ResourceNotFoundError(f"{uri}: {message}")
+            raise ResourceReadError(uri, message)
         return dict(payload.get("result", {}))
 
     # ── Tool-id resolution (FORGE-343) ────────────────────────────────────

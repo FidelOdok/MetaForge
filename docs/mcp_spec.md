@@ -917,8 +917,23 @@ All MCP errors use standard JSON-RPC 2.0 error codes plus MetaForge-specific app
 | `-32601` | `METHOD_NOT_FOUND` | Unknown method (e.g., `tool/call` with invalid tool_id) |
 | `-32602` | `INVALID_PARAMS` | Tool arguments fail schema validation |
 | `-32001` | `TOOL_EXECUTION_ERROR` | Tool ran but produced an error (solver crash, invalid input) |
-| `-32002` | `TOOL_TIMEOUT` | Tool exceeded its timeout limit |
+| `-32002` | `RESOURCE_NOT_FOUND` | No such resource. **The code the MCP spec assigns**, so a spec-aware client reads it this way whatever we intend |
 | `-32003` | `TOOL_UNAVAILABLE` | Tool adapter is unhealthy or not registered |
+| `-32005` | `RESOURCE_READ_ERROR` | The resource exists and could not be read |
+| `-32006` | `TOOL_TIMEOUT` | Tool exceeded its timeout limit |
+| `-32007` | `AUTH_DENIED` | A credential was rejected |
+
+These live in one place, `mcp_core/protocol.py`, and every module imports
+them. FORGE-388 found **three** tables that disagreed: `-32002` meant
+`TOOL_TIMEOUT` in one, auth-denied in another, and the adapters emitted
+`-32004` for a missing resource — while the spec reserves `-32002` for
+exactly that. A client branching on `-32002` could not tell a missing
+resource from a timeout from a rejected credential, which is the whole
+purpose of a numeric code.
+
+`TOOL_TIMEOUT` and `AUTH_DENIED` moved to free codes rather than the
+spec-assigned one. Both are MetaForge-specific, so no client outside this
+repo was reading them.
 
 ### Error Response Format
 
@@ -950,7 +965,7 @@ class ToolExecutionError(McpError):
 class ToolTimeoutError(McpError):
     def __init__(self, tool_id: str, timeout_seconds: int):
         super().__init__(
-            code=-32002,
+            code=-32006,
             message=f"Tool exceeded timeout of {timeout_seconds}s",
             data=McpErrorData(
                 error_type="TOOL_TIMEOUT",

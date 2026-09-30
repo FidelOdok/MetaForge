@@ -28,6 +28,7 @@ from digital_twin.knowledge.service import (
     SourceSummary,
 )
 from digital_twin.knowledge.types import KnowledgeType
+from mcp_core.protocol import RESOURCE_NOT_FOUND
 from tool_registry.tools.knowledge.adapter import KnowledgeServer
 
 # ---------------------------------------------------------------------------
@@ -333,8 +334,10 @@ class TestReadUnknownSource:
 
         # JSON-RPC error wrapper for resource-not-found.
         assert "error" in body, body
-        # The server maps ResourceNotFoundError → -32004 (RESOURCE_NOT_FOUND).
-        assert body["error"]["code"] == -32004
+        # FORGE-388: -32002, the code the MCP spec assigns to "Resource
+        # not found". This asserted -32004 against a local table that
+        # disagreed with the spec and with two other tables in the repo.
+        assert body["error"]["code"] == RESOURCE_NOT_FOUND
         # Offending URI is in the data payload so the harness can
         # surface it without re-parsing the message.
         assert body["error"]["data"]["uri"] == uri

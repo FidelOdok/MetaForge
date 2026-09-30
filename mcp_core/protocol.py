@@ -15,14 +15,29 @@ from mcp_core.schemas import (
 
 # --- Error codes (JSON-RPC 2.0 standard + MCP-specific) ---
 
+# JSON-RPC 2.0 reserves -32000..-32099 for implementation-defined server
+# errors, and the MCP spec pins two of them: -32002 is "Resource not
+# found". FORGE-388: this table had -32002 as TOOL_TIMEOUT and
+# RESOURCE_NOT_FOUND at -32004, while `metaforge/mcp/server.py` kept a
+# *second* table where -32002 meant "auth denied" -- three meanings for
+# one number, none of them the spec's. A client branching on -32002 could
+# not tell a missing resource from a timeout from a rejected credential,
+# which is the entire purpose of a numeric code.
+#
+# One table now. Spec-assigned codes match the spec; the rest keep the
+# values they already had wherever nothing forced a move.
 INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 TOOL_EXECUTION_ERROR = -32001
-TOOL_TIMEOUT = -32002
+#: Per the MCP spec. Moved here from -32004.
+RESOURCE_NOT_FOUND = -32002
 TOOL_UNAVAILABLE = -32003
-RESOURCE_NOT_FOUND = -32004
 RESOURCE_READ_ERROR = -32005
+#: Moved off -32002, which the spec had already claimed.
+TOOL_TIMEOUT = -32006
+#: A credential was rejected. Previously -32002 in a second table.
+AUTH_DENIED = -32007
 
 
 class McpError(Exception):
