@@ -249,6 +249,63 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
     return root
 
 
+def build_marketplace() -> Path:
+    """The catalog that makes `/plugin marketplace add` work (FORGE-328).
+
+    Both generated READMEs have told people to run
+
+        /plugin marketplace add FidelOdok/MetaForge
+
+    since the packages existed, and there was no marketplace file, so the
+    command failed. A documented install path with nothing behind it is
+    worse than no install path: the first thing a new user does is the
+    thing that does not work.
+
+    Written at the repo root rather than under ``integrations/`` because
+    that is where Claude Code looks -- ``.claude-plugin/marketplace.json``
+    at the marketplace root, with every relative plugin source resolving
+    from the same root. Putting it anywhere else would need each user to
+    declare it in ``extraKnownMarketplaces`` by hand, which is not a
+    one-step install.
+    """
+    root = REPO / ".claude-plugin"
+    root.mkdir(exist_ok=True)
+    catalog = {
+        "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+        "name": "metaforge",
+        "owner": {"name": "MetaForge", "url": "https://www.metaforge.uk"},
+        "description": (
+            "Engineer hardware against a digital twin from your harness: "
+            "requirements, CAD, simulation and evidence, with writes held "
+            "for human approval."
+        ),
+        "plugins": [
+            {
+                "name": PLUGIN_NAME,
+                "source": "./integrations/claude-code",
+                "description": (
+                    "Connects to a MetaForge gateway over HTTP. Choose this for a "
+                    "team or hosted gateway, or a local one you already run."
+                ),
+                "category": "engineering",
+                "tags": ["hardware", "cad", "simulation", "digital-twin"],
+            },
+            {
+                "name": LOCAL_PLUGIN_NAME,
+                "source": "./integrations/claude-code-local",
+                "description": (
+                    "Runs MetaForge as a local process over stdio. No gateway, no "
+                    "account, no network. Needs `pip install metaforge`."
+                ),
+                "category": "engineering",
+                "tags": ["hardware", "cad", "simulation", "local-first"],
+            },
+        ],
+    }
+    (root / "marketplace.json").write_text(json.dumps(catalog, indent=2) + "\n")
+    return root / "marketplace.json"
+
+
 def build_claude_code_local() -> Path:
     """The no-gateway package (FORGE-374)."""
     root = OUT / "claude-code-local"
@@ -410,8 +467,10 @@ def main() -> int:
     # point at, and offering the option would imply otherwise.
     local = build_claude_code_local()
     print(f"wrote {local.relative_to(REPO)}")
+    catalog = build_marketplace()
+    print(f"wrote {catalog.relative_to(REPO)}")
     print(
-        "verify: claude plugin validate --strict integrations/claude-code "
+        "verify: claude plugin validate --strict . integrations/claude-code "
         "integrations/claude-code-local"
     )
     return 0
