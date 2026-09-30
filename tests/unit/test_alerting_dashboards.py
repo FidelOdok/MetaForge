@@ -89,10 +89,11 @@ class TestAlertingRules:
         # + 1 consolidation-contradictions (MET-455)
         # + 3 KB storage (MinIO bucket size / write latency / access errors,
         #   MET-476)
-        # + 2 harness (production-harness audit follow-up).
+        # + 2 harness (production-harness audit follow-up)
+        # + 4 MCP surface (FORGE-379).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 23
+        assert len(rules) == 27
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -122,11 +123,12 @@ class TestAlertingRules:
         # + 1 consolidation-contradictions (MET-455)
         # + 3 KB-storage (MinIO bucket size / write latency / access errors,
         #   MET-476)
-        # + 2 harness (production-harness audit follow-up).
+        # + 2 harness (production-harness audit follow-up)
+        # + 3 MCP surface (FORGE-379; the fourth is severity: info).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 17
+        assert len(warnings) == 20
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -153,6 +155,9 @@ class TestAlertingRules:
             [
                 "ConsolidationContradictionsRising",
                 "ContextTruncationSpike",
+                "McpAdapterUnreachable",
+                "McpErrorRateHigh",
+                "McpUnexpectedErrors",
                 "DeviceOffline",
                 "ErrorBudgetBurnRate",
                 "HarnessToolCallErrorRateHigh",

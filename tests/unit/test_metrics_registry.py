@@ -57,7 +57,7 @@ class TestMetricsRegistryGroupedAccess:
         # + 4 constraint + 5 retrieval (MET-326) + 1 knowledge (MET-401)
         # + 1 twin (MET-439) + 6 consolidation (MET-454/455)
         # + 5 harness (production-harness audit follow-up)
-        assert len(all_metrics) == 50
+        assert len(all_metrics) == 54
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -88,6 +88,7 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.twin_metrics())
             + len(MetricsRegistry.consolidation_metrics())
             + len(MetricsRegistry.harness_metrics())
+            + len(MetricsRegistry.mcp_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 
