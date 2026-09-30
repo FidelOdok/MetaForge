@@ -19,7 +19,10 @@ from pydantic import BaseModel, Field
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI
 from twin_core.consistency.budgets import budget_from_entity
-from twin_core.consistency.hierarchy_budget import compute_budget_allocation_status
+from twin_core.consistency.hierarchy_budget import (
+    _METRIC_ROLLUP_FIELD,
+    compute_budget_allocation_status,
+)
 from twin_core.consistency.hierarchy_rollup import compute_hierarchy_rollup
 from twin_core.models.enums import EdgeType, WorkProductType
 
@@ -176,16 +179,28 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                     )
                     continue
                 if budget.metric not in ("mass", "cost"):
-                    # FORGE-345: a power budget is recorded, resolves, and
-                    # then vanishes here -- the Structure tab shows no row
-                    # at all, which reads as "nobody set one". It stays
-                    # dropped (there is no rollup to check it against), but
-                    # it is no longer dropped silently.
+                    # FORGE-345: a budget this tab cannot render vanishes
+                    # here, and no row reads as "nobody set one". It stays
+                    # dropped, but not silently.
+                    #
+                    # FORGE-390 changed why. Power now HAS a rollup --
+                    # draw_peak_w / draw_average_w / dissipation_w, checked
+                    # against supply and thermal capacity respectively --
+                    # so the reason is no longer "nothing can compute it"
+                    # but "this tab has columns for mass and cost only".
+                    # Saying the old thing would send someone looking for a
+                    # rollup that is already there.
+                    rollable = budget.metric in _METRIC_ROLLUP_FIELD
                     logger.info(
-                        "hierarchy_budget_metric_not_rollable",
+                        "hierarchy_budget_metric_not_rendered",
                         metric=budget.metric,
                         entity_id=str(entity.id),
-                        reason="only mass and cost have a hierarchy rollup source",
+                        has_rollup=rollable,
+                        reason=(
+                            "rolled up, but the Structure tab renders mass and cost only"
+                            if rollable
+                            else "no hierarchy rollup source for this metric"
+                        ),
                     )
                     continue
                 statuses = await compute_budget_allocation_status(_twin, budget)

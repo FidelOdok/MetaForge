@@ -38,7 +38,40 @@ from twin_core.api import TwinAPI
 from twin_core.consistency.hierarchy_rollup import compute_hierarchy_rollup
 from twin_core.consistency.models import Budget
 
-_METRIC_ROLLUP_FIELD = {"mass": "mass_kg", "cost": "cost"}
+#: Budget metric -> the rollup field that answers it (FORGE-390).
+#:
+#: Power is TWO budgets, not one, and they are checked against different
+#: limits:
+#:
+#:   power_draw_peak      vs supply/rail capacity -- brown-outs, inrush
+#:   power_draw_average   vs battery capacity     -- runtime
+#:   power_dissipation    vs thermal capacity     -- what the enclosure sheds
+#:
+#: They are linked by ``dissipation = draw - output`` rather than being the
+#: same number. For most electronics the useful output is near zero and the
+#: two nearly coincide; for a motor, an LED or a transmitter they do not,
+#: and merging them gets one budget wrong -- thermal overestimated, or
+#: supply underestimated.
+_METRIC_ROLLUP_FIELD = {
+    "mass": "mass_kg",
+    "cost": "cost",
+    "power_draw_peak": "draw_peak_w",
+    "power_draw_average": "draw_average_w",
+    "power_dissipation": "dissipation_w",
+}
+
+#: Metrics that name a real quantity ambiguously. Answering one of these
+#: would mean picking a budget on the caller's behalf, and picking wrong is
+#: silent: a thermal budget checked against draw passes designs that
+#: overheat, and a supply budget checked against dissipation passes designs
+#: that brown out.
+_AMBIGUOUS_METRICS = {
+    "power": (
+        "'power' is two budgets: power_draw_peak / power_draw_average "
+        "(against supply) and power_dissipation (against thermal capacity). "
+        "Say which."
+    ),
+}
 
 
 class AllocationStatus(BaseModel):
@@ -53,6 +86,8 @@ class AllocationStatus(BaseModel):
     # to know who owns an over-budget subsystem.
     owner: str = ""
     discipline: str = ""
+    detail: str = ""
+    """What to do about ``reason``, when a sentence helps. Empty otherwise."""
     reason: str = ""
     """Why ``actual`` is None, when it is. Empty when the check ran.
 
@@ -68,6 +103,7 @@ class AllocationStatus(BaseModel):
 #: Why a rollup could not be computed. Values are stable strings so a UI
 #: can branch on them without parsing prose.
 UNSUPPORTED_METRIC = "metric_has_no_rollup"
+AMBIGUOUS_METRIC = "metric_is_ambiguous"
 TARGET_NOT_A_NODE_ID = "target_is_not_a_node_id"
 TARGET_NOT_FOUND = "target_node_not_found"
 
@@ -80,11 +116,15 @@ async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> lis
     for allocation in budget.allocations:
         actual: float | None = None
         reason = ""
-        if rollup_field is None:
-            # e.g. `power`, which this gap's own capability text names but
-            # which has no rollup source: no graph node carries a power
-            # value the tree walk could read. Saying so beats a blank that
-            # looks like missing data somebody could go and enter.
+        detail = ""
+        if budget.metric in _AMBIGUOUS_METRICS:
+            # FORGE-390: not "unsupported" -- the quantity is rolled up,
+            # the question is which of two budgets was meant. Refusing is
+            # the point: choosing for them is wrong in a way nothing later
+            # would catch.
+            reason = AMBIGUOUS_METRIC
+            detail = _AMBIGUOUS_METRICS[budget.metric]
+        elif rollup_field is None:
             reason = UNSUPPORTED_METRIC
         else:
             try:
@@ -114,6 +154,7 @@ async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> lis
                 owner=allocation.owner,
                 discipline=allocation.discipline,
                 reason=reason,
+                detail=detail,
             )
         )
     return results
