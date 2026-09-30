@@ -21,6 +21,11 @@ from uuid import UUID
 import structlog
 
 from mcp_core.context import current_context
+from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
+    HumanAuthorityRequiredError,
+    reject_caller_supplied_approver,
+)
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import (
     ResourceLimits,
@@ -4455,10 +4460,12 @@ class TwinServer(McpToolServer):
                     "every one must be 'pass', or 'fail' covered by an approved waiver "
                     "(twin.record_engineering_entity entity_type='waiver' + "
                     "twin.approve_engineering_entity) naming that requirement. This is a "
-                    "REAL gate: with any required claim unsatisfied, or with no "
-                    "'decided_by' human authority supplied, promotion is REFUSED -- the "
-                    "attempt is still persisted (with exactly why it was blocked), "
-                    "'promoted' is just false."
+                    "REAL gate: with any required claim unsatisfied promotion is REFUSED "
+                    "-- the attempt is still persisted (with exactly why it was blocked), "
+                    "'promoted' is just false. The deciding human is NOT an argument "
+                    "(FORGE-393): this call is always held for a person, and whoever "
+                    "approves it is recorded as the authority. Passing 'decided_by' is an "
+                    "error, not a shortcut."
                 ),
                 capability="twin_promotion",
                 input_schema={
@@ -4485,14 +4492,6 @@ class TwinServer(McpToolServer):
                                 "Recorded for this attempt (band multiplier context). Default 1.0."
                             ),
                         },
-                        "decided_by": {
-                            "type": "string",
-                            "description": (
-                                "Human authority signoff -- omit to get a dry-run "
-                                "('all satisfied, awaiting authority') without promoting. "
-                                "Required when 'reject' is true (who rejected it)."
-                            ),
-                        },
                         "comment": {
                             "type": "string",
                             "description": (
@@ -4504,7 +4503,8 @@ class TwinServer(McpToolServer):
                             "type": "boolean",
                             "description": (
                                 "Human veto (FORGE-290): refuse promotion even if every "
-                                "required claim is satisfied. Requires decided_by. Default false."
+                                "required claim is satisfied. The rejecting human is the "
+                                "approver, taken from the approval. Default false."
                             ),
                         },
                     },
@@ -4541,15 +4541,27 @@ class TwinServer(McpToolServer):
                 "twin.attempt_promotion: 'required_claim_ids' is required (non-empty array)"
             )
         k = arguments.get("k", 1.0)
-        decided_by = arguments.get("decided_by")
         comment = arguments.get("comment")
         reject = arguments.get("reject", False)
+
+        # FORGE-393: the deciding human is whoever answered the approval, and
+        # the dispatcher puts them here. `decided_by` used to be a plain tool
+        # argument, which meant the model typed the name of the person the
+        # gate recorded as its authority. Refuse it outright rather than drop
+        # it quietly -- a model that passed it believes it set the authority.
+        reject_caller_supplied_approver("twin.attempt_promotion", arguments)
+        decided_by = arguments.get(APPROVED_BY_ARG)
+        if not isinstance(decided_by, str) or not decided_by.strip():
+            raise HumanAuthorityRequiredError(
+                "twin.attempt_promotion",
+                "no approver reached the tool, so nothing ran",
+            )
         return await self._promotion_attempter(
             project_id=project_id,
             level=level,
             required_claim_ids=[str(c) for c in required_claim_ids],
             k=float(k),
-            decided_by=decided_by if isinstance(decided_by, str) else None,
+            decided_by=decided_by,
             comment=comment if isinstance(comment, str) else None,
             reject=bool(reject),
         )

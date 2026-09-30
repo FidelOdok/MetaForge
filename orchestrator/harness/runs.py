@@ -94,6 +94,11 @@ class Run:
     updated_at: float
     error: str | None = None
     approval_reason: str | None = None
+    #: Who answered the approval, and whether that identity was verified
+    #: (FORGE-393). Set by ``submit_approval``; never by the code that asked
+    #: for the approval, and never by a tool argument.
+    approved_by: str | None = None
+    approver_verified: bool = False
     result: dict[str, Any] | None = None
     history: list[RunStatus] = field(default_factory=list)
 
@@ -185,13 +190,29 @@ class InMemoryRunStore:
         run.approval_reason = reason
         return run
 
-    def submit_approval(self, run_id: str, decision: ApprovalDecision) -> Run:
+    def submit_approval(
+        self,
+        run_id: str,
+        decision: ApprovalDecision,
+        *,
+        approved_by: str | None = None,
+        approver_verified: bool = False,
+    ) -> Run:
+        """Record a human's answer, and who gave it.
+
+        ``approved_by`` comes from the route that observed the decision — the
+        verified principal where there is one, otherwise a label for the
+        surface the click arrived on. It is recorded on both outcomes: knowing
+        who refused a promotion matters as much as knowing who allowed one.
+        """
         run = self.get(run_id)
         if run.status is not RunStatus.AWAITING_APPROVAL:
             raise InvalidTransition(run_id, run.status, RunStatus.RUNNING)
         target = RunStatus.RUNNING if decision is ApprovalDecision.APPROVE else RunStatus.REJECTED
         run = self._transition(run_id, target)
         run.approval_reason = None
+        run.approved_by = approved_by
+        run.approver_verified = approver_verified
         return run
 
     def complete(self, run_id: str, result: dict[str, Any] | None = None) -> Run:

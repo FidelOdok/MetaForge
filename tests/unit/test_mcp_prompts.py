@@ -96,4 +96,12 @@ class TestTheWordingStaysHonest:
         assert "_meta" in prompt_body("doctor")
 
     def test_gate_does_not_offer_to_supply_the_human(self) -> None:
-        assert "Do not supply one on the user's behalf" in prompt_body("gate")
+        """The prompt used to say "do not supply one on the user's behalf",
+        which left the model holding an argument it was asked politely not to
+        use. FORGE-393 removed the argument, so the prompt has to say the
+        stronger thing: passing it is an error, and the authority comes from
+        whoever approves."""
+        body = prompt_body("gate")
+        assert "Do not pass" in body and "`decided_by`" in body
+        assert "supplying it is an error" in body
+        assert "whoever approves it is recorded" in body

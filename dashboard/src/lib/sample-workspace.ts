@@ -1575,10 +1575,14 @@ function route(
       const payload = body as {
         requiredClaimIds?: string[];
         level?: string;
-        decidedBy?: string;
         comment?: string;
         reject?: boolean;
       };
+      // FORGE-393: the reviewer is resolved server-side from the request, not
+      // read off the body. The sample workspace stands in for that resolution
+      // with the same label a local gateway records for a dashboard click, so
+      // the demo shows what production would actually write down.
+      const decidedBy = 'local:dashboard';
       const ids = payload.requiredClaimIds ?? [];
       const results: SampleRequiredClaimResult[] = ids.map((id) => {
         const row = s.requirementMatrix.rows.find((r) => r.requirementId === id);
@@ -1597,12 +1601,13 @@ function route(
       let promoted = false;
       let blockedReason: string | null = null;
       if (payload.reject) {
-        blockedReason = payload.comment ?? `rejected by ${payload.decidedBy}`;
+        blockedReason = payload.comment ?? `rejected by ${decidedBy}`;
       } else if (blocking.length > 0) {
         blockedReason = blocking.map((r) => `${r.requirementName} (${r.decision}): ${r.detail}`).join('; ');
-      } else if (!payload.decidedBy) {
-        blockedReason = 'all required claims satisfied, but promotion requires human authority';
       } else {
+        // The "no human authority supplied" branch is gone: there is no longer
+        // a way to submit without one, so it could only ever be dead code
+        // pretending to be a guardrail.
         promoted = true;
       }
       const gate: SampleMaturityGate = {
@@ -1610,7 +1615,7 @@ function route(
         level: payload.level ?? 'concept',
         promoted,
         blockedReason,
-        decidedBy: payload.decidedBy ?? null,
+        decidedBy,
         comment: payload.comment ?? null,
         createdAt: now,
         results,

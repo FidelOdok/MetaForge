@@ -81,6 +81,61 @@ class Decision:
 _EXEMPTIBLE: frozenset[Caller] = frozenset({Caller.LOCAL})
 
 
+#: Tools whose entire output is a record of a *human's* decision (FORGE-393).
+#:
+#: These are different in kind from an ordinary write. ``twin.commit_geometry``
+#: writes geometry the model produced, and holding it for approval is about
+#: consent. ``twin.attempt_promotion`` writes down *who authorised* a maturity
+#: promotion — the human is not consenting to the write, the human **is** the
+#: content. So the identity has to come from whoever answered the approval, and
+#: never from an argument the model filled in.
+#:
+#: Two consequences, both enforced below and in the dispatcher:
+#:
+#: * the local-write exemption does not apply. A stdio session with no approval
+#:   surface cannot promote, because there is no human in it to record. That is
+#:   a refusal, not an outage: the alternative is a gate signed by nobody.
+#: * an approval that arrives without an identified approver is not enough.
+HUMAN_AUTHORITY_TOOLS: frozenset[str] = frozenset(
+    {
+        "twin.attempt_promotion",
+    }
+)
+
+
+#: Reserved argument key. The dispatcher uses it to hand a human-authority
+#: tool the approver it must record.
+#:
+#: It is stripped from client-supplied arguments before anything else happens,
+#: so a model cannot set it itself. Reserving a name only works if the name is
+#: taken away first — otherwise it is a convention, and a convention is exactly
+#: what the model is free to imitate.
+APPROVED_BY_ARG = "__approved_by__"
+
+#: Argument names through which a caller has historically named the deciding
+#: human. Supplying one is now an error on a human-authority tool.
+CALLER_SUPPLIED_APPROVER_ARGS: frozenset[str] = frozenset({"decided_by", "approver"})
+
+
+def strip_reserved_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Remove dispatcher-reserved keys from whatever the client sent."""
+    return {k: v for k, v in arguments.items() if k != APPROVED_BY_ARG}
+
+
+def reject_caller_supplied_approver(tool_id: str, arguments: dict[str, Any]) -> None:
+    """Refuse a call that tries to name its own approving human."""
+    if not requires_human_authority(tool_id):
+        return
+    for field in sorted(CALLER_SUPPLIED_APPROVER_ARGS):
+        if arguments.get(field) is not None:
+            raise ApproverArgumentRejectedError(tool_id, field)
+
+
+def requires_human_authority(tool_id: str) -> bool:
+    """Does this tool record a named human's decision as its result?"""
+    return tool_id in HUMAN_AUTHORITY_TOOLS
+
+
 def decide(
     tool_id: str,
     *,
@@ -100,6 +155,16 @@ def decide(
 
     if annotations["readOnlyHint"]:
         return Decision(tool_id, False, "reads only; nothing to authorise")
+
+    if requires_human_authority(tool_id):
+        # Never exempt. The result of this call is a human's name; running it
+        # with nobody watching would record an authority that does not exist.
+        return Decision(
+            tool_id,
+            True,
+            "records a human decision; the approver's identity comes from the "
+            f"approval, not from the request ({caller.value} caller)",
+        )
 
     if exempt_local_writes and caller in _EXEMPTIBLE:
         return Decision(
@@ -131,6 +196,100 @@ class ApprovalOutcome(StrEnum):
 
 
 @dataclass(frozen=True)
+class Approver:
+    """The human an approval is attributable to (FORGE-393).
+
+    Constructed only by the code that *observed* the decision — the gateway
+    route that took the click, or an elicitation response. Never from a tool
+    argument, because the model fills those.
+    """
+
+    #: ``<kind>:<name>`` actor string, e.g. ``user:<uuid>`` for a verified
+    #: principal or ``local:dashboard`` for a click on an unauthenticated
+    #: local gateway.
+    actor_id: str
+
+    #: True only when a signature was checked. A local gateway runs with
+    #: ``METAFORGE_AUTH_MODE=off`` and has no identities to verify, so a real
+    #: human click there is ``verified=False``. That is an honest record of
+    #: what is known — unlike a model-supplied name, which records something
+    #: that was never known at all.
+    verified: bool = False
+
+    #: Human-readable, for the audit line. Display only.
+    display_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.actor_id or not self.actor_id.strip():
+            raise ValueError("Approver.actor_id must be a non-empty identity")
+
+    @property
+    def label(self) -> str:
+        """What gets written down as the deciding authority."""
+        return self.display_name or self.actor_id
+
+
+@dataclass(frozen=True)
+class ApprovalResolution:
+    """How an approval ended, and who ended it."""
+
+    outcome: ApprovalOutcome
+
+    #: Who decided. ``None`` means the gate answered without saying — which is
+    #: fine for an ordinary write and disqualifying for a human-authority tool.
+    approver: Approver | None = None
+
+
+def resolve_approval(raw: ApprovalOutcome | ApprovalResolution) -> ApprovalResolution:
+    """Normalise what a gate returned.
+
+    Gates predating FORGE-393 return a bare :class:`ApprovalOutcome`. Those
+    still work for ordinary writes; they simply carry no approver, and a
+    human-authority tool then refuses rather than inventing one. Accepting the
+    older shape is not a silent fallback: the missing identity is visible at
+    the point it matters, and it fails there.
+    """
+    if isinstance(raw, ApprovalResolution):
+        return raw
+    return ApprovalResolution(outcome=raw)
+
+
+class HumanAuthorityRequiredError(RuntimeError):
+    """A tool that records a human's decision had no identified human.
+
+    Raised instead of running the call. The stored gate would otherwise name
+    whoever the model decided to name, which is the bug this class exists to
+    make impossible (FORGE-393).
+    """
+
+    def __init__(self, tool_id: str, detail: str) -> None:
+        self.tool_id = tool_id
+        super().__init__(
+            f"{tool_id} records a human decision and none was established: {detail}. "
+            "The approver's identity comes from whoever answers the approval, never "
+            "from a tool argument."
+        )
+
+
+class ApproverArgumentRejectedError(ValueError):
+    """The caller tried to supply the approver's identity itself.
+
+    Ignoring it quietly would be defensible; refusing is better. A model that
+    passes ``decided_by`` believes it is setting the authority, and a silent
+    drop leaves it believing that.
+    """
+
+    def __init__(self, tool_id: str, field: str) -> None:
+        self.tool_id = tool_id
+        self.field = field
+        super().__init__(
+            f"{tool_id}: '{field}' cannot be supplied by the caller. The deciding "
+            "human is taken from the approval record. Remove the argument and ask "
+            "a person to approve the call."
+        )
+
+
+@dataclass(frozen=True)
 class ApprovalAsk:
     """What a reviewer needs to see to answer."""
 
@@ -149,9 +308,14 @@ class ApprovalAsk:
 
 
 class ApprovalGate(Protocol):
-    """Holds a call until a human decides. Injected by the gateway."""
+    """Holds a call until a human decides. Injected by the gateway.
 
-    def __call__(self, ask: ApprovalAsk) -> Awaitable[ApprovalOutcome]: ...
+    May answer with a bare :class:`ApprovalOutcome` or, to name the deciding
+    human, an :class:`ApprovalResolution`. Run the answer through
+    :func:`resolve_approval` rather than branching on the type at each site.
+    """
+
+    def __call__(self, ask: ApprovalAsk) -> Awaitable[ApprovalOutcome | ApprovalResolution]: ...
 
 
 class ApprovalNotConfiguredError(RuntimeError):
@@ -187,4 +351,4 @@ class ApprovalRejectedError(RuntimeError):
         super().__init__(f"{tool_id} was not run: {detail}.")
 
 
-ApprovalGateFn = Callable[[ApprovalAsk], Awaitable[ApprovalOutcome]]
+ApprovalGateFn = Callable[[ApprovalAsk], Awaitable[ApprovalOutcome | ApprovalResolution]]

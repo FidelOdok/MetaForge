@@ -16,8 +16,9 @@ just without a frontend wired to it yet.
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from api_gateway.auth.approver import approver_from_request
 from api_gateway.runs.schemas import ApprovalRequest, RunListResponse, RunResponse
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
@@ -121,12 +122,30 @@ def get_approval(run_id: str) -> RunResponse:
 
 
 @router.post("/{run_id}", response_model=RunResponse)
-def submit_tool_approval(run_id: str, body: ApprovalRequest) -> RunResponse:
+def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -> RunResponse:
+    """Record the decision, attributed to whoever made this request.
+
+    The identity comes from the request, not the body (FORGE-393). A client
+    cannot nominate the approver, which is the whole point: some tools write
+    the approver's name down as their result.
+    """
+    approver = approver_from_request(request)
     try:
-        run = _approval_store.submit_approval(run_id, ApprovalDecision(body.decision))
+        run = _approval_store.submit_approval(
+            run_id,
+            ApprovalDecision(body.decision),
+            approved_by=approver.label,
+            approver_verified=approver.verified,
+        )
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"approval '{run_id}' not found") from exc
     except InvalidTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    logger.info("tool_approval_submitted", run_id=run_id, decision=body.decision)
+    logger.info(
+        "tool_approval_submitted",
+        run_id=run_id,
+        decision=body.decision,
+        approved_by=approver.actor_id,
+        approver_verified=approver.verified,
+    )
     return RunResponse.from_run(run)

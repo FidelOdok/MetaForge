@@ -21,7 +21,13 @@ import asyncio
 import structlog
 
 from api_gateway.chat.tool_approvals import get_approval_store
-from mcp_core.guardrails import ApprovalAsk, ApprovalGateFn, ApprovalOutcome
+from mcp_core.guardrails import (
+    ApprovalAsk,
+    ApprovalGateFn,
+    ApprovalOutcome,
+    ApprovalResolution,
+    Approver,
+)
 from orchestrator.harness.runs import ApprovalWait, await_approval_decision
 
 logger = structlog.get_logger(__name__)
@@ -53,7 +59,7 @@ def build_mcp_approval_gate(
     the gateway layer is a layering violation waiting to be reintroduced.
     """
 
-    async def gate(ask: ApprovalAsk) -> ApprovalOutcome:
+    async def gate(ask: ApprovalAsk) -> ApprovalResolution:
         store = get_approval_store()
         run = store.create(
             {
@@ -84,12 +90,26 @@ def build_mcp_approval_gate(
             sleep=asyncio.sleep,
         )
         outcome = _OUTCOMES[wait]
+
+        # Who answered is read back off the ledger rather than passed around,
+        # because the ledger is what a reviewer and an auditor both look at.
+        # A timeout has no approver by construction: nobody answered.
+        decided = store.get(run.id)
+        approver: Approver | None = None
+        if decided.approved_by:
+            approver = Approver(
+                actor_id=decided.approved_by,
+                verified=decided.approver_verified,
+            )
+
         logger.info(
             "mcp_approval_resolved",
             run_id=run.id,
             tool_id=ask.tool_id,
             outcome=outcome.value,
+            approved_by=approver.actor_id if approver else None,
+            approver_verified=approver.verified if approver else None,
         )
-        return outcome
+        return ApprovalResolution(outcome=outcome, approver=approver)
 
     return gate

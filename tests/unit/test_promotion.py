@@ -6,9 +6,15 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from api_gateway.auth.approver import LOCAL_DASHBOARD_ACTOR
 from api_gateway.requirement_intelligence.promotion import attempt_promotion
 from api_gateway.twin.claim_recorder import make_claim_recorder
 from api_gateway.twin.evidence_recorder import make_evidence_recorder
+from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
+    ApproverArgumentRejectedError,
+    HumanAuthorityRequiredError,
+)
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models.constraint import Constraint
@@ -272,15 +278,52 @@ class TestAttemptPromotionAdapter:
         server = TwinServer(twin=twin, promotion_attempter=promotion_attempter)
         assert "twin.attempt_promotion" in server.tool_ids
 
+        # FORGE-393: this used to pass ``decided_by: "reviewer"`` as a tool
+        # argument, which is precisely the bug -- the caller naming the human
+        # the gate then records as its authority. The deciding human now
+        # arrives only under the dispatcher-reserved key.
         out = await server.attempt_promotion(
             {
                 "project_id": str(project_id),
                 "level": "sim_validated",
                 "required_claim_ids": [str(req.id)],
-                "decided_by": "reviewer",
+                APPROVED_BY_ARG: "user:reviewer",
             }
         )
         assert out["promoted"] is True
+        assert out["decided_by"] == "user:reviewer"
+
+    async def test_a_caller_supplied_decided_by_is_refused(self, twin, project_id):
+        """The negative control for the test above. Passing the old argument
+        must fail rather than be quietly ignored."""
+
+        async def promotion_attempter(**kwargs):
+            raise AssertionError("the promotion ran with a caller-supplied approver")
+
+        server = TwinServer(twin=twin, promotion_attempter=promotion_attempter)
+        with pytest.raises(ApproverArgumentRejectedError):
+            await server.attempt_promotion(
+                {
+                    "project_id": str(project_id),
+                    "level": "sim_validated",
+                    "required_claim_ids": [str(uuid4())],
+                    "decided_by": "Dr Jane Smith",
+                }
+            )
+
+    async def test_no_approver_at_all_is_refused(self, twin, project_id):
+        async def promotion_attempter(**kwargs):
+            raise AssertionError("the promotion ran with no approver")
+
+        server = TwinServer(twin=twin, promotion_attempter=promotion_attempter)
+        with pytest.raises(HumanAuthorityRequiredError):
+            await server.attempt_promotion(
+                {
+                    "project_id": str(project_id),
+                    "level": "sim_validated",
+                    "required_claim_ids": [str(uuid4())],
+                }
+            )
 
     async def test_not_registered_when_no_attempter_supplied(self, twin):
         server = TwinServer(twin=twin)
@@ -423,7 +466,6 @@ class TestPromotionRoutes:
                     "projectId": str(project_id),
                     "level": "sim_validated",
                     "requiredClaimIds": [str(req.id)],
-                    "decidedBy": "reviewer",
                 },
             )
             assert resp.status_code == 200
@@ -434,7 +476,10 @@ class TestPromotionRoutes:
         gates = list_resp.json()["gates"]
         assert len(gates) == 1
         assert gates[0]["promoted"] is True
-        assert gates[0]["decidedBy"] == "reviewer"
+        # FORGE-393: the body no longer carries a name. On a gateway running
+        # with auth off there is no verified identity, so what is recorded is
+        # the surface the click came from -- true, and unforgeable by a model.
+        assert gates[0]["decidedBy"] == LOCAL_DASHBOARD_ACTOR
 
     async def test_reject_via_route(self, client, twin, project_id) -> None:
         req = await _seed_requirement(twin, project_id, "tip_deflection", "<= 0.5mm")
@@ -458,7 +503,15 @@ class TestPromotionRoutes:
         assert body["promoted"] is False
         assert body["blockedReason"] == "hold off for now"
 
-    async def test_reject_without_decided_by_400s(self, client, project_id) -> None:
+    async def test_a_veto_records_who_vetoed_without_being_told(self, client, project_id) -> None:
+        """This used to assert a 400 when ``decidedBy`` was missing on a
+        veto -- the rule being that a refusal must name its author.
+
+        The rule survives; the 400 cannot. FORGE-393 takes the author from
+        the request rather than the body, so there is no longer a way to
+        submit a veto without one. What is worth asserting now is that the
+        name gets recorded anyway.
+        """
         async with client:
             resp = await client.post(
                 "/v1/promotion/attempt",
@@ -469,7 +522,26 @@ class TestPromotionRoutes:
                     "reject": True,
                 },
             )
-        assert resp.status_code == 400
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["promoted"] is False
+            assert resp.json()["decidedBy"] == LOCAL_DASHBOARD_ACTOR
+
+    async def test_the_route_ignores_a_body_supplied_approver(self, client, project_id) -> None:
+        """An old client still sending ``decidedBy`` must not be able to set
+        the authority. The field is gone from the model, so it is dropped."""
+        async with client:
+            resp = await client.post(
+                "/v1/promotion/attempt",
+                json={
+                    "projectId": str(project_id),
+                    "level": "sim_validated",
+                    "requiredClaimIds": [str(uuid4())],
+                    "reject": True,
+                    "decidedBy": "Dr Jane Smith",
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["decidedBy"] == LOCAL_DASHBOARD_ACTOR
 
     async def test_invalid_project_id_400s(self, client) -> None:
         async with client:
