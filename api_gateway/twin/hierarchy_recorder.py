@@ -123,6 +123,90 @@ def make_hierarchy_node_recorder(twin: Any, project_backend: Any = None) -> Any:
     return record
 
 
+async def _replace_outgoing_edge(twin: Any, node_id: UUID, edge_type: Any, target_id: UUID) -> None:
+    """Remove any existing outgoing edge of ``edge_type`` from ``node_id``
+    before adding the new one -- ``realize`` always REPLACES a node's
+    REALIZED_BY/INSTANCE_OF target, it never accumulates a second one."""
+    existing = await twin.get_edges(node_id, direction="outgoing", edge_type=edge_type)
+    for edge in existing:
+        await twin.remove_edge(node_id, edge.target_id, edge_type)
+    await twin.add_edge(node_id, target_id, edge_type)
+
+
+def make_hierarchy_geometry_linker(twin: Any) -> Any:
+    """Return an async ``realize(...)`` that attaches or REPLACES a
+    HierarchyNode's real geometry -- ``REALIZED_BY`` (a fabricated part's
+    CAD_MODEL work product) and/or ``INSTANCE_OF`` (a COTS component's
+    BOMItem) -- after the node already exists (FORGE-266, gap G-C2).
+
+    ``make_hierarchy_node_recorder`` above only ever ADDS these two edges
+    once, at node-creation time -- there was no way to attach or swap a
+    node's geometry afterward, which is exactly what "replace placeholder
+    with part" needs. This is the missing half, not a new edge type: it
+    reuses the same ``REALIZED_BY``/``INSTANCE_OF`` semantics
+    ``twin_core.consistency.hierarchical_bom``'s EBOM derivation already
+    reads, so a node realized here shows up there with zero further
+    changes.
+    """
+
+    async def realize(
+        *,
+        hierarchy_node_id: str,
+        work_product_id: str | None = None,
+        bom_item_id: str | None = None,
+    ) -> dict[str, Any]:
+        from twin_core.models.bom_item import BOMItem
+        from twin_core.models.enums import EdgeType
+
+        if not work_product_id and not bom_item_id:
+            raise ValueError(
+                "hierarchy geometry linker: at least one of 'work_product_id' or "
+                "'bom_item_id' is required"
+            )
+
+        node_id = UUID(hierarchy_node_id)
+        node = await twin.get_hierarchy_node(node_id)
+        if node is None:
+            raise ValueError(f"hierarchy geometry linker: no hierarchy node {hierarchy_node_id!r}")
+
+        with tracer.start_as_current_span("twin.realize_hierarchy_node") as span:
+            span.set_attribute("hierarchy_node.node_id", hierarchy_node_id)
+
+            realized_by_id: str | None = None
+            if work_product_id is not None:
+                wp = await twin.get_work_product(UUID(work_product_id))
+                if wp is None:
+                    raise ValueError(
+                        f"hierarchy geometry linker: no work product {work_product_id!r}"
+                    )
+                await _replace_outgoing_edge(
+                    twin, node_id, EdgeType.REALIZED_BY, UUID(work_product_id)
+                )
+                realized_by_id = work_product_id
+
+            instance_of_id: str | None = None
+            if bom_item_id is not None:
+                bom_node = await twin.graph.get_node(UUID(bom_item_id))
+                if not isinstance(bom_node, BOMItem):
+                    raise ValueError(f"hierarchy geometry linker: no BOMItem {bom_item_id!r}")
+                await _replace_outgoing_edge(twin, node_id, EdgeType.INSTANCE_OF, UUID(bom_item_id))
+                instance_of_id = bom_item_id
+
+            logger.info(
+                "hierarchy_node_realized",
+                node_id=hierarchy_node_id,
+                realized_by=realized_by_id,
+                instance_of=instance_of_id,
+            )
+            return {
+                "node_id": hierarchy_node_id,
+                "realized_by_work_product_id": realized_by_id,
+                "instance_of_bom_item_id": instance_of_id,
+            }
+
+    return realize
+
+
 def make_hierarchy_rollup_fn(twin: Any) -> Any:
     """Return an async ``rollup(root_id: str) -> dict`` wrapping
     ``compute_hierarchy_rollup`` (FORGE-260) -- returns a plain dict, never

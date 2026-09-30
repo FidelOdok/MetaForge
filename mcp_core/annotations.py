@@ -242,6 +242,13 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         "twin.execute_revalidation_plan",
         "twin.mark_engineering_change_rolled_back",
         "twin.reject_engineering_change",
+        # FORGE-266: unlike twin.record_hierarchy_node (ADDITIVE above, sets
+        # REALIZED_BY/INSTANCE_OF only once at creation), this REPLACES a
+        # node's existing REALIZED_BY/INSTANCE_OF edge -- the prior target is
+        # removed, not just added alongside. "Replace placeholder with part"
+        # is exactly the kind of state-forward, prior-state-losing decision
+        # this category exists for.
+        "twin.realize_hierarchy_node",
     }
 )
 

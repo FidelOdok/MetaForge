@@ -2767,6 +2767,17 @@
             "title": "Id",
             "type": "string"
           },
+          "instanceOfBomItemId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instanceofbomitemid"
+          },
           "interfaces": {
             "items": {
               "$ref": "#/components/schemas/InterfaceSummary"
@@ -2863,6 +2874,17 @@
               }
             ],
             "title": "Quantity"
+          },
+          "realizedByWorkProductId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realizedbyworkproductid"
           }
         },
         "required": [
@@ -4625,6 +4647,69 @@
           }
         },
         "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "RealizeHierarchyNodeRequest": {
+        "properties": {
+          "bomItemId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bomitemid"
+          },
+          "workProductId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workproductid"
+          }
+        },
+        "title": "RealizeHierarchyNodeRequest",
+        "type": "object"
+      },
+      "RealizeHierarchyNodeResponse": {
+        "properties": {
+          "instanceOfBomItemId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instanceofbomitemid"
+          },
+          "nodeId": {
+            "title": "Nodeid",
+            "type": "string"
+          },
+          "realizedByWorkProductId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realizedbyworkproductid"
+          }
+        },
+        "required": [
+          "nodeId"
+        ],
+        "title": "RealizeHierarchyNodeResponse",
         "type": "object"
       },
       "RequiredClaimResultView": {
@@ -12269,6 +12354,59 @@
           }
         },
         "summary": "Get Hierarchy Tree",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/hierarchy/{node_id}/realize": {
+      "post": {
+        "description": "\"Replace placeholder with part\": attach or replace ``node_id``'s\nREALIZED_BY (a cad_model work product, e.g. from ``POST /v1/twin/import``)\nand/or INSTANCE_OF (a BOMItem) geometry -- the dashboard's own action\nreuses the SAME bound callable ``twin.realize_hierarchy_node`` uses.",
+        "operationId": "realize_hierarchy_node_v1_twin_hierarchy__node_id__realize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RealizeHierarchyNodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RealizeHierarchyNodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Realize Hierarchy Node",
         "tags": [
           "twin"
         ]

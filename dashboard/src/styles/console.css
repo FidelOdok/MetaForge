@@ -3390,7 +3390,7 @@ button:disabled {
 }
 .tw-structure-row {
   display: grid;
-  grid-template-columns: 24px 20px minmax(120px, 1fr) 90px 50px 70px 70px;
+  grid-template-columns: 24px 20px minmax(120px, 1fr) 90px 50px 70px 70px 118px;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;

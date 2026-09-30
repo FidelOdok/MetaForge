@@ -105,6 +105,7 @@ class TwinServer(McpToolServer):
         ect_bridge: Any = None,
         hierarchy_node_recorder: Any = None,
         hierarchy_rollup_fn: Any = None,
+        hierarchy_geometry_linker: Any = None,
         metric_evaluator: Any = None,
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
@@ -258,6 +259,11 @@ class TwinServer(McpToolServer):
         # wrapping ``twin_core.consistency.hierarchy_rollup.
         # compute_hierarchy_rollup`` -- same injection seam, same reason.
         self._hierarchy_rollup_fn = hierarchy_rollup_fn
+        # FORGE-266: an injected async ``realize(*, hierarchy_node_id, ...)``
+        # (make_hierarchy_geometry_linker) -- attaches/replaces a node's
+        # REALIZED_BY/INSTANCE_OF geometry after the node already exists,
+        # same injection seam, same reason.
+        self._hierarchy_geometry_linker = hierarchy_geometry_linker
         # FORGE-315: an injected async ``evaluate_tip_deflection(...)``
         # (make_metric_evaluator) -- a tier-0 closed-form hand-calc against
         # a CAD work product's own recorded geometry, escalating to a real
@@ -375,6 +381,8 @@ class TwinServer(McpToolServer):
             self._register_record_hierarchy_node()
         if hierarchy_rollup_fn is not None:
             self._register_compute_hierarchy_rollup()
+        if hierarchy_geometry_linker is not None:
+            self._register_realize_hierarchy_node()
         if metric_evaluator is not None:
             self._register_evaluate_metric()
         if revalidation_executor is not None:
@@ -3822,6 +3830,80 @@ class TwinServer(McpToolServer):
                 "twin.compute_hierarchy_rollup: 'root_id' is required (non-empty string)"
             )
         return await self._hierarchy_rollup_fn(root_id)
+
+    # ------------------------------------------------------------------
+    # twin.realize_hierarchy_node (FORGE-266, gap G-C2)
+    # ------------------------------------------------------------------
+
+    def _register_realize_hierarchy_node(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.realize_hierarchy_node",
+                adapter_id="twin",
+                name="Realize Hierarchy Node",
+                description=(
+                    "Attach or REPLACE a hierarchy position's real geometry -- "
+                    "REALIZED_BY (a cad_model work product, e.g. from "
+                    "twin.import_work_product / the FreeCAD authoring tools) "
+                    "and/or INSTANCE_OF (a BOMItem, e.g. from "
+                    "twin.record_component_selection / twin.select_component) "
+                    "-- after the node already exists. "
+                    "twin.record_hierarchy_node only ever sets these once, at "
+                    "creation time; this is the missing 'replace placeholder "
+                    "with part' half -- any existing REALIZED_BY/INSTANCE_OF "
+                    "edge on the node is removed first, so a node always has "
+                    "at most one of each, never an accumulating history. "
+                    "twin.compute_hierarchy_rollup and the hierarchical BOM "
+                    "(gap G-C3) read exactly these edges, so realizing a node "
+                    "here makes it show up there with no further action."
+                ),
+                capability="twin_hierarchy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "hierarchy_node_id": {"type": "string"},
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "A cad_model work product id -- sets/replaces "
+                                "REALIZED_BY. At least one of work_product_id/"
+                                "bom_item_id is required; both may be given."
+                            ),
+                        },
+                        "bom_item_id": {
+                            "type": "string",
+                            "description": ("A BOMItem id -- sets/replaces INSTANCE_OF."),
+                        },
+                    },
+                    "required": ["hierarchy_node_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "realized_by_work_product_id": {"type": ["string", "null"]},
+                        "instance_of_bom_item_id": {"type": ["string", "null"]},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.realize_hierarchy_node,
+        )
+
+    async def realize_hierarchy_node(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        hierarchy_node_id = arguments.get("hierarchy_node_id")
+        if not hierarchy_node_id or not isinstance(hierarchy_node_id, str):
+            raise ValueError(
+                "twin.realize_hierarchy_node: 'hierarchy_node_id' is required (non-empty string)"
+            )
+        work_product_id = arguments.get("work_product_id")
+        bom_item_id = arguments.get("bom_item_id")
+        return await self._hierarchy_geometry_linker(
+            hierarchy_node_id=hierarchy_node_id,
+            work_product_id=work_product_id if isinstance(work_product_id, str) else None,
+            bom_item_id=bom_item_id if isinstance(bom_item_id, str) else None,
+        )
 
     # ------------------------------------------------------------------
     # twin.evaluate_metric (FORGE-315)

@@ -155,6 +155,32 @@ test.describe('Digital Twin Viewer', () => {
     await expect(card).toContainText('Supported by 1 evidence record');
   });
 
+  test('Structure tab: replace placeholder with part (FORGE-266)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const actuatorRow = page.locator('.tw-structure-row', { hasText: 'elbow_actuator' });
+    await expect(actuatorRow).toBeVisible();
+    await expect(actuatorRow.getByTestId(/^realize-node-button-/)).toHaveText('Replace placeholder');
+
+    await actuatorRow.getByTestId(/^realize-node-button-/).click();
+    const panel = page.getByTestId('realize-node-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Replace placeholder: elbow_actuator');
+
+    await panel.getByTestId('realize-mode-pick').click();
+    await panel.getByTestId('realize-bom-item-select').selectOption({ label: 'DS3218MG -- Miuzei' });
+    await panel.getByTestId('confirm-realize-pick').click();
+
+    // The panel closes and the row's own action label flips to "Replace
+    // part" -- a real INSTANCE_OF edge now exists, this isn't a placeholder
+    // anymore.
+    await expect(panel).not.toBeVisible();
+    await expect(actuatorRow.getByTestId(/^realize-node-button-/)).toHaveText('Replace part');
+  });
+
   test('Assembly tab: joints are editable and persist', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the graph canvas.
