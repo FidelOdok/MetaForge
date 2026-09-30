@@ -409,8 +409,15 @@ class TestCodexPlugin:
         url = mcp["mcpServers"]["metaforge"]["url"]
         assert url in (pkg / "config.toml").read_text()
 
-    def test_the_readme_does_not_claim_it_was_verified(self) -> None:
-        """It has not been loaded end to end. Saying otherwise is the kind
-        of claim that costs somebody an afternoon."""
+    def test_the_readme_says_how_the_claim_was_checked(self) -> None:
+        """It has now been loaded end to end (FORGE-383), so the README says
+        so -- but a bare "verified" is the claim with nothing behind it that
+        this file exists to prevent. It has to name the version it was
+        checked against and the calls that did the checking, so a reader who
+        doubts it can repeat them rather than take it on faith."""
         readme = (self._pkg() / "README.md").read_text()
-        assert "has not been loaded end to end" in readme
+        assert "codex-cli 0.118.0" in readme
+        for method in ("plugin/list", "plugin/read", "plugin/install"):
+            assert method in readme, f"README claims verification without citing {method}"
+        # The MCP server is the half that a manifest check alone would miss.
+        assert "metaforge-mcp" in readme

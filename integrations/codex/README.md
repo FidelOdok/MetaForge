@@ -21,19 +21,30 @@ then `/plugins`.
 Append `config.toml` to `~/.codex/config.toml` and restart. This needs no
 plugin and is the path this repo has been running.
 
-## What is verified, and what is not
+## What is verified
 
-The manifest layout comes from codex-cli 0.118.0 itself — `codex features
-list` reports `plugins  stable  true`, and the binary embeds the
-scaffolding script every field name here was taken from. That is a
-stronger source than the published docs, which describe installing
-plugins but not the manifest.
+Loaded end to end against codex-cli 0.118.0, by driving
+`codex app-server` over stdio and reading what it reported back:
 
-**It has not been loaded end to end.** Doing that needs a signed-in
-Codex (`codex login`), and the CLI on the machine this was generated on
-has an expired token. The shape is right; whether Codex accepts it is
-untested. Say so rather than assuming, and if it fails, the format is
-the first thing to re-check against your Codex version.
+- `plugin/list` finds the marketplace and returns `metaforge@metaforge`
+  with `marketplaceLoadErrors: []` — the manifest parses, `installPolicy`
+  and `authPolicy` survive, and every `interface` field lands where the
+  curated plugins put theirs.
+- `plugin/read` resolves all 30 skills and `mcpServers: ["metaforge"]`.
+- `plugin/install` succeeds and writes `[plugins."metaforge@metaforge"]`
+  into `~/.codex/config.toml`.
+- Codex then connects to the MCP server itself: its client logs
+  `server_info: Implementation { name: "metaforge-mcp" }` at protocol
+  `2025-06-18`, and `tools/list` returns the MetaForge tools.
+
+One cosmetic wart: Codex opens `GET /mcp` for a server-initiated SSE
+stream, the sidecar answers `405` (which the Streamable HTTP spec
+permits), and Codex logs that as an `ERROR` line before carrying on
+normally. It is not a failure — ignore it.
+
+If the plugin ever stops loading, re-check the manifest format against
+your Codex version first: it is read from the binary, not from a
+published spec, so a Codex upgrade can move it.
 
 ## Skills
 
