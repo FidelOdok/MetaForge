@@ -32,6 +32,7 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from mcp_core.annotations import annotations_for
+from mcp_core.cypher import is_read_only_cypher
 
 
 class Caller(StrEnum):
@@ -114,6 +115,51 @@ HUMAN_AUTHORITY_TOOLS: frozenset[str] = frozenset(
 )
 
 
+#: Tools that write, but write *bookkeeping about the agent's own work* —
+#: not design state (FORGE-407).
+#:
+#: Holding these was a real outage rather than a guardrail. `session.start`
+#: is how an external harness attributes its work at all (FORGE-366/G1), so
+#: refusing it meant every remote plugin ran unattributed — the opposite of
+#: what session capture is for. And there is nothing to protect: an agent
+#: cannot damage a design by recording that it did something.
+#:
+#: They remain `readOnlyHint: false` in the annotations, because they do
+#: write and telling a client otherwise would be a lie. The gate knows the
+#: difference between "writes" and "writes something worth holding".
+BOOKKEEPING: frozenset[str] = frozenset(
+    {
+        "session.start",
+        "session.log_event",
+        "session.complete",
+    }
+)
+
+
+#: Tools whose approval depends on the *call*, not the tool.
+#:
+#: `twin.query_cypher` is one tool that is either a read or a write depending
+#: on its query. Classifying per tool meant that on a deployment with
+#: `--allow-twin-mutations` — which is every deployment that can build a
+#: digital thread — a plain `MATCH ... RETURN` was refused as "may overwrite
+#: or remove data" (FORGE-407). The annotation still has to be per tool (the
+#: MCP spec has no per-call hint), so the two deliberately disagree: the hint
+#: is the cautious answer, the gate is the accurate one.
+ARGUMENT_CLASSIFIED: frozenset[str] = frozenset({"twin.query_cypher"})
+
+
+def _call_is_read_only(tool_id: str, arguments: dict[str, Any] | None) -> bool:
+    """Is *this call* a read, for a tool that can be either?"""
+    if tool_id != "twin.query_cypher":
+        return False
+    if arguments is None:
+        # No arguments to inspect means no evidence it is a read. Erring the
+        # other way would let an unapproved write through on a call this
+        # function simply could not see.
+        return False
+    return is_read_only_cypher(arguments.get("cypher") or arguments.get("query"))
+
+
 #: Reserved argument key. The dispatcher uses it to hand a human-authority
 #: tool the approver it must record.
 #:
@@ -153,6 +199,7 @@ def decide(
     caller: Caller,
     twin_mutations_enabled: bool = False,
     exempt_local_writes: bool = True,
+    arguments: dict[str, Any] | None = None,
 ) -> Decision:
     """Say whether this call needs a human before it runs.
 
@@ -166,6 +213,20 @@ def decide(
 
     if annotations["readOnlyHint"]:
         return Decision(tool_id, False, "reads only; nothing to authorise")
+
+    if tool_id in ARGUMENT_CLASSIFIED and _call_is_read_only(tool_id, arguments):
+        return Decision(
+            tool_id,
+            False,
+            "this call reads only; the tool can write, this query does not",
+        )
+
+    if tool_id in BOOKKEEPING:
+        return Decision(
+            tool_id,
+            False,
+            "records the agent's own activity, not design state",
+        )
 
     if requires_human_authority(tool_id):
         # Never exempt. The result of this call is a human's name; running it
