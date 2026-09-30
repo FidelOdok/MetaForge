@@ -93,6 +93,7 @@ class SessionCapture:
         result: Any = None,
         error: Any = None,
         call_id: str | None = None,
+        attribution: dict[str, Any] | None = None,
     ) -> None:
         """Record one tool call. Never raises — capture must not break the call."""
         try:
@@ -104,6 +105,7 @@ class SessionCapture:
                 result=result,
                 error=error,
                 call_id=call_id,
+                attribution=attribution,
             )
         except Exception as exc:  # noqa: BLE001 — capture is best-effort, never fatal
             logger.warning("session_capture_failed", tool_id=tool_id, error=str(exc))
@@ -118,6 +120,7 @@ class SessionCapture:
         result: Any,
         error: Any,
         call_id: str | None = None,
+        attribution: dict[str, Any] | None = None,
     ) -> None:
         now = self._clock()
 
@@ -133,7 +136,7 @@ class SessionCapture:
                 self._explicit_id = None
             return
 
-        session_id = await self._target_session(now)
+        session_id = await self._target_session(now, attribution)
         if session_id is None:
             return
         self._last_activity = now
@@ -154,11 +157,19 @@ class SessionCapture:
         # identically.
         if call_id is not None:
             data["call_id"] = call_id
+        # FORGE-366: who, with what. Stamped on every event rather than only
+        # on the session, because a session can outlive a client swap and an
+        # event answers "who did *this*" without the reader having to assume
+        # the session header still applies.
+        if attribution:
+            data.update(attribution)
         if error is not None:
             data["error"] = str(error)[:_MAX_ARG_SUMMARY]
         await self._store.append_event(session_id, type=event_type, message=message, data=data)
 
-    async def _target_session(self, now: datetime) -> str | None:
+    async def _target_session(
+        self, now: datetime, attribution: dict[str, Any] | None = None
+    ) -> str | None:
         if self._explicit_id is not None:
             return self._explicit_id
 
@@ -177,8 +188,13 @@ class SessionCapture:
             self._implicit_id = None
 
         if self._implicit_id is None:
+            # File the session under the client that opened it. The column
+            # already exists; it was just always "mcp", so /sessions could
+            # not be filtered by who produced a run.
+            client = (attribution or {}).get("client") or {}
+            agent_code = client.get("name") or self._agent_code
             session = await self._store.create_session(
-                agent_code=self._agent_code, task_type=self._task_type, source="external"
+                agent_code=str(agent_code), task_type=self._task_type, source="external"
             )
             self._implicit_id = session.id
         return self._implicit_id

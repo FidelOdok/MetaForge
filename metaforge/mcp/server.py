@@ -594,9 +594,18 @@ class UnifiedMcpServer:
             # the key ``tool_registry.mcp_server.handlers.handle_tool_call``
             # reads. Sending ``parameters`` silently dropped every arg
             # and broke every spec-compliant client (Claude Code etc.).
-            result = await self._tool_call(
-                {"tool_id": tool_name, "arguments": arguments, "_call_id": call_id}
-            )
+            # FORGE-366: `_meta` rides along. It is the spec's extension
+            # point and the only place a client can tell us which model is
+            # driving -- dropping it in translation meant session capture
+            # could never record one.
+            legacy: dict[str, Any] = {
+                "tool_id": tool_name,
+                "arguments": arguments,
+                "_call_id": call_id,
+            }
+            if isinstance(params.get("_meta"), dict):
+                legacy["_meta"] = params["_meta"]
+            result = await self._tool_call(legacy)
         except (ToolNotFoundError, ToolHandlerError):
             # Re-raise so the outer handler emits a JSON-RPC error
             # envelope. The MCP spec also accepts isError=true content
@@ -711,6 +720,7 @@ class UnifiedMcpServer:
                 duration_ms=(time.monotonic() - t0) * 1000,
                 error=exc.details,
                 call_id=call_id,
+                attribution=self.attribution(params),
             )
             raise
         await self._capture.on_tool_call(
@@ -720,8 +730,69 @@ class UnifiedMcpServer:
             duration_ms=(time.monotonic() - t0) * 1000,
             result=result,
             call_id=call_id,
+            attribution=self.attribution(params),
         )
         return result
+
+    def attribution(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Who, with what, is doing this (FORGE-366).
+
+        Every captured action used to be filed under ``agent_code: "mcp"``
+        with nothing else. A reviewer reading /sessions could see what was
+        done and not who did it, from which client, or with which model --
+        which is most of the value of having the timeline at all.
+
+        Two of the three are things the server knows for itself. The third
+        is not, and is labelled accordingly:
+
+        * ``actor`` comes from the call context. ``verified`` is true only
+          when an OAuth token established it; a shared API key authorises
+          without identifying, and a client-supplied header is a claim.
+          FORGE-330 fixed the case where the claim outranked the token, and
+          flattening the distinction here would give that back.
+        * ``client`` comes from the ``initialize`` handshake.
+        * ``model`` cannot be known server-side -- nothing on the wire
+          carries it. A client may state it in ``_meta.model``; it is
+          recorded under ``claimed`` so nobody later mistakes it for
+          something the server checked.
+        """
+        out: dict[str, Any] = {}
+        try:
+            from mcp_core.context import current_context
+
+            ctx = current_context()
+            actor = ctx.actor_id
+        except Exception:  # noqa: BLE001 — attribution must not break capture
+            actor = None
+        if actor:
+            out["actor"] = actor
+            out["actor_verified"] = bool(actor) and actor != "system:unattributed"
+        if self._client_info:
+            name = self._client_info.get("name")
+            version = self._client_info.get("version")
+            client: dict[str, Any] = {}
+            if isinstance(name, str):
+                client["name"] = name
+            if isinstance(version, str):
+                client["version"] = version
+            if client:
+                out["client"] = client
+        meta = (params or {}).get("_meta")
+        model = meta.get("model") if isinstance(meta, dict) else None
+        if isinstance(model, str) and model:
+            out["claimed"] = {"model": model}
+        return out
+
+    def client_agent_code(self, default: str = "mcp") -> str:
+        """What to file a session under. The client's name when it gave one.
+
+        ``agent_code`` is an existing column, so this is the one part of the
+        stamp that shows up in /sessions without a schema change -- and a
+        list where every row says "mcp" is a list that cannot be filtered by
+        who produced it.
+        """
+        name = (self._client_info or {}).get("name")
+        return name if isinstance(name, str) and name.strip() else default
 
     # ── Prompts (FORGE-340) ───────────────────────────────────────────────
 

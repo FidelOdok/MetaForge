@@ -258,6 +258,45 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Who did it, with what
+
+Every captured action carries an attribution stamp. Until FORGE-366 they
+were all filed under `agent_code: "mcp"` with nothing else, so `/sessions`
+could show *what* was done and not who did it, from which client, or with
+which model.
+
+```json
+{
+  "tool_id": "twin.commit_geometry",
+  "actor": "user:fidel",
+  "actor_verified": true,
+  "client": {"name": "claude-code", "version": "2.1.4"},
+  "claimed": {"model": "claude-opus-5"}
+}
+```
+
+The split between what the server established and what the client asserted
+is deliberate:
+
+- **`actor`** comes from the call context, and `actor_verified` is true
+  only when an OAuth token established it. A shared API key authorises the
+  call and identifies nobody; a client-supplied `X-MetaForge-Actor` header
+  is a claim. FORGE-330 fixed a case where that claim outranked a verified
+  token, and recording both under one unlabelled field would give it back
+  by another route.
+- **`client`** comes from the `initialize` handshake. Absent, not empty,
+  when the client never identified itself.
+- **`model`** cannot be known server-side — nothing on the MCP wire
+  carries it. A client may state it in the request's `_meta.model`, and it
+  is recorded under `claimed` so nobody later reads an assertion as
+  something the server checked.
+
+The session's `agent_code` is set from the client name, which is the one
+part of the stamp visible in `/sessions` without a schema change. Adding
+columns would need a migration mechanism the repo does not have yet
+(schema is `create_all` plus a few `CREATE TABLE IF NOT EXISTS`), so the
+rest rides in the event's existing JSON `data` column.
+
 ### Being briefed, not offered a brief
 
 `project.open` returns the project brief inline with the result, so the
