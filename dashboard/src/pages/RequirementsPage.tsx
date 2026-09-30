@@ -19,6 +19,11 @@ import {
 } from '../hooks/use-design-loop';
 import { useAttemptPromotion, usePromotionHistory } from '../hooks/use-promotion';
 import { useGenerateFeature } from '../hooks/use-features';
+import {
+  useAddConceptOption,
+  useConceptOptions,
+  useSelectConcept,
+} from '../hooks/use-trade-study';
 import type {
   EvidenceSummary,
   PassFail,
@@ -29,6 +34,7 @@ import type {
 import type { DesignLoopIteration, DesignLoopStatus } from '../types/design-loop';
 import type { AttemptPromotionResult, MaturityLevel } from '../types/promotion';
 import type { FeatureType, GenerateFeatureResult } from '../types/features';
+import type { ConceptOption } from '../types/trade-study';
 
 const OPERATORS = ['<=', '>=', '==', '<', '>', '!='] as const;
 
@@ -1315,6 +1321,295 @@ function FeatureLibrarySection({ projectId }: { projectId?: string }) {
   );
 }
 
+const TRADE_STUDY_CRITERIA = ['mass_kg', 'cost_usd', 'risk', 'performance'] as const;
+
+/** FORGE-262 (gap G-B2): "Trade-study view: options as columns, criteria
+ * rows, weights editable, scores from evidence; 'select concept' creates a
+ * decision." Weighted scores are recomputed client-side from the already-
+ * fetched criteria_scores as weights change -- only the FINAL committed
+ * weights get baked into the Decision's rationale at selection time
+ * (POST /v1/trade-study/select), matching every other "editable before
+ * commit" pattern in this codebase (e.g. the Design Loop section's own
+ * form). Only mass_kg has any real measured source anywhere in this
+ * codebase today -- a criterion an option marks evidence_backed_criteria
+ * gets a small tertiary marker distinguishing it from an asserted number,
+ * same discipline the evidence matrix above uses for no_data vs pass. */
+function TradeStudySection({ projectId }: { projectId?: string }) {
+  const toast = useToast();
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [title, setTitle] = useState('');
+  const [scores, setScores] = useState<Record<string, string>>({});
+  const [massIsGrounded, setMassIsGrounded] = useState(false);
+  const [weights, setWeights] = useState<Record<string, number>>({
+    mass_kg: -1,
+    cost_usd: -0.01,
+    risk: -1,
+    performance: 1,
+  });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [rationale, setRationale] = useState('');
+
+  const { data: options } = useConceptOptions(projectId);
+  const addOption = useAddConceptOption(projectId);
+  const select = useSelectConcept();
+
+  const canAddOption = title.trim() !== '';
+  const handleAddOption = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canAddOption) return;
+    const criteriaScores: Record<string, number> = {};
+    for (const c of TRADE_STUDY_CRITERIA) {
+      const v = scores[c];
+      if (v !== undefined && v !== '') criteriaScores[c] = Number(v);
+    }
+    addOption.mutate(
+      {
+        title: title.trim(),
+        criteriaScores,
+        evidenceBackedCriteria: massIsGrounded ? ['mass_kg'] : [],
+        projectId,
+      },
+      {
+        onSuccess: () => {
+          setTitle('');
+          setScores({});
+          setMassIsGrounded(false);
+          setShowAddForm(false);
+        },
+        onError: () => toast.error('Could not record the concept option'),
+      },
+    );
+  };
+
+  const scored = (options ?? []).map((o: ConceptOption) => ({
+    ...o,
+    weighted_score: TRADE_STUDY_CRITERIA.reduce(
+      (sum, c) => sum + (weights[c] ?? 0) * (o.criteria_scores[c] ?? 0),
+      0,
+    ),
+  }));
+
+  const canSelect = !!selectedId && rationale.trim() !== '';
+  const handleSelect = () => {
+    if (!selectedId || !options) return;
+    const decisionTitle = `Concept selection: ${options.find((o) => o.id === selectedId)?.title ?? selectedId}`;
+    select.mutate(
+      {
+        optionIds: options.map((o) => o.id),
+        selectedOptionId: selectedId,
+        weights,
+        title: decisionTitle,
+        rationale: rationale.trim(),
+        projectId,
+      },
+      {
+        onSuccess: () => {
+          toast.success('Concept selected -- recorded as a Decision');
+          setSelectedId(null);
+          setRationale('');
+        },
+        onError: (err) => {
+          const detail =
+            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+          toast.error(detail || 'Could not record the selection');
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="mb-6" data-testid="trade-study-section">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+          Concept trade study
+        </h2>
+        {projectId && !showAddForm && (
+          <button
+            type="button"
+            data-testid="open-add-option-button"
+            onClick={() => setShowAddForm(true)}
+            className="rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            + Add option
+          </button>
+        )}
+      </div>
+
+      {projectId && showAddForm && (
+        <form
+          data-testid="add-option-form"
+          onSubmit={handleAddOption}
+          className="mb-3 flex flex-wrap items-end gap-2 rounded-lg p-3"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+            Option name
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Hollow tube"
+              className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+              style={{ ...FIELD_STYLE, width: '160px' }}
+            />
+          </label>
+          {TRADE_STUDY_CRITERIA.map((c) => (
+            <label key={c} className="flex flex-col gap-1 text-xs text-on-surface-variant">
+              {c}
+              <input
+                value={scores[c] ?? ''}
+                onChange={(e) => setScores((s) => ({ ...s, [c]: e.target.value }))}
+                type="number"
+                className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                style={{ ...FIELD_STYLE, width: '80px' }}
+              />
+            </label>
+          ))}
+          <label className="flex items-center gap-1 text-xs text-on-surface-variant">
+            <input
+              type="checkbox"
+              checked={massIsGrounded}
+              onChange={(e) => setMassIsGrounded(e.target.checked)}
+            />
+            mass_kg is a real measured value
+          </label>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={!canAddOption || addOption.isPending}>
+              {addOption.isPending ? 'Adding…' : 'Add'}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setShowAddForm(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {!options || options.length === 0 ? (
+        <EmptyState
+          title="No concept options recorded yet"
+          description="Record 2-4 candidate architectures above, weigh the criteria that matter, then select one -- the selection is recorded as a real Decision with the rejected options as its alternatives."
+        />
+      ) : (
+        <div
+          className="rounded-lg overflow-hidden overflow-x-auto"
+          style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+        >
+          <table className="w-full text-left border-collapse" data-testid="trade-study-table">
+            <thead>
+              <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                <th className="px-3 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-left" style={{ height: 32 }}>
+                  Criterion
+                </th>
+                <th className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-right" style={{ height: 32 }}>
+                  Weight
+                </th>
+                {scored.map((o) => (
+                  <th
+                    key={o.id}
+                    data-testid="trade-study-option-column"
+                    className="px-2 font-mono text-[10px] uppercase tracking-widest text-on-surface-variant text-right"
+                    style={{ height: 32 }}
+                  >
+                    {o.title}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {TRADE_STUDY_CRITERIA.map((c) => (
+                <tr key={c} style={{ borderBottom: '1px solid var(--mf-r-65-72-90-0p2)' }}>
+                  <td className="px-3 py-1 text-xs text-on-surface">{c}</td>
+                  <td className="px-2 py-1 text-right">
+                    <input
+                      value={weights[c] ?? 0}
+                      onChange={(e) =>
+                        setWeights((w) => ({ ...w, [c]: Number(e.target.value) || 0 }))
+                      }
+                      type="number"
+                      step="0.01"
+                      data-testid={`trade-study-weight-${c}`}
+                      className="rounded px-1 py-0.5 text-xs text-on-surface text-right focus:outline-none"
+                      style={{ ...FIELD_STYLE, width: '64px' }}
+                    />
+                  </td>
+                  {scored.map((o) => {
+                    const grounded = o.evidence_backed_criteria.includes(c);
+                    return (
+                      <td
+                        key={o.id}
+                        className="px-2 py-1 text-right font-mono text-xs text-on-surface-variant"
+                        title={grounded ? 'from a real measured value' : 'asserted, not measured'}
+                        style={grounded ? { color: 'var(--mf-c-86cfff, #86cfff)' } : undefined}
+                      >
+                        {o.criteria_scores[c] ?? '—'}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr style={{ background: 'var(--mf-c-191b22)' }}>
+                <td className="px-3 py-1 text-xs font-medium text-on-surface" colSpan={2}>
+                  Weighted score
+                </td>
+                {scored.map((o) => (
+                  <td
+                    key={o.id}
+                    data-testid="trade-study-weighted-score"
+                    className="px-2 py-1 text-right font-mono text-xs font-medium text-on-surface"
+                  >
+                    {o.weighted_score.toFixed(3)}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="px-3 py-2" colSpan={2 + scored.length}>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="flex flex-col gap-1 text-xs text-on-surface-variant">
+                      Select
+                      <select
+                        value={selectedId ?? ''}
+                        onChange={(e) => setSelectedId(e.target.value || null)}
+                        data-testid="trade-study-select-option"
+                        className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                        style={{ ...FIELD_STYLE, width: '160px' }}
+                      >
+                        <option value="">choose an option…</option>
+                        {scored.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs text-on-surface-variant" style={{ flex: 1 }}>
+                      Rationale
+                      <input
+                        value={rationale}
+                        onChange={(e) => setRationale(e.target.value)}
+                        placeholder="Why this option, over the others?"
+                        className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+                        style={{ ...FIELD_STYLE, width: '100%' }}
+                      />
+                    </label>
+                    <Button
+                      size="sm"
+                      data-testid="select-concept-button"
+                      disabled={!canSelect || select.isPending}
+                      onClick={handleSelect}
+                    >
+                      {select.isPending ? 'Recording…' : 'Select concept'}
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RequirementsPage() {
   const { activeProjectId } = useActiveProject();
   const [productType, setProductType] = useState('generic');
@@ -1360,6 +1655,8 @@ export function RequirementsPage() {
       <GateReviewSection projectId={activeProjectId ?? undefined} requirements={requirements} />
 
       <FeatureLibrarySection projectId={activeProjectId ?? undefined} />
+
+      <TradeStudySection projectId={activeProjectId ?? undefined} />
 
       {completeness && (
         <div

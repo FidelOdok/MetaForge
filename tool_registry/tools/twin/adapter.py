@@ -82,6 +82,7 @@ class TwinServer(McpToolServer):
         design_loop_reader: Any = None,
         design_loop_approver: Any = None,
         tube_height_design_loop_starter: Any = None,
+        concept_selector: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -291,6 +292,7 @@ class TwinServer(McpToolServer):
         # get_design_loop/approve_design_loop need no separate tube-height
         # variant, they already work on any DesignLoopIteration by loop_id.
         self._tube_height_design_loop_starter = tube_height_design_loop_starter
+        self._concept_selector = concept_selector
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -357,6 +359,8 @@ class TwinServer(McpToolServer):
             self._register_approve_design_loop()
         if tube_height_design_loop_starter is not None:
             self._register_start_tube_height_design_loop()
+        if concept_selector is not None:
+            self._register_select_concept()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -1378,7 +1382,13 @@ class TwinServer(McpToolServer):
                     "'release_approval' (release-to-manufacture sign-off) only "
                     "counts toward the G8 Release gate once approved with "
                     "twin.approve_engineering_entity -- creating one alone leaves "
-                    "it PROPOSED, which FAILS an outstanding waiver's check."
+                    "it PROPOSED, which FAILS an outstanding waiver's check. A "
+                    "'concept_option' (FORGE-262) is one candidate architecture in "
+                    "a trade study -- extra: criteria_scores={metric: number, ...} "
+                    "(e.g. mass_kg/cost_usd/risk/performance) and optional "
+                    "evidence_backed_criteria=[metric, ...] naming which scores "
+                    "came from a real measured source rather than an assertion; "
+                    "record 2-4 of these then call twin.select_concept."
                 ),
                 capability="twin_engineering_entity",
                 input_schema={
@@ -1399,6 +1409,7 @@ class TwinServer(McpToolServer):
                                 "invariant",
                                 "waiver",
                                 "release_approval",
+                                "concept_option",
                             ],
                         },
                         "statement": {
@@ -4628,6 +4639,118 @@ class TwinServer(McpToolServer):
             height_min_mm=float(height_min_mm),
             height_max_mm=float(height_max_mm) if isinstance(height_max_mm, (int, float)) else None,
             max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.select_concept (FORGE-262, gap G-B2)
+    # ------------------------------------------------------------------
+
+    def _register_select_concept(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.select_concept",
+                adapter_id="twin",
+                name="Select Concept",
+                description=(
+                    "Trade-study selection (gap G-B2): given 2-4 recorded "
+                    "concept_option entities (twin.record_engineering_entity, "
+                    "entity_type='concept_option') and a weight per criterion, "
+                    "computes each option's weighted score from its own recorded "
+                    "criteria_scores and records the selected one as a real "
+                    "Decision (twin.record_decision) -- every non-selected option "
+                    "becomes a real alternatives entry with its weighted score as "
+                    "reason_rejected, which is exactly what "
+                    "twin_core.consistency.gates's G5 'Trade study performed' "
+                    "check reads. Concept GENERATION is not this tool -- record "
+                    "each candidate architecture separately via "
+                    "twin.record_engineering_entity first."
+                ),
+                capability="twin_trade_study",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "option_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "2-4 concept_option entity ids to compare.",
+                        },
+                        "selected_option_id": {
+                            "type": "string",
+                            "description": "Must be one of option_ids.",
+                        },
+                        "weights": {
+                            "type": "object",
+                            "additionalProperties": {"type": "number"},
+                            "description": (
+                                "Criterion name -> weight, e.g. "
+                                "{'mass_kg': -1.0, 'cost_usd': -0.01, 'risk': -1.0, "
+                                "'performance': 1.0}. Sign encodes direction -- a "
+                                "criterion to MINIMIZE (mass, cost, risk) needs a "
+                                "negative weight so a higher weighted_score always "
+                                "means better, matching the design loop's own "
+                                "'higher objective = better' convention nowhere "
+                                "else in this codebase."
+                            ),
+                        },
+                        "title": {"type": "string", "minLength": 1},
+                        "rationale": {"type": "string", "minLength": 1},
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Linked to the Decision via parent_refs.",
+                        },
+                    },
+                    "required": [
+                        "option_ids",
+                        "selected_option_id",
+                        "weights",
+                        "title",
+                        "rationale",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "selected_option_id": {"type": "string"},
+                        "scores": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.select_concept,
+        )
+
+    async def select_concept(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        option_ids = arguments.get("option_ids")
+        if not isinstance(option_ids, list) or not option_ids:
+            raise ValueError("twin.select_concept: 'option_ids' is required (non-empty array)")
+        selected_option_id = arguments.get("selected_option_id")
+        if not selected_option_id or not isinstance(selected_option_id, str):
+            raise ValueError("twin.select_concept: 'selected_option_id' is required")
+        weights = arguments.get("weights")
+        if not isinstance(weights, dict) or not weights:
+            raise ValueError("twin.select_concept: 'weights' is required (non-empty object)")
+        title = arguments.get("title")
+        if not title or not isinstance(title, str):
+            raise ValueError("twin.select_concept: 'title' is required (non-empty string)")
+        rationale = arguments.get("rationale")
+        if not rationale or not isinstance(rationale, str):
+            raise ValueError("twin.select_concept: 'rationale' is required (non-empty string)")
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        return await self._concept_selector(
+            option_ids=[str(o) for o in option_ids],
+            selected_option_id=selected_option_id,
+            weights={str(k): float(v) for k, v in weights.items()},
+            title=title,
+            rationale=rationale,
             project_id=project_id if isinstance(project_id, str) else None,
             requirement_ids=(
                 [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None

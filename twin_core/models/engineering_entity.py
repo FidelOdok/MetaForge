@@ -53,6 +53,17 @@ EngineeringEntityType = Literal[
     # from creation alone. See twin_core.consistency.gates's G8 section.
     "waiver",
     "release_approval",
+    # FORGE-262 (gap G-B2): one candidate architecture in a trade study --
+    # metadata carries `criteria_scores` (dict[str, float], e.g.
+    # {"mass_kg": 1.8, "cost_usd": 340, "risk": 3, "performance": 7}) and
+    # `evidence_backed_criteria` (list[str] naming which of those keys came
+    # from a real measured/recorded source -- e.g. a CAD work product's own
+    # mass_kg -- rather than an asserted number; risk/performance in the
+    # general case have no measured source in this codebase and are always
+    # asserted). `twin.select_concept` (api_gateway/twin/trade_study.py)
+    # reads these back to compute a weighted score and record the selection
+    # as a real Decision -- see that module's own docstring.
+    "concept_option",
 ]
 
 

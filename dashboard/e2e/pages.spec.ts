@@ -434,6 +434,48 @@ test.describe('Requirements', () => {
     await expect(result).toContainText('rib');
     await expect(result).toContainText('3 entities');
   });
+
+  test('trade study scores recorded options and selecting one records a decision (FORGE-262)', async ({
+    page,
+  }) => {
+    await page.goto('/requirements?demo=1');
+    const section = page.getByTestId('trade-study-section');
+    await expect(section).toBeVisible();
+
+    const table = section.getByTestId('trade-study-table');
+    await expect(table).toBeVisible();
+    await expect(section.getByTestId('trade-study-option-column')).toHaveCount(2);
+
+    // Default weights (mass_kg:-1, cost_usd:-0.01, risk:-1, performance:1)
+    // already favour the lighter, hollow-tube option (0.4 vs 2.85) --
+    // confirm the weighted scores reflect the real recorded
+    // criteria_scores, not a placeholder.
+    const scores = section.getByTestId('trade-study-weighted-score');
+    await expect(scores.nth(0)).toHaveText('0.400');
+    await expect(scores.nth(1)).toHaveText('2.850');
+
+    // Editing the mass_kg weight recomputes the score client-side.
+    await section.getByTestId('trade-study-weight-mass_kg').fill('-2');
+    await expect(scores.nth(1)).toHaveText('1.250');
+
+    // Add a new option via the dashboard form.
+    await section.getByTestId('open-add-option-button').click();
+    const addForm = section.getByTestId('add-option-form');
+    await addForm.getByLabel('Option name').fill('Composite tube');
+    await addForm.getByLabel('mass_kg', { exact: true }).fill('1.1');
+    await addForm.getByRole('button', { name: 'Add' }).click();
+    await expect(addForm).not.toBeVisible();
+    await expect(section.getByTestId('trade-study-option-column')).toHaveCount(3);
+    await expect(table).toContainText('Composite tube');
+
+    // Select a concept -- records a real Decision.
+    await section.getByTestId('trade-study-select-option').selectOption({ label: 'Hollow tube' });
+    await section
+      .locator('input[placeholder="Why this option, over the others?"]')
+      .fill('Best mass/cost balance for the arm link.');
+    await section.getByTestId('select-concept-button').click();
+    await expect(page.getByText('Concept selected -- recorded as a Decision')).toBeVisible();
+  });
 });
 
 test.describe('Design Assistant', () => {

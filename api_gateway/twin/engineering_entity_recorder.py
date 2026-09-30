@@ -53,6 +53,7 @@ _ENTITY_TYPES = frozenset(
         "invariant",
         "waiver",
         "release_approval",
+        "concept_option",
     }
 )
 
