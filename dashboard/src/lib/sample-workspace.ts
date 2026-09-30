@@ -1411,6 +1411,67 @@ function route(
       ];
       return { node_id: decisionId, selected_option_id: selectedOptionId, scores: scored };
     }
+    if (path === '/component-selection/select') {
+      // FORGE-265: illustrative margin arithmetic mirrors
+      // api_gateway.twin.component_selection.check_spec_margin exactly (a
+      // positive margin always means "passes with this much headroom",
+      // regardless of '>=' vs '<=').
+      const candidates = (body.candidates as {
+        mpn: string;
+        manufacturer: string;
+        specs: Record<string, number>;
+      }[]) ?? [];
+      const requiredSpecs =
+        (body.requiredSpecs as Record<string, { op: '>=' | '<='; value: number }>) ?? {};
+      const selectedMpn = body.selectedMpn as string;
+      const scoredCandidates = candidates.map((c) => {
+        const margins: Record<
+          string,
+          { pass: boolean; required: number; actual: number | null; op: string; margin: number | null }
+        > = {};
+        for (const [name, req] of Object.entries(requiredSpecs)) {
+          const actual = c.specs[name];
+          if (actual === undefined) {
+            margins[name] = { pass: false, required: req.value, actual: null, op: req.op, margin: null };
+            continue;
+          }
+          const margin = req.op === '>=' ? actual - req.value : req.value - actual;
+          const pass = req.op === '>=' ? actual >= req.value : actual <= req.value;
+          margins[name] = { pass, required: req.value, actual, op: req.op, margin };
+        }
+        return { ...c, margins };
+      });
+      const selected = scoredCandidates.find((c) => c.mpn === selectedMpn);
+      const rejected = scoredCandidates.filter((c) => c.mpn !== selectedMpn);
+      const selectedMeetsRequirements = Object.values(selected?.margins ?? {}).every(
+        (m) => m.pass,
+      );
+      const bomItemId = `sample-bom-item-${Date.now()}`;
+      const decisionId = `sample-decision-component-${Date.now()}`;
+      s.decisions[bomItemId] = [
+        {
+          id: decisionId,
+          title: (body.title as string) ?? 'Component selection',
+          rationale: (body.rationale as string) ?? '',
+          alternatives: rejected.map((c) => ({
+            option: `${c.mpn} (${c.manufacturer})`,
+            reason_rejected: Object.entries(c.margins)
+              .map(([name, m]) => `${name}: ${m.pass ? 'PASS' : 'FAIL'}`)
+              .join(', '),
+          })),
+          parent_refs: [],
+          evidence_refs: [],
+          created_at: now,
+        },
+      ];
+      return {
+        node_id: bomItemId,
+        decision_node_id: decisionId,
+        selected_mpn: selectedMpn,
+        selected_meets_requirements: selectedMeetsRequirements,
+        candidates: scoredCandidates,
+      };
+    }
     if (path === '/promotion/attempt') {
       // FORGE-290: illustrative evidence-gated approval -- looks each
       // requested requirement up on the SAME live-ish matrix the evidence

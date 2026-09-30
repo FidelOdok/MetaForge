@@ -83,6 +83,7 @@ class TwinServer(McpToolServer):
         design_loop_approver: Any = None,
         tube_height_design_loop_starter: Any = None,
         concept_selector: Any = None,
+        component_selector: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -293,6 +294,7 @@ class TwinServer(McpToolServer):
         # variant, they already work on any DesignLoopIteration by loop_id.
         self._tube_height_design_loop_starter = tube_height_design_loop_starter
         self._concept_selector = concept_selector
+        self._component_selector = component_selector
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -361,6 +363,8 @@ class TwinServer(McpToolServer):
             self._register_start_tube_height_design_loop()
         if concept_selector is not None:
             self._register_select_concept()
+        if component_selector is not None:
+            self._register_select_component()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4751,6 +4755,157 @@ class TwinServer(McpToolServer):
             weights={str(k): float(v) for k, v in weights.items()},
             title=title,
             rationale=rationale,
+            project_id=project_id if isinstance(project_id, str) else None,
+            requirement_ids=(
+                [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # twin.select_component (FORGE-265, gap G-C1)
+    # ------------------------------------------------------------------
+
+    def _register_select_component(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.select_component",
+                adapter_id="twin",
+                name="Select Component",
+                description=(
+                    "Requirement-driven component selection (gap G-C1): given "
+                    "2+ real candidate parts (each an mpn + caller-asserted "
+                    "datasheet specs, e.g. a servo's published torque_kg_cm) "
+                    "and the specs the design actually requires (a threshold "
+                    "+ '>='/'<=' direction per spec, e.g. 'torque_kg_cm >= "
+                    "24.5'), computes a real numeric margin per requirement "
+                    "per candidate, records the selection as a real Decision "
+                    "(twin.record_decision, alternatives = every non-selected "
+                    "candidate's margin summary) and persists the selected "
+                    "candidate as a real BOMItem (twin.record_component_"
+                    "selection's own recorder) -- unlike that tool alone, "
+                    "which persists whatever was already decided with zero "
+                    "requirement comparison. Spec values are caller-asserted "
+                    "real datasheet numbers, not scraped by any in-repo "
+                    "parsing pipeline."
+                ),
+                capability="twin_component_selection",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "candidates": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "mpn": {"type": "string"},
+                                    "manufacturer": {"type": "string"},
+                                    "specs": {
+                                        "type": "object",
+                                        "additionalProperties": {"type": "number"},
+                                    },
+                                },
+                                "required": ["mpn", "manufacturer"],
+                            },
+                            "description": "2+ real candidates to compare.",
+                        },
+                        "required_specs": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                    "op": {"type": "string", "enum": [">=", "<="]},
+                                    "value": {"type": "number"},
+                                },
+                                "required": ["op", "value"],
+                            },
+                            "description": (
+                                "Spec name -> {op, value}, e.g. "
+                                "{'torque_kg_cm': {'op': '>=', 'value': 24.5}}."
+                            ),
+                        },
+                        "selected_mpn": {
+                            "type": "string",
+                            "description": "Must be one of candidates' mpn values.",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": (
+                                "digital_twin.catalog.taxonomy category, e.g. 'servo'."
+                            ),
+                        },
+                        "purchase_unit": {"type": "string"},
+                        "title": {"type": "string", "minLength": 1},
+                        "rationale": {"type": "string", "minLength": 1},
+                        "quantity": {"type": "integer"},
+                        "project_id": {"type": "string"},
+                        "requirement_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Linked to the Decision via parent_refs.",
+                        },
+                    },
+                    "required": [
+                        "candidates",
+                        "required_specs",
+                        "selected_mpn",
+                        "category",
+                        "purchase_unit",
+                        "title",
+                        "rationale",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "decision_node_id": {"type": "string"},
+                        "selected_mpn": {"type": "string"},
+                        "selected_meets_requirements": {"type": "boolean"},
+                        "candidates": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=15),
+            ),
+            handler=self.select_component,
+        )
+
+    async def select_component(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        candidates = arguments.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise ValueError("twin.select_component: 'candidates' is required (non-empty array)")
+        required_specs = arguments.get("required_specs")
+        if not isinstance(required_specs, dict) or not required_specs:
+            raise ValueError(
+                "twin.select_component: 'required_specs' is required (non-empty object)"
+            )
+        selected_mpn = arguments.get("selected_mpn")
+        if not selected_mpn or not isinstance(selected_mpn, str):
+            raise ValueError("twin.select_component: 'selected_mpn' is required")
+        category = arguments.get("category")
+        if not category or not isinstance(category, str):
+            raise ValueError("twin.select_component: 'category' is required")
+        purchase_unit = arguments.get("purchase_unit")
+        if not purchase_unit or not isinstance(purchase_unit, str):
+            raise ValueError("twin.select_component: 'purchase_unit' is required")
+        title = arguments.get("title")
+        if not title or not isinstance(title, str):
+            raise ValueError("twin.select_component: 'title' is required (non-empty string)")
+        rationale = arguments.get("rationale")
+        if not rationale or not isinstance(rationale, str):
+            raise ValueError("twin.select_component: 'rationale' is required (non-empty string)")
+        quantity = arguments.get("quantity", 1)
+        project_id = arguments.get("project_id")
+        requirement_ids = arguments.get("requirement_ids")
+        return await self._component_selector(
+            candidates=candidates,
+            required_specs=required_specs,
+            selected_mpn=selected_mpn,
+            category=category,
+            purchase_unit=purchase_unit,
+            title=title,
+            rationale=rationale,
+            quantity=int(quantity) if isinstance(quantity, (int, float)) else 1,
             project_id=project_id if isinstance(project_id, str) else None,
             requirement_ids=(
                 [str(r) for r in requirement_ids] if isinstance(requirement_ids, list) else None

@@ -1,6 +1,46 @@
 {
   "components": {
     "schemas": {
+      "AddConceptOptionRequest": {
+        "properties": {
+          "criteriaScores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Criteriascores",
+            "type": "object"
+          },
+          "evidenceBackedCriteria": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidencebackedcriteria",
+            "type": "array"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "criteriaScores"
+        ],
+        "title": "AddConceptOptionRequest",
+        "type": "object"
+      },
       "ApprovalDecision": {
         "description": "Body for ``POST /api/v1/assistant/proposals/{change_id}/decide``.",
         "properties": {
@@ -61,6 +101,19 @@
           "decision"
         ],
         "title": "ApprovalRequest",
+        "type": "object"
+      },
+      "ApproveDesignLoopRequest": {
+        "properties": {
+          "approvedBy": {
+            "title": "Approvedby",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approvedBy"
+        ],
+        "title": "ApproveDesignLoopRequest",
         "type": "object"
       },
       "ApproveSketchRequest": {
@@ -415,6 +468,131 @@
         "title": "AssistantResponse",
         "type": "object"
       },
+      "AttemptPromotionRequest": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "decidedBy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidedby"
+          },
+          "k": {
+            "default": 1.0,
+            "title": "K",
+            "type": "number"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "reject": {
+            "default": false,
+            "title": "Reject",
+            "type": "boolean"
+          },
+          "requiredClaimIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requiredclaimids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "projectId",
+          "level",
+          "requiredClaimIds"
+        ],
+        "title": "AttemptPromotionRequest",
+        "type": "object"
+      },
+      "AttemptPromotionResponse": {
+        "properties": {
+          "blockedReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockedreason"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "decidedBy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidedby"
+          },
+          "gateId": {
+            "title": "Gateid",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "promoted": {
+            "title": "Promoted",
+            "type": "boolean"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/RequiredClaimResultView"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "gateId",
+          "level",
+          "promoted",
+          "blockedReason",
+          "decidedBy",
+          "comment",
+          "results"
+        ],
+        "title": "AttemptPromotionResponse",
+        "type": "object"
+      },
       "Body_import_work_product_v1_twin_import_post": {
         "properties": {
           "description": {
@@ -701,6 +879,32 @@
           "result_area_mm2"
         ],
         "title": "BooleanCutResponse",
+        "type": "object"
+      },
+      "Candidate": {
+        "properties": {
+          "manufacturer": {
+            "title": "Manufacturer",
+            "type": "string"
+          },
+          "mpn": {
+            "title": "Mpn",
+            "type": "string"
+          },
+          "specs": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "default": {},
+            "title": "Specs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "mpn",
+          "manufacturer"
+        ],
+        "title": "Candidate",
         "type": "object"
       },
       "ChangeStatus": {
@@ -1325,6 +1529,94 @@
         "title": "CreateAssemblyRequest",
         "type": "object"
       },
+      "CreateConstraintRequest": {
+        "properties": {
+          "expectedEvidence": {
+            "default": "",
+            "title": "Expectedevidence",
+            "type": "string"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "number"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "operator": {
+            "default": "<=",
+            "title": "Operator",
+            "type": "string"
+          },
+          "projectId": {
+            "title": "Projectid",
+            "type": "string"
+          },
+          "severity": {
+            "default": "error",
+            "title": "Severity",
+            "type": "string"
+          },
+          "targetNodeType": {
+            "default": "",
+            "title": "Targetnodetype",
+            "type": "string"
+          },
+          "unit": {
+            "default": "",
+            "title": "Unit",
+            "type": "string"
+          },
+          "verificationMethod": {
+            "default": "",
+            "title": "Verificationmethod",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "name",
+          "metric",
+          "limit"
+        ],
+        "title": "CreateConstraintRequest",
+        "type": "object"
+      },
+      "CreateConstraintResponse": {
+        "properties": {
+          "constraintId": {
+            "title": "Constraintid",
+            "type": "string"
+          },
+          "setWorkProductId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Setworkproductid"
+          }
+        },
+        "required": [
+          "constraintId",
+          "setWorkProductId"
+        ],
+        "title": "CreateConstraintResponse",
+        "type": "object"
+      },
       "CreateLoadCaseRequest": {
         "description": "Body for ``POST /v1/simulation/load-cases``.",
         "properties": {
@@ -1836,6 +2128,73 @@
         "title": "EvidenceResponse",
         "type": "object"
       },
+      "EvidenceSummary": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "staleness": {
+            "title": "Staleness",
+            "type": "string"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "id",
+          "method",
+          "staleness"
+        ],
+        "title": "EvidenceSummary",
+        "type": "object"
+      },
       "EvidenceType": {
         "description": "Types of compliance evidence work_products.",
         "enum": [
@@ -1865,6 +2224,44 @@
           "download_url"
         ],
         "title": "ExportFile",
+        "type": "object"
+      },
+      "FeatureDiffResponse": {
+        "properties": {
+          "added": {
+            "additionalProperties": true,
+            "title": "Added",
+            "type": "object"
+          },
+          "changed": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldDelta"
+            },
+            "title": "Changed",
+            "type": "object"
+          },
+          "currentWorkProductId": {
+            "title": "Currentworkproductid",
+            "type": "string"
+          },
+          "previousWorkProductId": {
+            "title": "Previousworkproductid",
+            "type": "string"
+          },
+          "removed": {
+            "additionalProperties": true,
+            "title": "Removed",
+            "type": "object"
+          }
+        },
+        "required": [
+          "currentWorkProductId",
+          "previousWorkProductId",
+          "changed",
+          "added",
+          "removed"
+        ],
+        "title": "FeatureDiffResponse",
         "type": "object"
       },
       "FieldDelta": {
@@ -2106,6 +2503,62 @@
           "spec"
         ],
         "title": "FromTextResponse",
+        "type": "object"
+      },
+      "GenerateFeatureRequest": {
+        "properties": {
+          "adapter": {
+            "default": "freecad",
+            "title": "Adapter",
+            "type": "string"
+          },
+          "commit": {
+            "default": true,
+            "title": "Commit",
+            "type": "boolean"
+          },
+          "feature": {
+            "additionalProperties": true,
+            "title": "Feature",
+            "type": "object"
+          },
+          "material": {
+            "default": "aluminum_6061",
+            "title": "Material",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "workProductId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workproductid"
+          }
+        },
+        "required": [
+          "name",
+          "feature"
+        ],
+        "title": "GenerateFeatureRequest",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -3327,6 +3780,70 @@
         "title": "LoadCaseResponse",
         "type": "object"
       },
+      "MaturityGateSummary": {
+        "properties": {
+          "blockedReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blockedreason"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "decidedBy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidedby"
+          },
+          "gateId": {
+            "title": "Gateid",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "promoted": {
+            "title": "Promoted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "gateId",
+          "level",
+          "promoted",
+          "blockedReason",
+          "decidedBy",
+          "comment",
+          "createdAt"
+        ],
+        "title": "MaturityGateSummary",
+        "type": "object"
+      },
       "MemoryHitResponse": {
         "description": "Wire shape of a single hit in the response payload.",
         "properties": {
@@ -4003,6 +4520,22 @@
         "title": "ProjectWorkProductResponse",
         "type": "object"
       },
+      "PromotionHistoryResponse": {
+        "properties": {
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/MaturityGateSummary"
+            },
+            "title": "Gates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "gates"
+        ],
+        "title": "PromotionHistoryResponse",
+        "type": "object"
+      },
       "ProposalListResponse": {
         "description": "Paginated list of design-change proposals.",
         "properties": {
@@ -4092,6 +4625,137 @@
           }
         },
         "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "RequiredClaimResultView": {
+        "properties": {
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "requirementId": {
+            "title": "Requirementid",
+            "type": "string"
+          },
+          "requirementName": {
+            "title": "Requirementname",
+            "type": "string"
+          },
+          "waiverId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiverid"
+          }
+        },
+        "required": [
+          "requirementId",
+          "requirementName",
+          "decision",
+          "detail",
+          "waiverId"
+        ],
+        "title": "RequiredClaimResultView",
+        "type": "object"
+      },
+      "RequiredSpec": {
+        "properties": {
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "op",
+          "value"
+        ],
+        "title": "RequiredSpec",
+        "type": "object"
+      },
+      "RequirementMatrixResponse": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/RequirementMatrixRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "RequirementMatrixResponse",
+        "type": "object"
+      },
+      "RequirementMatrixRow": {
+        "properties": {
+          "artefactIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Artefactids",
+            "type": "array"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceSummary"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "expectedEvidence": {
+            "default": "",
+            "title": "Expectedevidence",
+            "type": "string"
+          },
+          "limitText": {
+            "title": "Limittext",
+            "type": "string"
+          },
+          "requirementId": {
+            "title": "Requirementid",
+            "type": "string"
+          },
+          "requirementName": {
+            "title": "Requirementname",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "verificationMethod": {
+            "default": "",
+            "title": "Verificationmethod",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requirementId",
+          "requirementName",
+          "limitText",
+          "status",
+          "detail"
+        ],
+        "title": "RequirementMatrixRow",
         "type": "object"
       },
       "RequirementRecordView": {
@@ -4771,6 +5435,149 @@
           "totalFound"
         ],
         "title": "SearchResponse",
+        "type": "object"
+      },
+      "SelectComponentRequest": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/Candidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "purchaseUnit": {
+            "title": "Purchaseunit",
+            "type": "string"
+          },
+          "quantity": {
+            "default": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "requiredSpecs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RequiredSpec"
+            },
+            "title": "Requiredspecs",
+            "type": "object"
+          },
+          "requirementIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirementids"
+          },
+          "selectedMpn": {
+            "title": "Selectedmpn",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidates",
+          "requiredSpecs",
+          "selectedMpn",
+          "category",
+          "purchaseUnit",
+          "title",
+          "rationale"
+        ],
+        "title": "SelectComponentRequest",
+        "type": "object"
+      },
+      "SelectConceptRequest": {
+        "properties": {
+          "optionIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Optionids",
+            "type": "array"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "requirementIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirementids"
+          },
+          "selectedOptionId": {
+            "title": "Selectedoptionid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "optionIds",
+          "selectedOptionId",
+          "weights",
+          "title",
+          "rationale"
+        ],
+        "title": "SelectConceptRequest",
         "type": "object"
       },
       "SendMessageRequest": {
@@ -5580,6 +6387,85 @@
           "indexedAt"
         ],
         "title": "SourceSummaryResponse",
+        "type": "object"
+      },
+      "StartDesignLoopRequest": {
+        "properties": {
+          "deflectionLimitMm": {
+            "title": "Deflectionlimitmm",
+            "type": "number"
+          },
+          "loadN": {
+            "title": "Loadn",
+            "type": "number"
+          },
+          "material": {
+            "default": "aluminum_6061",
+            "title": "Material",
+            "type": "string"
+          },
+          "maxIterations": {
+            "default": 60,
+            "title": "Maxiterations",
+            "type": "integer"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "requirementIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirementids"
+          },
+          "sfLimit": {
+            "default": 2.0,
+            "title": "Sflimit",
+            "type": "number"
+          },
+          "wallMaxMm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallmaxmm"
+          },
+          "wallMinMm": {
+            "default": 0.5,
+            "title": "Wallminmm",
+            "type": "number"
+          },
+          "workProductId": {
+            "title": "Workproductid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workProductId",
+          "loadN",
+          "deflectionLimitMm"
+        ],
+        "title": "StartDesignLoopRequest",
         "type": "object"
       },
       "SynthesizeRequest": {
@@ -8528,6 +9414,49 @@
         ]
       }
     },
+    "/v1/component-selection/select": {
+      "post": {
+        "operationId": "select_component_v1_component_selection_select_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectComponentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Select Component V1 Component Selection Select Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Select Component",
+        "tags": [
+          "component-selection"
+        ]
+      }
+    },
     "/v1/constraint/synthesize": {
       "post": {
         "description": "Turn a drag delta into a parametric constraint, and \u2014 when the dragged\ngroup maps to a live FreeCAD session object (``session_id`` + ``obj_id``) \u2014\n**bind it into the model** so Apply re-parameterizes and re-solves (MET-531).\n\nWithout a session/object it stays a suggestion-only stub (MET-519). Binding\nis best-effort: an adapter error leaves the suggestion intact with\n``bound=False`` and a ``binding_error``.",
@@ -8784,6 +9713,299 @@
         "summary": "Get Metadata",
         "tags": [
           "convert"
+        ]
+      }
+    },
+    "/v1/decisions": {
+      "get": {
+        "operationId": "list_related_decisions_v1_decisions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "related_to",
+            "required": true,
+            "schema": {
+              "title": "Related To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Related Decisions V1 Decisions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Related Decisions",
+        "tags": [
+          "decisions"
+        ]
+      }
+    },
+    "/v1/design-loop/start": {
+      "post": {
+        "operationId": "start_design_loop_v1_design_loop_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartDesignLoopRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start Design Loop V1 Design Loop Start Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Design Loop",
+        "tags": [
+          "design-loop"
+        ]
+      }
+    },
+    "/v1/design-loop/{loop_id}": {
+      "get": {
+        "operationId": "get_design_loop_v1_design_loop__loop_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loop_id",
+            "required": true,
+            "schema": {
+              "title": "Loop Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Design Loop V1 Design Loop  Loop Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Design Loop",
+        "tags": [
+          "design-loop"
+        ]
+      }
+    },
+    "/v1/design-loop/{loop_id}/approve": {
+      "post": {
+        "operationId": "approve_design_loop_v1_design_loop__loop_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loop_id",
+            "required": true,
+            "schema": {
+              "title": "Loop Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveDesignLoopRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Design Loop V1 Design Loop  Loop Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Design Loop",
+        "tags": [
+          "design-loop"
+        ]
+      }
+    },
+    "/v1/evals": {
+      "get": {
+        "operationId": "get_evals_v1_evals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Evals V1 Evals Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Evals",
+        "tags": [
+          "evals"
+        ]
+      }
+    },
+    "/v1/features/generate": {
+      "post": {
+        "operationId": "generate_feature_v1_features_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateFeatureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Generate Feature V1 Features Generate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Feature",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/features/{work_product_id}/diff": {
+      "get": {
+        "operationId": "get_feature_diff_v1_features__work_product_id__diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDiffResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Feature Diff",
+        "tags": [
+          "features"
         ]
       }
     },
@@ -9990,6 +11212,174 @@
         ]
       }
     },
+    "/v1/promotion": {
+      "get": {
+        "operationId": "list_promotions_v1_promotion_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromotionHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Promotions",
+        "tags": [
+          "promotion"
+        ]
+      }
+    },
+    "/v1/promotion/attempt": {
+      "post": {
+        "operationId": "attempt_promotion_route_v1_promotion_attempt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttemptPromotionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptPromotionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attempt Promotion Route",
+        "tags": [
+          "promotion"
+        ]
+      }
+    },
+    "/v1/requirements/constraints": {
+      "post": {
+        "description": "FORGE-259: create one structured constraint (metric/operator/limit/\nunit/target_node_type) from the dashboard's constraint editor. Live\npass/fail/no_data status for it then comes from the existing\nGET /v1/requirements/matrix, computed from real Claim/Evidence data --\nthis route only ever records the requirement's own declaration.",
+        "operationId": "create_constraint_v1_requirements_constraints_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConstraintRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateConstraintResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Constraint",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/v1/requirements/matrix": {
+      "get": {
+        "description": "FORGE-318: requirements x claims x evidence, one row per real\nrequirement -- status (pass/uncertain/fail/no_data/stale) derived live\nfrom current claim + evidence staleness state, never cached.",
+        "operationId": "get_requirement_matrix_v1_requirements_matrix_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementMatrixResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Requirement Matrix",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
     "/v1/requirements/quality": {
       "get": {
         "operationId": "get_requirement_quality_v1_requirements_quality_get",
@@ -10696,6 +12086,141 @@
         "summary": "List Simulation Results",
         "tags": [
           "simulation"
+        ]
+      }
+    },
+    "/v1/trade-study/options": {
+      "get": {
+        "operationId": "list_concept_options_v1_trade_study_options_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Concept Options V1 Trade Study Options Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Concept Options",
+        "tags": [
+          "trade-study"
+        ]
+      },
+      "post": {
+        "operationId": "add_concept_option_v1_trade_study_options_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddConceptOptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Concept Option V1 Trade Study Options Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Concept Option",
+        "tags": [
+          "trade-study"
+        ]
+      }
+    },
+    "/v1/trade-study/select": {
+      "post": {
+        "operationId": "select_concept_v1_trade_study_select_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectConceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Select Concept V1 Trade Study Select Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Select Concept",
+        "tags": [
+          "trade-study"
         ]
       }
     },

@@ -43,6 +43,44 @@ test.describe('BOM Page', () => {
       'true',
     );
   });
+
+  test('requirement-driven component selection records a margin-checked decision (FORGE-265)', async ({
+    page,
+  }) => {
+    await page.goto('/bom?demo=1');
+    const section = page.getByTestId('component-selection-section');
+    await expect(section).toBeVisible();
+
+    // One required spec is pre-filled -- name it and set the threshold.
+    await section.getByPlaceholder('e.g. torque_kg_cm').fill('torque_kg_cm');
+    await section.getByPlaceholder('required value').fill('20');
+
+    // Two candidates are pre-filled by default -- one that clears the
+    // requirement, one that doesn't.
+    const rows = section.locator('tbody tr');
+    await rows.nth(0).getByPlaceholder('e.g. MG996R').fill('DS3218');
+    await rows.nth(0).getByPlaceholder('e.g. TowerPro').fill('Miuzei');
+    await rows.nth(0).locator('input[type="number"]').fill('19.6');
+    await rows.nth(1).getByPlaceholder('e.g. MG996R').fill('MG996R');
+    await rows.nth(1).getByPlaceholder('e.g. TowerPro').fill('TowerPro');
+    await rows.nth(1).locator('input[type="number"]').fill('25');
+
+    await rows.nth(1).getByTestId('select-candidate-radio-1').check();
+
+    await section.getByPlaceholder('e.g. Elbow joint actuator').fill('Elbow joint actuator');
+    await section
+      .getByPlaceholder('Why this part, over the others?')
+      .fill('MG996R clears the required torque with margin.');
+
+    const selectButton = section.getByTestId('select-component-button');
+    await expect(selectButton).toBeEnabled();
+    await selectButton.click();
+
+    const result = section.getByTestId('component-selection-result');
+    await expect(result).toBeVisible();
+    await expect(result).toContainText('MG996R');
+    await expect(result).toContainText('meets all required specs');
+  });
 });
 
 test.describe('Evals Page', () => {
