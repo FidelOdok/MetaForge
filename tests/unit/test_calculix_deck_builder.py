@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import pytest
 
-from tool_registry.tools.calculix.deck_builder import build_modal_deck, build_static_stress_deck
+from tool_registry.tools.calculix.deck_builder import (
+    build_modal_deck,
+    build_static_stress_deck,
+    build_thermal_deck,
+)
 from tool_registry.tools.calculix.inp_mesh import MeshData
 
 
@@ -324,3 +328,123 @@ class TestBuildModalDeck:
         assert "7.849999999999999e-09" not in deck
         density_line = deck.splitlines()[deck.splitlines().index("*DENSITY") + 1]
         assert len(density_line.replace("-", "").replace(".", "")) <= 11  # <=10 sig figs + sign
+
+
+class TestBuildThermalDeck:
+    def test_deck_contains_the_expected_cards_in_order(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_thermal_deck(
+            mesh,
+            conductivity_w_mm_k=0.235,
+            heat_source_node_set="Surface2",
+            power_dissipation_w=5.0,
+            sink_node_set="Surface1",
+            sink_temp_c=20.0,
+        )
+        for card in (
+            "*NODE",
+            "*ELEMENT, TYPE=C3D4, ELSET=Volume1",
+            "*NSET, NSET=SINK_Surface1",
+            "*MATERIAL, NAME=MAT1",
+            "*CONDUCTIVITY",
+            "0.235",
+            "*SOLID SECTION, ELSET=Volume1, MATERIAL=MAT1",
+            "*STEP",
+            "*HEAT TRANSFER, STEADY STATE",
+            "*BOUNDARY",
+            "SINK_Surface1, 11, 11, 20",
+            "*CFLUX",
+            "*NODE FILE",
+            "NT",
+            "*END STEP",
+        ):
+            assert card in deck, f"missing card: {card!r}"
+        assert deck.index("*CONDUCTIVITY") < deck.index("*SOLID SECTION")
+        assert deck.index("*SOLID SECTION") < deck.index("*STEP")
+        assert deck.index("*HEAT TRANSFER") < deck.index("*BOUNDARY")
+        assert deck.index("*BOUNDARY") < deck.index("*CFLUX")
+        assert deck.index("*CFLUX") < deck.index("*END STEP")
+
+    def test_no_elastic_density_or_el_file_unlike_structural_decks(self) -> None:
+        """A thermal solve has no stiffness/mass matrix and requests no
+        displacement/stress output -- all structural-only cards."""
+        mesh = _cantilever_mesh()
+        deck = build_thermal_deck(
+            mesh,
+            conductivity_w_mm_k=0.235,
+            heat_source_node_set="Surface2",
+            power_dissipation_w=5.0,
+            sink_node_set="Surface1",
+            sink_temp_c=20.0,
+        )
+        assert "*ELASTIC" not in deck
+        assert "*DENSITY" not in deck
+        assert "*EL FILE" not in deck
+        assert "*CLOAD" not in deck
+        assert "*STATIC" not in deck
+        assert "*FREQUENCY" not in deck
+
+    def test_heat_flux_is_divided_evenly_across_heat_source_nodes(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_thermal_deck(
+            mesh,
+            conductivity_w_mm_k=0.235,
+            heat_source_node_set="Surface2",  # nodes 5,6,7,8 -- 4 nodes
+            power_dissipation_w=8.0,
+            sink_node_set="Surface1",
+            sink_temp_c=20.0,
+        )
+        cflux_index = deck.splitlines().index("*CFLUX")
+        cflux_lines = deck.splitlines()[cflux_index + 1 : cflux_index + 5]
+        for node_id, line in zip((5, 6, 7, 8), cflux_lines):
+            assert line == f"{node_id}, 11, 2"  # 8.0 / 4 nodes = 2.0 W/node
+
+    def test_only_volume_elements_are_included(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_thermal_deck(
+            mesh,
+            conductivity_w_mm_k=0.235,
+            heat_source_node_set="Surface2",
+            power_dissipation_w=5.0,
+            sink_node_set="Surface1",
+            sink_temp_c=20.0,
+        )
+        assert "TYPE=CPS3" not in deck
+        assert "TYPE=T3D2" not in deck
+
+    def test_unknown_volume_elset_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(ValueError, match="NotAVolumeSet"):
+            build_thermal_deck(
+                mesh,
+                conductivity_w_mm_k=0.235,
+                heat_source_node_set="Surface2",
+                power_dissipation_w=5.0,
+                sink_node_set="Surface1",
+                sink_temp_c=20.0,
+                volume_elset="NotAVolumeSet",
+            )
+
+    def test_unknown_heat_source_node_set_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(KeyError):
+            build_thermal_deck(
+                mesh,
+                conductivity_w_mm_k=0.235,
+                heat_source_node_set="NotAFace",
+                power_dissipation_w=5.0,
+                sink_node_set="Surface1",
+                sink_temp_c=20.0,
+            )
+
+    def test_unknown_sink_node_set_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(KeyError):
+            build_thermal_deck(
+                mesh,
+                conductivity_w_mm_k=0.235,
+                heat_source_node_set="Surface2",
+                power_dissipation_w=5.0,
+                sink_node_set="NotAFace",
+                sink_temp_c=20.0,
+            )

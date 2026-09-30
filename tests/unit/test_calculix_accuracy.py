@@ -9,6 +9,7 @@ from tool_registry.tools.calculix.accuracy import (
     check_mesh_convergence,
     cross_check_cantilever_bending,
     cross_check_cantilever_frequency,
+    cross_check_thermal_steady_state,
 )
 
 
@@ -195,6 +196,96 @@ class TestCrossCheckCantileverFrequency:
                 density_kg_m3=7850,
                 youngs_modulus_mpa=200000,
                 fea_first_mode_hz=1631.0,
+                tolerance_pct=0,
+            )
+
+
+class TestCrossCheckThermalSteadyState:
+    # 50mm conduction path, 10x10mm (100mm^2) cross-section, aluminum
+    # (205 W/(m*K)), 5W dissipation, 20C sink. R = L/(k*A) =
+    # 50/(0.205*100) = 2.439 K/W, T_rise = 5*2.439 = 12.195C, peak =
+    # 32.195C -- hand-computed (independently of the function under test).
+    def test_matches_hand_calc_within_tolerance(self) -> None:
+        result = cross_check_thermal_steady_state(
+            conduction_length_mm=50,
+            cross_section_area_mm2=100,
+            thermal_conductivity_w_mk=205,
+            power_dissipation_w=5,
+            sink_temp_c=20,
+            fea_peak_temp_c=32.2,
+        )
+        assert result["hand_calc_peak_temp_c"] == pytest.approx(32.2, rel=0.01)
+        assert result["within_tolerance"] is True
+        assert result["percent_difference"] < 5.0
+
+    def test_flags_a_real_mismatch(self) -> None:
+        result = cross_check_thermal_steady_state(
+            conduction_length_mm=50,
+            cross_section_area_mm2=100,
+            thermal_conductivity_w_mk=205,
+            power_dissipation_w=5,
+            sink_temp_c=20,
+            fea_peak_temp_c=200.0,  # wildly too high
+            tolerance_pct=20.0,
+        )
+        assert result["within_tolerance"] is False
+        assert result["percent_difference"] > 100
+
+    def test_custom_tolerance_is_honored(self) -> None:
+        # ~13% off the ~12.2C hand-calc temperature rise.
+        result = cross_check_thermal_steady_state(
+            conduction_length_mm=50,
+            cross_section_area_mm2=100,
+            thermal_conductivity_w_mk=205,
+            power_dissipation_w=5,
+            sink_temp_c=20,
+            fea_peak_temp_c=33.8,
+            tolerance_pct=5.0,
+        )
+        assert result["within_tolerance"] is False
+
+    def test_non_positive_conduction_length_raises(self) -> None:
+        with pytest.raises(ValueError, match="conduction_length_mm must be positive"):
+            cross_check_thermal_steady_state(
+                conduction_length_mm=0,
+                cross_section_area_mm2=100,
+                thermal_conductivity_w_mk=205,
+                power_dissipation_w=5,
+                sink_temp_c=20,
+                fea_peak_temp_c=32.2,
+            )
+
+    def test_non_positive_area_raises(self) -> None:
+        with pytest.raises(ValueError, match="cross_section_area_mm2 must be positive"):
+            cross_check_thermal_steady_state(
+                conduction_length_mm=50,
+                cross_section_area_mm2=0,
+                thermal_conductivity_w_mk=205,
+                power_dissipation_w=5,
+                sink_temp_c=20,
+                fea_peak_temp_c=32.2,
+            )
+
+    def test_non_positive_conductivity_raises(self) -> None:
+        with pytest.raises(ValueError, match="thermal_conductivity_w_mk must be positive"):
+            cross_check_thermal_steady_state(
+                conduction_length_mm=50,
+                cross_section_area_mm2=100,
+                thermal_conductivity_w_mk=0,
+                power_dissipation_w=5,
+                sink_temp_c=20,
+                fea_peak_temp_c=32.2,
+            )
+
+    def test_non_positive_tolerance_raises(self) -> None:
+        with pytest.raises(ValueError, match="tolerance_pct must be positive"):
+            cross_check_thermal_steady_state(
+                conduction_length_mm=50,
+                cross_section_area_mm2=100,
+                thermal_conductivity_w_mk=205,
+                power_dissipation_w=5,
+                sink_temp_c=20,
+                fea_peak_temp_c=32.2,
                 tolerance_pct=0,
             )
 

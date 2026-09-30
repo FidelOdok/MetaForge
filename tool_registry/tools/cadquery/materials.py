@@ -164,3 +164,64 @@ def resolve_yield_mpa(material: str | None = None, yield_mpa: float | None = Non
             f"{sorted(MATERIAL_YIELD_MPA)}, or pass yield_mpa explicitly."
         )
     return MATERIAL_YIELD_MPA[key]
+
+
+# FORGE-282: thermal conductivity (W/(m*K), standard SI reference values --
+# NOT the mm-consistent W/(mm*K) build_thermal_deck's *CONDUCTIVITY card
+# needs; callers must multiply by 1e-3 at the call site, same
+# convert-once-at-the-call-site discipline as MATERIAL_DENSITY_KG_M3's own
+# 1e-12 kg/m^3 -> tonne/mm^3 conversion for build_modal_deck -- see that
+# function's docstring). Room-temperature nominal values for a common
+# temper/grade (same references as MATERIAL_ELASTIC_MPA/MATERIAL_YIELD_MPA:
+# Incropera/Engineering Toolbox order-of-magnitude figures), not a
+# certified materials database. carbon_fiber is the same isotropic
+# approximation the other tables use, but conductivity is far MORE
+# anisotropic in real CFRP than stiffness or yield (along-fiber can be
+# 10x+ the transverse value) -- this uses a conservative transverse-ish
+# figure, not a fiber-direction one.
+MATERIAL_THERMAL_CONDUCTIVITY_W_MK: dict[str, float] = {
+    "aluminum_6061": 167.0,
+    "aluminum": 235.0,  # pure/annealed, unspecified alloy
+    "steel": 50.0,  # mild/structural steel
+    "stainless_steel": 16.2,  # 304, annealed
+    "titanium": 17.0,  # CP grade 2
+    "brass": 120.0,
+    "copper": 401.0,  # annealed
+    "abs": 0.17,
+    "pla": 0.13,
+    "petg": 0.20,
+    "nylon": 0.25,
+    "polycarbonate": 0.20,
+    "acrylic": 0.20,
+    "carbon_fiber": 5.0,  # conservative transverse-ish isotropic approximation
+    "rubber": 0.15,
+}
+
+
+def resolve_thermal_conductivity_w_mk(
+    material: str | None = None, thermal_conductivity_w_mk: float | None = None
+) -> float:
+    """Resolve a thermal conductivity (W/(m*K)) for a steady-state thermal FEA solve.
+
+    An explicit ``thermal_conductivity_w_mk`` always wins. Otherwise looks up
+    ``material`` (same name normalization as :func:`resolve_density_kg_m3`).
+    Same discipline as :func:`resolve_elastic_properties`/
+    :func:`resolve_yield_mpa`: an unrecognized or missing material RAISES
+    rather than silently defaulting -- a wrong conductivity feeds directly
+    into a peak-temperature number an engineer might trust as real.
+    """
+    if thermal_conductivity_w_mk is not None:
+        return thermal_conductivity_w_mk
+    if not material:
+        raise ValueError(
+            "resolve_thermal_conductivity_w_mk: provide either a recognized material "
+            "name, or thermal_conductivity_w_mk explicitly."
+        )
+    key = material.strip().lower().replace(" ", "_").replace("-", "_")
+    if key not in MATERIAL_THERMAL_CONDUCTIVITY_W_MK:
+        raise ValueError(
+            f"resolve_thermal_conductivity_w_mk: unknown material {material!r} -- "
+            f"accepted: {sorted(MATERIAL_THERMAL_CONDUCTIVITY_W_MK)}, or pass "
+            "thermal_conductivity_w_mk explicitly."
+        )
+    return MATERIAL_THERMAL_CONDUCTIVITY_W_MK[key]

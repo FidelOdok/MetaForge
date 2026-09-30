@@ -115,9 +115,8 @@ def server_with_mocks() -> CalculixServer:
     )
     s._execute_thermal_solver = AsyncMock(  # type: ignore[method-assign]
         return_value={
-            "max_temperature": 85.3,
-            "min_temperature": 22.1,
-            "temperature_distribution": {"zone_a": 85.3, "zone_b": 45.6},
+            "max_temperature_c": 85.3,
+            "min_temperature_c": 22.1,
             "solver_time": 8.2,
         }
     )
@@ -168,11 +167,12 @@ class TestCalculixConfig:
 
 
 class TestCalculixServer:
-    def test_server_registers_eight_tools(self, server: CalculixServer) -> None:
+    def test_server_registers_nine_tools(self, server: CalculixServer) -> None:
         # FORGE-280 adds cross_check_cantilever_beam + check_mesh_convergence.
         # FORGE-281 adds cross_check_cantilever_frequency.
         # FORGE-283 adds compute_joint_loads.
-        assert len(server.tool_ids) == 8
+        # FORGE-282 adds cross_check_thermal_steady_state.
+        assert len(server.tool_ids) == 9
 
     def test_tool_ids(self, server: CalculixServer) -> None:
         expected = {
@@ -182,6 +182,7 @@ class TestCalculixServer:
             "calculix.extract_results",
             "calculix.cross_check_cantilever_beam",
             "calculix.cross_check_cantilever_frequency",
+            "calculix.cross_check_thermal_steady_state",
             "calculix.check_mesh_convergence",
             "calculix.compute_joint_loads",
         }
@@ -433,40 +434,109 @@ class TestRunFeaStaticStressValidation:
 
 
 class TestRunThermal:
+    _VALID_ARGS: dict[str, Any] = {
+        "mesh_file": "/models/heatsink.inp",
+        "material": {"name": "aluminum"},
+        "heat_source_node_set": "Surface2",
+        "power_dissipation_w": 5.0,
+        "sink_node_set": "Surface1",
+        "sink_temp_c": 20.0,
+    }
+
     async def test_run_thermal_success(self, server_with_mocks: CalculixServer) -> None:
-        result = await server_with_mocks.run_thermal(
-            {
-                "mesh_file": "/models/heatsink.inp",
-                "boundary_conditions": {"ambient_temp": 25.0, "heat_flux": 100.0},
-                "analysis_mode": "steady_state",
-            }
-        )
-        assert result["max_temperature"] == 85.3
-        assert result["min_temperature"] == 22.1
-        assert "temperature_distribution" in result
+        result = await server_with_mocks.run_thermal(self._VALID_ARGS)
+        assert result["max_temperature_c"] == 85.3
+        assert result["min_temperature_c"] == 22.1
         assert result["solver_time"] == 8.2
 
     async def test_run_thermal_missing_mesh_file_raises(
         self, server_with_mocks: CalculixServer
     ) -> None:
         with pytest.raises(ValueError, match="mesh_file is required"):
-            await server_with_mocks.run_thermal(
-                {
-                    "mesh_file": "",
-                    "boundary_conditions": {"ambient_temp": 25.0},
-                }
-            )
+            await server_with_mocks.run_thermal({**self._VALID_ARGS, "mesh_file": ""})
 
-    async def test_run_thermal_missing_boundary_conditions_raises(
+    async def test_run_thermal_missing_material_raises(
         self, server_with_mocks: CalculixServer
     ) -> None:
-        with pytest.raises(ValueError, match="boundary_conditions is required"):
+        with pytest.raises(ValueError, match="material"):
+            args = dict(self._VALID_ARGS)
+            del args["material"]
+            await server_with_mocks.run_thermal(args)
+
+    async def test_run_thermal_missing_heat_source_node_set_raises(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        with pytest.raises(ValueError, match="heat_source_node_set"):
+            args = dict(self._VALID_ARGS)
+            del args["heat_source_node_set"]
+            await server_with_mocks.run_thermal(args)
+
+    async def test_run_thermal_missing_power_dissipation_raises(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        with pytest.raises(ValueError, match="power_dissipation_w"):
+            args = dict(self._VALID_ARGS)
+            del args["power_dissipation_w"]
+            await server_with_mocks.run_thermal(args)
+
+    async def test_run_thermal_missing_sink_node_set_raises(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        with pytest.raises(ValueError, match="sink_node_set"):
+            args = dict(self._VALID_ARGS)
+            del args["sink_node_set"]
+            await server_with_mocks.run_thermal(args)
+
+    async def test_run_thermal_missing_sink_temp_raises(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        with pytest.raises(ValueError, match="sink_temp_c"):
+            args = dict(self._VALID_ARGS)
+            del args["sink_temp_c"]
+            await server_with_mocks.run_thermal(args)
+
+    async def test_run_thermal_material_without_name_or_explicit_conductivity_raises(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        with pytest.raises(ValueError, match="provide either"):
+            await server_with_mocks.run_thermal({**self._VALID_ARGS, "material": {}})
+
+    async def test_run_thermal_unrecognized_material_name_raises(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        with pytest.raises(ValueError, match="unknown material"):
             await server_with_mocks.run_thermal(
-                {
-                    "mesh_file": "/models/heatsink.inp",
-                    "boundary_conditions": {},
-                }
+                {**self._VALID_ARGS, "material": {"name": "unobtainium"}}
             )
+
+    async def test_run_thermal_explicit_conductivity_bypasses_name_lookup(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        result = await server_with_mocks.run_thermal(
+            {**self._VALID_ARGS, "material": {"thermal_conductivity_w_mk": 42.0}}
+        )
+        assert result["max_temperature_c"] == 85.3
+
+    async def test_run_thermal_transient_mode_raises_not_implemented(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        with pytest.raises(ValueError, match="not implemented"):
+            await server_with_mocks.run_thermal({**self._VALID_ARGS, "analysis_mode": "transient"})
+
+    async def test_run_thermal_passes_a_deck_spec_to_execute_thermal_solver(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        await server_with_mocks.run_thermal(self._VALID_ARGS)
+        assert server_with_mocks._execute_thermal_solver.await_args is not None
+        call_args = server_with_mocks._execute_thermal_solver.await_args.args
+        assert call_args[0] == "/models/heatsink.inp"
+        deck_spec = call_args[1]
+        assert deck_spec["heat_source_node_set"] == "Surface2"
+        assert deck_spec["sink_node_set"] == "Surface1"
+        assert deck_spec["sink_temp_c"] == 20.0
+        assert deck_spec["power_dissipation_w"] == 5.0
+        # aluminum = 235.0 W/(m*K) -> 0.235 W/(mm*K)
+        assert deck_spec["conductivity_w_mm_k"] == pytest.approx(0.235)
 
 
 # ---------------------------------------------------------------------------
@@ -598,16 +668,51 @@ class TestCheckMeshConvergence:
 
 class TestExecuteThermalSolverParsesRealResults:
     """MET-661 follow-up: _execute_thermal_solver previously discarded the
-    real solver output and always returned hardcoded max/min_temperature=0.0
-    and an empty distribution, regardless of what ccx actually solved."""
+    real solver output and always returned hardcoded max/min_temperature=0.0.
+    FORGE-282: _execute_thermal_solver now also builds a real, solvable deck
+    around the mesh-only .inp file first (mirroring _execute_solver's own
+    FORGE-234 deck-building), so these tests provide a real mesh file, not
+    just a bare path string."""
+
+    _MESH_INP = """\
+*Heading
+ /workspace/box.inp
+*NODE
+1, 0, 0, 0
+2, 0, 0, 10
+3, 0, 20, 0
+4, 0, 20, 10
+5, 100, 0, 0
+6, 100, 0, 10
+7, 100, 20, 0
+8, 100, 20, 10
+9, 50, 10, 5
+10, 50, 10, 6
+*ELEMENT, type=CPS3, ELSET=Surface1
+201, 1, 2, 3
+202, 2, 4, 3
+*ELEMENT, type=CPS3, ELSET=Surface2
+203, 5, 6, 7
+204, 6, 8, 7
+*ELEMENT, type=C3D4, ELSET=Volume1
+301, 1, 2, 3, 9
+302, 5, 6, 7, 9
+303, 3, 4, 9, 10
+304, 6, 8, 9, 10
+"""
 
     async def test_returns_real_parsed_temperatures_not_hardcoded_zeros(
         self, server: CalculixServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        frd_path = tmp_path / "test_thermal.frd"
+        mesh_path = tmp_path / "box.inp"
+        mesh_path.write_text(self._MESH_INP, encoding="utf-8")
+        frd_path = tmp_path / "box_solved.frd"
         frd_path.write_text(REAL_CCX_THERMAL_FRD, encoding="utf-8")
 
-        async def _fake_solver_run_fea(**_kwargs: Any) -> dict[str, Any]:
+        captured_kwargs: dict[str, Any] = {}
+
+        async def _fake_solver_run_fea(**kwargs: Any) -> dict[str, Any]:
+            captured_kwargs.update(kwargs)
             return {"solver_time_s": 0.01, "result_files": [str(frd_path)]}
 
         monkeypatch.setattr(
@@ -615,12 +720,28 @@ class TestExecuteThermalSolverParsesRealResults:
         )
 
         result = await server._execute_thermal_solver(
-            "/models/test.inp", {"ambient_temp": 20.0}, "steady_state"
+            str(mesh_path),
+            {
+                "conductivity_w_mm_k": 0.235,
+                "heat_source_node_set": "Surface2",
+                "power_dissipation_w": 5.0,
+                "sink_node_set": "Surface1",
+                "sink_temp_c": 20.0,
+            },
         )
 
-        assert result["max_temperature"] == pytest.approx(100.0)
-        assert result["min_temperature"] == pytest.approx(20.0)
-        assert result["temperature_distribution"], "must contain real per-node data"
+        solved_path = tmp_path / "box_solved.inp"
+        assert solved_path.exists(), "the built deck must be written to <stem>_solved.inp"
+        solved_text = solved_path.read_text(encoding="utf-8")
+        assert "*CONDUCTIVITY" in solved_text
+        assert "*CFLUX" in solved_text
+        assert "TYPE=CPS3" not in solved_text  # surface elements dropped, see deck_builder
+
+        assert captured_kwargs["mesh_file"] == str(solved_path)
+        assert captured_kwargs["mesh_file"] != str(mesh_path)
+
+        assert result["max_temperature_c"] == pytest.approx(100.0)
+        assert result["min_temperature_c"] == pytest.approx(20.0)
         # FORGE-239: same frd_path surfacing as _execute_solver.
         assert result["frd_path"] == str(frd_path)
 
@@ -662,9 +783,39 @@ class TestEmptyResultIsNeverReportedAsSuccess:
         with pytest.raises(FrdParseError, match="node_count == 0"):
             await server._execute_solver("/models/test.inp", "static_stress")
 
+    _THERMAL_MESH_INP = """\
+*Heading
+ /workspace/box.inp
+*NODE
+1, 0, 0, 0
+2, 0, 0, 10
+3, 0, 20, 0
+4, 0, 20, 10
+5, 100, 0, 0
+6, 100, 0, 10
+7, 100, 20, 0
+8, 100, 20, 10
+9, 50, 10, 5
+10, 50, 10, 6
+*ELEMENT, type=CPS3, ELSET=Surface1
+201, 1, 2, 3
+202, 2, 4, 3
+*ELEMENT, type=CPS3, ELSET=Surface2
+203, 5, 6, 7
+204, 6, 8, 7
+*ELEMENT, type=C3D4, ELSET=Volume1
+301, 1, 2, 3, 9
+302, 5, 6, 7, 9
+303, 3, 4, 9, 10
+304, 6, 8, 9, 10
+"""
+
     async def test_run_thermal_raises_when_solver_produces_no_frd_at_all(
-        self, server: CalculixServer, monkeypatch: pytest.MonkeyPatch
+        self, server: CalculixServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        mesh_path = tmp_path / "box.inp"
+        mesh_path.write_text(self._THERMAL_MESH_INP, encoding="utf-8")
+
         async def _fake_solver_run_fea(**_kwargs: Any) -> dict[str, Any]:
             return {"solver_time_s": 0.11, "result_files": []}
 
@@ -674,7 +825,14 @@ class TestEmptyResultIsNeverReportedAsSuccess:
 
         with pytest.raises(SolverError, match="no .frd result file"):
             await server._execute_thermal_solver(
-                "/models/test.inp", {"ambient_temp": 20.0}, "steady_state"
+                str(mesh_path),
+                {
+                    "conductivity_w_mm_k": 0.235,
+                    "heat_source_node_set": "Surface2",
+                    "power_dissipation_w": 5.0,
+                    "sink_node_set": "Surface1",
+                    "sink_temp_c": 20.0,
+                },
             )
 
 
@@ -851,7 +1009,16 @@ class TestUnmockedSolverRaisesOnMissingFiles:
 
     async def test_execute_thermal_solver_raises(self, server: CalculixServer) -> None:
         with pytest.raises((FileNotFoundError, NotImplementedError)):
-            await server._execute_thermal_solver("/models/test.inp", {"temp": 25.0}, "steady_state")
+            await server._execute_thermal_solver(
+                "/models/test.inp",
+                {
+                    "conductivity_w_mm_k": 0.235,
+                    "heat_source_node_set": "Surface2",
+                    "power_dissipation_w": 5.0,
+                    "sink_node_set": "Surface1",
+                    "sink_temp_c": 20.0,
+                },
+            )
 
     async def test_validate_mesh_file_raises(self, server: CalculixServer) -> None:
         with pytest.raises((FileNotFoundError, NotImplementedError)):
@@ -884,7 +1051,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 8
+        assert len(response["result"]["tools"]) == 9
 
     async def test_tool_list_contains_expected_ids(self, server: CalculixServer) -> None:
         request = _make_jsonrpc("tool/list")
@@ -898,6 +1065,7 @@ class TestJsonRpcIntegration:
             "calculix.extract_results",
             "calculix.cross_check_cantilever_beam",
             "calculix.cross_check_cantilever_frequency",
+            "calculix.cross_check_thermal_steady_state",
             "calculix.check_mesh_convergence",
             "calculix.compute_joint_loads",
         }
@@ -938,15 +1106,18 @@ class TestJsonRpcIntegration:
                 "tool_id": "calculix.run_thermal",
                 "arguments": {
                     "mesh_file": "/models/heatsink.inp",
-                    "boundary_conditions": {"ambient_temp": 25.0},
-                    "analysis_mode": "transient",
+                    "material": {"name": "aluminum"},
+                    "heat_source_node_set": "Surface2",
+                    "power_dissipation_w": 5.0,
+                    "sink_node_set": "Surface1",
+                    "sink_temp_c": 20.0,
                 },
             },
         )
         raw_response = await server_with_mocks.handle_request(request)
         response = json.loads(raw_response)
         assert response["result"]["status"] == "success"
-        assert response["result"]["data"]["max_temperature"] == 85.3
+        assert response["result"]["data"]["max_temperature_c"] == 85.3
 
     async def test_tool_call_validate_mesh_via_handle_request(
         self, server_with_mocks: CalculixServer
@@ -970,7 +1141,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "calculix"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 8
+        assert response["result"]["tools_available"] == 9
 
     async def test_tool_call_unknown_tool(self, server: CalculixServer) -> None:
         request = _make_jsonrpc(
