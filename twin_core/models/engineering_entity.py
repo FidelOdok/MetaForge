@@ -64,6 +64,13 @@ EngineeringEntityType = Literal[
     # reads these back to compute a weighted score and record the selection
     # as a real Decision -- see that module's own docstring.
     "concept_option",
+    # FORGE-299 (gap G-I3): a versioned snapshot bundling a project's
+    # current hierarchy/BOM/evidence/decision node ids (never a deep copy of
+    # their content) plus a simple count-delta diff against the previous
+    # release_package, if any. Gated at creation time on `evaluate_g8_release`
+    # (twin_core.consistency.gates) returning PASSED -- see
+    # api_gateway/twin/release_package.py's module docstring.
+    "release_package",
 ]
 
 

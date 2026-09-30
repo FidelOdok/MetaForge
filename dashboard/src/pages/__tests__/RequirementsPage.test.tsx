@@ -20,16 +20,24 @@ vi.mock('../../hooks/use-active-project', () => ({
   useActiveProject: () => mockUseActiveProject(),
 }));
 
+vi.mock('../../hooks/use-releases', () => ({
+  useReleasePackages: vi.fn(),
+  useCreateReleasePackage: vi.fn(),
+}));
+
 import { RequirementsPage } from '../RequirementsPage';
 import {
   useRequirementCoverage,
   useRequirementMatrix,
   useRequirementQuality,
 } from '../../hooks/use-requirements';
+import { useCreateReleasePackage, useReleasePackages } from '../../hooks/use-releases';
 
 const mockUseRequirementQuality = vi.mocked(useRequirementQuality);
 const mockUseRequirementMatrix = vi.mocked(useRequirementMatrix);
 const mockUseRequirementCoverage = vi.mocked(useRequirementCoverage);
+const mockUseReleasePackages = vi.mocked(useReleasePackages);
+const mockUseCreateReleasePackage = vi.mocked(useCreateReleasePackage);
 
 const REPORT = {
   requirements: [
@@ -127,6 +135,14 @@ describe('RequirementsPage', () => {
       },
       isLoading: false,
     } as unknown as ReturnType<typeof useRequirementCoverage>);
+    mockUseReleasePackages.mockReturnValue({
+      data: [],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useReleasePackages>);
+    mockUseCreateReleasePackage.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useCreateReleasePackage>);
   });
 
   it('shows loading state', () => {
@@ -308,5 +324,110 @@ describe('RequirementsPage', () => {
       '0%',
     );
     expect(screen.getByTestId('coverage-tile-verification_to_evidence')).toHaveTextContent('N/A');
+  });
+
+  it('does not render release packages without an active project', () => {
+    // Explicit reset -- prior tests in this file set activeProjectId via
+    // mockReturnValue, which persists across tests (no global mock reset
+    // is configured), so this test must not rely on the module-level
+    // default still being in effect.
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: null,
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    render(<RequirementsPage />);
+    expect(screen.queryByTestId('release-packages')).not.toBeInTheDocument();
+  });
+
+  it('shows an empty state with no release packages yet', () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'proj-1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    render(<RequirementsPage />);
+    expect(screen.getByTestId('release-packages')).toHaveTextContent('No release packages yet');
+  });
+
+  it('renders release packages with real snapshot counts and diffs', () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'proj-1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    mockUseReleasePackages.mockReturnValue({
+      data: [
+        {
+          nodeId: 'rp-1',
+          createdAt: '2026-09-30T10:00:00Z',
+          title: 'v1.0 release candidate',
+          statement: 'Release package: 3 hierarchy nodes, 2 BOM items, 1 evidence, 1 decisions',
+          snapshot: {
+            hierarchyNodeIds: ['h1', 'h2', 'h3'],
+            bomItemIds: ['b1', 'b2'],
+            evidenceIds: ['e1'],
+            decisionIds: ['d1'],
+            drawingIds: [],
+          },
+          diffFromPrevious: {
+            comparedTo: null,
+            hierarchyDelta: 3,
+            bomDelta: 2,
+            evidenceDelta: 1,
+            decisionDelta: 1,
+          },
+          gateStatus: 'passed',
+        },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useReleasePackages>);
+    render(<RequirementsPage />);
+
+    const section = screen.getByTestId('release-packages');
+    expect(section).toHaveTextContent('v1.0 release candidate');
+    expect(section).toHaveTextContent('passed');
+    expect(screen.getByTestId('release-package-rp-1')).toHaveTextContent('First release');
+  });
+
+  it('clicking Create release package triggers the creation mutation', async () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'proj-1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    const mutate = vi.fn((_notes: string | undefined, opts?: { onSuccess?: (r: unknown) => void }) => {
+      opts?.onSuccess?.({ nodeId: 'rp-2', title: 'v1.1' });
+    });
+    mockUseCreateReleasePackage.mockReturnValue({
+      mutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useCreateReleasePackage>);
+    const user = userEvent.setup();
+    render(<RequirementsPage />);
+
+    await user.click(screen.getByTestId('create-release-button'));
+
+    expect(mutate).toHaveBeenCalledWith(undefined, expect.anything());
   });
 });

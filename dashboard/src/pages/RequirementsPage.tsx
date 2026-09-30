@@ -13,6 +13,7 @@ import {
   useProposeRequirementFix,
   useCreateConstraint,
 } from '../hooks/use-requirements';
+import { useCreateReleasePackage, useReleasePackages } from '../hooks/use-releases';
 import {
   useApproveDesignLoop,
   useDesignLoop,
@@ -597,6 +598,144 @@ function CoverageHeatmapSection({ projectId }: { projectId?: string }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// FORGE-299 (gap G-I3): a versioned snapshot of a project's current
+// hierarchy/BOM/evidence/decision node ids, gated server-side at creation
+// time on evaluate_g8_release(...) returning PASSED -- a 409 here means
+// the project isn't release-ready yet, and names the failing check(s).
+// "Diff against previous release" is a simple count delta, not a full
+// structural diff (api_gateway/twin/release_package.py's own module
+// docstring explains why).
+function ReleasePackagesSection({ projectId }: { projectId?: string }) {
+  const toast = useToast();
+  const { data: releases, isLoading } = useReleasePackages(projectId);
+  const createRelease = useCreateReleasePackage(projectId);
+  const [notes, setNotes] = useState('');
+
+  if (!projectId) return null;
+
+  const handleCreate = () => {
+    createRelease.mutate(notes.trim() || undefined, {
+      onSuccess: (pkg) => {
+        toast.success(`Created release package: ${pkg.title ?? pkg.nodeId}`);
+        setNotes('');
+      },
+      onError: (err) => {
+        const detail =
+          (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        toast.error(detail || 'Could not create a release package');
+      },
+    });
+  };
+
+  return (
+    <div className="mb-6" data-testid="release-packages">
+      <h2 className="mb-2 text-sm font-medium text-on-surface" style={{ margin: 0 }}>
+        Release packages
+      </h2>
+      <div className="mt-2 mb-3 flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Optional release title (e.g. v1.0 release candidate)"
+          data-testid="release-notes-input"
+          className="min-w-[240px] flex-1 rounded-lg px-3 py-2 text-sm"
+          style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+        />
+        <Button
+          onClick={handleCreate}
+          disabled={createRelease.isPending}
+          data-testid="create-release-button"
+        >
+          {createRelease.isPending ? 'Creating…' : 'Create release package'}
+        </Button>
+      </div>
+
+      {isLoading ? null : !releases || releases.length === 0 ? (
+        <EmptyState
+          title="No release packages yet"
+          description="Create one once this project's G8 release gate (baseline, evidence, verification, waivers, release approval) passes."
+        />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {[...releases].reverse().map((pkg) => (
+            <div
+              key={pkg.nodeId}
+              data-testid={`release-package-${pkg.nodeId}`}
+              className="rounded-lg p-3"
+              style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-on-surface">{pkg.title}</span>
+                <Badge variant="success">{pkg.gateStatus}</Badge>
+              </div>
+              {pkg.createdAt && (
+                <div className="mt-0.5 text-[10px] text-on-surface-variant">
+                  {new Date(pkg.createdAt).toLocaleString()}
+                </div>
+              )}
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <SnapshotCount
+                  label="Hierarchy"
+                  count={pkg.snapshot.hierarchyNodeIds.length}
+                  delta={pkg.diffFromPrevious.hierarchyDelta}
+                />
+                <SnapshotCount
+                  label="BOM"
+                  count={pkg.snapshot.bomItemIds.length}
+                  delta={pkg.diffFromPrevious.bomDelta}
+                />
+                <SnapshotCount
+                  label="Evidence"
+                  count={pkg.snapshot.evidenceIds.length}
+                  delta={pkg.diffFromPrevious.evidenceDelta}
+                />
+                <SnapshotCount
+                  label="Decisions"
+                  count={pkg.snapshot.decisionIds.length}
+                  delta={pkg.diffFromPrevious.decisionDelta}
+                />
+              </div>
+              {pkg.diffFromPrevious.comparedTo === null && (
+                <div className="mt-1 text-[10px] text-on-surface-variant">First release</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SnapshotCount({
+  label,
+  count,
+  delta,
+}: {
+  label: string;
+  count: number;
+  delta: number;
+}) {
+  const deltaText = delta === 0 ? '±0' : delta > 0 ? `+${delta}` : `${delta}`;
+  const deltaColor =
+    delta > 0
+      ? 'var(--mf-c-success, #4caf7d)'
+      : delta < 0
+        ? 'var(--mf-c-error, #d4595e)'
+        : 'var(--mf-c-on-surface-variant)';
+  return (
+    <div className="rounded-lg px-2 py-1.5" style={{ background: 'var(--mf-c-282a30)' }}>
+      <div className="text-[10px] uppercase tracking-widest text-on-surface-variant">{label}</div>
+      <div className="mt-0.5 flex items-baseline gap-1.5">
+        <span className="font-mono text-sm text-on-surface">{count}</span>
+        <span className="font-mono text-[10px]" style={{ color: deltaColor }}>
+          {deltaText}
+        </span>
       </div>
     </div>
   );
@@ -1704,6 +1843,8 @@ export function RequirementsPage() {
       <DesignLoopSection projectId={activeProjectId ?? undefined} />
 
       <GateReviewSection projectId={activeProjectId ?? undefined} requirements={requirements} />
+
+      <ReleasePackagesSection projectId={activeProjectId ?? undefined} />
 
       <FeatureLibrarySection projectId={activeProjectId ?? undefined} />
 

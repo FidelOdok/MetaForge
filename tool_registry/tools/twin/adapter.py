@@ -127,6 +127,7 @@ class TwinServer(McpToolServer):
         tube_height_design_loop_starter: Any = None,
         concept_selector: Any = None,
         component_selector: Any = None,
+        release_package_creator: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -361,6 +362,14 @@ class TwinServer(McpToolServer):
         self._tube_height_design_loop_starter = tube_height_design_loop_starter
         self._concept_selector = concept_selector
         self._component_selector = component_selector
+        # FORGE-299: an injected async ``create(*, project_id, notes=None)``
+        # (make_release_package_creator) -- bundles the project's current
+        # hierarchy/BOM/evidence/decision node ids into one new
+        # release_package EngineeringEntity, gated at creation time on a
+        # real evaluate_g8_release(...) == PASSED check. Same injection
+        # seam as every recorder above; None keeps tool_registry free of
+        # api_gateway imports.
+        self._release_package_creator = release_package_creator
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -440,6 +449,8 @@ class TwinServer(McpToolServer):
             self._register_select_concept()
         if component_selector is not None:
             self._register_select_component()
+        if release_package_creator is not None:
+            self._register_create_release_package()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4329,6 +4340,72 @@ class TwinServer(McpToolServer):
             mesh_file=mesh_file,
             build_axis=[float(v) for v in build_axis] if build_axis is not None else None,
             threshold_deg=float(threshold_deg) if isinstance(threshold_deg, (int, float)) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.create_release_package (FORGE-299)
+    # ------------------------------------------------------------------
+
+    def _register_create_release_package(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.create_release_package",
+                adapter_id="twin",
+                name="Create Release Package",
+                description=(
+                    "Bundles a project's current hierarchy/BOM/evidence/decision "
+                    "node ids into one new release_package entity -- a versioned "
+                    "snapshot, never a deep copy of the referenced items' content. "
+                    "Gated at creation time on twin_core.consistency.gates."
+                    "evaluate_g8_release(...) returning PASSED (a real, pre-"
+                    "existing but previously purely-advisory check: baseline "
+                    "fixed, no stale evidence, verification coverage complete, "
+                    "waivers approved, a release_approval entity approved) -- "
+                    "raises with the failing check(s) named if not. Includes a "
+                    "simple count-delta diff against the immediately-prior "
+                    "release_package for the same project, if any. Drawings are "
+                    "always an empty list (FORGE-293 not yet shipped); this is "
+                    "not a full structural diff, only counts."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project to snapshot and release-gate.",
+                        },
+                        "notes": {
+                            "type": "string",
+                            "description": "Optional human-readable title for this release.",
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "entity_type": {"type": "string"},
+                        "snapshot": {"type": "object"},
+                        "diff_from_previous": {"type": "object"},
+                        "gate_status": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.create_release_package,
+        )
+
+    async def create_release_package(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = arguments.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("twin.create_release_package: 'project_id' is required")
+        notes = arguments.get("notes")
+        return await self._release_package_creator(
+            project_id=project_id,
+            notes=notes if isinstance(notes, str) else None,
         )
 
     # ------------------------------------------------------------------

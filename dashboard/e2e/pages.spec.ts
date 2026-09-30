@@ -747,6 +747,28 @@ test.describe('Requirements', () => {
     await section.getByTestId('select-concept-button').click();
     await expect(page.getByText('Concept selected -- recorded as a Decision')).toBeVisible();
   });
+
+  test('release packages: lists the illustrative release and creates a new one with a real diff (FORGE-299)', async ({
+    page,
+  }) => {
+    await page.goto('/requirements?demo=1');
+    const section = page.getByTestId('release-packages');
+    await expect(section).toBeVisible();
+
+    // The sample workspace seeds one pre-existing release.
+    await expect(section).toContainText('v1.0 release candidate');
+    await expect(section.getByTestId('release-package-sample-release-v1')).toContainText('First release');
+
+    // Creating a second one diffs against the first -- not "First release".
+    await section.getByTestId('release-notes-input').fill('v1.1 hotfix');
+    await section.getByTestId('create-release-button').click();
+    await expect(section).toContainText('v1.1 hotfix');
+
+    const packages = section.getByTestId(/^release-package-/);
+    await expect(packages).toHaveCount(2);
+    const newest = section.getByTestId(/^release-package-(?!sample-release-v1)/);
+    await expect(newest).not.toContainText('First release');
+  });
 });
 
 test.describe('Design Assistant', () => {

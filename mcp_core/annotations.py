@@ -151,6 +151,11 @@ ADDITIVE: frozenset[str] = frozenset(
         # only ever adds a new reference-design node.
         "twin.import_urdf",
         "twin.commit_technical_drawing",
+        # FORGE-299: a pure-append snapshot (release_package
+        # EngineeringEntity) -- never overwrites an existing node, only
+        # reads the project's current state and the gate check it calls
+        # (evaluate_g8_release) is itself read-only.
+        "twin.create_release_package",
         "twin.optimize_parameter",
         "twin.propose_change",
         "twin.propose_engineering_change",
