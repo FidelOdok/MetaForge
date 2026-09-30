@@ -13,6 +13,32 @@ vi.mock('../../hooks/use-runs', () => ({
   useSubmitApproval: vi.fn(),
 }));
 
+// FORGE-395: the page reads the flow's display name from the gateway's
+// catalogue instead of a hand-copied list in the dashboard, so the test has
+// to supply one. The label here is the gateway's, not the old local string.
+vi.mock('../../hooks/use-design-flows', () => ({
+  useDesignFlows: () => ({
+    data: {
+      defaultFlowId: 'design_v1',
+      flows: [
+        {
+          id: 'hardware_v1',
+          name: 'Hardware & robotics lifecycle',
+          label: 'Hardware & robotics',
+          description: 'A multidisciplinary flow for a complete hardware system.',
+          version: '1.0.0',
+          isDefault: false,
+          valid: true,
+          violations: [],
+          phases: [],
+        },
+      ],
+    },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 import { RunDetailPage } from '../RunDetailPage';
 import { useRun, useSubmitApproval } from '../../hooks/use-runs';
 

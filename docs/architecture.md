@@ -74,6 +74,34 @@ So Temporal is **runnable and registered**, owns the consolidation pass when
 you hand it over, and as of FORGE-401 is the execution path for design-flow
 runs.
 
+### The flow catalogue is served, not copied (FORGE-395)
+
+`GET /v1/design-flows` returns every launchable flow as the gateway will run
+it: phases, gate criteria, required deliverables, disciplines, the template
+version, and whether the flow passes its own invariants.
+
+It exists because the dashboard used to hold the catalogue itself, in
+`dashboard/src/api/endpoints/design-flows.ts`, under a comment asking people
+to keep it in sync by hand. It was not in sync, and nothing could have said
+so:
+
+- **`design_v1` was missing entirely** — the *default* flow, the one a run
+  gets when the request names none, could not be selected in the wizard whose
+  purpose is selecting flows.
+- four phase titles were paraphrased (`Electronics` for *Electronics Design*,
+  `Manufacturing preparation` for *Manufacturing Prep*, two case
+  differences), so the wizard described phases by names no run uses.
+
+The short display labels moved into the template files rather than staying in
+the dashboard. Serving `name` alone would have moved the drift instead of
+removing it: the client would still have had to hold a friendly label per
+flow, and that copy would rot the same way.
+
+A flow that breaks an invariant is **listed and marked unstartable**, not
+hidden and not silently offered. Offering it and refusing at `POST /v1/runs`
+reads as the gateway being broken rather than the flow being wrong; hiding it
+makes a flow that exists and cannot be seen.
+
 ### Design flows on Temporal (FORGE-401)
 
 `/v1/runs` used to start a design flow as an `asyncio.create_task` in the

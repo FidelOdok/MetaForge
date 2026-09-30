@@ -2004,6 +2004,84 @@
         "title": "DesignChangeProposal",
         "type": "object"
       },
+      "DesignFlowListResponse": {
+        "properties": {
+          "defaultFlowId": {
+            "title": "Defaultflowid",
+            "type": "string"
+          },
+          "flows": {
+            "items": {
+              "$ref": "#/components/schemas/DesignFlowView"
+            },
+            "title": "Flows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "flows",
+          "defaultFlowId"
+        ],
+        "title": "DesignFlowListResponse",
+        "type": "object"
+      },
+      "DesignFlowView": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "isDefault": {
+            "default": false,
+            "title": "Isdefault",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseView"
+            },
+            "title": "Phases",
+            "type": "array"
+          },
+          "valid": {
+            "default": true,
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "violations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Violations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "label",
+          "description",
+          "version"
+        ],
+        "title": "DesignFlowView",
+        "type": "object"
+      },
       "EmittedJoint": {
         "description": "What was actually written for one joint, post type-resolution\n(FORGE-240) -- e.g. a revolute joint with caller-supplied limits is\nemitted as a real bounded ``revolute`` type, not the unlimited\n``continuous``/``PhysicsRevoluteJoint``-without-limits a caller might\notherwise assume from the input alone. Lets the reporting agent state\nwhat the file actually contains instead of guessing or fabricating.",
         "properties": {
@@ -2492,6 +2570,47 @@
           "spec"
         ],
         "title": "FromTextResponse",
+        "type": "object"
+      },
+      "GateView": {
+        "properties": {
+          "autoApprove": {
+            "default": false,
+            "title": "Autoapprove",
+            "type": "boolean"
+          },
+          "criteria": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Criteria",
+            "type": "array"
+          },
+          "enforceConstraints": {
+            "default": false,
+            "title": "Enforceconstraints",
+            "type": "boolean"
+          },
+          "gateId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gateid"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "GateView",
         "type": "object"
       },
       "GenerateFeatureRequest": {
@@ -4617,6 +4736,65 @@
           "link_name"
         ],
         "title": "PartRef",
+        "type": "object"
+      },
+      "PhaseView": {
+        "properties": {
+          "disciplines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Disciplines",
+            "type": "array"
+          },
+          "enforceDeliverables": {
+            "default": true,
+            "title": "Enforcedeliverables",
+            "type": "boolean"
+          },
+          "expectedArtifacts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expectedartifacts",
+            "type": "array"
+          },
+          "gate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "objective": {
+            "title": "Objective",
+            "type": "string"
+          },
+          "requiredDeliverables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requireddeliverables",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "objective"
+        ],
+        "title": "PhaseView",
         "type": "object"
       },
       "ProjectListResponse": {
@@ -7037,6 +7215,68 @@
           "server"
         ],
         "title": "ToolInfo",
+        "type": "object"
+      },
+      "TraceabilityCoverage": {
+        "description": "Percentages (0-100), spec section 33. `None` when the denominator is\nzero -- an empty set has no meaningful coverage ratio, not 0% or 100%.",
+        "properties": {
+          "critical_requirements_to_evidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Critical Requirements To Evidence"
+          },
+          "needs_to_requirements": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs To Requirements"
+          },
+          "requirements_to_architecture": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements To Architecture"
+          },
+          "requirements_to_verification": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements To Verification"
+          },
+          "verification_to_evidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verification To Evidence"
+          }
+        },
+        "title": "TraceabilityCoverage",
         "type": "object"
       },
       "TwinNodeListResponse": {
@@ -10047,6 +10287,71 @@
         ]
       }
     },
+    "/v1/design-flows": {
+      "get": {
+        "description": "Every launchable flow, as the gateway will actually run it.",
+        "operationId": "list_design_flows_v1_design_flows_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignFlowListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Design Flows",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
+    "/v1/design-flows/{flow_id}": {
+      "get": {
+        "description": "One flow, for the run detail view and the plan canvas.",
+        "operationId": "get_design_flow_v1_design_flows__flow_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow_id",
+            "required": true,
+            "schema": {
+              "title": "Flow Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesignFlowView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Design Flow",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
     "/v1/design-loop/start": {
       "post": {
         "operationId": "start_design_loop_v1_design_loop_start_post",
@@ -11620,6 +11925,49 @@
           }
         },
         "summary": "Create Constraint",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/v1/requirements/coverage": {
+      "get": {
+        "description": "FORGE-297 (gap G-I1): the 5 traceability coverage percentages\n(needs->requirements, requirements->architecture, requirements->\nverification, verification->evidence, critical_requirements->evidence),\ncomputed live by ``TraceabilityAgent`` (FORGE-56/73) -- previously real,\ntested code with no gateway route exposing it at all.",
+        "operationId": "get_requirement_coverage_v1_requirements_coverage_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceabilityCoverage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Requirement Coverage",
         "tags": [
           "requirements"
         ]

@@ -1,0 +1,145 @@
+"""Serve the flow catalogue the gateway actually runs (FORGE-395).
+
+``GET /v1/design-flows`` did not exist, so
+``dashboard/src/api/endpoints/design-flows.ts`` hand-copied the flows out of
+``spec.py`` under a comment reading *"Keep this list in sync when a flow is
+added or re-phased."* It was not in sync, and nothing could have told anyone:
+
+* ``design_v1`` — the **default** flow — was missing entirely, so the one
+  flow a run gets when none is named could not be chosen in the wizard.
+* four phase titles were paraphrased (``Electronics`` for *Electronics
+  Design*, ``Manufacturing preparation`` for *Manufacturing Prep*, and two
+  case differences), so the wizard described phases by names the run never
+  uses.
+
+A copy kept in sync by a comment is a copy that drifts. This serves the real
+definitions, including the parts the old copy had no way to carry at all —
+gate criteria, required deliverables and disciplines — which the New Run
+wizard needs to say what a flow will actually demand.
+"""
+
+from __future__ import annotations
+
+import structlog
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from observability.tracing import get_tracer
+from orchestrator.design_flow.invariants import validate_flow
+from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FLOWS, flow_version
+from orchestrator.design_flow.templates import load_templates
+
+logger = structlog.get_logger(__name__)
+tracer = get_tracer("api_gateway.design_flows.routes")
+
+router = APIRouter(prefix="/v1/design-flows", tags=["design-flows"])
+
+
+class GateView(BaseModel):
+    name: str
+    autoApprove: bool = Field(default=False)  # noqa: N815 — dashboard contract is camelCase
+    criteria: list[str] = Field(default_factory=list)
+    enforceConstraints: bool = Field(default=False)  # noqa: N815
+    gateId: str | None = None  # noqa: N815
+
+
+class PhaseView(BaseModel):
+    id: str
+    title: str
+    objective: str
+    expectedArtifacts: list[str] = Field(default_factory=list)  # noqa: N815
+    requiredDeliverables: list[str] = Field(default_factory=list)  # noqa: N815
+    enforceDeliverables: bool = True  # noqa: N815
+    disciplines: list[str] = Field(default_factory=list)
+    gate: GateView | None = None
+
+
+class DesignFlowView(BaseModel):
+    id: str
+    #: Full descriptive title, e.g. "Hardware & robotics lifecycle (…)".
+    name: str
+    #: Short name for a chooser. The dashboard used to hold these itself,
+    #: which is why it could drift; they live in the template now.
+    label: str
+    description: str
+    version: str
+    isDefault: bool = False  # noqa: N815
+    phases: list[PhaseView] = Field(default_factory=list)
+
+    #: Whether this flow passes the server-enforced invariants (FORGE-397).
+    #:
+    #: Served rather than assumed. A flow that cannot pass its own rules must
+    #: not be offered as startable and then refused at ``POST /v1/runs`` —
+    #: that reads as the gateway being broken rather than the flow being
+    #: wrong, and the person picking it has no way to tell which.
+    valid: bool = True
+    violations: list[str] = Field(default_factory=list)
+
+
+class DesignFlowListResponse(BaseModel):
+    flows: list[DesignFlowView]
+    defaultFlowId: str  # noqa: N815
+
+
+def _to_view(flow_id: str) -> DesignFlowView:
+    template = load_templates()[flow_id]
+    definition = template.definition
+    result = validate_flow(definition)
+    return DesignFlowView(
+        id=definition.id,
+        name=definition.name,
+        label=template.display_label(),
+        description=template.description,
+        version=flow_version(flow_id),
+        isDefault=flow_id == DEFAULT_FLOW_ID,
+        valid=result.ok,
+        violations=[str(v) for v in result.violations],
+        phases=[
+            PhaseView(
+                id=phase.id,
+                title=phase.title,
+                objective=phase.objective,
+                expectedArtifacts=list(phase.expected_artifacts),
+                requiredDeliverables=list(phase.required_deliverables),
+                enforceDeliverables=phase.enforce_deliverables,
+                disciplines=list(phase.disciplines),
+                gate=(
+                    None
+                    if phase.gate is None
+                    else GateView(
+                        name=phase.gate.name,
+                        autoApprove=phase.gate.auto_approve,
+                        criteria=list(phase.gate.criteria),
+                        enforceConstraints=phase.gate.enforce_constraints,
+                        gateId=phase.gate.gate_id,
+                    )
+                ),
+            )
+            for phase in definition.phases
+        ],
+    )
+
+
+@router.get("", response_model=DesignFlowListResponse)
+def list_design_flows() -> DesignFlowListResponse:
+    """Every launchable flow, as the gateway will actually run it."""
+    with tracer.start_as_current_span("design_flows.list") as span:
+        flows = [_to_view(flow_id) for flow_id in sorted(FLOWS)]
+        span.set_attribute("design_flows.count", len(flows))
+    logger.info(
+        "design_flows_listed",
+        count=len(flows),
+        invalid=[f.id for f in flows if not f.valid],
+    )
+    return DesignFlowListResponse(flows=flows, defaultFlowId=DEFAULT_FLOW_ID)
+
+
+@router.get("/{flow_id}", response_model=DesignFlowView)
+def get_design_flow(flow_id: str) -> DesignFlowView:
+    """One flow, for the run detail view and the plan canvas."""
+    if flow_id not in FLOWS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown flow '{flow_id}'; known flows: {sorted(FLOWS)}",
+        )
+    return _to_view(flow_id)

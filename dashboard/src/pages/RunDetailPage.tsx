@@ -2,8 +2,8 @@ import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight, RefreshCw, ShieldCheck, X } from 'lucide-react';
 
-import { findDesignFlow } from '../api/endpoints/design-flows';
 import { StatusBadge } from '../components/shared/StatusBadge';
+import { useDesignFlows } from '../hooks/use-design-flows';
 import { useRun, useSubmitApproval } from '../hooks/use-runs';
 import type { ApprovalDecision } from '../types/run';
 
@@ -16,6 +16,7 @@ function toIso(epochSeconds: number): string {
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const runQuery = useRun(id);
+  const designFlows = useDesignFlows();
   const approval = useSubmitApproval();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [decision, setDecision] = useState<ApprovalDecision>('approve');
@@ -70,7 +71,7 @@ export function RunDetailPage() {
     );
   }
 
-  const flow = findDesignFlow(run.request.flow);
+  const flow = designFlows.data?.flows.find((f) => f.id === run.request.flow);
   const projectId = typeof run.request.project_id === 'string' ? run.request.project_id : undefined;
   const rawPhases = run.result?.phases;
   const phases: PhaseResult[] = Array.isArray(rawPhases)
@@ -113,7 +114,7 @@ export function RunDetailPage() {
         </div>
         <div>
           <dt>Workflow</dt>
-          <dd>{flow?.name ?? String(run.request.flow ?? 'Custom run')}</dd>
+          <dd>{flow?.label ?? String(run.request.flow ?? 'Custom run')}</dd>
         </div>
         <div>
           <dt>Last updated</dt>

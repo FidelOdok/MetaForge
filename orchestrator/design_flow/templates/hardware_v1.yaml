@@ -1,17 +1,18 @@
 # hardware_v1 flow template (FORGE-397).
 #
-# Generated from the Python definition this replaced, not retyped --
-# see orchestrator/design_flow/templates.py for why, and
-# tests/unit/test_flow_templates.py for the round-trip that proves it.
+# Generated, not hand-edited -- regenerate via the snippet in
+# tests/unit/test_flow_templates.py rather than editing the YAML by hand.
+# (Hand-editing produced a broken file once already: `name` is a folded
+# multi-line scalar, and an inserted key landed inside it.)
 #
 # `version` is recorded on every run started from this template. Bump it
 # when the phases or gates change, so a completed run can still say what
 # it actually ran.
 id: hardware_v1
 version: 1.0.0
-name: >-
-  Hardware & robotics lifecycle (Requirements → Architecture → Concept Selection → Mechanical
-  → Electronics → Firmware → V&V → Manufacturing)
+name: ''
+label: Hardware & robotics
+description: A multidisciplinary flow for a complete hardware system.
 phases:
 - id: intent
   title: Intent

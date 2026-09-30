@@ -14,6 +14,82 @@ vi.mock('../../hooks/use-active-project', () => ({
 }));
 vi.mock('../../hooks/use-runs', () => ({ useCreateRun: vi.fn() }));
 
+// FORGE-395: the wizard reads the flow catalogue from the gateway instead of
+// a hand-copied list in this repo, so the test supplies one. The shapes here
+// are the API's, and the phase titles are the gateway's real ones -- the old
+// local list paraphrased four of them, which is part of what the ticket
+// found.
+vi.mock('../../hooks/use-design-flows', () => ({
+  useDesignFlows: () => ({
+    data: {
+      defaultFlowId: 'hardware_v1',
+      flows: [
+        {
+          id: 'hardware_v1',
+          name: 'Hardware & robotics lifecycle',
+          label: 'Hardware & robotics',
+          description: 'A multidisciplinary flow for a complete hardware system.',
+          version: '1.0.0',
+          isDefault: true,
+          valid: true,
+          violations: [],
+          phases: [
+            'Intent',
+            'Stakeholder Needs',
+            'Requirements',
+            'Preliminary Feasibility',
+            'System Architecture',
+            'Concept Selection',
+            'Mechanical Design',
+            'Electronics Design',
+            'Firmware & Control',
+            'Simulation & V&V',
+            'Manufacturing Prep',
+          ].map((title, i) => ({
+            id: `p${i}`,
+            title,
+            objective: 'x',
+            expectedArtifacts: [],
+            requiredDeliverables: [],
+            enforceDeliverables: true,
+            disciplines: [],
+            gate: { name: `${title} sign-off`, autoApprove: false, criteria: [], enforceConstraints: false, gateId: null },
+          })),
+        },
+        {
+          id: 'mech_v1',
+          name: 'Mechanical vertical',
+          label: 'Mechanical design',
+          description: 'A focused flow for a load-bearing part or mechanical subsystem.',
+          version: '1.0.0',
+          isDefault: false,
+          valid: true,
+          violations: [],
+          phases: [
+            'Intent',
+            'Stakeholder Needs',
+            'Requirements',
+            'Preliminary Feasibility',
+            'Mechanical Design',
+            'Simulation & V&V',
+          ].map((title, i) => ({
+            id: `m${i}`,
+            title,
+            objective: 'x',
+            expectedArtifacts: [],
+            requiredDeliverables: [],
+            enforceDeliverables: true,
+            disciplines: [],
+            gate: { name: `${title} sign-off`, autoApprove: false, criteria: [], enforceConstraints: false, gateId: null },
+          })),
+        },
+      ],
+    },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 import { NewRunPage } from '../NewRunPage';
 import { useProjects } from '../../hooks/use-projects';
 import { useCreateRun } from '../../hooks/use-runs';
@@ -56,8 +132,11 @@ describe('NewRunPage', () => {
     expect(screen.getByRole('heading', { name: /start a design run/i })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /hardware & robotics/i })).toBeChecked();
     const plan = screen.getByRole('complementary');
-    expect(within(plan).getByText('System architecture')).toBeInTheDocument();
-    expect(within(plan).getAllByText('Human review gate')).toHaveLength(11);
+    // 'System Architecture', not 'System architecture'. The old local list
+    // used the lower-case form, so the wizard named a phase the run does not
+    // have -- one of the four paraphrases FORGE-395 found.
+    expect(within(plan).getByText('System Architecture')).toBeInTheDocument();
+    expect(within(plan).getAllByRole('listitem')).toHaveLength(11);
     expect(screen.getByRole('button', { name: /review run/i })).toBeDisabled();
   });
 
@@ -87,8 +166,10 @@ describe('NewRunPage', () => {
     render(<NewRunPage />);
     await userEvent.click(screen.getByRole('radio', { name: /mechanical design/i }));
     const plan = screen.getByRole('complementary');
-    expect(within(plan).getAllByText('Human review gate')).toHaveLength(6);
-    expect(within(plan).queryByText('Electronics')).not.toBeInTheDocument();
+    expect(within(plan).getAllByRole('listitem')).toHaveLength(6);
+    // The real title is 'Electronics Design'; the old local list called it
+    // 'Electronics', which is one of the four paraphrases FORGE-395 found.
+    expect(within(plan).queryByText('Electronics Design')).not.toBeInTheDocument();
   });
 
   it('reviews then launches a design-flow run and opens it', async () => {
