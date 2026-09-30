@@ -440,6 +440,51 @@ class MetricsRegistry:
         buckets=[0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
     )
 
+    # ── MCP surface (FORGE-379) ────────────────────────────────────────
+    #
+    # The MCP server is where every external harness meets MetaForge, and it
+    # had no metrics at all -- only logs. "Which plugin tool is failing, for
+    # whom" was a question you answered by reading Loki by hand.
+    MCP_TOOL_CALL_TOTAL = MetricDefinition(
+        name="metaforge_mcp_tool_call_total",
+        type="counter",
+        description="Total MCP tool calls by tool, outcome and client",
+        labels=["tool_id", "status", "client"],
+    )
+    MCP_TOOL_CALL_DURATION = MetricDefinition(
+        name="metaforge_mcp_tool_call_duration_seconds",
+        type="histogram",
+        description="MCP tool call duration",
+        labels=["tool_id", "status"],
+        unit="s",
+        buckets=[0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120],
+    )
+    #: Separate from the call counter, and the point of this group: a
+    #: rate of "errors" says something is wrong, `error_class` says what to
+    #: do about it. A spike in `approval_timed_out` needs a reviewer, in
+    #: `adapter_unavailable` a container, in `tool_not_found` a client
+    #: that is calling a tool this build does not have.
+    MCP_ERROR_TOTAL = MetricDefinition(
+        name="metaforge_mcp_error_total",
+        type="counter",
+        description="MCP errors by tool, class and client",
+        labels=["tool_id", "error_class", "client"],
+    )
+    #: One sample per health probe, labelled by outcome. FORGE-332 made the
+    #: probe real; this is what lets an alert fire on it rather than someone
+    #: happening to run the doctor.
+    #:
+    #: A counter and not a gauge on purpose: ``type="gauge"`` in this
+    #: registry creates an OTel *UpDownCounter*, whose ``add()`` is a delta.
+    #: Writing 1 then 0 to it would climb and never come back down, so a
+    #: "reachable" gauge would read as healthy forever.
+    MCP_ADAPTER_PROBE_TOTAL = MetricDefinition(
+        name="metaforge_mcp_adapter_probe_total",
+        type="counter",
+        description="Adapter health probes by adapter and outcome",
+        labels=["adapter_id", "result"],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -458,7 +503,18 @@ class MetricsRegistry:
             + cls.twin_metrics()
             + cls.consolidation_metrics()
             + cls.harness_metrics()
+            + cls.mcp_metrics()
         )
+
+    @classmethod
+    def mcp_metrics(cls) -> list[MetricDefinition]:
+        """MCP-surface metrics (FORGE-379)."""
+        return [
+            cls.MCP_TOOL_CALL_TOTAL,
+            cls.MCP_TOOL_CALL_DURATION,
+            cls.MCP_ERROR_TOTAL,
+            cls.MCP_ADAPTER_PROBE_TOTAL,
+        ]
 
     @classmethod
     def harness_metrics(cls) -> list[MetricDefinition]:
@@ -997,6 +1053,45 @@ class MetricsCollector:
         hist = self._instruments.get(MetricsRegistry.HARNESS_TOOL_CALL_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes=attrs)
+
+    def record_mcp_tool_call(
+        self, tool_id: str, status: str, duration: float, client: str = "unknown"
+    ) -> None:
+        """Record one MCP tool call (counter + histogram).
+
+        ``client`` comes from the ``initialize`` handshake and is
+        low-cardinality by construction -- a handful of harness names.
+        Nothing here is labelled with a node id, an actor or a project:
+        those are unbounded, and a label that grows without limit takes
+        Prometheus down rather than telling you anything.
+        """
+        counter = self._instruments.get(MetricsRegistry.MCP_TOOL_CALL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool_id": tool_id, "status": status, "client": client})
+        hist = self._instruments.get(MetricsRegistry.MCP_TOOL_CALL_DURATION.name)
+        if hist is not None:
+            hist.record(duration, attributes={"tool_id": tool_id, "status": status})
+
+    def record_mcp_error(self, tool_id: str, error_class: str, client: str = "unknown") -> None:
+        """Record one MCP error, classified."""
+        counter = self._instruments.get(MetricsRegistry.MCP_ERROR_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={"tool_id": tool_id, "error_class": error_class, "client": client},
+            )
+
+    def record_mcp_adapter_probe(self, adapter_id: str, reachable: bool) -> None:
+        """Record the outcome of one adapter health probe."""
+        counter = self._instruments.get(MetricsRegistry.MCP_ADAPTER_PROBE_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "adapter_id": adapter_id,
+                    "result": "reachable" if reachable else "unreachable",
+                },
+            )
 
     def record_harness_provider_call(
         self, provider: str, model: str, role: str, duration: float

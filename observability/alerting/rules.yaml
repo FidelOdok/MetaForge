@@ -370,3 +370,56 @@ groups:
             5xx patterns, verify credentials + IAM policies, and check
             for client misconfigurations.
           runbook_url: "observability/runbooks/minio-access-errors.md"
+
+  # ── MCP surface: the plugins' front door (FORGE-379) ──────────────────
+  - name: metaforge_mcp
+    rules:
+      - alert: McpAdapterUnreachable
+        expr: rate(metaforge_mcp_adapter_probe_total{result="unreachable"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP adapter {{ $labels.adapter_id }} is not answering"
+          description: >-
+            Its tools are still registered and still listed, so a client sees
+            no gap -- calls to them fail one at a time. Check the adapter
+            container.
+
+      - alert: McpErrorRateHigh
+        expr: >-
+          sum by (tool_id, error_class) (rate(metaforge_mcp_error_total[5m]))
+          / ignoring(error_class) group_left
+          sum by (tool_id) (rate(metaforge_mcp_tool_call_total[5m])) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.tool_id }} is failing: {{ $labels.error_class }}"
+          description: >-
+            More than a quarter of calls to this tool are failing this way.
+            The class says where to look: adapter_unavailable is a container,
+            approval_refused is a person, tool_not_found is a client calling
+            something this build does not have.
+
+      - alert: McpApprovalsTimingOut
+        expr: rate(metaforge_mcp_error_total{error_class="approval_refused"}[15m]) > 0
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "MCP writes are being refused or left unanswered"
+          description: >-
+            Held writes are not being decided. Not a fault -- nobody is
+            watching the queue, or a reviewer is saying no repeatedly.
+
+      - alert: McpUnexpectedErrors
+        expr: rate(metaforge_mcp_error_total{error_class="unexpected"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP is raising errors nothing has classified"
+          description: >-
+            An exception type outside the known taxonomy. Either a new
+            failure mode, or one that should have had a class and does not.

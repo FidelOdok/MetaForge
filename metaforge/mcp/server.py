@@ -147,6 +147,7 @@ class UnifiedMcpServer:
         auth_posture: AuthPosture | None = None,
         elicitor: Elicitor | None = None,
         dashboard_url: str | None = None,
+        metrics: Any = None,
     ) -> None:
         self._adapters = list(adapters)
         # FORGE-339: when set, ``tools/list`` serves only this profile's
@@ -178,6 +179,11 @@ class UnifiedMcpServer:
         # all -- a guessed localhost URL is worse than none, because the
         # agent states it with the same confidence either way.
         self._deeplinks = DeepLinkBuilder(dashboard_url)
+        # FORGE-379: MetricsCollector, or None. The MCP surface is where
+        # every external harness meets MetaForge and it had no metrics at
+        # all -- "which plugin tool is failing, for whom" was a question
+        # you answered by reading Loki by hand.
+        self._metrics = metrics
         # Whoever last completed the `initialize` handshake. Reported by
         # health/check so a version-skew question has an answer other than
         # "ask the user what they are running".
@@ -337,6 +343,7 @@ class UnifiedMcpServer:
                         make_error(request_id, _METHOD_NOT_FOUND, f"Unknown method: {method}")
                     )
             except ToolNotFoundError as exc:
+                self._mark_failed(span, exc)
                 return json.dumps(
                     make_error(
                         request_id,
@@ -354,8 +361,10 @@ class UnifiedMcpServer:
                     )
                 )
             except PromptNotFoundError as exc:
+                self._mark_failed(span, exc)
                 return json.dumps(make_error(request_id, _METHOD_NOT_FOUND, str(exc)))
             except (ResourceNotFoundError, ResourceReadError) as exc:
+                self._mark_failed(span, exc)
                 # Same reason the approval errors are caught below: an
                 # exception escaping handle_request reaches the client as a
                 # dropped connection, which says nothing about what went
@@ -370,6 +379,7 @@ class UnifiedMcpServer:
                     )
                 )
             except (ApprovalNotConfiguredError, ApprovalRejectedError) as exc:
+                self._mark_failed(span, exc)
                 # A refused write is a normal outcome, not a crash. It has to
                 # reach the client as a JSON-RPC error it can read out to the
                 # user -- letting it escape gives a broken connection, which
@@ -398,6 +408,7 @@ class UnifiedMcpServer:
                     )
                 )
             except ToolHandlerError as exc:
+                self._mark_failed(span, exc)
                 logger.error(
                     "unified_mcp_tool_failed",
                     tool_id=exc.tool_id,
@@ -725,26 +736,64 @@ class UnifiedMcpServer:
         try:
             result = await self._dispatch_tool_call(params)
         except ToolHandlerError as exc:
+            elapsed = time.monotonic() - t0
+            self._record_call(tool_id, "error", elapsed, exc)
             await self._capture.on_tool_call(
                 tool_id,
                 arguments,
                 status="error",
-                duration_ms=(time.monotonic() - t0) * 1000,
+                duration_ms=elapsed * 1000,
                 error=exc.details,
                 call_id=call_id,
                 attribution=self.attribution(params),
             )
             raise
+        elapsed = time.monotonic() - t0
+        self._record_call(tool_id, "ok", elapsed)
         await self._capture.on_tool_call(
             tool_id,
             arguments,
             status="ok",
-            duration_ms=(time.monotonic() - t0) * 1000,
+            duration_ms=elapsed * 1000,
             result=result,
             call_id=call_id,
             attribution=self.attribution(params),
         )
         return result
+
+    @staticmethod
+    def _mark_failed(span: Any, exc: BaseException) -> None:
+        """Put the failure on the trace (FORGE-379).
+
+        There were no ``record_exception`` calls anywhere in this module,
+        which CLAUDE.md asks for and which is the difference between a
+        Tempo span that shows a failure and one that shows a request that
+        happened to return. Also sets ``mcp.error_class``, so a trace can
+        be filtered by the same taxonomy the metric counts.
+        """
+        try:
+            span.record_exception(exc)
+            span.set_attribute("mcp.error_class", error_class(exc))
+        except Exception:  # noqa: BLE001 — tracing must not fail the call
+            pass
+
+    def _record_call(
+        self, tool_id: str, status: str, duration: float, exc: BaseException | None = None
+    ) -> None:
+        """Publish one tool call to the metrics stack. Never raises.
+
+        Telemetry that can fail a tool call is worse than no telemetry --
+        the same contract session capture already keeps.
+        """
+        if self._metrics is None:
+            return
+        client = str((self._client_info or {}).get("name") or "unknown")
+        try:
+            self._metrics.record_mcp_tool_call(tool_id, status, duration, client)
+            if exc is not None:
+                self._metrics.record_mcp_error(tool_id, error_class(exc), client)
+        except Exception as metric_exc:  # noqa: BLE001 — never fail a call
+            logger.warning("mcp_metrics_record_failed", error=str(metric_exc))
 
     def attribution(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Who, with what, is doing this (FORGE-366).
@@ -1283,6 +1332,16 @@ class UnifiedMcpServer:
             await asyncio.gather(*(self._probe_adapter(a) for a in self._adapters))
         )
         unreachable = [a["adapter_id"] for a in adapter_health if not a["reachable"]]
+        # FORGE-379: publish each probe so an alert can fire on a down
+        # adapter, rather than it waiting for somebody to run the doctor.
+        if self._metrics is not None:
+            for entry in adapter_health:
+                try:
+                    self._metrics.record_mcp_adapter_probe(
+                        str(entry["adapter_id"]), bool(entry["reachable"])
+                    )
+                except Exception as exc:  # noqa: BLE001 — never fail health
+                    logger.warning("mcp_adapter_probe_metric_failed", error=str(exc))
 
         report: dict[str, Any] = {
             "service": "metaforge-mcp",
@@ -1329,6 +1388,39 @@ class UnifiedMcpServer:
         return report
 
 
+#: Exception type -> the ``error_class`` label (FORGE-379).
+#:
+#: Reuses the exception taxonomy the server already raises rather than
+#: inventing a parallel one. A second list is a list that can disagree with
+#: the errors clients actually receive, and the disagreement nobody notices
+#: is the one where a dashboard says "tool failures" for a queue of writes
+#: waiting on a human.
+_ERROR_CLASSES: tuple[tuple[str, str], ...] = (
+    ("ToolNotFoundError", "tool_not_found"),
+    ("PromptNotFoundError", "prompt_not_found"),
+    ("ResourceNotFoundError", "resource_not_found"),
+    ("ResourceReadError", "resource_read_failed"),
+    ("ApprovalNotConfiguredError", "approval_not_configured"),
+    ("ApprovalRejectedError", "approval_refused"),
+    ("ToolHandlerError", "tool_execution_error"),
+)
+
+
+def error_class(exc: BaseException) -> str:
+    """The metric label for one failure.
+
+    Matched on the exception's own type name so a subclass added later is
+    still classified, and anything unrecognised is ``unexpected`` rather
+    than being folded into a known bucket -- an error nobody has classified
+    should stand out, not hide inside ``tool_execution_error``.
+    """
+    names = {cls.__name__ for cls in type(exc).__mro__}
+    for name, label in _ERROR_CLASSES:
+        if name in names:
+            return label
+    return "unexpected"
+
+
 def _effective_project(arguments: dict[str, Any]) -> str | None:
     """Which project this call lands in, for the reviewer's benefit.
 
@@ -1373,6 +1465,7 @@ async def build_unified_server(
     component_recorder: Any = None,
     brief_provider: Any = None,
     dashboard_url: str | None = None,
+    metrics: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -1439,4 +1532,5 @@ async def build_unified_server(
         tool_registry=registry,
         profile=profile,
         dashboard_url=dashboard_url,
+        metrics=metrics,
     )

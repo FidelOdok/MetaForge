@@ -258,6 +258,49 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### When a plugin call fails
+
+The MCP surface publishes four metrics. It had none before FORGE-379 —
+only logs — so "which plugin tool is failing, for whom" was a question
+you answered by reading Loki by hand.
+
+| Metric | Labels | For |
+|---|---|---|
+| `metaforge_mcp_tool_call_total` | `tool_id`, `status`, `client` | Throughput and failure rate per tool |
+| `metaforge_mcp_tool_call_duration_seconds` | `tool_id`, `status` | Latency |
+| `metaforge_mcp_error_total` | `tool_id`, `error_class`, `client` | **What kind** of failure |
+| `metaforge_mcp_adapter_probe_total` | `adapter_id`, `result` | Health probes as a time series |
+
+`error_class` is the point of the group. A rate of "errors" says
+something is wrong; the class says what to do about it —
+`adapter_unavailable` needs a container, `approval_refused` needs a
+person, `tool_not_found` means a client is calling something this build
+does not have, and `unexpected` means an exception nobody has
+classified, which should stand out rather than hide inside
+`tool_execution_error`.
+
+The classes come from the exception types the server already raises
+rather than a parallel list, so the label cannot disagree with the error
+the client received.
+
+Labels are deliberately low-cardinality: a harness name, a tool id, an
+outcome. Nothing is labelled with a node id, actor or project — those are
+unbounded, and a label that grows without limit takes Prometheus down
+rather than telling you anything.
+
+Four alert rules live in `observability/alerting/rules.yaml`
+(`McpAdapterUnreachable`, `McpErrorRateHigh`, `McpApprovalsTimingOut`,
+`McpUnexpectedErrors`).
+
+Failures are also recorded on the trace. There were no
+`record_exception` calls anywhere in the MCP module, which is the
+difference between a Tempo span that shows a failure and one that shows a
+request that happened to return; each error path now records the
+exception and sets `mcp.error_class`, so a trace can be filtered by the
+same taxonomy the metric counts.
+
+Telemetry never fails a call — the same contract session capture keeps.
+
 ### Running with no gateway at all
 
 The MCP server runs as a local subprocess over stdio and needs nothing
