@@ -271,36 +271,36 @@ class TestParseFrdFileErrors:
             parse_frd_file(str(path))
 
 
-# FORGE-281: unlike REAL_CCX_FRD above, this is NOT a byte-for-byte capture
-# of real ccx output -- no ccx binary is available in this sandbox to
-# generate one. It's a best-effort reconstruction of the documented ccx
-# *FREQUENCY .dat block shape (mode number, eigenvalue, frequency in
-# cycles/time). Live-validated separately on fidel-dev against a real
-# ccx-generated .dat file (see the PR/Jira comment) -- if that run showed
-# a different real format, this fixture and parse_frequencies_dat's own
-# regex were both updated to match the real file before merging, same
-# "verify before trusting" discipline REAL_CCX_FRD's own docstring
-# established for the .frd parser.
-SYNTHETIC_CCX_DAT_FREQUENCIES = """\
+# FORGE-281 follow-up: byte-for-byte capture of a real ccx *FREQUENCY .dat
+# file, same discipline as REAL_CCX_FRD above. Captured live on fidel-dev
+# 2026-09-30 from a real modal solve of a 100x20x10mm steel cantilever
+# (fixed at the x=0 face), AFTER fixing the *DENSITY-card float-precision
+# bug this same follow-up found (see deck_builder.py's ``_fmt`` docstring --
+# the original synthetic fixture this replaced assumed a "F R E Q U E N C I E S"
+# header with 2 data columns; the real header is "E I G E N V A L U E
+# O U T P U T" with 4 data columns per mode, Hz being the 3rd, not the
+# last -- neither original assumption was correct).
+REAL_CCX_DAT_FREQUENCIES = """\
+     E I G E N V A L U E   O U T P U T
 
+ MODE NO    EIGENVALUE                       FREQUENCY
+                                     REAL PART            IMAGINARY PART
+                           (RAD/TIME)      (CYCLES/TIME     (RAD/TIME)
 
-                                          F R E Q U E N C I E S
+      1   0.2755344E+08   0.5249137E+04   0.8354261E+03   0.0000000E+00
+      2   0.1012618E+09   0.1006289E+05   0.1601559E+04   0.0000000E+00
+      3   0.9911443E+09   0.3148245E+05   0.5010587E+04   0.0000000E+00
 
-
- MODE NO      EIGENVALUE            FREQUENCY
-
-      1        4.93480E+04        1.11800E+01
-      2        1.97392E+05        2.23600E+01
-      3        7.89568E+05        4.47200E+01
+     P A R T I C I P A T I O N   F A C T O R S
 """
 
 
 class TestParseFrequenciesDat:
     def test_extracts_frequencies_in_order(self, tmp_path: Path) -> None:
         path = tmp_path / "modal.dat"
-        path.write_text(SYNTHETIC_CCX_DAT_FREQUENCIES, encoding="utf-8")
+        path.write_text(REAL_CCX_DAT_FREQUENCIES, encoding="utf-8")
         frequencies = parse_frequencies_dat(str(path))
-        assert frequencies == pytest.approx([11.18, 22.36, 44.72])
+        assert frequencies == pytest.approx([835.4261, 1601.559, 5010.587])
 
     def test_missing_file_raises_file_not_found(self) -> None:
         with pytest.raises(FileNotFoundError):
@@ -314,6 +314,6 @@ class TestParseFrequenciesDat:
 
     def test_header_with_no_mode_lines_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "empty_freq.dat"
-        path.write_text("F R E Q U E N C I E S\n\n(nothing here)\n", encoding="utf-8")
+        path.write_text("E I G E N V A L U E   O U T P U T\n\n(nothing here)\n", encoding="utf-8")
         with pytest.raises(DatParseError, match="no mode data lines"):
             parse_frequencies_dat(str(path))

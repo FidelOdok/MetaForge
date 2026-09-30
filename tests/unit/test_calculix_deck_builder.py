@@ -139,10 +139,10 @@ class TestBuildStaticStressDeck:
         load_lines = deck.split("*CLOAD")[1].split("*NODE FILE")[0].strip().splitlines()
         parsed = [tuple(p.strip() for p in line.split(",")) for line in load_lines]
         assert parsed == [
-            ("5", "3", "-25.0"),
-            ("6", "3", "-25.0"),
-            ("7", "3", "-25.0"),
-            ("8", "3", "-25.0"),
+            ("5", "3", "-25"),
+            ("6", "3", "-25"),
+            ("7", "3", "-25"),
+            ("8", "3", "-25"),
         ]
 
     def test_zero_components_of_the_force_are_not_emitted(self) -> None:
@@ -217,7 +217,7 @@ class TestBuildModalDeck:
             "*MATERIAL, NAME=MAT1",
             "*ELASTIC, TYPE=ISO",
             "*DENSITY",
-            "7.85e-09",
+            "7.85E-09",
             "*SOLID SECTION, ELSET=Volume1, MATERIAL=MAT1",
             "*STEP",
             "*FREQUENCY",
@@ -300,3 +300,27 @@ class TestBuildModalDeck:
                 fixed_node_set="Surface1",
                 num_modes=0,
             )
+
+    def test_density_card_never_emits_python_float_repr(self) -> None:
+        """Regression test for a real bug found live on fidel-dev: a density
+        computed as ``7850 * 1e-12`` (a normal materials-table conversion)
+        reprs in Python as ``'7.849999999999999e-09'`` -- 17 significant
+        digits -- which CalculiX's Fortran free-format *DENSITY reader
+        silently misparsed, understating the assembled mass by ~2.6e8x and
+        reporting modal frequencies ~16000x too low with no error at all.
+        The deck must never emit that raw repr."""
+        mesh = _cantilever_mesh()
+        raw_density = 7850 * 1e-12
+        assert raw_density == 7.849999999999999e-09  # the exact float this reproduces
+
+        deck = build_modal_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            density_tonne_mm3=raw_density,
+            fixed_node_set="Surface1",
+            num_modes=3,
+        )
+        assert "7.849999999999999e-09" not in deck
+        density_line = deck.splitlines()[deck.splitlines().index("*DENSITY") + 1]
+        assert len(density_line.replace("-", "").replace(".", "")) <= 11  # <=10 sig figs + sign
