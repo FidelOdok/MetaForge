@@ -420,3 +420,59 @@ class TestSavingAnEdit:
 
     def test_an_unknown_version_is_a_404(self, client: TestClient) -> None:
         assert client.get("/v1/design-flows/versions/flowv_nope").status_code == 404
+
+
+# ── the live run view's backend (FORGE-396) ──────────────────────────────
+
+
+class TestFlowStateReportsUnknownNotIdle:
+    def test_an_unqueryable_engine_says_so_rather_than_showing_an_empty_flow(
+        self, client: TestClient
+    ) -> None:
+        """The distinction the live view turns on.
+
+        A worker that is down and a flow that has not started render
+        identically if "could not read" becomes "pending". One of those is an
+        outage, and nothing on the page would say which.
+        """
+        created = client.post(
+            "/v1/runs",
+            json={
+                "request": {"kind": "design_flow", "flow": "mech_v1", "goal": "g"},
+                "start": False,
+            },
+        )
+        assert created.status_code == 201, created.text
+        run_id = created.json()["id"]
+
+        body = client.get(f"/v1/runs/{run_id}/flow-state").json()
+        assert body["live"] is False
+        assert body["detail"], "a degraded state with no reason is not actionable"
+        # The phases are still listed -- a run whose shape is known and whose
+        # progress is not should show the shape.
+        assert len(body["phases"]) == 6
+        assert {p["status"] for p in body["phases"]} == {"unknown"}
+
+    def test_a_plain_run_is_not_pretended_to_have_phases(self, client: TestClient) -> None:
+        created = client.post("/v1/runs", json={"request": {"goal": "x"}, "start": False})
+        run_id = created.json()["id"]
+        body = client.get(f"/v1/runs/{run_id}/flow-state").json()
+        assert body["live"] is False
+        assert body["phases"] == []
+        assert "not a design flow" in body["detail"]
+
+    def test_an_unknown_run_is_a_404(self, client: TestClient) -> None:
+        assert client.get("/v1/runs/nope/flow-state").status_code == 404
+
+    def test_the_phases_come_from_the_run_s_own_flow(self, client: TestClient) -> None:
+        from orchestrator.design_flow.spec import get_flow
+
+        created = client.post(
+            "/v1/runs",
+            json={
+                "request": {"kind": "design_flow", "flow": "hardware_v1", "goal": "g"},
+                "start": False,
+            },
+        )
+        body = client.get(f"/v1/runs/{created.json()['id']}/flow-state").json()
+        assert [p["id"] for p in body["phases"]] == [p.id for p in get_flow("hardware_v1").phases]

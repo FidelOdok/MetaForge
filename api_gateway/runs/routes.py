@@ -20,6 +20,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from api_gateway.auth.approver import approver_from_request
 from api_gateway.runs.engine import FlowEngine, resolve_flow_engine, temporal_target
@@ -542,6 +543,133 @@ def get_run(run_id: str) -> RunResponse:
         return RunResponse.from_run(_store.get(run_id))
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+
+
+class FlowPhaseState(BaseModel):
+    """One phase, as the live run view draws it."""
+
+    id: str
+    title: str
+    status: str
+    summary: str = ""
+    artifacts: list[str] = Field(default_factory=list)
+    gate: str | None = None
+    disciplines: list[str] = Field(default_factory=list)
+
+
+class FlowRunState(BaseModel):
+    """Live state of a design-flow run (FORGE-396).
+
+    Read from the workflow itself rather than a cache of it. A projection that
+    can be stale is a live view that is sometimes wrong, and nothing on the
+    page would say which.
+    """
+
+    runId: str  # noqa: N815
+    status: str
+    currentPhase: str | None = None  # noqa: N815
+    awaitingGate: str | None = None  # noqa: N815
+    phases: list[FlowPhaseState] = Field(default_factory=list)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+    #: True when the state came from the engine. False means the engine could
+    #: not be asked -- rendered as "unknown", never as "nothing is happening".
+    live: bool = True
+    detail: str = ""
+
+
+@router.get("/{run_id}/flow-state", response_model=FlowRunState)
+async def get_flow_state(run_id: str) -> FlowRunState:
+    """Phase-by-phase state of a design-flow run.
+
+    Queries the Temporal workflow. A workflow query is answered by a *worker*,
+    so with none running there is nobody to answer -- which is reported as
+    ``live: false`` with a reason rather than as an empty flow, because an
+    empty flow and a flow nobody can see render identically and mean opposite
+    things.
+    """
+    try:
+        run = _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+
+    flow_id = run.request.get("flow") or DEFAULT_FLOW_ID
+    try:
+        definition = get_flow(str(flow_id))
+    except KeyError:
+        definition = get_flow(DEFAULT_FLOW_ID)
+    ordered = list(definition.phases)
+
+    if not _is_design_flow(run.request):
+        return FlowRunState(
+            runId=run_id,
+            status=str(run.status),
+            live=False,
+            detail="this run is not a design flow, so it has no phases",
+        )
+
+    try:
+        launcher = await get_flow_launcher()
+        state = await launcher.state(run_id)
+        events = await launcher.events(run_id)
+    except Exception as exc:  # noqa: BLE001 — a view reports, it does not raise
+        logger.info("flow_state_unavailable", run_id=run_id, error=str(exc))
+        return FlowRunState(
+            runId=run_id,
+            status=str(run.status),
+            phases=[
+                FlowPhaseState(
+                    id=p.id,
+                    title=p.title,
+                    status="unknown",
+                    gate=p.gate.name if p.gate else None,
+                    disciplines=list(p.disciplines),
+                )
+                for p in ordered
+            ],
+            live=False,
+            detail=(
+                f"the workflow could not be queried ({exc}). A query is answered by a "
+                "worker, so this usually means the design-flow worker is not running. "
+                "Phase status is unknown, not idle."
+            ),
+        )
+
+    done = {entry["phase"]: entry for entry in state.get("completed", [])}
+    current = state.get("current_phase")
+    awaiting = state.get("awaiting_gate")
+
+    phases: list[FlowPhaseState] = []
+    for phase in ordered:
+        finished = done.get(phase.id)
+        if finished is not None:
+            status = "passed"
+        elif phase.id == current and awaiting:
+            status = "awaiting_gate"
+        elif phase.id == current:
+            status = "running"
+        else:
+            status = "pending"
+        phases.append(
+            FlowPhaseState(
+                id=phase.id,
+                title=phase.title,
+                status=status,
+                summary=str((finished or {}).get("summary") or ""),
+                artifacts=list((finished or {}).get("artifacts") or []),
+                gate=phase.gate.name if phase.gate else None,
+                disciplines=list(phase.disciplines),
+            )
+        )
+
+    return FlowRunState(
+        runId=run_id,
+        status=str(state.get("status") or run.status),
+        currentPhase=current,
+        awaitingGate=awaiting,
+        phases=phases,
+        events=events,
+        live=True,
+    )
 
 
 @router.get("/{run_id}/events")

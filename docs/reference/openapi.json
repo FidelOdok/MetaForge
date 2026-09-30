@@ -2622,6 +2622,60 @@
         "title": "FlowChangeView",
         "type": "object"
       },
+      "FlowPhaseState": {
+        "description": "One phase, as the live run view draws it.",
+        "properties": {
+          "artifacts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "disciplines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Disciplines",
+            "type": "array"
+          },
+          "gate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status"
+        ],
+        "title": "FlowPhaseState",
+        "type": "object"
+      },
       "FlowProposalView": {
         "description": "A tailored flow, awaiting a human.\n\n``approvalId`` is the held write. Nothing starts from a proposal: a run\nis created from the *approved* flow, and until somebody answers that\napproval there is nothing to run.",
         "properties": {
@@ -2677,6 +2731,72 @@
           "valid"
         ],
         "title": "FlowProposalView",
+        "type": "object"
+      },
+      "FlowRunState": {
+        "description": "Live state of a design-flow run (FORGE-396).\n\nRead from the workflow itself rather than a cache of it. A projection that\ncan be stale is a live view that is sometimes wrong, and nothing on the\npage would say which.",
+        "properties": {
+          "awaitingGate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Awaitinggate"
+          },
+          "currentPhase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currentphase"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "live": {
+            "default": true,
+            "title": "Live",
+            "type": "boolean"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/FlowPhaseState"
+            },
+            "title": "Phases",
+            "type": "array"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "status"
+        ],
+        "title": "FlowRunState",
         "type": "object"
       },
       "FlowVersionView": {
@@ -13166,6 +13286,49 @@
           }
         },
         "summary": "Stream Run Events",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/flow-state": {
+      "get": {
+        "description": "Phase-by-phase state of a design-flow run.\n\nQueries the Temporal workflow. A workflow query is answered by a *worker*,\nso with none running there is nobody to answer -- which is reported as\n``live: false`` with a reason rather than as an empty flow, because an\nempty flow and a flow nobody can see render identically and mean opposite\nthings.",
+        "operationId": "get_flow_state_v1_runs__run_id__flow_state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowRunState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Flow State",
         "tags": [
           "runs"
         ]
