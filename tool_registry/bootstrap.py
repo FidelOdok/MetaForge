@@ -293,6 +293,7 @@ async def bootstrap_tool_registry(
     component_selector: Any = None,
     release_package_creator: Any = None,
     baseline_creator: Any = None,
+    test_plan_generator: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -709,6 +710,7 @@ async def bootstrap_tool_registry(
                     component_selector=component_selector,
                     release_package_creator=release_package_creator,
                     baseline_creator=baseline_creator,
+                    test_plan_generator=test_plan_generator,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

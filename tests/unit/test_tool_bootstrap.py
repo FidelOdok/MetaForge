@@ -240,3 +240,33 @@ class TestBootstrapToolRegistry:
         health = await registry.check_health("cadquery")
         assert health.status == "healthy"
         assert health.tools_available == 15
+
+    async def test_bootstrap_forwards_every_twin_injection_kwarg_without_raising(self):
+        """Regression test for the exact class of bug FORGE-405's own fix
+        addressed (and FORGE-298 nearly repeated): api_gateway/server.py's
+        real startup passes every one of these as a keyword argument to
+        THIS function, not directly to TwinServer.__init__ -- a new
+        TwinServer.__init__ parameter with no matching parameter here (and
+        no matching forward into the internal TwinServer(...) call below)
+        passes every unit test that only exercises TwinServer directly, and
+        only raises TypeError at real gateway startup. This test calls
+        bootstrap_tool_registry() with a representative, growing sample of
+        twin-adapter injection kwargs (including the newest,
+        test_plan_generator) and asserts it doesn't raise -- the cheapest
+        possible net for "does this kwarg actually reach TwinServer."
+        """
+        from twin_core.api import InMemoryTwinAPI
+
+        twin = InMemoryTwinAPI.create()
+
+        async def _noop_test_plan_generator(*, project_id: str):
+            return {"project_id": project_id, "entries": []}
+
+        registry = await bootstrap_tool_registry(
+            adapter_ids=["twin"],
+            twin=twin,
+            test_plan_generator=_noop_test_plan_generator,
+        )
+
+        tool_ids = {t.tool_id for t in registry.list_tools()}
+        assert "twin.generate_test_plan" in tool_ids
