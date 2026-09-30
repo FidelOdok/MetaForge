@@ -42,6 +42,7 @@ from api_gateway.manufacture.routes import router as manufacture_router
 from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
 from api_gateway.promotion.routes import router as promotion_router
+from api_gateway.releases.routes import router as releases_router
 from api_gateway.requirement_intelligence.routes import router as requirements_router
 from api_gateway.robot_loads.routes import router as robot_loads_router
 from api_gateway.runs.routes import router as runs_router
@@ -811,6 +812,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.measurement_recorder import make_measurement_recorder
     from api_gateway.twin.metric_evaluator import make_metric_evaluator
     from api_gateway.twin.optimizer import make_tube_height_optimizer, make_wall_thickness_optimizer
+    from api_gateway.twin.release_package import (
+        make_release_package_creator,
+        make_release_package_lister,
+    )
     from api_gateway.twin.revalidation import make_revalidation_executor
     from api_gateway.twin.robot_description_recorder import (
         make_robot_description_recorder,
@@ -937,6 +942,25 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # indistinguishable afterward.
     engineering_entity_recorder_fn = make_engineering_entity_recorder(twin, project_backend)
     concept_selector_fn = make_trade_study_selector(twin, decision_recorder=decision_recorder)
+
+    # FORGE-299: a versioned snapshot (release_package) of a project's
+    # hierarchy/BOM/evidence/decisions, gated at creation time on a real
+    # evaluate_g8_release(...) == PASSED check -- the first real consumer
+    # of that previously purely-advisory gate. traceability_coverage is
+    # wired to the SAME TraceabilityAgent FORGE-297's coverage route uses,
+    # so G8's "required verification complete" check can actually evaluate
+    # instead of reporting NOT_EVALUATED.
+    from api_gateway.requirement_intelligence.traceability import TraceabilityAgent
+
+    async def _traceability_coverage_accessor(project_id: Any) -> Any:
+        return await TraceabilityAgent(twin).coverage(str(project_id))
+
+    release_package_creator_fn = make_release_package_creator(
+        twin,
+        engineering_entity_recorder=engineering_entity_recorder_fn,
+        traceability_coverage=_traceability_coverage_accessor,
+    )
+    release_package_lister_fn = make_release_package_lister(twin)
 
     # FORGE-265: requirement-driven component selection -- hoisted to a
     # named variable (unlike every other component_recorder use, which is
@@ -1120,6 +1144,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         concept_selector=concept_selector_fn,
         # FORGE-265: requirement-driven component selection (gap G-C1).
         component_selector=component_selector_fn,
+        # FORGE-299: versioned release-package snapshot, gated on G8 (gap G-I3).
+        release_package_creator=release_package_creator_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -1168,6 +1194,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.manufacture.routes import init_manufacture_release
 
     init_manufacture_release(manufacture_release_fn)
+    # FORGE-299: bind the release-package creator/lister to the dashboard's
+    # REST route (api_gateway/releases/routes.py) -- unlike the evaluators
+    # above, this doesn't call mcp_bridge at all (pure graph reads/writes +
+    # a gate check), so it doesn't need to wait for active_bridge, but is
+    # wired here for locality with the other route inits.
+    from api_gateway.releases.routes import init_release_package
+
+    init_release_package(release_package_creator_fn, release_package_lister_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -1812,6 +1846,7 @@ def create_app(
     app.include_router(component_selection_router)
     app.include_router(dfm_router)
     app.include_router(manufacture_router)
+    app.include_router(releases_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

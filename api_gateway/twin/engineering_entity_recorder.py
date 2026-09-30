@@ -54,6 +54,7 @@ _ENTITY_TYPES = frozenset(
         "waiver",
         "release_approval",
         "concept_option",
+        "release_package",
     }
 )
 

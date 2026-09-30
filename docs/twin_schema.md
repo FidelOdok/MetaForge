@@ -1025,6 +1025,36 @@ The three other pieces of FORGE-250 are entirely client-side, reading/writing th
 
 *Source: `dashboard/src/lib/robot-poses.ts`, `dashboard/src/lib/robot-drag-controls.ts`, `dashboard/src/components/viewer/RobotSceneContents.tsx`, `dashboard/src/components/viewer/RobotControlsOverlay.tsx`, `dashboard/src/components/viewer/R3FViewer.tsx`, `dashboard/src/store/viewer-store.ts`, `dashboard/src/hooks/use-twin.ts`, `dashboard/src/api/endpoints/twin.ts`, `api_gateway/twin/schemas.py`, `api_gateway/twin/routes.py`*
 
+### 2.26 Release packages: versioned snapshot + G8 gating (FORGE-299, gap G-I3)
+
+`release_package` is a new `EngineeringEntityType` -- a lightweight, versioned snapshot of a project's current hierarchy, BOM, evidence, and decisions, recorded through the same `twin.record_engineering_entity`-backed `engineering_entity_recorder` closure every other entity type already goes through. Its `metadata` carries only node ids (`hierarchy_node_ids`, `bom_item_ids`, `evidence_ids`, `decision_ids`, `drawing_ids`), a `diff_from_previous` count-delta object, and `gate_status` -- never a deep copy of the referenced items' content:
+
+```
+metadata: {
+  hierarchy_node_ids: string[]
+  bom_item_ids: string[]
+  evidence_ids: string[]
+  decision_ids: string[]
+  drawing_ids: string[]  // always [] -- FORGE-293 (2D drawings) hasn't shipped
+  diff_from_previous: {
+    compared_to: string | null  // prior release_package's node id, or null for the first
+    hierarchy_delta: number
+    bom_delta: number
+    evidence_delta: number
+    decision_delta: number
+  }
+  gate_status: "passed"  // creation is refused unless this is true
+}
+```
+
+**The real gate this reuses, not duplicates.** `release_approval` (FORGE-73) and G8's `evaluate_g8_release` (`twin_core.consistency.gates`) already existed -- real, comprehensive (baseline fixed, no stale evidence, verification coverage complete, waivers approved, a `release_approval` entity approved) -- but purely informational: nothing before this ticket ever called it as anything but an advisory display value. `twin.create_release_package` (`api_gateway/twin/release_package.py`) is G8's first real consumer with teeth: it calls `evaluate_g8_release` itself (with a real `TraceabilityAgent`-backed `traceability_coverage` accessor, so the "verification complete" check can actually evaluate) and refuses to create a package -- raising with every failing check named -- unless the result is `GateStatus.PASSED`. This is additive: `api_gateway/runs/gate_eval.py`'s `TwinConsistencyGateChecker` stays purely advisory everywhere else, unchanged.
+
+`GET /v1/releases?project_id=` lists a project's packages (oldest first), `POST /v1/releases` creates one (409 if G8 isn't passed, naming the failing checks). The dashboard's Requirements page ("Release packages" section) lists them with per-metric count deltas.
+
+**Deliberately out of scope**: drawings (empty list until FORGE-293 ships); a full structural diff between releases (a simple count delta ships instead -- no diff/comparison utility exists anywhere in `twin_core` to build a real structural diff on top of); wiring G8 into `twin.attempt_promotion`'s actual blocking gate logic (that stays the separate, already-real mechanism FORGE-290/319 built).
+
+*Source: `api_gateway/twin/release_package.py`, `api_gateway/releases/routes.py`, `twin_core/models/engineering_entity.py`, `twin_core/consistency/gates.py`, `dashboard/src/pages/RequirementsPage.tsx`, `dashboard/src/api/endpoints/releases.ts`, `dashboard/src/hooks/use-releases.ts`*
+
 ---
 
 ## 3. Edge Types

@@ -43,6 +43,31 @@ interface SampleRequiredClaimResult {
   waiverId: string | null;
 }
 
+// FORGE-299 (gap G-I3): illustrative shape of one release package,
+// mirroring api_gateway/releases/routes.py's own snake_case response --
+// same convention SampleDecision below already uses.
+interface SampleReleasePackage {
+  node_id: string;
+  created_at: string;
+  title: string;
+  statement: string;
+  snapshot: {
+    hierarchy_node_ids: string[];
+    bom_item_ids: string[];
+    evidence_ids: string[];
+    decision_ids: string[];
+    drawing_ids: string[];
+  };
+  diff_from_previous: {
+    compared_to: string | null;
+    hierarchy_delta: number;
+    bom_delta: number;
+    evidence_delta: number;
+    decision_delta: number;
+  };
+  gate_status: string;
+}
+
 interface SampleMaturityGate {
   gateId: string;
   level: string;
@@ -891,6 +916,33 @@ const SAMPLE_WORKSPACE_SEED = {
   // FORGE-290 (gap G-G4): gate-review attempts, newest first -- empty
   // until the "Attempt promotion" action records one.
   promotionGates: [] as SampleMaturityGate[],
+  // FORGE-299 (gap G-I3): one illustrative pre-existing release package,
+  // so the sample workspace can show a real "diff against previous
+  // release" the first time a viewer creates a second one via the UI --
+  // POST /releases below appends to this array.
+  releasePackages: [
+    {
+      node_id: 'sample-release-v1',
+      created_at: '2026-09-28T09:00:00Z',
+      title: 'v1.0 release candidate',
+      statement: 'Release package: 3 hierarchy nodes, 4 BOM items, 2 evidence, 1 decisions',
+      snapshot: {
+        hierarchy_node_ids: ['sample-hier-root', 'sample-hier-upper-arm', 'sample-hier-base'],
+        bom_item_ids: ['sample-bom-1', 'sample-bom-2', 'sample-bom-3', 'sample-bom-4'],
+        evidence_ids: ['sample-evidence-1', 'sample-evidence-2'],
+        decision_ids: ['sample-decision-wall-thickness'],
+        drawing_ids: [],
+      },
+      diff_from_previous: {
+        compared_to: null,
+        hierarchy_delta: 3,
+        bom_delta: 4,
+        evidence_delta: 2,
+        decision_delta: 1,
+      },
+      gate_status: 'passed',
+    },
+  ] as SampleReleasePackage[],
   // FORGE-289 (gap G-G3): decisions keyed by the node id they're related
   // to (a hierarchy node's own id, or a converged design loop's winning
   // iteration id) -- mirrors GET /v1/decisions?related_to=<node_id>'s own
@@ -1299,6 +1351,7 @@ function route(
     if (path === '/requirements/quality') return s.requirementsReport;
     if (path === '/requirements/matrix') return s.requirementMatrix;
     if (path === '/requirements/coverage') return s.requirementCoverage;
+    if (path === '/releases') return { releases: s.releasePackages };
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     if (path === '/bom') {
       const category = params.category ? String(params.category).toLowerCase() : null;
@@ -1830,6 +1883,42 @@ function route(
         dfm_pass: flagged.length === 0,
         evidence_node_id: 'evidence-dfm-demo',
       };
+    }
+    if (path === '/releases') {
+      // FORGE-299: sample mode has no real G8 gate to evaluate -- every
+      // create succeeds, diffing against the most recent existing
+      // package the same way api_gateway.twin.release_package's real
+      // count-delta diff does.
+      const prior = s.releasePackages[s.releasePackages.length - 1] as
+        | SampleReleasePackage
+        | undefined;
+      const notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null;
+      const createdAt = new Date().toISOString();
+      const snapshot = {
+        hierarchy_node_ids: s.hierarchyNodes.map((n) => n.id),
+        bom_item_ids: s.bomComponents.map((c) => c.id),
+        evidence_ids: prior ? [...prior.snapshot.evidence_ids, `sample-evidence-${Date.now()}`] : ['sample-evidence-1'],
+        decision_ids: Object.keys(s.decisions).flatMap((k) => (s.decisions[k] ?? []).map((d) => d.id)),
+        drawing_ids: [] as string[],
+      };
+      const diff = {
+        compared_to: prior ? prior.node_id : null,
+        hierarchy_delta: snapshot.hierarchy_node_ids.length - (prior?.snapshot.hierarchy_node_ids.length ?? 0),
+        bom_delta: snapshot.bom_item_ids.length - (prior?.snapshot.bom_item_ids.length ?? 0),
+        evidence_delta: snapshot.evidence_ids.length - (prior?.snapshot.evidence_ids.length ?? 0),
+        decision_delta: snapshot.decision_ids.length - (prior?.snapshot.decision_ids.length ?? 0),
+      };
+      const created: SampleReleasePackage = {
+        node_id: `sample-release-${Date.now()}`,
+        created_at: createdAt,
+        title: notes ?? `Release package ${createdAt}`,
+        statement: `Release package: ${snapshot.hierarchy_node_ids.length} hierarchy nodes, ${snapshot.bom_item_ids.length} BOM items, ${snapshot.evidence_ids.length} evidence, ${snapshot.decision_ids.length} decisions`,
+        snapshot,
+        diff_from_previous: diff,
+        gate_status: 'passed',
+      };
+      s.releasePackages.push(created);
+      return created;
     }
   }
   if (method === 'patch') {
