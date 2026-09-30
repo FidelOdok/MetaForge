@@ -38,6 +38,28 @@ tracer = get_tracer("tool_registry.tools.distributors.mcp_adapter")
 _RESOURCE_LIMITS = ResourceLimits(max_memory_mb=256, max_cpu_seconds=30, max_disk_mb=64)
 
 
+#: The suffixes this adapter registers, and the distributors it is built
+#: for. Exported because the ids are assembled with an f-string, which the
+#: annotation coverage guard's source scan cannot see -- FORGE-343's
+#: "nothing is unclassified" check silently skipped all twelve of these,
+#: so every distributor lookup sat on the destructive default and a
+#: catalog search was held for approval like a write.
+DISTRIBUTOR_TOOL_SUFFIXES: tuple[str, ...] = (
+    "search",
+    "get_product",
+    "get_pricing",
+    "get_availability",
+)
+KNOWN_DISTRIBUTOR_IDS: tuple[str, ...] = ("digikey", "mouser", "nexar")
+
+
+def distributor_tool_ids() -> set[str]:
+    """Every tool id this adapter can register, for coverage checks."""
+    return {
+        f"{did}.{suffix}" for did in KNOWN_DISTRIBUTOR_IDS for suffix in DISTRIBUTOR_TOOL_SUFFIXES
+    }
+
+
 class DistributorMcpServer(McpToolServer):
     """MCP wrapper for a :class:`DistributorAdapter` instance.
 

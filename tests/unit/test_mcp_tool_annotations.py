@@ -47,6 +47,15 @@ def declared_tool_ids() -> set[str]:
                     r'tool_id="([a-z0-9_.]+)"', path.read_text(encoding="utf-8", errors="replace")
                 )
             )
+    # Ids an adapter assembles rather than writes out. The scan above sees
+    # `tool_id="twin.get_node"` and not `tool_id=f"{did}.search"`, so all
+    # twelve distributor lookups were invisible to this guard and sat on
+    # the destructive default -- a catalog search classified as "may
+    # overwrite or remove data". Any future adapter that computes its ids
+    # has to export them the same way.
+    from tool_registry.tools.distributors.mcp_adapter import distributor_tool_ids
+
+    ids |= distributor_tool_ids()
     return ids
 
 

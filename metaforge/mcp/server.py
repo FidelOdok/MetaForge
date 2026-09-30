@@ -1489,6 +1489,8 @@ async def build_unified_server(
     brief_provider: Any = None,
     dashboard_url: str | None = None,
     metrics: Any = None,
+    caller: Caller = Caller.UNTRUSTED,
+    approval_gate: Any = None,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -1556,4 +1558,11 @@ async def build_unified_server(
         profile=profile,
         dashboard_url=dashboard_url,
         metrics=metrics,
+        # FORGE-387: conservative by default, like the constructor. The
+        # sidecar's transport overrides it with declare_caller(); an
+        # in-process caller (a test, an embedding host) says so here.
+        caller=caller,
+        # Where a held write goes. The gateway builds one from its own
+        # approval store; an embedding host supplies its own.
+        approval_gate=approval_gate,
     )
