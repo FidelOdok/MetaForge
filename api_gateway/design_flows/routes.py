@@ -21,10 +21,11 @@ wizard needs to say what a flow will actually demand.
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
+from orchestrator.design_flow.generator import FlowProposal
 from orchestrator.design_flow.invariants import validate_flow
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FLOWS, flow_version
 from orchestrator.design_flow.templates import load_templates
@@ -94,29 +95,31 @@ def _to_view(flow_id: str) -> DesignFlowView:
         isDefault=flow_id == DEFAULT_FLOW_ID,
         valid=result.ok,
         violations=[str(v) for v in result.violations],
-        phases=[
-            PhaseView(
-                id=phase.id,
-                title=phase.title,
-                objective=phase.objective,
-                expectedArtifacts=list(phase.expected_artifacts),
-                requiredDeliverables=list(phase.required_deliverables),
-                enforceDeliverables=phase.enforce_deliverables,
-                disciplines=list(phase.disciplines),
-                gate=(
-                    None
-                    if phase.gate is None
-                    else GateView(
-                        name=phase.gate.name,
-                        autoApprove=phase.gate.auto_approve,
-                        criteria=list(phase.gate.criteria),
-                        enforceConstraints=phase.gate.enforce_constraints,
-                        gateId=phase.gate.gate_id,
-                    )
-                ),
+        phases=[_phase_view(phase) for phase in definition.phases],
+    )
+
+
+def _phase_view(phase: object) -> PhaseView:
+    gate = getattr(phase, "gate", None)
+    return PhaseView(
+        id=phase.id,
+        title=phase.title,
+        objective=phase.objective,
+        expectedArtifacts=list(phase.expected_artifacts),
+        requiredDeliverables=list(phase.required_deliverables),
+        enforceDeliverables=phase.enforce_deliverables,
+        disciplines=list(phase.disciplines),
+        gate=(
+            None
+            if gate is None
+            else GateView(
+                name=gate.name,
+                autoApprove=gate.auto_approve,
+                criteria=list(gate.criteria),
+                enforceConstraints=gate.enforce_constraints,
+                gateId=gate.gate_id,
             )
-            for phase in definition.phases
-        ],
+        ),
     )
 
 
@@ -143,3 +146,131 @@ def get_design_flow(flow_id: str) -> DesignFlowView:
             detail=f"unknown flow '{flow_id}'; known flows: {sorted(FLOWS)}",
         )
     return _to_view(flow_id)
+
+
+# ── Tailoring a template to a project (FORGE-398) ────────────────────────
+
+
+class ProposeFlowRequest(BaseModel):
+    intent: str
+    projectId: str | None = None  # noqa: N815
+    requirements: list[str] = Field(default_factory=list)
+    provider: str | None = None
+    model: str | None = None
+
+
+class FlowChangeView(BaseModel):
+    op: str
+    phase: str
+    value: object | None = None
+    rationale: str
+
+
+class FlowProposalView(BaseModel):
+    """A tailored flow, awaiting a human.
+
+    ``approvalId`` is the held write. Nothing starts from a proposal: a run
+    is created from the *approved* flow, and until somebody answers that
+    approval there is nothing to run.
+    """
+
+    approvalId: str  # noqa: N815
+    baseTemplateId: str  # noqa: N815
+    baseVersion: str  # noqa: N815
+    intent: str
+    flow: DesignFlowView
+    changes: list[FlowChangeView] = Field(default_factory=list)
+    valid: bool
+    violations: list[str] = Field(default_factory=list)
+
+
+def _proposal_view(proposal: FlowProposal, approval_id: str) -> FlowProposalView:
+    definition = proposal.definition
+    return FlowProposalView(
+        approvalId=approval_id,
+        baseTemplateId=proposal.base_template_id,
+        baseVersion=proposal.base_version,
+        intent=proposal.intent,
+        valid=proposal.valid,
+        violations=[str(v) for v in proposal.validation.violations],
+        changes=[
+            FlowChangeView(
+                op=op.kind.value, phase=op.phase_id, value=op.value, rationale=op.rationale
+            )
+            for op in proposal.operations
+        ],
+        flow=DesignFlowView(
+            id=definition.id,
+            name=definition.name,
+            label=f"{proposal.base_template_id} (tailored)",
+            description=proposal.intent,
+            version=proposal.base_version,
+            isDefault=False,
+            valid=proposal.valid,
+            violations=[str(v) for v in proposal.validation.violations],
+            phases=[_phase_view(phase) for phase in definition.phases],
+        ),
+    )
+
+
+@router.post("/propose", response_model=FlowProposalView, status_code=201)
+async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowProposalView:
+    """Tailor a template to a project's intent, and hold it for a human.
+
+    The response carries an ``approvalId``, not a run. FORGE-398's rule is
+    that nothing starts before approval, and the way to make that true is for
+    the endpoint that generates a flow to have no ability to start one.
+    """
+    from api_gateway.chat.tool_approvals import get_approval_store
+    from api_gateway.design_flows.generate import (
+        GeneratorUnavailableError,
+        TailoringRequest,
+        generate_proposal,
+    )
+
+    if not body.intent.strip():
+        raise HTTPException(status_code=400, detail="intent is required")
+
+    try:
+        proposal = await generate_proposal(
+            TailoringRequest(
+                intent=body.intent.strip(),
+                project_id=body.projectId,
+                requirements=body.requirements,
+                provider=body.provider,
+                model=body.model,
+            )
+        )
+    except GeneratorUnavailableError as exc:
+        # 503 rather than a default template: a flow the human believes was
+        # tailored, and was not, is worse than being told it is down.
+        logger.error("flow_proposal_unavailable", error=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    store = get_approval_store()
+    run = store.create(
+        {
+            "kind": "design_flow_proposal",
+            "template": proposal.base_template_id,
+            "version": proposal.base_version,
+            "intent": proposal.intent,
+            "changes": proposal.diff(),
+            "project_id": body.projectId,
+        }
+    )
+    store.start(run.id)
+    store.request_approval(
+        run.id,
+        reason=(
+            f"Start a run on a flow tailored from '{proposal.base_template_id}' "
+            f"v{proposal.base_version} with {len(proposal.operations)} change(s)."
+        ),
+    )
+    logger.info(
+        "flow_proposal_held",
+        approval_id=run.id,
+        template=proposal.base_template_id,
+        changes=len(proposal.operations),
+        valid=proposal.valid,
+    )
+    return _proposal_view(proposal, run.id)

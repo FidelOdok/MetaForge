@@ -74,6 +74,49 @@ So Temporal is **runnable and registered**, owns the consolidation pass when
 you hand it over, and as of FORGE-401 is the execution path for design-flow
 runs.
 
+### Tailoring a flow to a project (FORGE-398)
+
+`POST /v1/design-flows/propose` takes a project's intent and returns a
+tailored flow held for a human.
+
+**The model does not write a flow.** It proposes operations from a closed set,
+and the server applies them to a versioned template:
+
+| Operation | Effect |
+| --- | --- |
+| `drop_phase` | the phase does not apply to this product at all |
+| `add_deliverable` | require an artifact, so the phase's gate demands it |
+| `set_disciplines` | the disciplines a phase fans out into |
+
+That is the design, and the reason is worth stating. Asking a model for a
+whole flow and validating the result puts the invariants in a position where
+they must catch everything — and "the validator will catch it" is the
+reasoning that ends with a release gate quietly missing because somebody added
+a rule later than the flow that broke it. Removing a gate, removing a
+deliverable and switching enforcement off are **not expressible**. The
+FORGE-397 validator still runs, as a backstop rather than the only line.
+
+Note the asymmetry: tailoring may make a flow **stricter, never laxer**. A
+model that thinks a simulation is unnecessary can drop the whole phase —
+visible in the diff and answerable by the person approving — but cannot keep
+the phase and stop checking its output.
+
+Every operation carries a rationale; one without is discarded, because a flow
+that differs from its template and cannot say why is a flow nobody can review.
+An operation naming a phase that does not exist is skipped rather than fatal,
+so a model that misremembers one id does not lose the changes it got right,
+and the diff describes what actually happened rather than what was asked for.
+
+**Nothing starts from a proposal.** The response carries an `approvalId` into
+the same ledger the dashboard Approvals page already watches, and this
+endpoint has no ability to create a run — which is how "nothing starts before
+approval" is made true rather than asserted.
+
+If no model is reachable the endpoint returns 503 and makes no proposal. There
+is no untailored fallback: a flow the human believes was tailored, and was
+not, is worse than being told the generator is down, because they would
+approve it on the strength of a tailoring that never happened.
+
 ### The flow catalogue is served, not copied (FORGE-395)
 
 `GET /v1/design-flows` returns every launchable flow as the gateway will run

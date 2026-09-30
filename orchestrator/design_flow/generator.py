@@ -1,0 +1,243 @@
+"""Tailoring a template to a project (FORGE-398).
+
+The model does **not** write a flow. It proposes operations from a closed set,
+and the server applies them to a versioned template.
+
+That distinction is the design. Asking a model for a whole flow and validating
+the result afterwards puts the invariants in a position where they have to
+catch everything, and "the validator will catch it" is the reasoning that ends
+with a release gate quietly missing because somebody added a rule later than
+the flow that broke it. Here, removing a gate or switching enforcement off are
+not things the model can express — there is no operation for them. The
+validator (FORGE-397) still runs, as a backstop rather than the only line.
+
+What a model *can* do:
+
+* **drop a phase** that does not apply — a kitchen cabinet has no firmware
+* **require more of a phase** — add a deliverable, so a gate demands evidence
+  it would otherwise accept the absence of
+* **assign disciplines** — the branches a phase fans out into
+
+Every operation carries a rationale, because a flow that differs from its
+template and cannot say why is a flow nobody can review.
+
+Note the asymmetry: deliverables can be **added** and never removed. Tailoring
+is allowed to make a flow stricter and never laxer. A model that decides a
+simulation is unnecessary can drop the whole phase — visible in the diff, and
+answerable by the human approving it — but cannot quietly keep the phase and
+stop checking its output.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
+
+import structlog
+
+from orchestrator.design_flow.invariants import ValidationResult, validate_flow
+from orchestrator.design_flow.spec import FlowDefinition, Phase
+
+logger = structlog.get_logger(__name__)
+
+__all__ = [
+    "FlowProposal",
+    "Operation",
+    "OperationKind",
+    "TailoringError",
+    "apply_operations",
+    "build_proposal",
+    "parse_operations",
+]
+
+
+class OperationKind(StrEnum):
+    DROP_PHASE = "drop_phase"
+    ADD_DELIVERABLE = "add_deliverable"
+    SET_DISCIPLINES = "set_disciplines"
+
+
+@dataclass(frozen=True)
+class Operation:
+    """One tailoring change, with the reason it was made."""
+
+    kind: OperationKind
+    phase_id: str
+    rationale: str
+    #: For ``add_deliverable``: the artifact type. For ``set_disciplines``:
+    #: the discipline list.
+    value: Any = None
+
+    def describe(self) -> str:
+        if self.kind is OperationKind.DROP_PHASE:
+            return f"drop phase '{self.phase_id}'"
+        if self.kind is OperationKind.ADD_DELIVERABLE:
+            return f"require '{self.value}' from phase '{self.phase_id}'"
+        return f"assign {self.value} to phase '{self.phase_id}'"
+
+
+class TailoringError(ValueError):
+    """An operation could not be applied, and the flow was not changed."""
+
+
+@dataclass
+class FlowProposal:
+    """A tailored flow, its provenance, and whether it is startable."""
+
+    base_template_id: str
+    base_version: str
+    definition: FlowDefinition
+    operations: list[Operation] = field(default_factory=list)
+    validation: ValidationResult = field(default_factory=ValidationResult)
+    intent: str = ""
+
+    @property
+    def valid(self) -> bool:
+        return self.validation.ok
+
+    def diff(self) -> list[str]:
+        """What changed from the template, in one line each."""
+        return [f"{op.describe()} — {op.rationale}" for op in self.operations]
+
+
+def parse_operations(raw: Any) -> list[Operation]:
+    """Turn a model's JSON into operations, dropping anything unrecognised.
+
+    Unknown operation kinds are ignored rather than rejected, which is the one
+    place this module is lenient and the reason is narrow: a model inventing
+    ``remove_gate`` should have that request *disappear*, not fail the whole
+    proposal. Failing would teach it to retry with different wording; silence
+    teaches it the operation does not exist. Everything it asked for that is
+    real still applies, and the diff shows exactly what was kept.
+    """
+    if not isinstance(raw, list):
+        return []
+    operations: list[Operation] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        kind_raw = str(entry.get("op") or entry.get("kind") or "").strip()
+        try:
+            kind = OperationKind(kind_raw)
+        except ValueError:
+            logger.info("flow_generator_unknown_operation", op=kind_raw)
+            continue
+        phase_id = str(entry.get("phase") or entry.get("phase_id") or "").strip()
+        if not phase_id:
+            continue
+        rationale = str(entry.get("rationale") or entry.get("reason") or "").strip()
+        if not rationale:
+            # A change nobody can review is not a change worth keeping.
+            logger.info("flow_generator_operation_without_rationale", op=kind_raw, phase=phase_id)
+            continue
+        operations.append(
+            Operation(
+                kind=kind,
+                phase_id=phase_id,
+                rationale=rationale,
+                value=entry.get("value"),
+            )
+        )
+    return operations
+
+
+def apply_operations(
+    base: FlowDefinition, operations: list[Operation]
+) -> tuple[FlowDefinition, list[Operation]]:
+    """Apply what can be applied. Returns the flow and the operations used.
+
+    An operation naming a phase that does not exist is skipped, not fatal:
+    a model that misremembers one phase id should not lose the four changes it
+    got right. Skipped operations are absent from the returned list, so the
+    diff a human reads describes what actually happened.
+    """
+    by_id = {phase.id: phase for phase in base.phases}
+    dropped: set[str] = set()
+    extra_deliverables: dict[str, list[str]] = {}
+    disciplines: dict[str, list[str]] = {}
+    applied: list[Operation] = []
+
+    for op in operations:
+        if op.phase_id not in by_id:
+            logger.info("flow_generator_unknown_phase", phase=op.phase_id, flow=base.id)
+            continue
+        if op.kind is OperationKind.DROP_PHASE:
+            dropped.add(op.phase_id)
+            applied.append(op)
+        elif op.kind is OperationKind.ADD_DELIVERABLE:
+            artifact = str(op.value or "").strip()
+            if not artifact:
+                continue
+            if artifact in by_id[op.phase_id].required_deliverables:
+                # Already required. Reporting it as a change would put a line
+                # in the diff that describes nothing.
+                continue
+            extra_deliverables.setdefault(op.phase_id, []).append(artifact)
+            applied.append(op)
+        elif op.kind is OperationKind.SET_DISCIPLINES:
+            value = op.value if isinstance(op.value, list) else []
+            names = [str(v).strip() for v in value if str(v).strip()]
+            if not names:
+                continue
+            disciplines[op.phase_id] = names
+            applied.append(op)
+
+    phases: list[Phase] = []
+    for phase in base.phases:
+        if phase.id in dropped:
+            continue
+        added = extra_deliverables.get(phase.id, [])
+        assigned = disciplines.get(phase.id)
+        if not added and assigned is None:
+            phases.append(phase)
+            continue
+        phases.append(
+            Phase(
+                id=phase.id,
+                title=phase.title,
+                objective=phase.objective,
+                expected_artifacts=phase.expected_artifacts,
+                required_deliverables=tuple([*phase.required_deliverables, *added]),
+                # Deliberately carried through untouched: there is no
+                # operation that can switch enforcement off, and copying the
+                # original value is what makes that true rather than a rule
+                # somebody has to remember.
+                enforce_deliverables=phase.enforce_deliverables,
+                gate=phase.gate,
+                disciplines=tuple(assigned) if assigned is not None else phase.disciplines,
+            )
+        )
+
+    tailored = FlowDefinition(id=base.id, name=base.name, phases=tuple(phases))
+    return tailored, applied
+
+
+def build_proposal(
+    base: FlowDefinition,
+    *,
+    base_version: str,
+    operations: list[Operation],
+    intent: str = "",
+) -> FlowProposal:
+    """Tailor ``base`` and report whether the result can be started."""
+    tailored, applied = apply_operations(base, operations)
+    validation = validate_flow(tailored)
+    proposal = FlowProposal(
+        base_template_id=base.id,
+        base_version=base_version,
+        definition=tailored,
+        operations=applied,
+        validation=validation,
+        intent=intent,
+    )
+    logger.info(
+        "flow_proposal_built",
+        template=base.id,
+        version=base_version,
+        requested=len(operations),
+        applied=len(applied),
+        phases=len(tailored.phases),
+        valid=proposal.valid,
+    )
+    return proposal
