@@ -129,6 +129,7 @@ class TwinServer(McpToolServer):
         component_selector: Any = None,
         release_package_creator: Any = None,
         baseline_creator: Any = None,
+        test_plan_generator: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -381,6 +382,14 @@ class TwinServer(McpToolServer):
         # injection seam as every recorder above; None keeps tool_registry
         # free of twin_core.transactions imports.
         self._baseline_creator = baseline_creator
+        # FORGE-298: an injected async ``generate(*, project_id) -> dict``
+        # (make_test_plan_generator) -- for every Constraint on the project
+        # with verification_method == "test", records one new
+        # verification_case entity whose metadata carries a mechanically-
+        # derived {step, acceptance_value, requirement_id}. Same injection
+        # seam as every recorder above; None keeps tool_registry free of
+        # api_gateway imports.
+        self._test_plan_generator = test_plan_generator
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -464,6 +473,8 @@ class TwinServer(McpToolServer):
             self._register_create_release_package()
         if baseline_creator is not None:
             self._register_create_baseline()
+        if test_plan_generator is not None:
+            self._register_generate_test_plan()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4503,6 +4514,62 @@ class TwinServer(McpToolServer):
             reason=reason,
             name=name if isinstance(name, str) else None,
         )
+
+    # ------------------------------------------------------------------
+    # twin.generate_test_plan (FORGE-298)
+    # ------------------------------------------------------------------
+
+    def _register_generate_test_plan(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.generate_test_plan",
+                adapter_id="twin",
+                name="Generate Test Plan",
+                description=(
+                    "For every Constraint (requirement) on a project with "
+                    "verification_method == 'test', mechanically derives one "
+                    "new verification_case entity from the requirement's own "
+                    "structured metric/operator/limit/unit/target_node_type "
+                    "fields -- a test step ('Measure {metric} on "
+                    "{target_node_type}; acceptance: {metric} {operator} "
+                    "{limit}{unit}') plus its acceptance value, no new "
+                    "authoring/synthesis. Out of scope: FMEA, HALT/HASS, "
+                    "reliability modeling (later-phase per MetaForge-"
+                    "Planner); bench-equipment/procedure authoring; wiring "
+                    "generated cases into evaluate_g8_release's "
+                    "verification-complete check."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": (
+                                "Project whose test-method requirements to derive a plan from."
+                            ),
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "entries": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.generate_test_plan,
+        )
+
+    async def generate_test_plan(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = arguments.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("twin.generate_test_plan: 'project_id' is required")
+        return await self._test_plan_generator(project_id=project_id)
 
     # ------------------------------------------------------------------
     # twin.execute_revalidation_plan (FORGE-316)

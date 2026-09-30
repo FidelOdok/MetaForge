@@ -1059,6 +1059,26 @@ metadata: {
 
 *Source: `api_gateway/twin/baseline.py`, `twin_core/transactions/baseline.py`, `twin_core/models/baseline.py`*
 
+### 2.27 Test plans: mechanical derivation from test-method requirements (FORGE-298, gap G-I2)
+
+`verification_case` (an `EngineeringEntityType` already real since FORGE-45, first exercised live by FORGE-405) had no defined `metadata` convention before this ticket, unlike `release_package`/`concept_option`/`waiver`. This is its new shape, established by `twin.generate_test_plan` (`api_gateway/twin/test_plan.py`):
+
+```
+metadata: {
+  step: string              // "Measure {metric} on {target_node_type}; acceptance: {metric} {operator} {limit}{unit}"
+  acceptance_value: string  // "{limit}{unit}"
+  requirement_id: string    // the source Constraint's id
+}
+```
+
+For every `Constraint` on a project with `verification_method == "test"` (FORGE-258/312's already-real field), `twin.generate_test_plan` mechanically derives one new `verification_case` entity from the requirement's own structured `metric`/`operator`/`limit`/`unit`/`target_node_type` fields (FORGE-259) -- pure string formatting over existing data, no new authoring/synthesis logic. This is deliberately process-generic: it works for whatever real requirements a project actually has declared `verification_method="test"`, not hardcoded to any fixed category list (the ticket's own "payload, reach, repeatability" examples are illustrative, not a closed set). Calling it twice creates a second `verification_case` per matching requirement (mirrors `release_package`'s own create-a-new-snapshot-each-call semantics).
+
+`GET /v1/testplans?project_id=` lists a project's generated entries (oldest first), `POST /v1/testplans` generates them. The dashboard's Requirements page ("Test plan" section) renders the step + acceptance value as a table.
+
+**Deliberately out of scope**: FMEA, HALT/HASS, reliability modeling (MetaForge-Planner's `FRAMEWORK_MAPPING.md` discipline #9 "Testing & Reliability" lists these alongside test plans, but marks only test plans as the Phase-1-relevant slice); bench-equipment/procedure authoring beyond the mechanical metric->step derivation; wiring generated `verification_case` entities into `evaluate_g8_release`'s verification-complete check (a real, separable follow-up -- generating a test plan doesn't by itself attach the Evidence that check actually looks for).
+
+*Source: `api_gateway/twin/test_plan.py`, `api_gateway/testplans/routes.py`, `twin_core/models/engineering_entity.py`, `twin_core/models/constraint.py`, `dashboard/src/pages/RequirementsPage.tsx`, `dashboard/src/api/endpoints/testplans.ts`, `dashboard/src/hooks/use-test-plan.ts`*
+
 ---
 
 ## 3. Edge Types

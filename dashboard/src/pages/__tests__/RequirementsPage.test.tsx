@@ -25,6 +25,11 @@ vi.mock('../../hooks/use-releases', () => ({
   useCreateReleasePackage: vi.fn(),
 }));
 
+vi.mock('../../hooks/use-test-plan', () => ({
+  useTestPlan: vi.fn(),
+  useGenerateTestPlan: vi.fn(),
+}));
+
 import { RequirementsPage } from '../RequirementsPage';
 import {
   useRequirementCoverage,
@@ -32,12 +37,15 @@ import {
   useRequirementQuality,
 } from '../../hooks/use-requirements';
 import { useCreateReleasePackage, useReleasePackages } from '../../hooks/use-releases';
+import { useGenerateTestPlan, useTestPlan } from '../../hooks/use-test-plan';
 
 const mockUseRequirementQuality = vi.mocked(useRequirementQuality);
 const mockUseRequirementMatrix = vi.mocked(useRequirementMatrix);
 const mockUseRequirementCoverage = vi.mocked(useRequirementCoverage);
 const mockUseReleasePackages = vi.mocked(useReleasePackages);
 const mockUseCreateReleasePackage = vi.mocked(useCreateReleasePackage);
+const mockUseTestPlan = vi.mocked(useTestPlan);
+const mockUseGenerateTestPlan = vi.mocked(useGenerateTestPlan);
 
 const REPORT = {
   requirements: [
@@ -143,6 +151,14 @@ describe('RequirementsPage', () => {
       mutate: vi.fn(),
       isPending: false,
     } as unknown as ReturnType<typeof useCreateReleasePackage>);
+    mockUseTestPlan.mockReturnValue({
+      data: [],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useTestPlan>);
+    mockUseGenerateTestPlan.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+    } as unknown as ReturnType<typeof useGenerateTestPlan>);
   });
 
   it('shows loading state', () => {
@@ -427,6 +443,77 @@ describe('RequirementsPage', () => {
     render(<RequirementsPage />);
 
     await user.click(screen.getByTestId('create-release-button'));
+
+    expect(mutate).toHaveBeenCalledWith(undefined, expect.anything());
+  });
+
+  it('shows an empty state with no test-plan entries yet', () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'proj-1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    render(<RequirementsPage />);
+    expect(screen.getByTestId('test-plan')).toHaveTextContent('No test-plan entries yet');
+  });
+
+  it('renders generated test-plan entries with step and acceptance value', () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'proj-1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    mockUseTestPlan.mockReturnValue({
+      data: [
+        {
+          nodeId: 'vc-1',
+          requirementId: 'r1',
+          step: 'Measure payload_capacity_kg on robot_description; acceptance: payload_capacity_kg >= 2.0kg',
+          acceptanceValue: '2.0kg',
+        },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useTestPlan>);
+    render(<RequirementsPage />);
+
+    const section = screen.getByTestId('test-plan');
+    expect(section).toHaveTextContent('payload_capacity_kg');
+    expect(section).toHaveTextContent('2.0kg');
+    expect(screen.getByTestId('test-plan-entry-vc-1')).toBeInTheDocument();
+  });
+
+  it('clicking Generate test plan triggers the generation mutation', async () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'proj-1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    const mutate = vi.fn((_arg: undefined, opts?: { onSuccess?: (r: unknown) => void }) => {
+      opts?.onSuccess?.([]);
+    });
+    mockUseGenerateTestPlan.mockReturnValue({
+      mutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useGenerateTestPlan>);
+    const user = userEvent.setup();
+    render(<RequirementsPage />);
+
+    await user.click(screen.getByTestId('generate-test-plan-button'));
 
     expect(mutate).toHaveBeenCalledWith(undefined, expect.anything());
   });

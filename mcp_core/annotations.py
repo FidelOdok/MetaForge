@@ -170,6 +170,10 @@ ADDITIVE: frozenset[str] = frozenset(
         # reads the project's current state and the gate check it calls
         # (evaluate_g8_release) is itself read-only.
         "twin.create_release_package",
+        # FORGE-298: for each matching requirement, records one new
+        # verification_case entity -- a pure append, never overwrites an
+        # existing Constraint or entity.
+        "twin.generate_test_plan",
         "twin.optimize_parameter",
         "twin.propose_change",
         "twin.propose_engineering_change",
