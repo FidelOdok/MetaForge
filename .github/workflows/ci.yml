@@ -182,7 +182,10 @@ jobs:
       # and there is no eslint.config.*, so the script cannot run at all
       # (MET-732). Repairing it means choosing a lint policy, which is not a
       # decision to make inside a CI wiring change.
-      - run: cd dashboard && npx vitest run
+      # FORGE-389: `npm test` is the guarded run -- it fails when fewer
+      # test files ran than exist, which `vitest run` reports only in its
+      # exit code and not in its summary.
+      - run: cd dashboard && npm test
 
   marketing:
     name: Marketing Site Checks

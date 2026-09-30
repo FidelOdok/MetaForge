@@ -48,6 +48,16 @@ export default tseslint.config(
     },
   },
   {
+    // FORGE-389: `scripts/` holds Node tooling, not app code, so it gets
+    // Node globals. Without this `console` and `process` are undefined
+    // under the browser globals the rest of the project uses -- which is
+    // how check-suite.mjs failed lint on its first CI run.
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.es2022 },
+    },
+  },
+  {
     // Tests legitimately reach for `any` when building doubles for third-party
     // shapes, and assert on internals. Keeping the main rules on for src/ is
     // where the value is.
