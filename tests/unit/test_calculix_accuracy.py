@@ -8,6 +8,7 @@ from tool_registry.tools.calculix.accuracy import (
     assess_stress_accuracy,
     check_mesh_convergence,
     cross_check_cantilever_bending,
+    cross_check_cantilever_frequency,
 )
 
 
@@ -103,6 +104,97 @@ class TestCrossCheckCantileverBending:
                 height_mm=20,
                 force_n=500,
                 fea_max_stress_mpa=75.0,
+                tolerance_pct=0,
+            )
+
+
+class TestCrossCheckCantileverFrequency:
+    # 100mm long steel (E=200000 MPa, density=7850 kg/m^3), 10x20mm
+    # rectangular section -- same beam geometry as the bending tests above.
+    # f1 = (3.516/(2*pi*L^2)) * sqrt(E*I/(rho*A)), I=width*height^3/12=
+    # 6666.67mm^4, A=200mm^2, rho=7.85e-9 tonne/mm^3 -- hand-computed
+    # (independently of the function under test) to ~1631 Hz.
+    def test_matches_hand_calc_within_tolerance(self) -> None:
+        result = cross_check_cantilever_frequency(
+            length_mm=100,
+            width_mm=10,
+            height_mm=20,
+            density_kg_m3=7850,
+            youngs_modulus_mpa=200000,
+            fea_first_mode_hz=1650.0,
+        )
+        assert result["hand_calc_first_mode_hz"] == pytest.approx(1631, rel=0.02)
+        assert result["within_tolerance"] is True
+        assert result["percent_difference"] < 5.0
+
+    def test_flags_a_real_mismatch(self) -> None:
+        result = cross_check_cantilever_frequency(
+            length_mm=100,
+            width_mm=10,
+            height_mm=20,
+            density_kg_m3=7850,
+            youngs_modulus_mpa=200000,
+            fea_first_mode_hz=16310.0,  # 10x too high
+            tolerance_pct=20.0,
+        )
+        assert result["within_tolerance"] is False
+        assert result["percent_difference"] > 100
+
+    def test_custom_tolerance_is_honored(self) -> None:
+        # ~6.5% off the ~1631Hz hand calc.
+        result = cross_check_cantilever_frequency(
+            length_mm=100,
+            width_mm=10,
+            height_mm=20,
+            density_kg_m3=7850,
+            youngs_modulus_mpa=200000,
+            fea_first_mode_hz=1737.0,
+            tolerance_pct=5.0,
+        )
+        assert result["within_tolerance"] is False
+
+    def test_non_positive_dimensions_raise(self) -> None:
+        with pytest.raises(ValueError, match="must all be positive"):
+            cross_check_cantilever_frequency(
+                length_mm=0,
+                width_mm=10,
+                height_mm=20,
+                density_kg_m3=7850,
+                youngs_modulus_mpa=200000,
+                fea_first_mode_hz=1631.0,
+            )
+
+    def test_non_positive_density_raises(self) -> None:
+        with pytest.raises(ValueError, match="density_kg_m3 must be positive"):
+            cross_check_cantilever_frequency(
+                length_mm=100,
+                width_mm=10,
+                height_mm=20,
+                density_kg_m3=0,
+                youngs_modulus_mpa=200000,
+                fea_first_mode_hz=1631.0,
+            )
+
+    def test_non_positive_modulus_raises(self) -> None:
+        with pytest.raises(ValueError, match="youngs_modulus_mpa must be positive"):
+            cross_check_cantilever_frequency(
+                length_mm=100,
+                width_mm=10,
+                height_mm=20,
+                density_kg_m3=7850,
+                youngs_modulus_mpa=0,
+                fea_first_mode_hz=1631.0,
+            )
+
+    def test_non_positive_tolerance_raises(self) -> None:
+        with pytest.raises(ValueError, match="tolerance_pct must be positive"):
+            cross_check_cantilever_frequency(
+                length_mm=100,
+                width_mm=10,
+                height_mm=20,
+                density_kg_m3=7850,
+                youngs_modulus_mpa=200000,
+                fea_first_mode_hz=1631.0,
                 tolerance_pct=0,
             )
 

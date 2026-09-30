@@ -17,11 +17,19 @@ Three independent checks, each usable on its own:
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+# FORGE-281: the first root of a fixed-free (cantilever) beam's transcendental
+# frequency equation cos(bL)cosh(bL) = -1, squared -- the standard constant in
+# f1 = (beta1*L)^2 / (2*pi*L^2) * sqrt(EI/(rho*A)) for a uniform cantilever's
+# first bending mode. A textbook constant (e.g. Blevins, "Formulas for
+# Natural Frequency and Mode Shape"), not derived here.
+_CANTILEVER_FIRST_MODE_BETA_L_SQUARED = 3.5160
 
 # Empirically, a real converged stress field varies smoothly; a max more
 # than this many times the median nodal value is characteristic of a
@@ -129,6 +137,69 @@ def cross_check_cantilever_bending(
     return {
         "hand_calc_stress_mpa": round(hand_calc_stress_mpa, 2),
         "fea_max_stress_mpa": fea_max_stress_mpa,
+        "percent_difference": round(percent_difference, 1),
+        "tolerance_pct": tolerance_pct,
+        "within_tolerance": within_tolerance,
+    }
+
+
+def cross_check_cantilever_frequency(
+    length_mm: float,
+    width_mm: float,
+    height_mm: float,
+    density_kg_m3: float,
+    youngs_modulus_mpa: float,
+    fea_first_mode_hz: float,
+    tolerance_pct: float = 20.0,
+) -> dict[str, Any]:
+    """Closed-form first-bending-mode natural frequency for a uniform
+    rectangular cantilever, tip-free (FORGE-281) -- the modal sibling of
+    :func:`cross_check_cantilever_bending`, same one-well-understood-
+    textbook-case discipline and the same fixed-free/rectangular-section
+    scope restriction (not a general beam-vibration solver).
+
+    f1 = (beta1*L)^2 / (2*pi*L^2) * sqrt(E*I / (rho*A)), with I = width *
+    height^3 / 12 (bending about the width-height section, height in the
+    bending direction -- same convention as ``cross_check_cantilever_
+    bending``) and A = width * height. ``density_kg_m3`` is converted
+    internally to the tonne/mm^3 consistent with ``youngs_modulus_mpa``'s
+    own mm+N+MPa system (see ``deck_builder.build_modal_deck``'s docstring
+    for why kg/m^3 can't be used directly here).
+    """
+    if length_mm <= 0 or width_mm <= 0 or height_mm <= 0:
+        raise ValueError("length_mm, width_mm, and height_mm must all be positive")
+    if density_kg_m3 <= 0:
+        raise ValueError("density_kg_m3 must be positive")
+    if youngs_modulus_mpa <= 0:
+        raise ValueError("youngs_modulus_mpa must be positive")
+    if tolerance_pct <= 0:
+        raise ValueError("tolerance_pct must be positive")
+
+    density_tonne_mm3 = density_kg_m3 * 1e-12
+    area_mm2 = width_mm * height_mm
+    i_mm4 = width_mm * height_mm**3 / 12
+    hand_calc_hz = (
+        _CANTILEVER_FIRST_MODE_BETA_L_SQUARED
+        / (2 * math.pi * length_mm**2)
+        * math.sqrt(youngs_modulus_mpa * i_mm4 / (density_tonne_mm3 * area_mm2))
+    )
+
+    percent_difference = (
+        abs(fea_first_mode_hz - hand_calc_hz) / hand_calc_hz * 100 if hand_calc_hz else float("inf")
+    )
+    within_tolerance = percent_difference <= tolerance_pct
+
+    logger.info(
+        "cantilever_frequency_cross_check",
+        hand_calc_hz=round(hand_calc_hz, 3),
+        fea_first_mode_hz=fea_first_mode_hz,
+        percent_difference=round(percent_difference, 1),
+        within_tolerance=within_tolerance,
+    )
+
+    return {
+        "hand_calc_first_mode_hz": round(hand_calc_hz, 3),
+        "fea_first_mode_hz": fea_first_mode_hz,
         "percent_difference": round(percent_difference, 1),
         "tolerance_pct": tolerance_pct,
         "within_tolerance": within_tolerance,

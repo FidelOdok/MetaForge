@@ -10,15 +10,20 @@ import structlog
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
-from tool_registry.tools.cadquery.materials import resolve_elastic_properties
+from tool_registry.tools.cadquery.materials import resolve_density_kg_m3, resolve_elastic_properties
 from tool_registry.tools.calculix.accuracy import (
     check_mesh_convergence,
     cross_check_cantilever_bending,
+    cross_check_cantilever_frequency,
 )
 from tool_registry.tools.calculix.config import CalculixConfig
-from tool_registry.tools.calculix.deck_builder import build_static_stress_deck
+from tool_registry.tools.calculix.deck_builder import build_modal_deck, build_static_stress_deck
 from tool_registry.tools.calculix.inp_mesh import MeshData, parse_mesh_inp
-from tool_registry.tools.calculix.result_parser import extract_results, parse_frd_file
+from tool_registry.tools.calculix.result_parser import (
+    extract_results,
+    parse_frd_file,
+    parse_frequencies_dat,
+)
 from tool_registry.tools.calculix.solver import SolverError
 from tool_registry.tools.calculix.solver import run_fea as solver_run_fea
 
@@ -89,11 +94,14 @@ def _fixed_node_set_span_warning(mesh: MeshData, fixed_node_set: str) -> str | N
 class CalculixServer(McpToolServer):
     """CalculiX FEA tool adapter.
 
-    Provides four tools:
-    - calculix.run_fea: Static stress FEA analysis
-    - calculix.extract_results: Parse existing .frd result files
-    - calculix.run_thermal: Thermal analysis (steady-state/transient)
-    - calculix.validate_mesh: Validate mesh quality
+    Provides seven tools:
+    - calculix.run_fea: static-stress or modal (FORGE-281) FEA analysis
+    - calculix.extract_results: parse existing .frd result files
+    - calculix.run_thermal: thermal analysis (steady-state/transient)
+    - calculix.validate_mesh: validate mesh quality
+    - calculix.cross_check_cantilever_beam: hand-calc stress cross-check
+    - calculix.cross_check_cantilever_frequency: hand-calc frequency cross-check
+    - calculix.check_mesh_convergence: compare results across element sizes
     """
 
     def __init__(self, config: CalculixConfig | None = None) -> None:
@@ -125,21 +133,28 @@ class CalculixServer(McpToolServer):
                             "type": "string",
                             "enum": ["static_stress", "modal"],
                             "description": (
-                                "Type of analysis. FORGE-234: material/fixed_node_set/"
-                                "load_node_set/load_force_n below build a complete, "
-                                "solvable deck for 'static_stress' only -- 'modal' still "
-                                "invokes the mesh directly with no deck construction."
+                                "Type of analysis. FORGE-234/FORGE-281: material/"
+                                "fixed_node_set build a complete, solvable deck for both "
+                                "'static_stress' and 'modal'; load_node_set/load_force_n "
+                                "are static_stress-only (a modal solve is an eigenvalue "
+                                "problem, it has no applied load) and num_modes is "
+                                "modal-only."
                             ),
                         },
                         "material": {
                             "type": "object",
                             "description": (
-                                "Required for 'static_stress'. Either {'name': "
-                                "<materials.py name, e.g. 'steel'/'aluminum_6061'>} or "
-                                "explicit {'youngs_modulus_mpa': ..., 'poissons_ratio': ...}. "
-                                "MPa (N/mm^2), NOT Pa -- mesh coordinates are in "
-                                "millimeters, and mixing unit systems silently understates "
-                                "stiffness by 1e6."
+                                "Required for both 'static_stress' and 'modal'. Either "
+                                "{'name': <materials.py name, e.g. 'steel'/"
+                                "'aluminum_6061'>} or explicit {'youngs_modulus_mpa': ..., "
+                                "'poissons_ratio': ...}. 'modal' additionally needs a real "
+                                "density (a wrong one silently reports a confidently wrong "
+                                "frequency), which this codebase only has a lookup table "
+                                "for by name -- 'name' is required for 'modal' even when "
+                                "explicit elastic properties are also given. MPa (N/mm^2), "
+                                "NOT Pa -- mesh "
+                                "coordinates are in millimeters, and mixing unit systems "
+                                "silently understates stiffness by 1e6."
                             ),
                             "properties": {
                                 "name": {"type": "string"},
@@ -150,12 +165,12 @@ class CalculixServer(McpToolServer):
                         "fixed_node_set": {
                             "type": "string",
                             "description": (
-                                "Required for 'static_stress'. Element set name from "
-                                "freecad.generate_mesh's own mesh (e.g. 'Surface1', gmsh's "
-                                "per-STEP-face group) to fully constrain (all 3 "
-                                "translational DOFs) -- use generate_mesh's own 'faces' "
-                                "response to identify which named face is which by its "
-                                "bounding box."
+                                "Required for both 'static_stress' and 'modal'. Element "
+                                "set name from freecad.generate_mesh's own mesh (e.g. "
+                                "'Surface1', gmsh's per-STEP-face group) to fully "
+                                "constrain (all 3 translational DOFs) -- use "
+                                "generate_mesh's own 'faces' response to identify which "
+                                "named face is which by its bounding box."
                             ),
                         },
                         "load_node_set": {
@@ -175,6 +190,15 @@ class CalculixServer(McpToolServer):
                                 "Newtons, distributed evenly across load_node_set's nodes."
                             ),
                         },
+                        "num_modes": {
+                            "type": "integer",
+                            "default": 3,
+                            "description": (
+                                "'modal' only. Number of natural frequencies/mode shapes "
+                                "to extract, lowest first (CalculiX's own Lanczos "
+                                "default eigensolver)."
+                            ),
+                        },
                     },
                     "required": ["mesh_file", "load_case", "analysis_type"],
                 },
@@ -183,7 +207,14 @@ class CalculixServer(McpToolServer):
                     "properties": {
                         "max_von_mises": {
                             "type": "object",
-                            "description": "Max stress by region",
+                            "description": "Max stress by region (static_stress only).",
+                        },
+                        "frequencies_hz": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": (
+                                "modal only. Natural frequencies in Hz, lowest mode first."
+                            ),
                         },
                         "solver_time": {"type": "number"},
                         "mesh_elements": {"type": "integer"},
@@ -408,6 +439,83 @@ class CalculixServer(McpToolServer):
 
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="calculix.cross_check_cantilever_frequency",
+                adapter_id="calculix",
+                name="Cross-Check Cantilever Frequency",
+                description=(
+                    "Closed-form first-bending-mode natural frequency for a uniform "
+                    "rectangular cantilever, tip-free (FORGE-281) -- the modal sibling "
+                    "of calculix.cross_check_cantilever_beam, same one-textbook-case "
+                    "discipline (fixed-free, rectangular cross-section). Compares "
+                    "against a modal FEA run's own first mode within a tolerance."
+                ),
+                capability="accuracy_check",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "length_mm": {
+                            "type": "number",
+                            "description": "Distance from the fixed end to the free tip, mm.",
+                        },
+                        "width_mm": {
+                            "type": "number",
+                            "description": "Cross-section width (bending-neutral direction), mm.",
+                        },
+                        "height_mm": {
+                            "type": "number",
+                            "description": "Cross-section height (in the bending direction), mm.",
+                        },
+                        "density_kg_m3": {
+                            "type": "number",
+                            "description": "Material density, kg/m^3.",
+                        },
+                        "youngs_modulus_mpa": {
+                            "type": "number",
+                            "description": "Material Young's modulus, MPa (N/mm^2).",
+                        },
+                        "fea_first_mode_hz": {
+                            "type": "number",
+                            "description": (
+                                "The modal FEA run's own first (lowest) natural "
+                                "frequency, Hz, to check."
+                            ),
+                        },
+                        "tolerance_pct": {
+                            "type": "number",
+                            "default": 20.0,
+                            "description": (
+                                "Max allowed percent difference between the hand calc "
+                                "and the FEA number before flagging a mismatch."
+                            ),
+                        },
+                    },
+                    "required": [
+                        "length_mm",
+                        "width_mm",
+                        "height_mm",
+                        "density_kg_m3",
+                        "youngs_modulus_mpa",
+                        "fea_first_mode_hz",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "hand_calc_first_mode_hz": {"type": "number"},
+                        "fea_first_mode_hz": {"type": "number"},
+                        "percent_difference": {"type": "number"},
+                        "tolerance_pct": {"type": "number"},
+                        "within_tolerance": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=5),
+            ),
+            handler=self.handle_cross_check_cantilever_frequency,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="calculix.check_mesh_convergence",
                 adapter_id="calculix",
                 name="Check Mesh Convergence",
@@ -477,11 +585,10 @@ class CalculixServer(McpToolServer):
         if analysis_type not in ("static_stress", "modal"):
             raise ValueError(f"Unsupported analysis type: {analysis_type}")
 
-        # FORGE-234: 'static_stress' needs a real, structured load case to
-        # build a complete deck around -- there is no meaningful default
-        # material/boundary-condition/load, so these are all required here
-        # (not in the JSON schema's own 'required' list, since they're only
-        # required for THIS analysis_type, not 'modal').
+        # FORGE-234/FORGE-281: neither analysis type has a meaningful
+        # default material/boundary-condition, so these are all required
+        # here (not in the JSON schema's own 'required' list, since which
+        # fields are required depends on analysis_type).
         deck_spec: dict[str, Any] | None = None
         if analysis_type == "static_stress":
             material = arguments.get("material")
@@ -523,6 +630,49 @@ class CalculixServer(McpToolServer):
                     float(load_force_n[1]),
                     float(load_force_n[2]),
                 ),
+            }
+        elif analysis_type == "modal":
+            material = arguments.get("material")
+            fixed_node_set = arguments.get("fixed_node_set")
+            missing = [
+                name
+                for name, value in (("material", material), ("fixed_node_set", fixed_node_set))
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"calculix.run_fea: {', '.join(missing)} required for "
+                    "analysis_type='modal' -- there is no default material or boundary "
+                    "condition to build a real analysis deck around."
+                )
+            if not isinstance(material, dict):
+                raise ValueError("calculix.run_fea: 'material' must be an object")
+            material_name = material.get("name")
+            if not material_name:
+                raise ValueError(
+                    "calculix.run_fea: material.name is required for analysis_type="
+                    "'modal' -- density (needed for the mass matrix) is only ever "
+                    "looked up by name in this codebase, even when explicit elastic "
+                    "properties are also given."
+                )
+            youngs_modulus_mpa, poissons_ratio = resolve_elastic_properties(
+                material=material_name,
+                youngs_modulus_mpa=material.get("youngs_modulus_mpa"),
+                poissons_ratio=material.get("poissons_ratio"),
+            )
+            density_kg_m3 = resolve_density_kg_m3(material_name)
+            num_modes = arguments.get("num_modes", 3)
+            if not isinstance(num_modes, int) or num_modes < 1:
+                raise ValueError("calculix.run_fea: 'num_modes' must be a positive integer")
+            deck_spec = {
+                "youngs_modulus_mpa": youngs_modulus_mpa,
+                "poissons_ratio": poissons_ratio,
+                # FORGE-281: kg/m^3 -> tonne/mm^3, the mass unit the mm+N+MPa
+                # consistent system forces -- see build_modal_deck's own
+                # docstring for why this conversion can't be skipped.
+                "density_tonne_mm3": density_kg_m3 * 1e-12,
+                "fixed_node_set": fixed_node_set,
+                "num_modes": num_modes,
             }
 
         logger.info(
@@ -570,6 +720,40 @@ class CalculixServer(McpToolServer):
                     height_mm=float(arguments["height_mm"]),
                     force_n=float(arguments["force_n"]),
                     fea_max_stress_mpa=float(arguments["fea_max_stress_mpa"]),
+                    tolerance_pct=float(arguments.get("tolerance_pct", 20.0)),
+                )
+            except ValueError as exc:
+                span.record_exception(exc)
+                raise
+            span.set_attribute("calculix.within_tolerance", result["within_tolerance"])
+            return result
+
+    async def handle_cross_check_cantilever_frequency(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Closed-form first-mode natural-frequency cross-check for a
+        tip-free cantilever (FORGE-281)."""
+        required = (
+            "length_mm",
+            "width_mm",
+            "height_mm",
+            "density_kg_m3",
+            "youngs_modulus_mpa",
+            "fea_first_mode_hz",
+        )
+        missing = [name for name in required if arguments.get(name) is None]
+        if missing:
+            raise ValueError(f"Missing required field(s): {', '.join(missing)}")
+
+        with tracer.start_as_current_span("calculix.cross_check_cantilever_frequency") as span:
+            try:
+                result = cross_check_cantilever_frequency(
+                    length_mm=float(arguments["length_mm"]),
+                    width_mm=float(arguments["width_mm"]),
+                    height_mm=float(arguments["height_mm"]),
+                    density_kg_m3=float(arguments["density_kg_m3"]),
+                    youngs_modulus_mpa=float(arguments["youngs_modulus_mpa"]),
+                    fea_first_mode_hz=float(arguments["fea_first_mode_hz"]),
                     tolerance_pct=float(arguments.get("tolerance_pct", 20.0)),
                 )
             except ValueError as exc:
@@ -633,14 +817,15 @@ class CalculixServer(McpToolServer):
         This method is designed to be easily mockable in tests.
         In production, it invokes the ccx binary and parses the results.
 
-        FORGE-234: when ``deck_spec`` is given (always true for
-        ``analysis_type='static_stress'`` -- see ``run_fea``), ``mesh_file``
-        is treated as mesh-only topology (nodes + elements, no analysis
-        cards -- exactly what freecad.generate_mesh produces) and a
+        FORGE-234/FORGE-281: when ``deck_spec`` is given (always true for
+        ``analysis_type`` 'static_stress' and 'modal' -- see ``run_fea``),
+        ``mesh_file`` is treated as mesh-only topology (nodes + elements, no
+        analysis cards -- exactly what freecad.generate_mesh produces) and a
         complete, solvable deck is built around it first (only the volume
-        elements, real material/section/boundary/load/output-request cards
-        -- see ``deck_builder.build_static_stress_deck``), written to a new
-        ``<stem>_solved.inp`` file, and THAT is what actually gets solved.
+        elements, real material/section/boundary/[load]/output-request
+        cards -- see ``deck_builder.build_static_stress_deck``/
+        ``build_modal_deck``), written to a new ``<stem>_solved.inp`` file,
+        and THAT is what actually gets solved.
         """
         with tracer.start_as_current_span("calculix.execute_solver") as span:
             span.set_attribute("calculix.mesh_file", mesh_file)
@@ -656,7 +841,11 @@ class CalculixServer(McpToolServer):
                     # so there's no reason to wait for a (possibly slow)
                     # solve to surface it.
                     span_warning = _fixed_node_set_span_warning(mesh, deck_spec["fixed_node_set"])
-                    deck_text = build_static_stress_deck(mesh, **deck_spec)
+                    deck_text = (
+                        build_modal_deck(mesh, **deck_spec)
+                        if analysis_type == "modal"
+                        else build_static_stress_deck(mesh, **deck_spec)
+                    )
                     solved_path = Path(mesh_file).with_name(f"{Path(mesh_file).stem}_solved.inp")
                     solved_path.write_text(deck_text, encoding="utf-8")
                     solved_file = str(solved_path)
@@ -710,6 +899,21 @@ class CalculixServer(McpToolServer):
                     "stress": parsed.get("stress", {}),
                     "displacement": parsed.get("displacement", {}),
                 }
+                if analysis_type == "modal":
+                    # FORGE-281: the actual eigenfrequencies live in the .dat
+                    # file, not the .frd -- see parse_frequencies_dat's own
+                    # docstring. A modal deck requests no *EL FILE, so the
+                    # .frd's own "stress" block above is always empty here;
+                    # that's expected, not a solver problem.
+                    dat_files = [
+                        f for f in solver_result.get("result_files", []) if f.endswith(".dat")
+                    ]
+                    if not dat_files:
+                        raise SolverError(
+                            "CalculiX exited successfully but produced no .dat result "
+                            "file -- nothing was actually solved for this *FREQUENCY step."
+                        )
+                    result["frequencies_hz"] = parse_frequencies_dat(dat_files[0])
                 if span_warning:
                     result["warnings"] = [span_warning]
                 return result

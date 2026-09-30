@@ -42,6 +42,7 @@ READ_ONLY: frozenset[str] = frozenset(
         # Analysis that reads an existing result rather than producing one
         "calculix.check_mesh_convergence",
         "calculix.cross_check_cantilever_beam",
+        "calculix.cross_check_cantilever_frequency",
         "calculix.extract_results",
         "calculix.validate_mesh",
         "gazebo.extract_results",

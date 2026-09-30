@@ -45,10 +45,11 @@ class TestRegistryMcpBridge:
         adds freecad.import_step for 79. FORGE-277 adds
         freecad.list_named_faces for 80. FORGE-280 adds calculix.cross_check_
         cantilever_beam + calculix.check_mesh_convergence for 82.
+        FORGE-281 adds calculix.cross_check_cantilever_frequency for 83.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 82
+        assert len(tools) == 83
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

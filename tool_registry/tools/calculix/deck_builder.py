@@ -165,3 +165,109 @@ def build_static_stress_deck(
     lines.append("*END STEP")
 
     return "\n".join(lines) + "\n"
+
+
+def build_modal_deck(
+    mesh: MeshData,
+    *,
+    youngs_modulus_mpa: float,
+    poissons_ratio: float,
+    density_tonne_mm3: float,
+    fixed_node_set: str,
+    num_modes: int,
+    volume_elset: str = "Volume1",
+) -> str:
+    """Return a complete, solvable CalculiX modal (natural-frequency) deck
+    (FORGE-281, gap G-F5) -- same "real cards around the mesh's volume
+    elements only" shape as :func:`build_static_stress_deck`, sharing its
+    node/element/nset-building logic, but a ``*FREQUENCY`` step instead of
+    ``*STATIC``: no load (an eigenvalue problem has none) and a ``*DENSITY``
+    card the static-stress deck never needs (a mass matrix requires mass;
+    a pure stiffness solve doesn't).
+
+    ``density_tonne_mm3`` -- CalculiX has no built-in unit system, and the
+    mm+N+MPa consistent triple :func:`build_static_stress_deck` already uses
+    forces a mass unit of the TONNE, not the kilogram: F=ma with F in N and a
+    in mm/s^2 makes the mass unit N*s^2/mm, which works out to 1000 kg (see
+    module docstring's own mm/N/MPa consistency note, extended one unit
+    further for a dynamics problem). A material's density in the ordinary
+    kg/m^3 tables (``tool_registry.tools.cadquery.materials.
+    MATERIAL_DENSITY_KG_M3``) must be multiplied by 1e-12 before it belongs
+    in this deck -- getting this wrong doesn't fail loudly, it just reports
+    confidently wrong frequencies (a mass-unit error under a square root, so
+    off by exactly sqrt(1e12) = 1e6x). Callers should use
+    :func:`resolve_density_kg_m3` and convert once at the call site, not
+    duplicate the constant.
+
+    ``num_modes`` is the number of natural frequencies/mode shapes to
+    extract, lowest first (CalculiX's own Lanczos default).
+
+    Same argument-validation contract as :func:`build_static_stress_deck`
+    (unknown volume_elset/fixed_node_set, empty node sets, no real volume
+    elements) -- see that function's docstring.
+    """
+    if volume_elset not in mesh.elsets:
+        raise ValueError(
+            f"build_modal_deck: no element set {volume_elset!r} in this mesh -- "
+            f"available element sets: {sorted(mesh.elsets)}"
+        )
+    fixed_nodes = mesh.node_ids_for_elset(fixed_node_set)
+    if not fixed_nodes:
+        raise ValueError(f"build_modal_deck: {fixed_node_set!r} has no nodes")
+    if num_modes < 1:
+        raise ValueError(f"build_modal_deck: num_modes must be >= 1, got {num_modes}")
+
+    volume_by_type: dict[str, list[int]] = {}
+    for element_id in mesh.elsets[volume_elset]:
+        etype, _node_ids = mesh.elements[element_id]
+        if etype.startswith(_VOLUME_ELEMENT_PREFIXES):
+            volume_by_type.setdefault(etype, []).append(element_id)
+    if not volume_by_type:
+        raise ValueError(
+            f"build_modal_deck: element set {volume_elset!r} has no volume (C3D*) "
+            f"elements -- nothing for a modal solve to act on"
+        )
+    kept_node_ids: set[int] = set()
+    for element_ids in volume_by_type.values():
+        for element_id in element_ids:
+            kept_node_ids.update(mesh.elements[element_id][1])
+    missing = set(fixed_nodes) - kept_node_ids
+    if missing:
+        raise ValueError(
+            f"build_modal_deck: {len(missing)} node(s) in {fixed_node_set!r} aren't "
+            f"part of any kept volume element -- e.g. {sorted(missing)[:5]} -- the "
+            f"mesh may be inconsistent"
+        )
+
+    fixed_nset = f"FIXED_{fixed_node_set}"
+
+    lines: list[str] = ["*Heading", " MetaForge FORGE-281 modal (natural frequency) deck", "*NODE"]
+    for node_id in sorted(kept_node_ids):
+        x, y, z = mesh.nodes[node_id]
+        lines.append(f"{node_id}, {x}, {y}, {z}")
+
+    for etype, element_ids in volume_by_type.items():
+        lines.append(f"*ELEMENT, TYPE={etype}, ELSET={volume_elset}")
+        for element_id in element_ids:
+            _etype, node_ids = mesh.elements[element_id]
+            lines.append(f"{element_id}, " + ", ".join(str(n) for n in node_ids))
+
+    lines.append(f"*NSET, NSET={fixed_nset}")
+    lines.extend(_format_id_list(fixed_nodes))
+
+    lines.append("*MATERIAL, NAME=MAT1")
+    lines.append("*ELASTIC, TYPE=ISO")
+    lines.append(f"{youngs_modulus_mpa}, {poissons_ratio}")
+    lines.append("*DENSITY")
+    lines.append(f"{density_tonne_mm3}")
+    lines.append(f"*SOLID SECTION, ELSET={volume_elset}, MATERIAL=MAT1")
+    lines.append("*STEP")
+    lines.append("*FREQUENCY")
+    lines.append(f"{num_modes}")
+    lines.append("*BOUNDARY")
+    lines.append(f"{fixed_nset}, 1, 3")
+    lines.append("*NODE FILE")
+    lines.append("U")
+    lines.append("*END STEP")
+
+    return "\n".join(lines) + "\n"
