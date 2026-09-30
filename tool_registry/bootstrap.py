@@ -270,6 +270,7 @@ async def bootstrap_tool_registry(
     ect_bridge: Any = None,
     hierarchy_node_recorder: Any = None,
     hierarchy_rollup_fn: Any = None,
+    hierarchy_geometry_linker: Any = None,
     metric_evaluator: Any = None,
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
@@ -446,6 +447,10 @@ async def bootstrap_tool_registry(
         component_selector: Optional async ``select(...)``
             (make_component_selector, FORGE-265). When supplied, registers
             ``twin.select_component``. ``None`` skips registration.
+        hierarchy_geometry_linker: Optional async ``realize(...)``
+            (make_hierarchy_geometry_linker, FORGE-266). When supplied,
+            registers ``twin.realize_hierarchy_node``. ``None`` skips
+            registration.
 
     Returns:
         The populated ToolRegistry.
@@ -620,6 +625,7 @@ async def bootstrap_tool_registry(
                     ect_bridge=ect_bridge,
                     hierarchy_node_recorder=hierarchy_node_recorder,
                     hierarchy_rollup_fn=hierarchy_rollup_fn,
+                    hierarchy_geometry_linker=hierarchy_geometry_linker,
                     metric_evaluator=metric_evaluator,
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,

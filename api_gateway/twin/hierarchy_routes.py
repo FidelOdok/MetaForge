@@ -39,6 +39,19 @@ def init_twin(twin: object) -> None:
     logger.info("hierarchy_routes_twin_initialized", twin_type=type(twin).__name__)
 
 
+# FORGE-266 (gap G-C2): an injected async ``realize(*, hierarchy_node_id, ...)``
+# (make_hierarchy_geometry_linker) -- the SAME bound instance
+# twin.realize_hierarchy_node uses, so the dashboard's "Replace placeholder
+# with part" action and an agent's own MCP call are indistinguishable
+# afterward. None until the server lifespan wires it in.
+_hierarchy_geometry_linker: Any = None
+
+
+def init_hierarchy_geometry_linker(linker: Any) -> None:
+    global _hierarchy_geometry_linker  # noqa: PLW0603
+    _hierarchy_geometry_linker = linker
+
+
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
 
 
@@ -89,6 +102,11 @@ class HierarchyNodeResponse(BaseModel):
     # SYSTEM_ARCHITECTURE work products) touching this node, matched by
     # component name against HierarchyNode.name.
     interfaces: list[InterfaceSummary] = Field(default_factory=list)
+    # FORGE-266 (gap G-C2): which real geometry (if any) this position has.
+    # Both None means "placeholder" -- the dashboard's cue to show "Replace
+    # placeholder with part" rather than "Replace part".
+    realizedByWorkProductId: str | None = None  # noqa: N815
+    instanceOfBomItemId: str | None = None  # noqa: N815
 
 
 class HierarchyTreeResponse(BaseModel):
@@ -216,6 +234,8 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
         parent_of: dict[UUID, UUID] = {}
         quantity_of: dict[UUID, float] = {}
         placement_of: dict[UUID, dict[str, Any] | None] = {}
+        realized_by_of: dict[UUID, UUID] = {}
+        instance_of_of: dict[UUID, UUID] = {}
         for node in nodes:
             incoming = await _twin.get_edges(
                 node.id, direction="incoming", edge_type=EdgeType.CONTAINS
@@ -226,6 +246,18 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                 qty = edge.metadata.get("quantity", 1)
                 quantity_of[node.id] = qty if isinstance(qty, (int, float)) else 1
                 placement_of[node.id] = edge.metadata.get("placement")
+            # FORGE-266: at most one of each by construction (twin.
+            # realize_hierarchy_node always replaces, never accumulates).
+            realized_by = await _twin.get_edges(
+                node.id, direction="outgoing", edge_type=EdgeType.REALIZED_BY
+            )
+            if realized_by:
+                realized_by_of[node.id] = realized_by[0].target_id
+            instance_of = await _twin.get_edges(
+                node.id, direction="outgoing", edge_type=EdgeType.INSTANCE_OF
+            )
+            if instance_of:
+                instance_of_of[node.id] = instance_of[0].target_id
 
         result: list[HierarchyNodeResponse] = []
         for node in nodes:
@@ -258,8 +290,53 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                     costBudgetOwner=cost_status.owner if cost_status else None,
                     costBudgetDiscipline=cost_status.discipline if cost_status else None,
                     interfaces=interfaces_by_node_name.get(node.name, []),
+                    realizedByWorkProductId=(
+                        str(realized_by_of[node.id]) if node.id in realized_by_of else None
+                    ),
+                    instanceOfBomItemId=(
+                        str(instance_of_of[node.id]) if node.id in instance_of_of else None
+                    ),
                 )
             )
         span.set_attribute("hierarchy.count", len(result))
         logger.info("hierarchy_tree_listed", count=len(result), project_id=project_id)
         return HierarchyTreeResponse(nodes=result)
+
+
+class RealizeHierarchyNodeRequest(BaseModel):
+    workProductId: str | None = None  # noqa: N815 — dashboard contract is camelCase
+    bomItemId: str | None = None  # noqa: N815
+
+
+class RealizeHierarchyNodeResponse(BaseModel):
+    nodeId: str  # noqa: N815
+    realizedByWorkProductId: str | None = None  # noqa: N815
+    instanceOfBomItemId: str | None = None  # noqa: N815
+
+
+@router.post("/hierarchy/{node_id}/realize", response_model=RealizeHierarchyNodeResponse)
+async def realize_hierarchy_node(
+    node_id: str, payload: RealizeHierarchyNodeRequest
+) -> RealizeHierarchyNodeResponse:
+    """ "Replace placeholder with part": attach or replace ``node_id``'s
+    REALIZED_BY (a cad_model work product, e.g. from ``POST /v1/twin/import``)
+    and/or INSTANCE_OF (a BOMItem) geometry -- the dashboard's own action
+    reuses the SAME bound callable ``twin.realize_hierarchy_node`` uses.
+    """
+    if _hierarchy_geometry_linker is None:
+        raise HTTPException(status_code=503, detail="hierarchy geometry linking is not available")
+    with tracer.start_as_current_span("twin.realize_hierarchy_node") as span:
+        span.set_attribute("hierarchy_node.node_id", node_id)
+        try:
+            result = await _hierarchy_geometry_linker(
+                hierarchy_node_id=node_id,
+                work_product_id=payload.workProductId,
+                bom_item_id=payload.bomItemId,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RealizeHierarchyNodeResponse(
+            nodeId=result["node_id"],
+            realizedByWorkProductId=result["realized_by_work_product_id"],
+            instanceOfBomItemId=result["instance_of_bom_item_id"],
+        )

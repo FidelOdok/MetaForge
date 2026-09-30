@@ -798,6 +798,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
     from api_gateway.twin.hierarchy_recorder import (
+        make_hierarchy_geometry_linker,
         make_hierarchy_node_recorder,
         make_hierarchy_rollup_fn,
     )
@@ -902,6 +903,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     component_selector_fn = make_component_selector(
         twin, decision_recorder=decision_recorder, component_recorder=component_recorder_fn
     )
+
+    # FORGE-266: attach/replace a hierarchy node's REALIZED_BY/INSTANCE_OF
+    # geometry after the node already exists ("replace placeholder with
+    # part") -- hoisted so the REST route's own init_hierarchy_geometry_linker
+    # below reuses the SAME instance twin.realize_hierarchy_node uses.
+    hierarchy_geometry_linker_fn = make_hierarchy_geometry_linker(twin)
 
     # FORGE-319: attempt_promotion is a plain function (twin, ...) -- bind
     # twin once here, same injected-callable shape as every make_X(twin,
@@ -1022,6 +1029,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # from the twin's other "by type" views.
         hierarchy_node_recorder=make_hierarchy_node_recorder(twin, project_backend),
         hierarchy_rollup_fn=make_hierarchy_rollup_fn(twin),
+        # FORGE-266 (gap G-C2): "replace placeholder with part".
+        hierarchy_geometry_linker=hierarchy_geometry_linker_fn,
         # FORGE-315: tier-0 closed-form hand-calc + tier-2 FEA escalation
         # (spec §30, minimum sufficient fidelity). metric_evaluator_bridge
         # is bound to the real active_bridge below, once it exists.
@@ -1112,6 +1121,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.trade_study.routes import init_entity_recorder as init_ts_entity_recorder
     from api_gateway.trade_study.routes import init_twin as init_trade_study_twin
     from api_gateway.twin.decision_routes import init_twin as init_decisions_twin
+    from api_gateway.twin.hierarchy_routes import init_hierarchy_geometry_linker
     from api_gateway.twin.hierarchy_routes import init_twin as init_hierarchy_twin
     from api_gateway.twin.routes import init_design_sketch_approver
     from api_gateway.twin.routes import init_twin as init_twin_viewer
@@ -1204,6 +1214,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
     init_bom_twin(twin)
     init_simulation_twin(twin)
     init_hierarchy_twin(twin)
+    # FORGE-266: the dashboard's "Replace placeholder with part" action
+    # reuses the SAME bound callable wired into bootstrap_tool_registry
+    # above, so recording isn't duplicated between the MCP tool and the
+    # REST route.
+    init_hierarchy_geometry_linker(hierarchy_geometry_linker_fn)
     init_requirements_twin(twin)
     init_design_loop_twin(twin)
     init_promotion_twin(twin)

@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (103 across 17 adapters)
+## MCP tools (104 across 17 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -17,12 +17,12 @@ Gazebo, the OpenUSD conversion adapter, and Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-Ninety-six of the 103 are described in the table below. The seven that are
+Ninety-seven of the 104 are described in the table below. The seven that are
 not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 103 does carry an MCP
+they simply have no row here yet. Every one of the 104 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -1118,6 +1118,7 @@ what the server will actually enforce.
 | `twin` | `twin.record_measurement` | Record a real-world measurement against an interface quantity (target lifecycle spec App. B REALISE/LEARN, step 11) — e.g. a measured tip deflection on a built unit. Appends the value to the named metric on an interface embedded in a system_architecture work product (explicit `work_product_id`, or the project's one such document, FORGE-313's own one-per-project assumption), and links the measuring DeviceInstance via a new MEASURED_BY edge. When `predicted_value` is supplied (e.g. from a prior `twin.evaluate_metric` call — the natural, honest composition, never fabricated here), records the residual as Evidence for calibration; the first real prediction a quantity gets backfills its previously-unset `predicted` field, never overwrites an existing one. `digital_twin/calibration/store.py` turns residuals into a real band (`k * stddev(\|residual\|)`, k=2.0, needs >=3 samples — below that the caller's fixed prior is unchanged) that `twin.evaluate_metric` now reads INSTEAD of its fixed 0.2 prior once enough history exists, scanned across every project on purpose since calibration is meant to inform the NEXT project, not cache per-project (`band_source`/`calibration_sample_count` in the response say which was used). Deliberately NOT full conformal prediction — running stats is the smallest real thing the ticket's own acceptance wording needs. Gerbers/pick-and-place export (a separate bullet in this ticket's own Jira Scope) deliberately deferred: the yardstick project has zero PCB artifacts to honestly demonstrate against, and the ticket's own Acceptance never exercises it (FORGE-321) | unit-verified (FORGE-321) |
 | `twin` | `twin.record_hierarchy_node` | Persist one position in the project's product hierarchy tree (product/system/subsystem/assembly), nested via a real `CONTAINS{quantity, placement}` edge from an optional parent; `realized_by_node_id`/`instance_of_node_id` link a position to the cad_model/robot_description geometry or BOMItem that actually fulfils it (FORGE-260, gap G-B1) | unit-verified (FORGE-260) |
 | `twin` | `twin.compute_hierarchy_rollup` | Sum mass/cost over one branch of the product hierarchy (a root id and everything it `CONTAINS`, recursively, weighted by each edge's own quantity), reading `mass_kg` from `REALIZED_BY`-linked cad_models and cost from `INSTANCE_OF`-linked BOMItems — computed live, never cached, so it can't go stale relative to its children (FORGE-260) | unit-verified (FORGE-260) |
+| `twin` | `twin.realize_hierarchy_node` | "Replace placeholder with part" (FORGE-266, gap G-C2): attach or REPLACE a hierarchy node's `REALIZED_BY` (a cad_model work product, e.g. from `twin.import_work_product`/the FreeCAD authoring tools) and/or `INSTANCE_OF` (a BOMItem, e.g. from `twin.record_component_selection`/`twin.select_component`) geometry after the node already exists — `twin.record_hierarchy_node` only ever sets these once, at creation time. Any existing edge of that type is removed first, so a node always has at most one of each. Classified DESTRUCTIVE (unlike the ADDITIVE `twin.record_hierarchy_node`) since it genuinely replaces prior state. `POST /v1/twin/hierarchy/{node_id}/realize` exposes the same action to the dashboard's Structure-tab "Replace placeholder with part" panel (upload a real STEP file via the existing `POST /v1/twin/import`, with a real GLB preview via the existing `GET /v1/twin/nodes/{id}/model`, or pick an already-recorded BOMItem) | unit-verified (FORGE-266) |
 | `run` | `run.start_design_flow` | Start a gated design lifecycle (hardware_v1 / mech_v1 / design_v1) for a goal, project-scoped; every phase gate still requires human approval | unit-verified (MET-587) |
 | `run` | `run.get_status` | Check a design-flow run's status / gate reason / result | unit-verified (MET-587) |
 | `constraint` (default) | `constraint.validate` | Pre-flight validate proposed graph changes | [`tier1/constraint-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/constraint-hp.md) |

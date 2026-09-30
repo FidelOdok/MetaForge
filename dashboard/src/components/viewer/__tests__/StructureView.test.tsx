@@ -30,6 +30,8 @@ function node(overrides: Partial<HierarchyNode>): HierarchyNode {
     costBudgetOwner: null,
     costBudgetDiscipline: null,
     interfaces: [],
+    realizedByWorkProductId: null,
+    instanceOfBomItemId: null,
     ...overrides,
   };
 }

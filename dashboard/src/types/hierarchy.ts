@@ -41,4 +41,8 @@ export interface HierarchyNode {
   costBudgetDiscipline: string | null;
   /** FORGE-313: interfaces touching this node. */
   interfaces: InterfaceSummary[];
+  /** FORGE-266 (gap G-C2): which real geometry (if any) this position has.
+   * Both null means "placeholder". */
+  realizedByWorkProductId: string | null;
+  instanceOfBomItemId: string | null;
 }

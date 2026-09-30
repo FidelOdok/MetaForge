@@ -317,3 +317,118 @@ class TestInterfacesWiring:
         result = await get_hierarchy_tree(project_id=str(pid))
         assert result.nodes[0].id == str(node.id)
         assert result.nodes[0].interfaces == []
+
+
+class TestGeometryFields:
+    """FORGE-266 (gap G-C2): realizedByWorkProductId/instanceOfBomItemId --
+    the dashboard's cue for "placeholder" (both None) vs "realized"."""
+
+    async def test_placeholder_node_has_null_geometry_fields(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        node = await twin.create_hierarchy_node(HierarchyNode(name="Bracket slot", kind="assembly"))
+
+        result = await get_hierarchy_tree()
+        assert result.nodes[0].id == str(node.id)
+        assert result.nodes[0].realizedByWorkProductId is None
+        assert result.nodes[0].instanceOfBomItemId is None
+
+    async def test_realized_by_edge_is_surfaced(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        node = await twin.create_hierarchy_node(HierarchyNode(name="Bracket slot", kind="assembly"))
+        cad = await twin.create_work_product(
+            WorkProduct(
+                name="Bracket",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+            )
+        )
+        await twin.add_edge(node.id, cad.id, EdgeType.REALIZED_BY)
+
+        result = await get_hierarchy_tree()
+        assert result.nodes[0].realizedByWorkProductId == str(cad.id)
+        assert result.nodes[0].instanceOfBomItemId is None
+
+    async def test_instance_of_edge_is_surfaced(self) -> None:
+        from twin_core.models.bom_item import BOMItem
+
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        node = await twin.create_hierarchy_node(
+            HierarchyNode(name="Actuator slot", kind="assembly")
+        )
+        bom = await twin.add_bom_item(BOMItem(part_number="DS3218MG", manufacturer="Miuzei"))
+        await twin.add_edge(node.id, bom.id, EdgeType.INSTANCE_OF)
+
+        result = await get_hierarchy_tree()
+        assert result.nodes[0].instanceOfBomItemId == str(bom.id)
+        assert result.nodes[0].realizedByWorkProductId is None
+
+
+class TestRealizeHierarchyNodeRoute:
+    @pytest.fixture(autouse=True)
+    def _wire(self):
+        from api_gateway.twin.hierarchy_recorder import make_hierarchy_geometry_linker
+        from api_gateway.twin.hierarchy_routes import init_hierarchy_geometry_linker
+
+        self.twin = InMemoryTwinAPI.create()
+        init_twin(self.twin)
+        init_hierarchy_geometry_linker(make_hierarchy_geometry_linker(self.twin))
+        yield
+        init_hierarchy_geometry_linker(None)
+
+    async def test_sets_realized_by_via_the_route(self) -> None:
+        from api_gateway.twin.hierarchy_routes import (
+            RealizeHierarchyNodeRequest,
+            realize_hierarchy_node,
+        )
+
+        node = await self.twin.create_hierarchy_node(HierarchyNode(name="x", kind="assembly"))
+        cad = await self.twin.create_work_product(
+            WorkProduct(
+                name="Bracket",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+            )
+        )
+
+        result = await realize_hierarchy_node(
+            str(node.id), RealizeHierarchyNodeRequest(workProductId=str(cad.id))
+        )
+        assert result.realizedByWorkProductId == str(cad.id)
+
+        tree = await get_hierarchy_tree()
+        assert tree.nodes[0].realizedByWorkProductId == str(cad.id)
+
+    async def test_unavailable_linker_503s(self) -> None:
+        from api_gateway.twin.hierarchy_routes import (
+            RealizeHierarchyNodeRequest,
+            init_hierarchy_geometry_linker,
+            realize_hierarchy_node,
+        )
+
+        init_hierarchy_geometry_linker(None)
+        with pytest.raises(HTTPException) as exc:
+            await realize_hierarchy_node(str(uuid4()), RealizeHierarchyNodeRequest())
+        assert exc.value.status_code == 503
+
+    async def test_invalid_target_is_400(self) -> None:
+        from api_gateway.twin.hierarchy_routes import (
+            RealizeHierarchyNodeRequest,
+            realize_hierarchy_node,
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await realize_hierarchy_node(
+                str(uuid4()), RealizeHierarchyNodeRequest(workProductId=str(uuid4()))
+            )
+        assert exc.value.status_code == 400

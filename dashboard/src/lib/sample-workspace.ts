@@ -1,4 +1,6 @@
 import { AxiosError, type AxiosAdapter, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
+import type { BomComponent } from '../types/bom';
+import type { HierarchyNode } from '../types/hierarchy';
 
 /* Offline sample workspace for the digital twin (`?demo=1`). Illustrative data only: no gateway, solver or agent is called. */
 
@@ -979,6 +981,8 @@ const SAMPLE_WORKSPACE_SEED = {
       costBudgetOwner: null,
       costBudgetDiscipline: null,
       interfaces: [],
+      realizedByWorkProductId: null,
+      instanceOfBomItemId: null,
     },
     {
       id: 'sample-hier-upper-arm',
@@ -1005,6 +1009,8 @@ const SAMPLE_WORKSPACE_SEED = {
           quantities: [{ metric: 'tip_deflection', unit: 'mm', limit: 0.5, op: '<=' }],
         },
       ],
+      realizedByWorkProductId: null,
+      instanceOfBomItemId: null,
     },
     {
       id: 'sample-hier-shoulder',
@@ -1034,8 +1040,76 @@ const SAMPLE_WORKSPACE_SEED = {
           ],
         },
       ],
+      realizedByWorkProductId: null,
+      instanceOfBomItemId: null,
     },
-  ],
+    // FORGE-266 (gap G-C2): a genuine placeholder leaf -- no REALIZED_BY/
+    // INSTANCE_OF edge yet -- so the sample workspace demonstrates "Replace
+    // placeholder with part" the same way the real arm project's own live
+    // validation does.
+    {
+      id: 'sample-hier-elbow-actuator',
+      name: 'elbow_actuator',
+      kind: 'assembly',
+      parentId: 'sample-hier-upper-arm',
+      quantity: 1,
+      placement: null,
+      massKg: 0,
+      cost: 0,
+      massBudgetKg: null,
+      massOverBudget: null,
+      costBudget: null,
+      costOverBudget: null,
+      massBudgetOwner: null,
+      massBudgetDiscipline: null,
+      costBudgetOwner: null,
+      costBudgetDiscipline: null,
+      interfaces: [],
+      realizedByWorkProductId: null,
+      instanceOfBomItemId: null,
+    },
+  ] as HierarchyNode[],
+  // FORGE-266: real-looking recorded parts a "Replace placeholder with
+  // part" action can pick from -- same shape POST /v1/component-selection/
+  // select (FORGE-265) would have produced.
+  bomComponents: [
+    {
+      id: 'sample-bom-ds3218mg',
+      designator: '',
+      partNumber: 'DS3218MG',
+      description: 'servo (cots_assembly)',
+      manufacturer: 'Miuzei',
+      quantity: 1,
+      unitPrice: 12.99,
+      priceCurrency: 'USD',
+      status: 'available',
+      category: 'servo',
+      projectId: 'sample-drone-fc',
+      imageUrl: null,
+      purchaseUrl: null,
+      datasheetUrl: null,
+      footprint: null,
+      cadModelUrl: null,
+    },
+    {
+      id: 'sample-bom-mg996r',
+      designator: '',
+      partNumber: 'MG996R',
+      description: 'servo (cots_assembly)',
+      manufacturer: 'TowerPro',
+      quantity: 1,
+      unitPrice: 5.49,
+      priceCurrency: 'USD',
+      status: 'available',
+      category: 'servo',
+      projectId: 'sample-drone-fc',
+      imageUrl: null,
+      purchaseUrl: null,
+      datasheetUrl: null,
+      footprint: null,
+      cadModelUrl: null,
+    },
+  ] as BomComponent[],
 };
 
 // ── Sample mode flag ────────────────────────────────────────────────────────
@@ -1208,6 +1282,7 @@ function route(
     if (path === '/requirements/quality') return s.requirementsReport;
     if (path === '/requirements/matrix') return s.requirementMatrix;
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
+    if (path === '/bom') return { components: s.bomComponents, total: s.bomComponents.length };
     if (/^\/design-loop\/[^/]+$/.test(path)) return s.designLoops[segment(path, 2)];
     if (path === '/promotion') return { gates: s.promotionGates };
     if (path === '/decisions') {
@@ -1410,6 +1485,25 @@ function route(
         },
       ];
       return { node_id: decisionId, selected_option_id: selectedOptionId, scores: scored };
+    }
+    const realizeMatch = path.match(/^\/twin\/hierarchy\/([^/]+)\/realize$/);
+    if (realizeMatch) {
+      // FORGE-266 (gap G-C2): "Replace placeholder with part" -- mutates
+      // the matching hierarchy node in place, same REALIZED_BY/INSTANCE_OF
+      // "at most one of each, always replaces" semantics as the real
+      // twin.realize_hierarchy_node.
+      const nodeId = realizeMatch[1];
+      const node = s.hierarchyNodes.find((n) => n.id === nodeId);
+      if (!node) return undefined;
+      const workProductId = body.workProductId as string | undefined;
+      const bomItemId = body.bomItemId as string | undefined;
+      if (workProductId) node.realizedByWorkProductId = workProductId;
+      if (bomItemId) node.instanceOfBomItemId = bomItemId;
+      return {
+        nodeId,
+        realizedByWorkProductId: node.realizedByWorkProductId,
+        instanceOfBomItemId: node.instanceOfBomItemId,
+      };
     }
     if (path === '/component-selection/select') {
       // FORGE-265: illustrative margin arithmetic mirrors
