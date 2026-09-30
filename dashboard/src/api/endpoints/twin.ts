@@ -21,6 +21,7 @@ interface TwinNodeApiResponse {
   geometryParameters?: { parameters: Record<string, unknown>; properties: Record<string, unknown> } | null;
   hasScript?: boolean;
   assembly?: AssemblyDescription | null;
+  poses?: Record<string, Record<string, number>> | null;
 }
 
 export interface TwinNodeScript {
@@ -59,6 +60,7 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     geometryParameters: node.geometryParameters ?? undefined,
     hasScript: node.hasScript,
     assembly: node.assembly ?? undefined,
+    poses: node.poses ?? undefined,
   }));
 }
 
@@ -77,6 +79,7 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       geometryParameters: node.geometryParameters ?? undefined,
       hasScript: node.hasScript,
       assembly: node.assembly ?? undefined,
+      poses: node.poses ?? undefined,
     };
   } catch {
     return undefined;
@@ -217,6 +220,26 @@ interface WorkProductVersionHistoryRaw {
 export async function getNodeVersionHistory(nodeId: string): Promise<WorkProductRevision[]> {
   const { data } = await apiClient.get<WorkProductVersionHistoryRaw>(`/twin/nodes/${nodeId}/versions`);
   return data.revisions ?? [];
+}
+
+/**
+ * FORGE-250: "Save current pose" reuses this existing generic revision
+ * mechanism (``POST /v1/twin/nodes/{id}/iterate``, already used for CAD
+ * re-exports) rather than a bespoke pose-save route -- it merges
+ * `metadataUpdates` on top of the node's current metadata and records a new
+ * entry in the node's version history for free, which is exactly what the
+ * acceptance criteria (persisted + versioned + visible in History) needs.
+ */
+export async function iterateWorkProduct(
+  nodeId: string,
+  changeDescription: string,
+  metadataUpdates: Record<string, unknown>,
+): Promise<WorkProductRevision> {
+  const { data } = await apiClient.post<WorkProductRevision>(`/twin/nodes/${nodeId}/iterate`, {
+    change_description: changeDescription,
+    metadata_updates: metadataUpdates,
+  });
+  return data;
 }
 
 // ── Work-product file download / open / preview (MET-483) ───────────────────

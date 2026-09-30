@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Box3, Vector3 } from 'three';
 import type { Mesh } from 'three';
 import { useUrdfRobot } from '../../hooks/use-urdf-robot';
@@ -7,6 +7,7 @@ import { useUrdfPhysics } from '../../hooks/use-urdf-physics';
 import { fetchNodeFileText, nodeMeshBaseUrl } from '../../api/endpoints/twin';
 import { useViewerStore } from '../../store/viewer-store';
 import { buildJointLoadChainPayload } from '../../lib/robot-statics';
+import { RobotPoseDragControls } from '../../lib/robot-drag-controls';
 
 /**
  * MET-747: the Canvas-side half of the "View Robot" consolidation. Fetches
@@ -149,6 +150,43 @@ export function RobotSceneContents({ nodeId }: { nodeId: string }) {
       robot.setJointValue(name, value);
     }
   }, [robot, robotPhysicsEnabled, robotJointValues]);
+
+  // FORGE-250: pointer-drag-a-link-to-pose-its-joint. Built (not just
+  // disabled) only while kinematic control is active -- physics mode drives
+  // joint transforms itself (useUrdfPhysics above), so a drag controller
+  // fighting it over the same robot object would be meaningless as well as
+  // actively wrong.
+  const { camera, gl } = useThree();
+  const setRobotJointValue = useViewerStore((s) => s.setRobotJointValue);
+  const setRobotHoveredJoint = useViewerStore((s) => s.setRobotHoveredJoint);
+  const setRobotDragging = useViewerStore((s) => s.setRobotDragging);
+  const setOrbitControlsEnabled = useViewerStore((s) => s.setOrbitControlsEnabled);
+  useEffect(() => {
+    if (!robot || robotPhysicsEnabled) return;
+    const controls = new RobotPoseDragControls(robot, camera, gl.domElement, {
+      onJointChange: setRobotJointValue,
+      onHoverChange: setRobotHoveredJoint,
+      onDragStateChange: (dragging) => {
+        setRobotDragging(dragging);
+        setOrbitControlsEnabled(!dragging);
+      },
+    });
+    return () => {
+      controls.dispose();
+      setRobotHoveredJoint(null);
+      setRobotDragging(false);
+      setOrbitControlsEnabled(true);
+    };
+  }, [
+    robot,
+    robotPhysicsEnabled,
+    camera,
+    gl,
+    setRobotJointValue,
+    setRobotHoveredJoint,
+    setRobotDragging,
+    setOrbitControlsEnabled,
+  ]);
 
   if (!robot) return null;
   return <primitive object={robot} />;

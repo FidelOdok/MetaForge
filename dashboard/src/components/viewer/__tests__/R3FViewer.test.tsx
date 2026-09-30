@@ -69,6 +69,7 @@ vi.mock('../../../store/viewer-store', () => ({
       registerCameraReset: vi.fn(),
       modelBounds: null,
       booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+      registerOrbitControlsEnabledSetter: vi.fn(),
     };
     return selector(state);
   }),
@@ -123,6 +124,7 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
       modelBounds: null,
       selectPart: selectPartMock,
       booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+      registerOrbitControlsEnabledSetter: vi.fn(),
     };
     vi.mocked(useViewerStore).mockImplementation((selector) =>
       selector(fakeState as unknown as Parameters<typeof selector>[0]),
@@ -206,6 +208,7 @@ describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
         },
         modelBounds,
         booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+      registerOrbitControlsEnabledSetter: vi.fn(),
       } as unknown as Parameters<typeof selector>[0]),
     );
   }
@@ -258,6 +261,7 @@ describe('R3FViewer — a failed Environment HDR load is contained (MET-622)', (
         registerCameraReset: vi.fn(),
         modelBounds: null,
         booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+      registerOrbitControlsEnabledSetter: vi.fn(),
       } as unknown as Parameters<typeof selector>[0]),
     );
   });

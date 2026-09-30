@@ -227,6 +227,111 @@ test.describe('Digital Twin Viewer', () => {
     await expect(page.getByText(/Reaction moment \(N·mm\):/)).toBeVisible();
   });
 
+  test('Robot viewer: drag-to-pose, presets, and saved poses persist (FORGE-250)', async ({
+    page,
+  }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByText('drone-assembly.urdf').click();
+    await page.getByRole('button', { name: 'Model', exact: true }).click();
+
+    // The sample robot has one non-fixed joint (revolute, "rotor_joint" --
+    // see dashboard/src/lib/sample-workspace.ts) -- FORGE-250's own
+    // acceptance criteria names a "link_2"/"joint_2" pair from the real
+    // AR4 robot_description used in live validation; the demo sample
+    // workspace this e2e suite runs against only has the one joint, so
+    // this test exercises the same drag-to-pose mechanism against it.
+    const slider = page.getByLabel('joint rotor_joint');
+    await expect(slider).toBeVisible({ timeout: 15_000 });
+    const initialValue = await slider.inputValue();
+
+    const canvas = page.locator('canvas').first();
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error('robot viewer canvas not found');
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+
+    // Camera auto-fit framing isn't pixel-exact -- probe a small grid of
+    // points around the canvas center for one that actually raycasts onto
+    // a link (the hover overlay text appears) instead of guessing a single
+    // offset and risking a flaky miss.
+    const offsets: [number, number][] = [
+      [0, 0], [20, 0], [-20, 0], [0, 20], [0, -20],
+      [30, 15], [-30, -15], [40, 0], [-40, 0], [0, 40],
+    ];
+    let hover: { x: number; y: number } | null = null;
+    for (const [dx, dy] of offsets) {
+      await page.mouse.move(cx + dx, cy + dy);
+      if (await page.getByText(/Hovering:/).isVisible().catch(() => false)) {
+        hover = { x: cx + dx, y: cy + dy };
+        break;
+      }
+    }
+    expect(hover, 'expected to find a hoverable link on the robot').not.toBeNull();
+
+    await page.screenshot({ path: 'test-results/forge-250-before-drag.png' });
+
+    await page.mouse.move(hover!.x, hover!.y);
+    await page.mouse.down();
+    await page.mouse.move(hover!.x + 60, hover!.y + 40, { steps: 12 });
+    await page.mouse.up();
+
+    await page.screenshot({ path: 'test-results/forge-250-after-drag.png' });
+
+    await expect(async () => {
+      expect(await slider.inputValue()).not.toBe(initialValue);
+    }).toPass({ timeout: 5_000 });
+
+    // Zero preset animates back to 0.
+    await page.getByRole('button', { name: 'Zero', exact: true }).click();
+    await expect(async () => {
+      expect(Number(await slider.inputValue())).toBeCloseTo(0, 1);
+    }).toPass({ timeout: 2_000 });
+
+    // Drag again to a non-zero pose, then save it as a named preset --
+    // persisted on the node's metadata and versioned (acceptance criteria).
+    await page.mouse.move(hover!.x, hover!.y);
+    await page.mouse.down();
+    await page.mouse.move(hover!.x + 60, hover!.y + 40, { steps: 12 });
+    await page.mouse.up();
+    await expect(async () => {
+      expect(await slider.inputValue()).not.toBe('0');
+    }).toPass({ timeout: 5_000 });
+    const savedValue = await slider.inputValue();
+
+    await page.getByLabel('New pose name').fill('Extended');
+    await page.getByRole('button', { name: 'Save current pose' }).click();
+
+    // The node detail sidebar's History section (always visible alongside
+    // the viewer, independent of which viewer tab is active) shows the new
+    // revision -- confirms it's actually persisted+versioned, not just
+    // held in client state.
+    await expect(page.getByText('Saved pose "Extended"')).toBeVisible({ timeout: 10_000 });
+
+    // Reload: the saved preset survives and reappears as a button, reading
+    // back from the node rather than any client-only state.
+    await page.reload();
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByText('drone-assembly.urdf').click();
+    await page.getByRole('button', { name: 'Model', exact: true }).click();
+    await expect(page.getByLabel('joint rotor_joint')).toBeVisible({ timeout: 15_000 });
+
+    const extendedPreset = page.getByRole('button', { name: 'Extended' });
+    await expect(extendedPreset).toBeVisible();
+    await extendedPreset.click();
+    await expect(async () => {
+      expect(await page.getByLabel('joint rotor_joint').inputValue()).toBe(savedValue);
+    }).toPass({ timeout: 2_000 });
+
+    // Physics mode disables drag/presets; toggling it back off restores
+    // kinematic control at the last pose rather than resetting it.
+    await page.getByTestId('main-viewer-robot-physics-toggle').check();
+    await expect(page.getByRole('button', { name: 'Zero', exact: true })).not.toBeVisible();
+    await page.getByTestId('main-viewer-robot-physics-toggle').uncheck();
+    await expect(page.getByLabel('joint rotor_joint')).toHaveValue(savedValue);
+  });
+
   test('History tab shows a parameter diff against a superseded version (FORGE-270)', async ({
     page,
   }) => {

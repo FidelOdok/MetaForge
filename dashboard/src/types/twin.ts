@@ -43,6 +43,10 @@ export interface TwinNode {
   // full state from an already-fetched node list, no extra round trip and
   // no live FreeCAD session required.
   assembly?: AssemblyDescription;
+  // FORGE-250: a robot_description node's saved named poses
+  // ({poseName: {jointName: value}}) — undefined for every other node
+  // type, or a robot_description with no saved poses yet.
+  poses?: Record<string, Record<string, number>>;
 }
 
 export interface TwinRelationship {

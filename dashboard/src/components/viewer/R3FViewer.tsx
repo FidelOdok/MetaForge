@@ -140,6 +140,21 @@ function CameraController() {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const registerCameraReset = useViewerStore((s) => s.registerCameraReset);
   const modelBounds = useViewerStore((s) => s.modelBounds);
+  const registerOrbitControlsEnabledSetter = useViewerStore(
+    (s) => s.registerOrbitControlsEnabledSetter,
+  );
+
+  // FORGE-250: lets drag-to-pose flip OrbitControls.enabled imperatively the
+  // instant a joint drag starts/ends, same registration pattern as
+  // registerCameraReset above -- see viewer-store's
+  // `_orbitControlsEnabledSetterFn` docstring for why this can't just be a
+  // React prop bound to store state (one frame too slow).
+  useEffect(() => {
+    registerOrbitControlsEnabledSetter((enabled) => {
+      if (controlsRef.current) controlsRef.current.enabled = enabled;
+    });
+    return () => registerOrbitControlsEnabledSetter(null);
+  }, [registerOrbitControlsEnabledSetter]);
 
   const fitToModel = useCallback(() => {
     const { center, radius } = modelBounds ?? DEFAULT_BOUNDS;
