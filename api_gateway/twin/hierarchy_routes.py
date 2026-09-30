@@ -176,6 +176,17 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                     )
                     continue
                 if budget.metric not in ("mass", "cost"):
+                    # FORGE-345: a power budget is recorded, resolves, and
+                    # then vanishes here -- the Structure tab shows no row
+                    # at all, which reads as "nobody set one". It stays
+                    # dropped (there is no rollup to check it against), but
+                    # it is no longer dropped silently.
+                    logger.info(
+                        "hierarchy_budget_metric_not_rollable",
+                        metric=budget.metric,
+                        entity_id=str(entity.id),
+                        reason="only mass and cost have a hierarchy rollup source",
+                    )
                     continue
                 statuses = await compute_budget_allocation_status(_twin, budget)
                 target_map = mass_status_by_node if budget.metric == "mass" else cost_status_by_node
