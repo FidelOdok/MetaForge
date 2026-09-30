@@ -90,8 +90,11 @@ def _item_to_component(item: BOMItem) -> BomComponentResponse:
 
 
 @router.get("", response_model=BomListResponse)
-async def list_bom(project_id: str | None = None) -> BomListResponse:
-    """List BOM components, optionally scoped to a project.
+async def list_bom(project_id: str | None = None, category: str | None = None) -> BomListResponse:
+    """List BOM components, optionally scoped to a project and/or filtered
+    by ``category`` (case-insensitive exact match against
+    ``BOMItem.specifications.category``, e.g. ``category=fastener`` for a
+    fastener list -- FORGE-294, gap G-H2).
 
     Empty (``{components: [], total: 0}``) when the project has no BOM — not a
     404, so the dashboard renders a clean empty state.
@@ -104,6 +107,8 @@ async def list_bom(project_id: str | None = None) -> BomListResponse:
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid project_id format")
             span.set_attribute("bom.project_id", project_id)
+        if category:
+            span.set_attribute("bom.category_filter", category)
         items = await _twin.list_bom_items(project_id=scoped)
         components: list[BomComponentResponse] = []
         skipped = 0
@@ -125,6 +130,9 @@ async def list_bom(project_id: str | None = None) -> BomListResponse:
                 )
                 continue
             components.append(_item_to_component(i))
+        if category:
+            wanted = category.strip().lower()
+            components = [c for c in components if c.category.lower() == wanted]
         span.set_attribute("bom.count", len(components))
         if skipped:
             span.set_attribute("bom.skipped", skipped)

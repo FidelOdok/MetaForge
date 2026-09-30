@@ -115,6 +115,36 @@ describe('StructureView', () => {
     expect(runButton).not.toBeDisabled();
   });
 
+  it('shows a Release for manufacture button only for a node with real geometry', () => {
+    mockUseHierarchyTree.mockReturnValue({
+      data: [
+        node({ id: 'n1', name: 'realized', realizedByWorkProductId: 'wp-1' }),
+        node({ id: 'n2', name: 'placeholder' }),
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchyTree>);
+    render(<StructureView projectId="p1" onSelect={() => {}} />);
+    expect(screen.getByTestId('manufacture-release-button-n1')).toBeInTheDocument();
+    expect(screen.queryByTestId('manufacture-release-button-n2')).not.toBeInTheDocument();
+  });
+
+  it('opens the manufacture release panel with a process selector defaulting to 3D print', () => {
+    mockUseHierarchyTree.mockReturnValue({
+      data: [node({ id: 'n1', name: 'upper_arm', realizedByWorkProductId: 'wp-1' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchyTree>);
+    render(<StructureView projectId="p1" onSelect={() => {}} />);
+
+    fireEvent.click(screen.getByTestId('manufacture-release-button-n1'));
+    expect(screen.getByTestId('manufacture-release-panel')).toBeInTheDocument();
+    const select = screen.getByTestId('manufacture-process-select') as HTMLSelectElement;
+    expect(select.value).toBe('3d_print');
+
+    fireEvent.change(select, { target: { value: 'cnc' } });
+    expect(select.value).toBe('cnc');
+    expect(screen.getByTestId('run-manufacture-release')).not.toBeDisabled();
+  });
+
   it('shows the allocation owner as a title on the mass cell', () => {
     mockUseHierarchyTree.mockReturnValue({
       data: [

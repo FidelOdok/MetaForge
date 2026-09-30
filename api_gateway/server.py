@@ -37,6 +37,7 @@ from api_gateway.features.routes import router as features_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
+from api_gateway.manufacture.routes import router as manufacture_router
 from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
 from api_gateway.promotion.routes import router as promotion_router
@@ -805,6 +806,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_hierarchy_node_recorder,
         make_hierarchy_rollup_fn,
     )
+    from api_gateway.twin.manufacture_release import make_manufacture_release
     from api_gateway.twin.measurement_recorder import make_measurement_recorder
     from api_gateway.twin.metric_evaluator import make_metric_evaluator
     from api_gateway.twin.optimizer import make_tube_height_optimizer, make_wall_thickness_optimizer
@@ -846,6 +848,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-273: same lazy-bridge seam, for twin.evaluate_overhang_metric's
     # real freecad.list_named_faces call.
     overhang_evaluator_bridge = _LazyBridge()
+    # FORGE-294: same lazy-bridge seam, for manufacture_release's real
+    # cadquery.export_geometry call.
+    manufacture_release_bridge = _LazyBridge()
     evidence_recorder_fn = make_evidence_recorder(twin, project_backend)
     # FORGE-321: a real measurement history overrides evaluate_metric's
     # fixed-prior band once enough of it exists for a given metric/tier --
@@ -873,6 +878,21 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin,
         evidence_recorder=evidence_recorder_fn,
         mcp_bridge=overhang_evaluator_bridge,
+    )
+    # MET-618: hoisted so the SAME blob-stager instance (and its staged-file
+    # cache) is reused by both twin.stage_work_product_file (below) and
+    # manufacture_release_fn, same pattern FORGE-265 established for
+    # component_recorder_fn.
+    blob_stager_fn = make_blob_stager(twin)
+    # FORGE-294: "Release for manufacture" -- resolves a work product's real
+    # committed STEP file (via blob_stager_fn), exports it to a real
+    # process-specific manufacturing file (via cadquery.export_geometry),
+    # and returns the result. manufacture_release_bridge is bound to the
+    # real active_bridge below, once it exists.
+    manufacture_release_fn = make_manufacture_release(
+        twin,
+        blob_stager=blob_stager_fn,
+        mcp_bridge=manufacture_release_bridge,
     )
     # FORGE-316: dispatch table for twin.execute_revalidation_plan --
     # every tool a stale Evidence's metadata["replay"]["tool_id"] can name.
@@ -1009,8 +1029,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
         document_recorder=make_document_recorder(twin, project_backend),
         # MET-618: lets an agent recover a committed work product's actual
         # file (STEP, mesh, ...) by node id once its authoring session is
-        # gone, unknown, or was never its own.
-        blob_stager=make_blob_stager(twin),
+        # gone, unknown, or was never its own. Hoisted above (FORGE-294) so
+        # the same instance backs manufacture_release_fn too.
+        blob_stager=blob_stager_fn,
         # MET-436: the parametric component catalog + the intent-translation
         # LLM (reused from the property-extraction Tier-2 wiring above).
         # component.* registers only when both are supplied, together with
@@ -1132,12 +1153,20 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-273: same for overhang_evaluator_bridge (twin.
     # evaluate_overhang_metric's freecad.list_named_faces call).
     overhang_evaluator_bridge.bridge = active_bridge
+    # FORGE-294: same for manufacture_release_bridge (manufacture_release's
+    # cadquery.export_geometry call).
+    manufacture_release_bridge.bridge = active_bridge
     # FORGE-273: bind the same evaluator closure to the dashboard's REST
     # route (api_gateway/dfm/routes.py) -- only now, after the bridge above
     # is bound, since the closure calls mcp_bridge.invoke internally.
     from api_gateway.dfm.routes import init_overhang_evaluator
 
     init_overhang_evaluator(overhang_evaluator_fn)
+    # FORGE-294: same, for the manufacture-release REST route
+    # (api_gateway/manufacture/routes.py).
+    from api_gateway.manufacture.routes import init_manufacture_release
+
+    init_manufacture_release(manufacture_release_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -1780,6 +1809,7 @@ def create_app(
     app.include_router(trade_study_router)
     app.include_router(component_selection_router)
     app.include_router(dfm_router)
+    app.include_router(manufacture_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:
