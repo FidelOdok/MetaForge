@@ -258,6 +258,41 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Importing somebody else's robot
+
+`twin.import_urdf` reads a URDF and records it as a reference design to
+work against: links become components, joints become interfaces, stored
+through the same recorder as `twin.commit_system_architecture`. A URDF
+is a rigid-body graph, which is the shape the twin already holds, so
+this adds no representation nothing else reads.
+
+STEP import already worked and preserves the file's own part labels
+(`freecad.import_step`, MET-534/535/616). URDF had **export only** —
+there was no way to bring an existing arm in.
+
+**Geometry does not come in.** A URDF references meshes by path, usually
+`package://` URIs that resolve only inside a ROS workspace this server
+does not have. The structure is imported, every skipped mesh is listed:
+
+```json
+{
+  "robot_name": "two_link_arm", "component_count": 3, "interface_count": 2,
+  "not_imported": [
+    {"kind": "mesh", "name": "base_link/visual",
+     "detail": "package://arm/meshes/base.stl -- geometry is referenced by path and was not resolved; the structure was imported without it"}
+  ]
+}
+```
+
+`not_imported` also carries any joint whose type is not one the URDF spec
+defines, and any joint naming a link the file does not contain. Neither
+is guessed at — a joint whose type we invented would move wrongly in
+every downstream simulation.
+
+A document that is not a URDF is refused rather than partly read:
+malformed XML, a root that is not `<robot>`, or a file with no links. An
+empty import reporting success is worse than an error.
+
 ### Does the part actually meet the requirements
 
 `twin.record_component_selection` holds the chosen part's specs against
