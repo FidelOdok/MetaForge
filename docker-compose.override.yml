@@ -86,6 +86,12 @@ services:
     environment:
       - METAFORGE_ENV=docker
       - NEO4J_URI=bolt://neo4j:7687
+      # FORGE-406: where to park a held write. The approval store is
+      # process-level, so without this the sidecar holds calls in its own
+      # memory and the dashboard -- served by the gateway -- never sees them.
+      # Unset, the sidecar falls back to that in-process queue and says so on
+      # every start-up rather than only when somebody tries to write.
+      - METAFORGE_GATEWAY_URL=http://gateway:8000
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # Credentials sourced from .env — same vars the gateway service uses.
       # No literal fallbacks: secret scanners treat a hardcoded user/pass

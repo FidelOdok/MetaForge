@@ -1399,8 +1399,11 @@ async def _bootstrap(
     except Exception as exc:  # noqa: BLE001 — degrade to no resources, loudly
         logger.warning("mcp_brief_provider_unavailable", error=str(exc))
 
+    approval_gate = _build_approval_gate()
+
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
+        approval_gate=approval_gate,
         brief_provider=brief_provider,
         # FORGE-371: unset means no links, reported by health/check. The
         # server cannot know where the dashboard is served from.
@@ -1423,6 +1426,61 @@ async def _bootstrap(
         component_recorder=component_recorder,
     )
     return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
+
+
+def _build_approval_gate() -> Any:
+    """Somewhere for a held write to wait (FORGE-406).
+
+    Until this existed, nothing outside the test suite ever built a gate, so
+    ``approval_gate`` was ``None`` and every write from a plugin came back
+    "no approval gate is configured". FORGE-359's guardrail was present,
+    correct and unreachable — which is the failure this codebase keeps
+    producing, and the reason the absence is now logged at start-up rather
+    than discovered on the first write.
+
+    Two shapes, chosen explicitly:
+
+    ``METAFORGE_GATEWAY_URL`` set
+        Park held calls in the gateway's ledger over HTTP. This is the right
+        answer for the sidecar: the approval store is process-level, so a
+        call held in this process would sit in a queue the dashboard cannot
+        see.
+
+    unset, but ``api_gateway`` importable
+        Use the in-process gate. Correct only when the MCP server is running
+        inside the gateway; the log line says which was chosen so a
+        misconfigured sidecar is visible rather than merely quiet.
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_approvals import build_remote_approval_gate
+
+        logger.info("mcp_approval_gate_remote", gateway=gateway_url)
+        return build_remote_approval_gate(gateway_url)
+
+    try:
+        from api_gateway.mcp_approvals import build_mcp_approval_gate
+    except Exception as exc:  # noqa: BLE001 — reported, never fatal
+        logger.error(
+            "mcp_approval_gate_missing",
+            error=str(exc),
+            detail=(
+                "No approval gate could be built, so every held write will be REFUSED "
+                "rather than queued. Set METAFORGE_GATEWAY_URL to the gateway so held "
+                "calls reach the dashboard's approvals queue."
+            ),
+        )
+        return None
+
+    logger.warning(
+        "mcp_approval_gate_in_process",
+        detail=(
+            "Holding writes in this process's own queue. Correct only if this MCP "
+            "server runs inside the gateway; a separate sidecar should set "
+            "METAFORGE_GATEWAY_URL, or held calls will never appear on the dashboard."
+        ),
+    )
+    return build_mcp_approval_gate()
 
 
 def _configure_logging_for_transport(transport: str) -> None:
