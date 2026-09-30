@@ -217,12 +217,13 @@ class TestBootstrapToolRegistry:
         freecad.list_named_faces for 80. FORGE-280 adds
         calculix.cross_check_cantilever_beam + calculix.check_mesh_
         convergence for 82. FORGE-281 adds
-        calculix.cross_check_cantilever_frequency for 83.
+        calculix.cross_check_cantilever_frequency for 83. FORGE-283 adds
+        calculix.compute_joint_loads for 84.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 83
+        assert len(tools) == 84
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

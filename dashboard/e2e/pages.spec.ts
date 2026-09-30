@@ -207,6 +207,26 @@ test.describe('Digital Twin Viewer', () => {
     await expect(editor.getByText(/tail_joint/)).toBeVisible();
   });
 
+  test('Robot viewer: "Use as load case" computes joint loads (FORGE-283)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByText('drone-assembly.urdf').click();
+    await page.getByRole('button', { name: 'Model', exact: true }).click();
+
+    // The robot loads into the main viewer's Canvas; its one non-fixed
+    // joint ("rotor_joint", revolute) gets a slider (MET-747).
+    await expect(page.getByLabel('joint rotor_joint')).toBeVisible({ timeout: 15_000 });
+
+    const useAsLoadCase = page.getByRole('button', { name: 'Use as load case' });
+    await expect(useAsLoadCase).toBeVisible();
+    await useAsLoadCase.click();
+
+    await expect(page.getByText(/Worst joint:/)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Reaction force \(N\):/)).toBeVisible();
+    await expect(page.getByText(/Reaction moment \(N·mm\):/)).toBeVisible();
+  });
+
   test('History tab shows a parameter diff against a superseded version (FORGE-270)', async ({
     page,
   }) => {

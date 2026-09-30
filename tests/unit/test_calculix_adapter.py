@@ -168,10 +168,11 @@ class TestCalculixConfig:
 
 
 class TestCalculixServer:
-    def test_server_registers_seven_tools(self, server: CalculixServer) -> None:
+    def test_server_registers_eight_tools(self, server: CalculixServer) -> None:
         # FORGE-280 adds cross_check_cantilever_beam + check_mesh_convergence.
         # FORGE-281 adds cross_check_cantilever_frequency.
-        assert len(server.tool_ids) == 7
+        # FORGE-283 adds compute_joint_loads.
+        assert len(server.tool_ids) == 8
 
     def test_tool_ids(self, server: CalculixServer) -> None:
         expected = {
@@ -182,6 +183,7 @@ class TestCalculixServer:
             "calculix.cross_check_cantilever_beam",
             "calculix.cross_check_cantilever_frequency",
             "calculix.check_mesh_convergence",
+            "calculix.compute_joint_loads",
         }
         assert set(server.tool_ids) == expected
 
@@ -882,7 +884,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 7
+        assert len(response["result"]["tools"]) == 8
 
     async def test_tool_list_contains_expected_ids(self, server: CalculixServer) -> None:
         request = _make_jsonrpc("tool/list")
@@ -897,6 +899,7 @@ class TestJsonRpcIntegration:
             "calculix.cross_check_cantilever_beam",
             "calculix.cross_check_cantilever_frequency",
             "calculix.check_mesh_convergence",
+            "calculix.compute_joint_loads",
         }
 
     async def test_tool_call_fea_via_handle_request(
@@ -967,7 +970,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "calculix"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 7
+        assert response["result"]["tools_available"] == 8
 
     async def test_tool_call_unknown_tool(self, server: CalculixServer) -> None:
         request = _make_jsonrpc(
@@ -1001,3 +1004,86 @@ class TestJsonRpcIntegration:
         assert response["error"]["code"] == -32001
         assert response["error"]["data"]["error_type"] == "TOOL_EXECUTION_ERROR"
         assert response["error"]["data"]["tool_id"] == "calculix.run_fea"
+
+
+# ---------------------------------------------------------------------------
+# TestHandleComputeJointLoads (FORGE-283)
+# ---------------------------------------------------------------------------
+
+
+class TestHandleComputeJointLoads:
+    async def test_single_link_matches_hand_calc(self, server: CalculixServer) -> None:
+        result = await server.handle_compute_joint_loads(
+            {
+                "links": [{"name": "link0", "com_world_mm": [100.0, 0.0, 0.0], "mass_kg": 2.0}],
+                "joints": [{"name": "j0", "position_world_mm": [0.0, 0.0, 0.0]}],
+            }
+        )
+        assert len(result["loads"]) == 1
+        load = result["loads"][0]
+        assert load["joint_name"] == "j0"
+        assert load["supported_mass_kg"] == pytest.approx(2.0)
+        assert load["reaction_force_n"][2] == pytest.approx(2.0 * 9.80665)
+        assert result["worst_joint"]["joint_name"] == "j0"
+
+    async def test_multi_link_worst_joint_is_base(self, server: CalculixServer) -> None:
+        result = await server.handle_compute_joint_loads(
+            {
+                "links": [
+                    {"name": "upper_arm", "com_world_mm": [100.0, 0.0, 0.0], "mass_kg": 1.5},
+                    {"name": "forearm", "com_world_mm": [300.0, 0.0, 0.0], "mass_kg": 1.0},
+                ],
+                "joints": [
+                    {"name": "base", "position_world_mm": [0.0, 0.0, 0.0]},
+                    {"name": "elbow", "position_world_mm": [200.0, 0.0, 0.0]},
+                ],
+            }
+        )
+        assert result["worst_joint"]["joint_name"] == "base"
+
+    async def test_with_payload(self, server: CalculixServer) -> None:
+        result = await server.handle_compute_joint_loads(
+            {
+                "links": [{"name": "link0", "com_world_mm": [100.0, 0.0, 0.0], "mass_kg": 1.0}],
+                "joints": [{"name": "j0", "position_world_mm": [0.0, 0.0, 0.0]}],
+                "payload_mass_kg": 5.0,
+                "payload_position_world_mm": [200.0, 0.0, 0.0],
+            }
+        )
+        assert result["loads"][0]["supported_mass_kg"] == pytest.approx(6.0)
+
+    async def test_missing_links_raises(self, server: CalculixServer) -> None:
+        with pytest.raises(ValueError, match="links and joints"):
+            await server.handle_compute_joint_loads({"joints": []})
+
+    async def test_missing_joints_raises(self, server: CalculixServer) -> None:
+        with pytest.raises(ValueError, match="links and joints"):
+            await server.handle_compute_joint_loads(
+                {"links": [{"name": "l0", "com_world_mm": [0.0, 0.0, 0.0], "mass_kg": 1.0}]}
+            )
+
+    async def test_payload_without_position_raises(self, server: CalculixServer) -> None:
+        with pytest.raises(ValueError, match="payload_position_world_mm"):
+            await server.handle_compute_joint_loads(
+                {
+                    "links": [{"name": "l0", "com_world_mm": [100.0, 0.0, 0.0], "mass_kg": 1.0}],
+                    "joints": [{"name": "j0", "position_world_mm": [0.0, 0.0, 0.0]}],
+                    "payload_mass_kg": 5.0,
+                }
+            )
+
+    async def test_via_handle_request(self, server: CalculixServer) -> None:
+        request = _make_jsonrpc(
+            "tool/call",
+            {
+                "tool_id": "calculix.compute_joint_loads",
+                "arguments": {
+                    "links": [{"name": "l0", "com_world_mm": [100.0, 0.0, 0.0], "mass_kg": 2.0}],
+                    "joints": [{"name": "j0", "position_world_mm": [0.0, 0.0, 0.0]}],
+                },
+            },
+        )
+        raw_response = await server.handle_request(request)
+        response = json.loads(raw_response)
+        assert response["result"]["status"] == "success"
+        assert response["result"]["data"]["worst_joint"]["joint_name"] == "j0"

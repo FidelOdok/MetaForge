@@ -26,6 +26,12 @@ from tool_registry.tools.calculix.result_parser import (
 )
 from tool_registry.tools.calculix.solver import SolverError
 from tool_registry.tools.calculix.solver import run_fea as solver_run_fea
+from tool_registry.tools.calculix.statics import (
+    ChainJoint,
+    ChainLink,
+    compute_joint_loads,
+    worst_joint_load,
+)
 
 logger = structlog.get_logger()
 tracer = get_tracer("tool_registry.tools.calculix.adapter")
@@ -94,7 +100,7 @@ def _fixed_node_set_span_warning(mesh: MeshData, fixed_node_set: str) -> str | N
 class CalculixServer(McpToolServer):
     """CalculiX FEA tool adapter.
 
-    Provides seven tools:
+    Provides eight tools:
     - calculix.run_fea: static-stress or modal (FORGE-281) FEA analysis
     - calculix.extract_results: parse existing .frd result files
     - calculix.run_thermal: thermal analysis (steady-state/transient)
@@ -102,6 +108,7 @@ class CalculixServer(McpToolServer):
     - calculix.cross_check_cantilever_beam: hand-calc stress cross-check
     - calculix.cross_check_cantilever_frequency: hand-calc frequency cross-check
     - calculix.check_mesh_convergence: compare results across element sizes
+    - calculix.compute_joint_loads: quasi-static joint reaction loads (FORGE-283)
     """
 
     def __init__(self, config: CalculixConfig | None = None) -> None:
@@ -569,6 +576,127 @@ class CalculixServer(McpToolServer):
             handler=self.handle_check_mesh_convergence,
         )
 
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="calculix.compute_joint_loads",
+                adapter_id="calculix",
+                name="Compute Joint Loads",
+                description=(
+                    "Quasi-static reaction force/moment at every joint of a posed "
+                    "serial robot-arm chain, from gravity alone (FORGE-283). Given "
+                    "each link's world-frame center of mass and mass at a chosen "
+                    "pose, plus each joint's world-frame position at that same pose, "
+                    "returns the total supported weight and bending/torsional moment "
+                    "each joint must react to hold the pose static -- the classic "
+                    "'arm fully extended holding a payload' load case that dominates "
+                    "structural sizing. Deliberately quasi-static: no velocity/"
+                    "acceleration terms from an actual trajectory, no friction, no "
+                    "actuator torque-speed curves -- a full dynamic worst-case-over-"
+                    "motion analysis needs a real multibody dynamics engine, which "
+                    "this codebase's Gazebo/Isaac adapters don't yet expose (no "
+                    "force/torque output from either today). The worst-loaded "
+                    "joint's reaction_force_n can be fed directly into "
+                    "calculix.run_fea's load_force_n; a reaction_moment_n_mm can be "
+                    "applied as a force couple (two equal-and-opposite point loads "
+                    "separated by a lever arm) using that same static_stress path."
+                ),
+                capability="load_analysis",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "links": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "com_world_mm": {
+                                        "type": "array",
+                                        "items": {"type": "number"},
+                                        "minItems": 3,
+                                        "maxItems": 3,
+                                    },
+                                    "mass_kg": {"type": "number"},
+                                },
+                                "required": ["name", "com_world_mm", "mass_kg"],
+                            },
+                            "description": (
+                                "Base-to-tip. links[i] is the link immediately "
+                                "outboard of joints[i] -- same length as joints, "
+                                "paired by index."
+                            ),
+                        },
+                        "joints": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "position_world_mm": {
+                                        "type": "array",
+                                        "items": {"type": "number"},
+                                        "minItems": 3,
+                                        "maxItems": 3,
+                                    },
+                                },
+                                "required": ["name", "position_world_mm"],
+                            },
+                            "description": "Base-to-tip, same length as links.",
+                        },
+                        "payload_mass_kg": {
+                            "type": "number",
+                            "default": 0.0,
+                            "description": "Optional end-effector payload mass, kg.",
+                        },
+                        "payload_position_world_mm": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Required if payload_mass_kg > 0.",
+                        },
+                        "gravity_m_s2": {
+                            "type": "number",
+                            "default": 9.80665,
+                            "description": "Gravitational acceleration, m/s^2.",
+                        },
+                    },
+                    "required": ["links", "joints"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "loads": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "joint_name": {"type": "string"},
+                                    "supported_mass_kg": {"type": "number"},
+                                    "reaction_force_n": {"type": "array"},
+                                    "reaction_moment_n_mm": {"type": "array"},
+                                },
+                            },
+                        },
+                        "worst_joint": {
+                            "type": "object",
+                            "properties": {
+                                "joint_name": {"type": "string"},
+                                "supported_mass_kg": {"type": "number"},
+                                "reaction_force_n": {"type": "array"},
+                                "reaction_moment_n_mm": {"type": "array"},
+                            },
+                        },
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=5),
+            ),
+            handler=self.handle_compute_joint_loads,
+        )
+
     async def run_fea(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Execute CalculiX FEA stress analysis.
 
@@ -779,6 +907,59 @@ class CalculixServer(McpToolServer):
                 raise
             span.set_attribute("calculix.converged", result["converged"])
             return result
+
+    async def handle_compute_joint_loads(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Quasi-static joint reaction loads for a posed serial chain (FORGE-283)."""
+        links_arg = arguments.get("links")
+        joints_arg = arguments.get("joints")
+        if not links_arg or not joints_arg:
+            raise ValueError("links and joints are both required")
+
+        with tracer.start_as_current_span("calculix.compute_joint_loads") as span:
+            try:
+                links = [
+                    ChainLink(
+                        name=link["name"],
+                        com_world_mm=tuple(link["com_world_mm"]),
+                        mass_kg=float(link["mass_kg"]),
+                    )
+                    for link in links_arg
+                ]
+                joints = [
+                    ChainJoint(
+                        name=joint["name"],
+                        position_world_mm=tuple(joint["position_world_mm"]),
+                    )
+                    for joint in joints_arg
+                ]
+                payload_position = arguments.get("payload_position_world_mm")
+                loads = compute_joint_loads(
+                    links=links,
+                    joints=joints,
+                    payload_mass_kg=float(arguments.get("payload_mass_kg", 0.0)),
+                    payload_position_world_mm=(
+                        tuple(payload_position) if payload_position is not None else None
+                    ),
+                    gravity_m_s2=float(arguments.get("gravity_m_s2", 9.80665)),
+                )
+                worst = worst_joint_load(loads)
+            except (ValueError, KeyError) as exc:
+                span.record_exception(exc)
+                raise
+
+            def _serialize(load: Any) -> dict[str, Any]:
+                return {
+                    "joint_name": load.joint_name,
+                    "supported_mass_kg": load.supported_mass_kg,
+                    "reaction_force_n": list(load.reaction_force_n),
+                    "reaction_moment_n_mm": list(load.reaction_moment_n_mm),
+                }
+
+            span.set_attribute("calculix.worst_joint", worst.joint_name)
+            return {
+                "loads": [_serialize(load) for load in loads],
+                "worst_joint": _serialize(worst),
+            }
 
     async def run_thermal(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Execute CalculiX thermal analysis."""
