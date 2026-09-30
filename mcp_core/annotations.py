@@ -41,6 +41,7 @@ READ_ONLY: frozenset[str] = frozenset(
         "omniverse_usd.validate_usd_minimum",
         # Analysis that reads an existing result rather than producing one
         "calculix.check_mesh_convergence",
+        "calculix.compute_joint_loads",
         "calculix.cross_check_cantilever_beam",
         "calculix.cross_check_cantilever_frequency",
         "calculix.extract_results",

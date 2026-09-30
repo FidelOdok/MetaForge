@@ -6,6 +6,7 @@ import { useUrdfRobot } from '../../hooks/use-urdf-robot';
 import { useUrdfPhysics } from '../../hooks/use-urdf-physics';
 import { fetchNodeFileText, nodeMeshBaseUrl } from '../../api/endpoints/twin';
 import { useViewerStore } from '../../store/viewer-store';
+import { buildJointLoadChainPayload } from '../../lib/robot-statics';
 
 /**
  * MET-747: the Canvas-side half of the "View Robot" consolidation. Fetches
@@ -26,6 +27,7 @@ export function RobotSceneContents({ nodeId }: { nodeId: string }) {
   const setRobotJoints = useViewerStore((s) => s.setRobotJoints);
   const robotJointValues = useViewerStore((s) => s.robotJointValues);
   const robotPhysicsEnabled = useViewerStore((s) => s.robotPhysicsEnabled);
+  const registerJointLoadChainCompute = useViewerStore((s) => s.registerJointLoadChainCompute);
 
   const meshBaseUrl = nodeMeshBaseUrl(nodeId);
 
@@ -122,6 +124,21 @@ export function RobotSceneContents({ nodeId }: { nodeId: string }) {
       });
     setRobotJoints(joints);
   }, [robot, nodeId, setRobotJoints]);
+
+  // FORGE-283: registers a closure over the live `robot` object so
+  // RobotControlsOverlay's "Use as load case" button (an HTML sibling that
+  // can't reach into this Canvas child's Three.js objects) can read the
+  // CURRENT posed transforms on click -- see viewer-store's
+  // `_computeJointLoadChainFn` docstring for why this isn't just stored as
+  // plain data instead.
+  useEffect(() => {
+    if (!robot) {
+      registerJointLoadChainCompute(null);
+      return;
+    }
+    registerJointLoadChainCompute((jointNames) => buildJointLoadChainPayload(robot, jointNames));
+    return () => registerJointLoadChainCompute(null);
+  }, [robot, registerJointLoadChainCompute]);
 
   useUrdfPhysics(robot, robotPhysicsEnabled);
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ExplodeDirection, ModelManifest } from '../types/viewer';
+import type { JointLoadChainPayload } from '../lib/robot-statics';
 
 /** Boolean-cut mode (MET-612): 'idle' (hidden) → 'picking-cutter' (choosing a
  * sibling node) → 'ready' (cutter loaded, Hole/Group enabled). */
@@ -84,6 +85,19 @@ interface ViewerState {
   setRobotJointValue: (name: string, value: number) => void;
   setRobotPhysicsEnabled: (enabled: boolean) => void;
   setRobotError: (message: string | null) => void;
+
+  /** FORGE-283: same Canvas-child-registers/HTML-sibling-calls pattern as
+   * `_cameraResetFn` above -- RobotSceneContents owns the live URDFRobot
+   * object (never put directly in this store) and registers a closure that
+   * reads its current world-posed transforms; RobotControlsOverlay's "Use
+   * as load case" button calls it on click, at the pose the user is
+   * looking at right then, rather than this store re-deriving a plain
+   * payload on every joint-slider tick nobody has asked to use yet. */
+  _computeJointLoadChainFn: ((jointNames: string[]) => JointLoadChainPayload | null) | null;
+  registerJointLoadChainCompute: (
+    fn: ((jointNames: string[]) => JointLoadChainPayload | null) | null,
+  ) => void;
+  computeJointLoadChain: (jointNames: string[]) => JointLoadChainPayload | null;
 
   loadModel: (glbUrl: string, manifest: ModelManifest) => void;
   /** MET-683: clear the loaded model WITHOUT leaving 3D view mode (unlike
@@ -179,6 +193,13 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setRobotPhysicsEnabled: (enabled) => set({ robotPhysicsEnabled: enabled }),
 
   setRobotError: (message) => set({ robotError: message }),
+
+  _computeJointLoadChainFn: null,
+  registerJointLoadChainCompute: (fn) => set({ _computeJointLoadChainFn: fn }),
+  computeJointLoadChain: (jointNames) => {
+    const fn = get()._computeJointLoadChainFn;
+    return fn ? fn(jointNames) : null;
+  },
 
   loadModel: (glbUrl, manifest) =>
     set({

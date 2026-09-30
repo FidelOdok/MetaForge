@@ -1694,6 +1694,52 @@ function route(
         ],
       };
     }
+    if (path === '/robot/joint-loads') {
+      // FORGE-283: mirrors tool_registry.tools.calculix.statics's real
+      // sum-of-moments quasi-static calc (not a canned number) so the demo
+      // button exercises the same physics the real gateway route does.
+      const GRAVITY_M_S2 = 9.80665;
+      const links =
+        (body.links as { name: string; com_world_mm: [number, number, number]; mass_kg: number }[]) ?? [];
+      const joints = (body.joints as { name: string; position_world_mm: [number, number, number] }[]) ?? [];
+      const payloadMassKg = (body.payload_mass_kg as number) ?? 0;
+      const payloadPos = body.payload_position_world_mm as [number, number, number] | undefined;
+
+      const masses = links.map((l) => l.mass_kg);
+      const coms = links.map((l) => l.com_world_mm);
+      if (payloadMassKg > 0 && payloadPos) {
+        masses.push(payloadMassKg);
+        coms.push(payloadPos);
+      }
+
+      const loads = joints.map((joint, i) => {
+        const outboardMasses = masses.slice(i);
+        const outboardComs = coms.slice(i);
+        const supportedMassKg = outboardMasses.reduce((sum, m) => sum + m, 0);
+        let momentX = 0;
+        let momentY = 0;
+        for (let k = 0; k < outboardMasses.length; k++) {
+          const com = outboardComs[k];
+          const m = outboardMasses[k];
+          if (!com || m === undefined) continue;
+          const rx = com[0] - joint.position_world_mm[0];
+          const ry = com[1] - joint.position_world_mm[1];
+          const fz = -m * GRAVITY_M_S2;
+          momentX += ry * fz;
+          momentY += -rx * fz;
+        }
+        return {
+          joint_name: joint.name,
+          supported_mass_kg: supportedMassKg,
+          reaction_force_n: [0, 0, supportedMassKg * GRAVITY_M_S2],
+          reaction_moment_n_mm: [-momentX, -momentY, 0],
+        };
+      });
+      const worst = loads.reduce((a, b) =>
+        Math.hypot(...b.reaction_moment_n_mm) > Math.hypot(...a.reaction_moment_n_mm) ? b : a,
+      );
+      return { loads, worst_joint: worst };
+    }
   }
   if (method === 'patch') {
     // FORGE-271: whole-list joint replace on an already-committed node.
