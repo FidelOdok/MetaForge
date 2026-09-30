@@ -57,7 +57,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 4 constraint + 5 retrieval (MET-326) + 1 knowledge (MET-401)
         # + 1 twin (MET-439) + 6 consolidation (MET-454/455)
         # + 5 harness (production-harness audit follow-up)
-        assert len(all_metrics) == 54
+        # + 4 MCP (FORGE-379) + 3 design-flow (FORGE-401)
+        assert len(all_metrics) == 57
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -89,8 +90,36 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.consolidation_metrics())
             + len(MetricsRegistry.harness_metrics())
             + len(MetricsRegistry.mcp_metrics())
+            + len(MetricsRegistry.design_flow_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
+
+    def test_no_metric_is_in_a_group_but_missing_from_all_metrics(self) -> None:
+        """The invariant the count above is a proxy for, stated directly.
+
+        A metric defined and grouped but left out of ``all_metrics`` is never
+        instrumented, so it reports nothing and no alert on it can ever fire
+        -- while the definition sitting in the registry makes it look wired.
+        """
+        groups = [
+            MetricsRegistry.gateway_metrics(),
+            MetricsRegistry.agent_metrics(),
+            MetricsRegistry.skill_metrics(),
+            MetricsRegistry.kafka_metrics(),
+            MetricsRegistry.datastore_metrics(),
+            MetricsRegistry.telemetry_metrics(),
+            MetricsRegistry.constraint_metrics(),
+            MetricsRegistry.retrieval_metrics(),
+            MetricsRegistry.knowledge_metrics(),
+            MetricsRegistry.twin_metrics(),
+            MetricsRegistry.consolidation_metrics(),
+            MetricsRegistry.harness_metrics(),
+            MetricsRegistry.mcp_metrics(),
+            MetricsRegistry.design_flow_metrics(),
+        ]
+        grouped = {m.name for group in groups for m in group}
+        registered = {m.name for m in MetricsRegistry.all_metrics()}
+        assert grouped == registered
 
 
 # ── Naming convention validation ───────────────────────────────────────

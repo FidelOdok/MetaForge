@@ -7105,6 +7105,23 @@
             "title": "Name",
             "type": "string"
           },
+          "poses": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poses"
+          },
           "projectId": {
             "anyOf": [
               {
@@ -11891,6 +11908,7 @@
     },
     "/v1/runs/{run_id}/approval": {
       "post": {
+        "description": "Answer the gate this run is parked at.\n\nAsync so the store transition \u2014 which resolves the in-process executor's\ngate future via the coordinator \u2014 runs on the event-loop thread (future\nresolution is not thread-safe from FastAPI's sync worker pool).\n\nOn Temporal the decision is also *signalled* into the workflow, which is\nwhat actually resumes it (FORGE-401). The store transition stays, because\nthe run list, the SSE stream and the ledger all read from it.\n\nThe deciding human comes from the request, never the body (FORGE-393).",
         "operationId": "submit_approval_v1_runs__run_id__approval_post",
         "parameters": [
           {

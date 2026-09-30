@@ -266,7 +266,8 @@ class TestAllMetricsCombined:
         # + 4 constraint + 5 retrieval (MET-326) + 1 knowledge (MET-401)
         # + 1 twin (MET-439) + 6 consolidation (MET-454/455)
         # + 5 harness (production-harness audit follow-up)
-        assert len(MetricsRegistry.all_metrics()) == 54
+        # + 4 MCP (FORGE-379) + 3 design-flow (FORGE-401)
+        assert len(MetricsRegistry.all_metrics()) == 57
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
@@ -283,6 +284,7 @@ class TestAllMetricsCombined:
             + len(MetricsRegistry.consolidation_metrics())
             + len(MetricsRegistry.harness_metrics())
             + len(MetricsRegistry.mcp_metrics())
+            + len(MetricsRegistry.design_flow_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 

@@ -423,3 +423,34 @@ groups:
           description: >-
             An exception type outside the known taxonomy. Either a new
             failure mode, or one that should have had a class and does not.
+
+      # ── Design-flow engine (FORGE-401) ───────────────────────────────
+      - alert: DesignFlowEngineUnavailable
+        expr: rate(metaforge_design_flow_engine_unavailable_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Design-flow runs cannot start: Temporal at {{ $labels.target }} is unreachable"
+          description: >-
+            Every run start is being refused. This is deliberate -- there is
+            no in-process fallback, because a run that is not durable must
+            not look like one that is -- so the symptom is a hard 503 rather
+            than runs that quietly vanish on the next restart. Bring Temporal
+            back (`docker compose up temporal`); nothing needs replaying,
+            since no run was created.
+
+      - alert: DesignFlowGatesNeverAnswered
+        expr: >-
+          rate(metaforge_design_flow_gate_total{outcome="timed_out"}[1h]) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Design-flow gates are expiring unanswered"
+          description: >-
+            A gate that nobody answers ends the run rejected. Repeated
+            timeouts mean the approval queue is not being watched, not that
+            reviewers are refusing work -- those are counted separately as
+            outcome="rejected", and confusing the two hides an unattended
+            queue behind what looks like normal review.
