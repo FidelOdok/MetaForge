@@ -258,6 +258,50 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Does the part actually meet the requirements
+
+`twin.record_component_selection` holds the chosen part's specs against
+every typed requirement the project already has, and returns the result
+with the commit:
+
+```json
+{
+  "node_id": "bom-1", "mpn": "TPS62840",
+  "requirement_margins": [
+    {"requirement": "iq", "metric": "quiescent_current", "operator": "<=",
+     "limit": 50.0, "unit": "uA", "spec_value": 75.0,
+     "satisfied": false, "margin": -25.0, "margin_pct": -50.0}
+  ],
+  "violates": ["iq"]
+}
+```
+
+**The selection is still recorded.** Refusing the commit would block the
+normal case — choosing the best available part and then revising the
+requirement. But it is no longer silent: without this the violation first
+surfaced at a gate, with nothing linking it back to the decision to buy
+that part.
+
+`margin` is signed, in the requirement's own unit: positive is slack,
+negative is overshoot. An `==` requirement reports no margin at all,
+because "how far over" is not meaningful there and a number would invite
+a comparison between parts that does not mean anything.
+
+Units are converted when the spec carries one (`"3300 mV"` against a
+limit in `V`). A bare number is compared and flagged `unit_assumed` —
+refusing would leave most catalog rows unchecked, and not flagging would
+let a 3300 that is microfarads read as farads and satisfy almost
+anything. A genuinely incompatible unit is not compared.
+
+`unchecked_requirements` names every requirement no margin could be
+computed for, with a reason: `no_matching_spec`, `spec_not_numeric`,
+`incompatible_units`, `requirement_not_bound`. Reported rather than
+skipped — "no margin shown" and "no requirement" otherwise look the same.
+
+This works only because requirements are typed (see [A requirement
+something can check](#a-requirement-something-can-check)); an untyped one
+comes back as `requirement_not_bound`.
+
 ### Why a budget cell is blank
 
 Budget allocations roll up mass and cost over the `CONTAINS` tree and

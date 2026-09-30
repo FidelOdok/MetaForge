@@ -110,6 +110,28 @@ async def _find_or_create_bom_work_product(
         return None
 
 
+async def _requirement_margins(
+    twin: Any, project_id: str | None, specs: dict[str, Any]
+) -> tuple[list[Any], list[Any]]:
+    """Hold the chosen part's specs against the project's requirements.
+
+    FORGE-346. Best-effort by design: a margin report that fails must not
+    fail the BOM commit, which is the thing the caller actually asked for.
+    """
+    if not project_id or not specs:
+        return [], []
+    try:
+        from uuid import UUID
+
+        from twin_core.consistency.spec_margins import compare_specs_to_requirements
+
+        constraints = await twin.list_constraints(project_id=UUID(str(project_id)))
+        return compare_specs_to_requirements(specs, list(constraints))
+    except Exception as exc:  # noqa: BLE001 — never fail the commit
+        logger.warning("component_requirement_margins_failed", error=str(exc))
+        return [], []
+
+
 def make_component_recorder(
     twin: Any, project_backend: Any = None, catalog_store: Any = None
 ) -> Any:
@@ -290,12 +312,33 @@ def make_component_recorder(
                 linked=linked,
                 bom_work_product_id=bom_wp_id,
             )
-            return {
+            result: dict[str, Any] = {
                 "node_id": node_id,
                 "mpn": mpn,
                 "category": category,
                 "project_linked": linked,
                 "bom_work_product_id": bom_wp_id,
             }
+            margins, unchecked = await _requirement_margins(twin, project_id, specs or {})
+            if margins or unchecked:
+                result["requirement_margins"] = [m.model_dump() for m in margins]
+                result["unchecked_requirements"] = [u.model_dump() for u in unchecked]
+                violated = [m.requirement for m in margins if not m.satisfied]
+                if violated:
+                    # FORGE-346: the part is still recorded -- refusing a
+                    # commit because a requirement is not met would block
+                    # the normal case of choosing the best available part
+                    # and then changing the requirement. But it must not be
+                    # silent: without this the violation first surfaces at a
+                    # gate, with nothing linking it back to the decision to
+                    # buy this part.
+                    result["violates"] = violated
+                    logger.warning(
+                        "component_selection_violates_requirements",
+                        node_id=node_id,
+                        mpn=mpn,
+                        requirements=violated,
+                    )
+            return result
 
     return record
