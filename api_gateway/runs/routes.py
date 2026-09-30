@@ -33,12 +33,13 @@ from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_w
 from observability.metrics import MetricsCollector
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
 from orchestrator.design_flow.frozen import freeze_flow
+from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
 from orchestrator.design_flow.launcher import (
     DesignFlowLauncher,
     TemporalUnavailableError,
     connect_temporal,
 )
-from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, get_flow
+from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, flow_version, get_flow
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
     ApprovalDecision,
@@ -412,7 +413,19 @@ async def _start_on_temporal(run_id: str) -> None:
     """
     run = _store.get(run_id)
     flow_id = run.request.get("flow") or DEFAULT_FLOW_ID
-    frozen = freeze_flow(get_flow(flow_id))
+    definition = get_flow(flow_id)
+
+    # FORGE-397: the invariants are server-enforced, which means here -- not
+    # only where a flow is authored. A tailored flow reaching this point
+    # having skipped its own validation is exactly the case the rules exist
+    # for, and refusing costs a 400 rather than a run that cannot pass.
+    validate_flow(definition).raise_if_invalid(flow_id)
+
+    # The version travels with the run, so "which flow did this use" survives
+    # the template being edited afterwards.
+    frozen = freeze_flow(definition, version=flow_version(flow_id))
+    run.request["flow_version"] = frozen.version
+    run.request["flow_content_hash"] = frozen.content_hash
     launcher = await get_flow_launcher()
     await launcher.start(
         run_id=run_id,
@@ -432,6 +445,13 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
         if engine is FlowEngine.TEMPORAL:
             try:
                 await _start_on_temporal(run.id)
+            except FlowInvariantError as exc:
+                # The flow itself is wrong. Distinct from the engine being
+                # down: retrying will never help, and the message already
+                # names each rule and phase.
+                _store.delete(run.id)
+                logger.warning("design_flow_invalid", run_id=run.id, error=str(exc))
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             except TemporalUnavailableError as exc:
                 # No run is left behind. A record sitting in `queued` that
                 # nothing will ever pick up is worse than no record: it reads
