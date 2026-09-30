@@ -167,3 +167,83 @@ class TestCodexPackage:
         assert "no_data" in text and "gap, not a pass" in text
         assert "held for approval" in text
         assert "unavailableAdapters" in text
+
+
+# ---------------------------------------------------------------------------
+# Local-first: a package that needs no gateway (FORGE-374)
+# ---------------------------------------------------------------------------
+
+
+class TestLocalFirstPackage:
+    """I1 asks for a local gateway *plus a stdio connector*.
+
+    The stdio transport worked -- it boots on an empty environment and
+    serves the full tool set -- but nothing shipped it. The only package
+    was HTTP-only, so an installer had no way to reach the local-first
+    path and had to run a sidecar even to work alone.
+    """
+
+    def _local(self) -> dict:
+        from scripts.build_integrations import stdio_plugin_manifest
+
+        return stdio_plugin_manifest()
+
+    def test_it_launches_a_process_rather_than_calling_a_url(self) -> None:
+        servers = self._local()["mcpServers"]
+        assert servers["metaforge"]["command"] == "metaforge-mcp"
+        assert servers["metaforge"]["args"] == ["--transport", "stdio"]
+        assert "url" not in servers["metaforge"]
+
+    def test_the_launch_command_is_a_real_console_script(self) -> None:
+        """`python -m metaforge.mcp` depends on the interpreter and working
+        directory the harness happens to spawn with. A packaged plugin
+        cannot assume either."""
+        import tomllib
+        from pathlib import Path
+
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        scripts = tomllib.loads(pyproject.read_text())["project"]["scripts"]
+        assert scripts["metaforge-mcp"] == "metaforge.mcp.__main__:main"
+
+    def test_it_asks_for_nothing(self) -> None:
+        """A URL or a token here would imply this package can reach a
+        remote gateway, which is the other package's job."""
+        assert "userConfig" not in self._local()
+
+    def test_exactly_one_server_is_declared(self) -> None:
+        """The manifest format has no conditional -- no `enabled`, no
+        `when`. A package declaring both an http and a stdio server
+        connects to both, so every tool appears twice and an HTTP user
+        also spawns a Python process. The choice has to be made by
+        installing one package or the other, which is why this is a
+        second package rather than a second entry."""
+        assert len(self._local()["mcpServers"]) == 1
+
+    def test_the_two_packages_can_be_installed_alongside_each_other(self) -> None:
+        from scripts.build_integrations import DEFAULT_GATEWAY_URL, plugin_manifest
+
+        gateway = plugin_manifest(default_gateway_url=DEFAULT_GATEWAY_URL)
+        assert gateway["name"] != self._local()["name"]
+
+    def test_the_exporter_is_not_left_retrying_a_collector_nobody_ran(self) -> None:
+        """Measured, not assumed: with export on, a bare stdio boot logged
+        5 OTLP connection failures to localhost:4317 before finishing. On a
+        laptop that is noise on stderr and nothing else."""
+        env = self._local()["mcpServers"]["metaforge"]["env"]
+        assert env["METAFORGE_OTEL_EXPORT"] == "false"
+
+    def test_it_carries_the_same_skills_and_commands(self) -> None:
+        """Not a stripped-down copy. Working locally is the same work."""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2] / "integrations"
+        hosted = root / "claude-code"
+        local = root / "claude-code-local"
+        if not local.exists():  # pragma: no cover - generated artefact
+            pytest.skip("integrations/ not generated in this checkout")
+        assert sorted(p.name for p in (local / "skills").iterdir()) == sorted(
+            p.name for p in (hosted / "skills").iterdir()
+        )
+        assert sorted(p.name for p in (local / "commands").iterdir()) == sorted(
+            p.name for p in (hosted / "commands").iterdir()
+        )

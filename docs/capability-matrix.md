@@ -258,6 +258,46 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Running with no gateway at all
+
+The MCP server runs as a local subprocess over stdio and needs nothing
+configured. Verified on an empty environment, from a working directory
+outside the repo:
+
+```
+initialize  : {'name': 'metaforge-mcp', 'version': '0.1.0'}
+health      : healthy | adapters 13 | tools 105
+```
+
+No gateway, no URL, no token, no network, no API key. Persistent stores
+(Neo4j, Postgres) are optional; without them the twin is in-memory and
+does not survive a restart, and `health/check` says what is reachable
+rather than leaving it to be discovered.
+
+That path existed but nothing shipped it, so the only installable package
+was HTTP-only and working alone still meant running a sidecar. There are
+now two packages:
+
+| | `metaforge` | `metaforge-local` |
+|---|---|---|
+| Reaches | a gateway over HTTP | a process on this machine |
+| Needs | a gateway running, and its URL | `pip install metaforge` |
+| Suits | a team or hosted gateway | working on your own |
+
+**Install one, not both.** The plugin manifest format has no conditional —
+no `enabled`, no `when` — so a single package declaring both an `http`
+and a `stdio` server would connect to both: every tool twice, and an
+HTTP user also spawning a Python process they did not ask for. The
+choice has to be made at install time.
+
+The local package launches the `metaforge-mcp` console script rather than
+`python -m metaforge.mcp`, which would depend on whichever interpreter
+and working directory the harness spawned with. It also sets
+`METAFORGE_OTEL_EXPORT=false`: with export on, a bare stdio boot logged
+five OTLP connection failures to `localhost:4317` before finishing, which
+on a laptop with no collector is noise and nothing else. Local
+instrumentation stays on.
+
 ### Pointing at the view that shows it
 
 A `tools/call` result can carry links to the dashboard view for whatever

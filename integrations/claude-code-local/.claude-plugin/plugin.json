@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "metaforge-local",
+  "displayName": "MetaForge (local)",
+  "version": "0.1.0",
+  "description": "MetaForge on your own machine: the same digital-twin tools, run as a local process with no gateway, no account and no network.",
+  "author": {
+    "name": "MetaForge",
+    "url": "https://www.metaforge.uk"
+  },
+  "homepage": "https://fidelodok.github.io/MetaForge/",
+  "repository": "https://github.com/FidelOdok/MetaForge",
+  "license": "Apache-2.0",
+  "keywords": [
+    "hardware",
+    "cad",
+    "simulation",
+    "digital-twin",
+    "engineering"
+  ],
+  "mcpServers": {
+    "metaforge": {
+      "command": "metaforge-mcp",
+      "args": [
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "METAFORGE_OTEL_EXPORT": "false"
+      }
+    }
+  }
+}
