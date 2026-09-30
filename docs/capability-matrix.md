@@ -258,6 +258,48 @@ somewhere to answer, so the exemption stops applying to it. Set
 `exempt_local_writes=False` to hold local writes even from clients that
 cannot be asked.
 
+### Finding the gateway
+
+`forge connect` probes for a MetaForge gateway and prints the URL to put
+in the plugin's `gateway_url` setting. `/metaforge:connect` is the same
+thing from inside a harness — and, being a packaged command file rather
+than an MCP prompt, it still works when nothing is connected, which is
+the situation it exists for.
+
+```
+Found a MetaForge gateway at http://fidel-dev:8765/mcp
+  version 0.1.0, MCP 2024-11-05
+```
+
+**A candidate only counts when it names itself.** The check is not "is
+something listening" — a dev machine has plenty of services, and another
+MCP server answers `initialize` perfectly happily. Only
+`serverInfo.name == "metaforge-mcp"` is a match. Reporting a random
+service would be worse than finding nothing: the user pastes it in and
+gets a stranger set of failures, further from the cause.
+
+A `401`/`403` **is** a match. The URL is right and the token is the next
+step; saying "not found" would send them after the wrong problem.
+
+Candidates, in order:
+
+1. `<configured gateway>/mcp` — whoever set `METAFORGE_GATEWAY_URL` or a
+   saved config has already said where their gateway is.
+2. `<same host>:8765/mcp` — in the standard compose file the gateway is
+   `:8000` and the MCP sidecar is a **separate service** on `:8765`, so
+   `<gateway>/mcp` 404s and this is the right answer.
+3. `localhost:8765`, `127.0.0.1:8765`, `localhost:8000`.
+
+Deriving a URL is a guess; each one is still probed before being
+reported.
+
+When nothing is found, every candidate is listed with what it said, and
+the three ways forward are named: start one with `docker compose up
+gateway`, enter a team or hosted URL, or install the `metaforge-local`
+package and run with [no gateway at
+all](#running-with-no-gateway-at-all). `forge connect` exits non-zero, so
+it works as a precondition check in a script.
+
 ### Importing somebody else's robot
 
 `twin.import_urdf` reads a URDF and records it as a reference design to
