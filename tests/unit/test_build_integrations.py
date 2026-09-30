@@ -153,14 +153,20 @@ class TestCodexPackage:
         defined = {p.parent.name for p in REPO.glob("domain_agents/*/skills/*/definition.json")}
         assert {p.name for p in (root / "skills").iterdir() if p.is_dir()} == defined
 
-    def test_no_invented_plugin_manifest(self, root: Path) -> None:
-        # Codex plugins exist, but the packaging format is not publicly
-        # documented. A manifest shaped like a guess would look authoritative
-        # and be wrong, which is worse than not having one. If this test
-        # starts failing because someone added a real manifest, good -- delete
-        # it and say where the format came from.
-        assert not (root / "plugin.json").exists()
-        assert not (root / ".codex-plugin").exists()
+    def test_the_manifest_is_sourced_not_guessed(self, root: Path) -> None:
+        # This used to assert the manifest's *absence*: Codex plugins
+        # existed, the packaging format was not publicly documented, and a
+        # manifest shaped like a guess would have looked authoritative and
+        # been wrong. The note said "if this starts failing because someone
+        # added a real manifest, good -- delete it and say where the format
+        # came from."
+        #
+        # It came from codex-cli 0.118.0: `codex features list` reports
+        # `plugins  stable  true`, and the binary embeds the scaffolding
+        # script that writes `.codex-plugin/plugin.json`. Still one version,
+        # so TestCodexPlugin pins the field names.
+        assert (root / ".codex-plugin" / "plugin.json").is_file()
+        assert not (root / "plugin.json").exists()  # not at the root
 
     def test_agents_md_states_what_the_server_will_do(self, root: Path) -> None:
         text = (root / "AGENTS.md").read_text(encoding="utf-8")
@@ -324,3 +330,87 @@ class TestMarketplace:
             assert "/plugin marketplace add" in text
             installed = [p["name"] for p in catalog["plugins"] if f"install {p['name']}" in text]
             assert installed, f"{package} README installs no plugin this marketplace lists"
+
+
+# ---------------------------------------------------------------------------
+# Codex plugin package (FORGE-383)
+# ---------------------------------------------------------------------------
+
+
+class TestCodexPlugin:
+    """The format came from codex-cli 0.118.0 itself, not from the docs.
+
+    `codex features list` reports `plugins  stable  true`, and the binary
+    embeds the scaffolding script every field name here was taken from.
+    That is a stronger source than the published docs -- which describe
+    installing plugins but not the manifest -- and still one version, so
+    these pin the names rather than assuming they are eternal.
+
+    Not verified end to end: loading it needs a signed-in Codex, and the
+    CLI on the machine this was written on has an expired token.
+    """
+
+    def _pkg(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2] / "integrations" / "codex"
+        if not (root / ".codex-plugin" / "plugin.json").exists():  # pragma: no cover
+            pytest.skip("integrations/ not generated in this checkout")
+        return root
+
+    def test_the_manifest_is_where_codex_looks(self) -> None:
+        manifest = json.loads((self._pkg() / ".codex-plugin" / "plugin.json").read_text())
+        assert manifest["name"] == "metaforge"
+
+    def test_the_name_is_lowercase_hyphen_case(self) -> None:
+        """Codex normalises to that, and a name it has to rewrite is a name
+        that will not match the marketplace entry."""
+        import re
+
+        name = json.loads((self._pkg() / ".codex-plugin" / "plugin.json").read_text())["name"]
+        assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name), name
+
+    def test_component_paths_point_at_things_that_exist(self) -> None:
+        pkg = self._pkg()
+        manifest = json.loads((pkg / ".codex-plugin" / "plugin.json").read_text())
+        assert (pkg / manifest["skills"]).is_dir()
+        assert (pkg / manifest["mcpServers"]).is_file()
+
+    def test_the_marketplace_entry_uses_a_local_source(self) -> None:
+        """`{"source": "local", "path": "./plugins/<name>"}` -- the shape the
+        scaffolder writes."""
+        market = json.loads((self._pkg() / "marketplace.json").read_text())
+        entry = market["plugins"][0]
+        assert entry["source"] == {"source": "local", "path": "./plugins/metaforge"}
+
+    @pytest.mark.parametrize(
+        ("field", "allowed"),
+        [
+            ("installation", {"NOT_AVAILABLE", "AVAILABLE", "INSTALLED_BY_DEFAULT"}),
+            ("authentication", {"ON_INSTALL", "ON_USE"}),
+        ],
+    )
+    def test_the_policies_are_values_codex_accepts(self, field: str, allowed: set) -> None:
+        market = json.loads((self._pkg() / "marketplace.json").read_text())
+        assert market["plugins"][0]["policy"][field] in allowed
+
+    def test_the_entry_names_the_plugin_the_manifest_declares(self) -> None:
+        """A mismatch here installs nothing, and says nothing about why."""
+        pkg = self._pkg()
+        manifest = json.loads((pkg / ".codex-plugin" / "plugin.json").read_text())
+        market = json.loads((pkg / "marketplace.json").read_text())
+        assert market["plugins"][0]["name"] == manifest["name"]
+
+    def test_the_mcp_endpoint_matches_the_hand_written_config(self) -> None:
+        """Two ways in, one gateway. If they drift, whichever the user did
+        not use is the one that breaks."""
+        pkg = self._pkg()
+        mcp = json.loads((pkg / ".mcp.json").read_text())
+        url = mcp["mcpServers"]["metaforge"]["url"]
+        assert url in (pkg / "config.toml").read_text()
+
+    def test_the_readme_does_not_claim_it_was_verified(self) -> None:
+        """It has not been loaded end to end. Saying otherwise is the kind
+        of claim that costs somebody an afternoon."""
+        readme = (self._pkg() / "README.md").read_text()
+        assert "has not been loaded end to end" in readme
