@@ -8,21 +8,21 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (104 across 17 adapters)
+## MCP tools (105 across 17 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
-`knowledge,twin,constraint,cadquery,calculix` (24 tools). FreeCAD, KiCad,
+`knowledge,twin,constraint,cadquery,calculix` (25 tools). FreeCAD, KiCad,
 Gazebo, the OpenUSD conversion adapter, and Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-Ninety-seven of the 104 are described in the table below. The seven that are
+Ninety-eight of the 105 are described in the table below. The seven that are
 not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 104 does carry an MCP
+they simply have no row here yet. Every one of the 105 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -1136,11 +1136,12 @@ what the server will actually enforce.
 | `cadquery` | `cadquery.execute_script` | Run an inline CadQuery Python script | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.create_assembly` | Multi-body assembly (Phase 2 — manifest only) | _Phase 2_ |
 | `cadquery` | `cadquery.generate_enclosure` | Parametric enclosure generator (Phase 2 — manifest only) | _Phase 2_ |
-| `calculix` (default) | `calculix.run_fea` | Linear-static FEA on a meshed solid | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
+| `calculix` (default) | `calculix.run_fea` | Linear-static FEA on a meshed solid (`analysis_type="static_stress"`), or modal/natural-frequency analysis (`analysis_type="modal"`, FORGE-281, gap G-F5) — a real CalculiX `*FREQUENCY` eigenvalue solve (mass matrix from a real `*DENSITY` card, converted from the caller's kg/m^3 material to the mm+N+MPa consistent system's own tonne/mm^3 mass unit) returning real natural frequencies (`frequencies_hz`), lowest mode first. Deliberately narrow: fatigue, contact/bolted-joints, non-linear material, and buckling (the ticket's other four bundled analysis types) have zero existing scaffolding in this codebase and are each a separate, comparably-sized effort | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
 | `calculix` | `calculix.run_thermal` | Steady-state thermal analysis | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
 | `calculix` | `calculix.validate_mesh` | Mesh quality and connectivity checks | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
 | `calculix` | `calculix.extract_results` | Pull max-stress / max-displacement from `.frd`. FORGE-280: the `stress` block's own `accuracy` field auto-flags a suspicious result (max disproportionate to the rest of the nodal field — usually a point-load/BC concentration artifact) | [`tier1/fea-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/fea-hp.md) |
 | `calculix` | `calculix.cross_check_cantilever_beam` | Euler-Bernoulli hand-calc cross-check (sigma = M\*c/I) for a rectangular cantilever, tip-loaded — compares against an FEA max stress within a tolerance, for the textbook case a human caught FORGE-239's bad `fixed_node_set` with manually (FORGE-280) | unit-verified (FORGE-280) |
+| `calculix` | `calculix.cross_check_cantilever_frequency` | Closed-form first-bending-mode natural frequency for a uniform rectangular cantilever, tip-free (f1 = (beta1\*L)^2/(2*pi*L^2) \* sqrt(EI/(rho\*A)), a standard textbook constant) — the modal sibling of `calculix.cross_check_cantilever_beam`, same one-textbook-case scope, compares against a modal `calculix.run_fea` run's own first mode (FORGE-281) | unit-verified (FORGE-281) |
 | `calculix` | `calculix.check_mesh_convergence` | Whether max stress has stopped changing meaningfully across element sizes already run (does not orchestrate the sweep itself — compares results the caller already produced) (FORGE-280) | unit-verified (FORGE-280) |
 | `freecad` (opt-in) | `freecad.create_parametric` | FreeCAD-driven parametric solid | _none yet_ |
 | `freecad` | `freecad.boolean_operation` | FreeCAD boolean ops | _none yet_ |

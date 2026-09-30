@@ -119,7 +119,7 @@ class TestToolRegistry:
         assert adapter_info.adapter_id == "calculix"
         assert adapter_info.version == "0.1.0"
         assert adapter_info.status == AdapterStatus.CONNECTED
-        assert len(adapter_info.tools) == 6
+        assert len(adapter_info.tools) == 7
 
     async def test_register_adapter_populates_tools(self) -> None:
         registry = ToolRegistry()
@@ -132,6 +132,7 @@ class TestToolRegistry:
             "calculix.validate_mesh",
             "calculix.extract_results",
             "calculix.cross_check_cantilever_beam",
+            "calculix.cross_check_cantilever_frequency",
             "calculix.check_mesh_convergence",
         }
         actual_ids = {t.tool_id for t in registry.list_tools()}
@@ -187,7 +188,7 @@ class TestToolRegistry:
         await registry.register_adapter(server)
 
         tools = registry.list_tools()
-        assert len(tools) == 6
+        assert len(tools) == 7
 
     async def test_list_tools_by_capability(self) -> None:
         registry = ToolRegistry()
@@ -213,7 +214,7 @@ class TestToolRegistry:
 
         # All CalculiX tools are phase 1
         tools = registry.list_tools(phase=1)
-        assert len(tools) == 6
+        assert len(tools) == 7
 
         tools = registry.list_tools(phase=2)
         assert tools == []
@@ -246,10 +247,11 @@ class TestToolRegistry:
         }
 
         # Check that each capability references the correct tool(s) --
-        # accuracy_check is the one exception with more than one.
+        # accuracy_check is the one exception with more than one (FORGE-281
+        # adds a third: cross_check_cantilever_frequency).
         for cap in capabilities:
             if cap.capability == "accuracy_check":
-                assert len(cap.tool_ids) == 2
+                assert len(cap.tool_ids) == 3
             else:
                 assert len(cap.tool_ids) == 1
 
@@ -262,7 +264,7 @@ class TestToolRegistry:
         assert health.status == "healthy"
         assert health.adapter_id == "calculix"
         assert health.version == "0.1.0"
-        assert health.tools_available == 6
+        assert health.tools_available == 7
 
         # Verify adapter status was updated
         adapter = registry.get_adapter("calculix")
@@ -327,7 +329,7 @@ class TestToolRegistry:
         # Should still have exactly one adapter
         assert len(registry.list_adapters()) == 1
         # Tools should not be duplicated
-        assert len(registry.list_tools()) == 6
+        assert len(registry.list_tools()) == 7
         # Both infos should reference same adapter
         assert info1.adapter_id == info2.adapter_id
 

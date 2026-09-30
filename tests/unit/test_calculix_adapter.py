@@ -168,9 +168,10 @@ class TestCalculixConfig:
 
 
 class TestCalculixServer:
-    def test_server_registers_six_tools(self, server: CalculixServer) -> None:
+    def test_server_registers_seven_tools(self, server: CalculixServer) -> None:
         # FORGE-280 adds cross_check_cantilever_beam + check_mesh_convergence.
-        assert len(server.tool_ids) == 6
+        # FORGE-281 adds cross_check_cantilever_frequency.
+        assert len(server.tool_ids) == 7
 
     def test_tool_ids(self, server: CalculixServer) -> None:
         expected = {
@@ -179,6 +180,7 @@ class TestCalculixServer:
             "calculix.validate_mesh",
             "calculix.extract_results",
             "calculix.cross_check_cantilever_beam",
+            "calculix.cross_check_cantilever_frequency",
             "calculix.check_mesh_convergence",
         }
         assert set(server.tool_ids) == expected
@@ -236,6 +238,8 @@ class TestRunFea:
                 "mesh_file": "/models/bracket.inp",
                 "load_case": "vibration",
                 "analysis_type": "modal",
+                "material": {"name": "steel"},
+                "fixed_node_set": "Surface1",
             }
         )
         assert "max_von_mises" in result
@@ -337,19 +341,88 @@ class TestRunFeaStaticStressValidation:
             "load_force_n": (0.0, 0.0, -100.0),
         }
 
-    async def test_modal_analysis_needs_none_of_this(
+    async def test_modal_analysis_missing_material_raises(
         self, server_with_mocks: CalculixServer
     ) -> None:
-        """'modal' still invokes the mesh directly -- no deck_spec required."""
+        with pytest.raises(ValueError, match="material"):
+            await server_with_mocks.run_fea(
+                {
+                    "mesh_file": "/models/bracket.inp",
+                    "load_case": "vibration",
+                    "analysis_type": "modal",
+                    "fixed_node_set": "Surface1",
+                }
+            )
+
+    async def test_modal_analysis_missing_fixed_node_set_raises(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        with pytest.raises(ValueError, match="fixed_node_set"):
+            await server_with_mocks.run_fea(
+                {
+                    "mesh_file": "/models/bracket.inp",
+                    "load_case": "vibration",
+                    "analysis_type": "modal",
+                    "material": {"name": "steel"},
+                }
+            )
+
+    async def test_modal_analysis_explicit_properties_without_name_raises(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        """Unlike static_stress, 'modal' needs a real density -- and this
+        codebase only ever looks density up by material name, so a caller
+        who gave explicit E/poisson but no name still can't proceed."""
+        with pytest.raises(ValueError, match="material.name is required"):
+            await server_with_mocks.run_fea(
+                {
+                    "mesh_file": "/models/bracket.inp",
+                    "load_case": "vibration",
+                    "analysis_type": "modal",
+                    "material": {"youngs_modulus_mpa": 200000.0, "poissons_ratio": 0.3},
+                    "fixed_node_set": "Surface1",
+                }
+            )
+
+    async def test_modal_analysis_passes_a_deck_spec_to_execute_solver(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
         await server_with_mocks.run_fea(
             {
                 "mesh_file": "/models/bracket.inp",
                 "load_case": "vibration",
                 "analysis_type": "modal",
+                "material": {"name": "steel"},
+                "fixed_node_set": "Surface1",
+                "num_modes": 5,
             }
         )
         call_args = server_with_mocks._execute_solver.call_args  # type: ignore[attr-defined]
-        assert call_args[0][2] is None
+        mesh_file, analysis_type, deck_spec = call_args[0]
+        assert mesh_file == "/models/bracket.inp"
+        assert analysis_type == "modal"
+        assert deck_spec == {
+            "youngs_modulus_mpa": pytest.approx(200000.0),
+            "poissons_ratio": pytest.approx(0.30),
+            "density_tonne_mm3": pytest.approx(7850 * 1e-12),
+            "fixed_node_set": "Surface1",
+            "num_modes": 5,
+        }
+
+    async def test_modal_analysis_defaults_num_modes_to_three(
+        self, server_with_mocks: CalculixServer
+    ) -> None:
+        await server_with_mocks.run_fea(
+            {
+                "mesh_file": "/models/bracket.inp",
+                "load_case": "vibration",
+                "analysis_type": "modal",
+                "material": {"name": "steel"},
+                "fixed_node_set": "Surface1",
+            }
+        )
+        call_args = server_with_mocks._execute_solver.call_args  # type: ignore[attr-defined]
+        assert call_args[0][2]["num_modes"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -809,7 +882,7 @@ class TestJsonRpcIntegration:
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 6
+        assert len(response["result"]["tools"]) == 7
 
     async def test_tool_list_contains_expected_ids(self, server: CalculixServer) -> None:
         request = _make_jsonrpc("tool/list")
@@ -822,6 +895,7 @@ class TestJsonRpcIntegration:
             "calculix.validate_mesh",
             "calculix.extract_results",
             "calculix.cross_check_cantilever_beam",
+            "calculix.cross_check_cantilever_frequency",
             "calculix.check_mesh_convergence",
         }
 
@@ -893,7 +967,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "calculix"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 6
+        assert response["result"]["tools_available"] == 7
 
     async def test_tool_call_unknown_tool(self, server: CalculixServer) -> None:
         request = _make_jsonrpc(

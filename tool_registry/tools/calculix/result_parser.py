@@ -1,7 +1,9 @@
-"""Parser for CalculiX .frd output files -- extracts stress and displacement fields."""
+"""Parser for CalculiX .frd/.dat output files -- extracts stress,
+displacement, and (FORGE-281) modal-frequency fields."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,10 @@ tracer = get_tracer("tool_registry.tools.calculix.result_parser")
 
 class FrdParseError(Exception):
     """Raised when .frd file parsing fails."""
+
+
+class DatParseError(Exception):
+    """Raised when .dat file parsing fails."""
 
 
 def parse_frd_file(frd_path: str) -> dict[str, Any]:
@@ -112,6 +118,76 @@ def parse_frd_file(frd_path: str) -> dict[str, Any]:
         )
 
         return result
+
+
+# FORGE-281: a CalculiX *FREQUENCY step's eigenvalues/frequencies are
+# printed to the .dat file (not the .frd) as a block headed by a line
+# containing "F R E Q U E N C I E S" (ccx spaces out section titles), then
+# one data line per mode: mode number, eigenvalue (rad/time)^2, and
+# frequency in cycles/time (== Hz, since the mm-N-s-MPa unit system's time
+# unit is seconds) -- the LAST numeric column. Matched by a general
+# "<int> <float>... " pattern rather than the exact header wording/column
+# count, since the precise ccx-version-dependent spacing isn't something to
+# hardcode brittle-ly; live-validated against a real ccx-generated .dat file
+# on fidel-dev (see the PR/Jira comment) to confirm this reads real output,
+# not just a hand-built fixture's assumed shape.
+_FREQUENCY_HEADER_RE = re.compile(r"F\s*R\s*E\s*Q\s*U\s*E\s*N\s*C\s*I\s*E\s*S", re.IGNORECASE)
+_MODE_LINE_RE = re.compile(r"^\s*(\d+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s*$")
+
+
+def parse_frequencies_dat(dat_path: str) -> list[float]:
+    """Parse a CalculiX .dat file's eigenfrequency block into a list of
+    frequencies in Hz, lowest mode first.
+
+    Raises ``FileNotFoundError`` if the file doesn't exist, ``DatParseError``
+    if no frequency block is found or it contains no mode lines -- same
+    "never report success on an empty/missing result" discipline
+    ``parse_frd_file`` already applies (FORGE-232).
+    """
+    path = Path(dat_path)
+    if not path.exists():
+        raise FileNotFoundError(f"DAT file not found: {dat_path}")
+
+    with tracer.start_as_current_span("calculix.parse_frequencies_dat") as span:
+        span.set_attribute("calculix.dat_file", dat_path)
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            span.record_exception(exc)
+            raise DatParseError(f"Failed to read DAT file: {exc}") from exc
+
+        lines = content.splitlines()
+        header_idx = next(
+            (i for i, line in enumerate(lines) if _FREQUENCY_HEADER_RE.search(line)), None
+        )
+        if header_idx is None:
+            raise DatParseError(
+                f"{dat_path}: no frequency block found -- this means the solve wasn't "
+                "a *FREQUENCY step, or produced no eigenvalues (an empty/incomplete "
+                "modal deck, mirroring FORGE-232's own 'never report success on "
+                "nothing solved' rule for .frd files)."
+            )
+
+        frequencies: list[float] = []
+        for line in lines[header_idx + 1 :]:
+            match = _MODE_LINE_RE.match(line)
+            if match:
+                frequencies.append(float(match.group(3)))
+            elif frequencies:
+                # The mode-number sequence ended (next section starts) --
+                # stop rather than scanning the rest of the file for
+                # coincidentally-matching lines.
+                break
+
+        if not frequencies:
+            raise DatParseError(
+                f"{dat_path}: found a frequency block header but no mode data lines "
+                "under it -- solver may have failed to converge on any eigenvalue."
+            )
+
+        span.set_attribute("calculix.mode_count", len(frequencies))
+        logger.info("Parsed DAT frequencies", dat_file=dat_path, mode_count=len(frequencies))
+        return frequencies
 
 
 def _extract_stress(lines: list[str]) -> dict[str, Any]:

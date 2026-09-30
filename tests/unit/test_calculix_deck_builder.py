@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from tool_registry.tools.calculix.deck_builder import build_static_stress_deck
+from tool_registry.tools.calculix.deck_builder import build_modal_deck, build_static_stress_deck
 from tool_registry.tools.calculix.inp_mesh import MeshData
 
 
@@ -196,4 +196,107 @@ class TestBuildStaticStressDeck:
                 load_node_set="Surface2",
                 load_force_n=(0.0, 0.0, -100.0),
                 volume_elset="EmptyVolume",
+            )
+
+
+class TestBuildModalDeck:
+    def test_deck_contains_the_expected_cards_in_order(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_modal_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            density_tonne_mm3=7.85e-9,
+            fixed_node_set="Surface1",
+            num_modes=3,
+        )
+        for card in (
+            "*NODE",
+            "*ELEMENT, TYPE=C3D4, ELSET=Volume1",
+            "*NSET, NSET=FIXED_Surface1",
+            "*MATERIAL, NAME=MAT1",
+            "*ELASTIC, TYPE=ISO",
+            "*DENSITY",
+            "7.85e-09",
+            "*SOLID SECTION, ELSET=Volume1, MATERIAL=MAT1",
+            "*STEP",
+            "*FREQUENCY",
+            "3",
+            "*BOUNDARY",
+            "FIXED_Surface1, 1, 3",
+            "*NODE FILE",
+            "U",
+            "*END STEP",
+        ):
+            assert card in deck, f"missing card: {card!r}"
+        assert deck.index("*ELASTIC") < deck.index("*DENSITY")
+        assert deck.index("*DENSITY") < deck.index("*SOLID SECTION")
+        assert deck.index("*SOLID SECTION") < deck.index("*STEP")
+        assert deck.index("*FREQUENCY") < deck.index("*BOUNDARY")
+        assert deck.index("*BOUNDARY") < deck.index("*END STEP")
+
+    def test_no_cload_and_no_el_file_unlike_static_stress(self) -> None:
+        """A modal (eigenvalue) solve has no applied load and requests no
+        stress output -- both are static_stress-only cards."""
+        mesh = _cantilever_mesh()
+        deck = build_modal_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            density_tonne_mm3=7.85e-9,
+            fixed_node_set="Surface1",
+            num_modes=3,
+        )
+        assert "*CLOAD" not in deck
+        assert "*EL FILE" not in deck
+        assert "*STATIC" not in deck
+
+    def test_only_volume_elements_are_included(self) -> None:
+        mesh = _cantilever_mesh()
+        deck = build_modal_deck(
+            mesh,
+            youngs_modulus_mpa=200000.0,
+            poissons_ratio=0.30,
+            density_tonne_mm3=7.85e-9,
+            fixed_node_set="Surface1",
+            num_modes=3,
+        )
+        assert "TYPE=CPS3" not in deck
+        assert "TYPE=T3D2" not in deck
+
+    def test_unknown_volume_elset_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(ValueError, match="NotAVolumeSet"):
+            build_modal_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                density_tonne_mm3=7.85e-9,
+                fixed_node_set="Surface1",
+                num_modes=3,
+                volume_elset="NotAVolumeSet",
+            )
+
+    def test_unknown_fixed_node_set_raises(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(KeyError):
+            build_modal_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                density_tonne_mm3=7.85e-9,
+                fixed_node_set="NotAFace",
+                num_modes=3,
+            )
+
+    def test_num_modes_must_be_positive(self) -> None:
+        mesh = _cantilever_mesh()
+        with pytest.raises(ValueError, match="num_modes"):
+            build_modal_deck(
+                mesh,
+                youngs_modulus_mpa=200000.0,
+                poissons_ratio=0.30,
+                density_tonne_mm3=7.85e-9,
+                fixed_node_set="Surface1",
+                num_modes=0,
             )
