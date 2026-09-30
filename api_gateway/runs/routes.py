@@ -40,6 +40,7 @@ from orchestrator.design_flow.launcher import (
     connect_temporal,
 )
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, flow_version, get_flow
+from orchestrator.design_flow.versions import VersionNotFoundError, get_version_store
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
     ApprovalDecision,
@@ -192,7 +193,14 @@ def _is_design_flow(request: dict) -> bool:
     Triggered by a ``flow`` id or ``kind == "design_flow"`` — never by a bare
     ``goal`` alone, so plain runs keep their existing create+start semantics.
     """
-    return bool(request.get("flow")) or request.get("kind") == "design_flow"
+    return (
+        bool(request.get("flow"))
+        # FORGE-399: a run started from an approved, edited flow version names
+        # the version rather than a template. Without this it would be treated
+        # as a plain run: created, started, and never driven by any engine.
+        or bool(request.get("flow_version_id"))
+        or request.get("kind") == "design_flow"
+    )
 
 
 async def _ensure_run_project(run: Any, project_backend: Any) -> None:
@@ -404,6 +412,16 @@ async def _launch_flow(run_id: str) -> None:
     task.add_done_callback(_flow_tasks.discard)
 
 
+class FlowVersionNotApprovedError(RuntimeError):
+    """A run named a flow version nobody has approved yet (FORGE-399)."""
+
+    def __init__(self, version_id: str, status: str) -> None:
+        super().__init__(
+            f"flow version '{version_id}' is {status}, not approved. A run cannot start "
+            "on a flow a human has not agreed to."
+        )
+
+
 async def _start_on_temporal(run_id: str) -> None:
     """Hand the run to the real engine (FORGE-401).
 
@@ -412,6 +430,32 @@ async def _start_on_temporal(run_id: str) -> None:
     and never will be.
     """
     run = _store.get(run_id)
+
+    # FORGE-399: a run may name a stored, approved flow version instead of a
+    # template. An unapproved version is refused here rather than at the
+    # gate: starting work on a flow nobody agreed to and asking afterwards is
+    # the shape this whole epic exists to prevent.
+    version_id = run.request.get("flow_version_id")
+    if version_id:
+        version = get_version_store().get(str(version_id))
+        if not version.startable:
+            raise FlowVersionNotApprovedError(str(version_id), version.status.value)
+        flow_id = version.base_template_id
+        frozen = version.frozen
+        run.request["flow"] = flow_id
+        run.request["flow_version"] = frozen.version
+        run.request["flow_content_hash"] = frozen.content_hash
+        launcher = await get_flow_launcher()
+        await launcher.start(
+            run_id=run_id,
+            goal=str(run.request.get("goal") or "").strip(),
+            flow=frozen,
+            project_id=run.request.get("project_id"),
+            session_id=run.request.get("session_id"),
+        )
+        _metrics().record_design_flow_started(FlowEngine.TEMPORAL.value, flow_id)
+        return
+
     flow_id = run.request.get("flow") or DEFAULT_FLOW_ID
     definition = get_flow(flow_id)
 
@@ -445,6 +489,13 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
         if engine is FlowEngine.TEMPORAL:
             try:
                 await _start_on_temporal(run.id)
+            except FlowVersionNotApprovedError as exc:
+                _store.delete(run.id)
+                logger.warning("design_flow_version_not_approved", run_id=run.id, error=str(exc))
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except VersionNotFoundError as exc:
+                _store.delete(run.id)
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
             except FlowInvariantError as exc:
                 # The flow itself is wrong. Distinct from the engine being
                 # down: retrying will never help, and the message already

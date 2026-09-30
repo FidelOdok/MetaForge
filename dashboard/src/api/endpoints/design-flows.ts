@@ -9,7 +9,13 @@
  */
 
 import apiClient from '../client';
-import type { DesignFlow, DesignFlowCatalog } from '../../types/design-flows';
+import type {
+  DesignFlow,
+  DesignFlowCatalog,
+  EditFlowRequest,
+  FlowValidation,
+  FlowVersion,
+} from '../../types/design-flows';
 
 export async function getDesignFlows(): Promise<DesignFlowCatalog> {
   const { data } = await apiClient.get<DesignFlowCatalog>('/design-flows');
@@ -38,4 +44,27 @@ export function buildDesignFlowRequest(
     throw new Error('Select a supported design flow.');
   }
   return { kind: 'design_flow', flow: flowId, goal: goal.trim(), project_id: projectId };
+}
+
+/**
+ * Check an edit without saving it (FORGE-399).
+ *
+ * Called as the canvas changes so a rule break appears while the person is
+ * looking at the thing that broke it -- rather than at save, by which point
+ * they have made five more edits and have to work out which one it means.
+ */
+export async function validateFlowEdit(body: EditFlowRequest): Promise<FlowValidation> {
+  const { data } = await apiClient.post<FlowValidation>('/design-flows/validate', body);
+  return data;
+}
+
+/** Save an edit as a new version, held for approval. */
+export async function saveFlowVersion(body: EditFlowRequest): Promise<FlowVersion> {
+  const { data } = await apiClient.post<FlowVersion>('/design-flows/versions', body);
+  return data;
+}
+
+export async function getFlowVersion(versionId: string): Promise<FlowVersion> {
+  const { data } = await apiClient.get<FlowVersion>(`/design-flows/versions/${versionId}`);
+  return data;
 }

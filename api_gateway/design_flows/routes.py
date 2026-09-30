@@ -26,9 +26,23 @@ from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
 from orchestrator.design_flow.generator import FlowProposal
-from orchestrator.design_flow.invariants import validate_flow
-from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FLOWS, flow_version
+from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
+from orchestrator.design_flow.spec import (
+    DEFAULT_FLOW_ID,
+    FLOWS,
+    FlowDefinition,
+    Gate,
+    Phase,
+    flow_version,
+    get_flow,
+)
 from orchestrator.design_flow.templates import load_templates
+from orchestrator.design_flow.versions import (
+    FlowVersion,
+    VersionNotFoundError,
+    diff_flows,
+    get_version_store,
+)
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.design_flows.routes")
@@ -175,6 +189,9 @@ class FlowProposalView(BaseModel):
     """
 
     approvalId: str  # noqa: N815
+    #: The stored, immutable flow this approval is about. Without it, an
+    #: approved proposal is a decision about something nobody kept.
+    versionId: str  # noqa: N815
     baseTemplateId: str  # noqa: N815
     baseVersion: str  # noqa: N815
     intent: str
@@ -184,10 +201,11 @@ class FlowProposalView(BaseModel):
     violations: list[str] = Field(default_factory=list)
 
 
-def _proposal_view(proposal: FlowProposal, approval_id: str) -> FlowProposalView:
+def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) -> FlowProposalView:
     definition = proposal.definition
     return FlowProposalView(
         approvalId=approval_id,
+        versionId=version_id,
         baseTemplateId=proposal.base_template_id,
         baseVersion=proposal.base_version,
         intent=proposal.intent,
@@ -247,6 +265,23 @@ async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowPropos
         logger.error("flow_proposal_unavailable", error=str(exc))
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    version_store = get_version_store()
+    try:
+        version = version_store.save(
+            proposal.definition,
+            base_template_id=proposal.base_template_id,
+            base_version=proposal.base_version,
+            changes=proposal.diff(),
+            origin="generated",
+            intent=proposal.intent,
+        )
+    except FlowInvariantError as exc:
+        # A proposal that cannot pass the rules is refused rather than stored
+        # as something a human could approve. Approving an unstartable flow
+        # is a decision that means nothing.
+        logger.warning("flow_proposal_invalid", error=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     store = get_approval_store()
     run = store.create(
         {
@@ -256,6 +291,7 @@ async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowPropos
             "intent": proposal.intent,
             "changes": proposal.diff(),
             "project_id": body.projectId,
+            "flow_version_id": version.id,
         }
     )
     store.start(run.id)
@@ -273,4 +309,201 @@ async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowPropos
         changes=len(proposal.operations),
         valid=proposal.valid,
     )
-    return _proposal_view(proposal, run.id)
+    version.approval_id = run.id
+    return _proposal_view(proposal, run.id, version.id)
+
+
+# ── Editing a flow (FORGE-399) ───────────────────────────────────────────
+
+
+class EditGate(BaseModel):
+    name: str
+    autoApprove: bool = False  # noqa: N815
+    criteria: list[str] = Field(default_factory=list)
+    enforceConstraints: bool = False  # noqa: N815
+    gateId: str | None = None  # noqa: N815
+
+
+class EditPhase(BaseModel):
+    id: str
+    title: str
+    objective: str
+    expectedArtifacts: list[str] = Field(default_factory=list)  # noqa: N815
+    requiredDeliverables: list[str] = Field(default_factory=list)  # noqa: N815
+    enforceDeliverables: bool = True  # noqa: N815
+    disciplines: list[str] = Field(default_factory=list)
+    gate: EditGate | None = None
+
+
+class EditFlowRequest(BaseModel):
+    """A whole edited flow, plus the template it descends from.
+
+    The editor sends the full flow rather than a patch. A patch would need the
+    client and server to agree on how to apply it, and a disagreement there is
+    a flow that is not what the person on the canvas was looking at when they
+    pressed save.
+    """
+
+    baseTemplateId: str  # noqa: N815
+    phases: list[EditPhase]
+    name: str | None = None
+
+
+class ValidationView(BaseModel):
+    valid: bool
+    violations: list[str] = Field(default_factory=list)
+
+
+class FlowVersionView(BaseModel):
+    versionId: str  # noqa: N815
+    approvalId: str  # noqa: N815
+    baseTemplateId: str  # noqa: N815
+    baseVersion: str  # noqa: N815
+    status: str
+    origin: str
+    changes: list[str] = Field(default_factory=list)
+    flow: DesignFlowView
+    valid: bool
+    violations: list[str] = Field(default_factory=list)
+
+
+def _definition_from(body: EditFlowRequest) -> FlowDefinition:
+    return FlowDefinition(
+        id=body.baseTemplateId,
+        name=body.name or get_flow(body.baseTemplateId).name,
+        phases=tuple(
+            Phase(
+                id=p.id,
+                title=p.title,
+                objective=p.objective,
+                expected_artifacts=tuple(p.expectedArtifacts),
+                required_deliverables=tuple(p.requiredDeliverables),
+                enforce_deliverables=p.enforceDeliverables,
+                disciplines=tuple(p.disciplines),
+                gate=(
+                    None
+                    if p.gate is None
+                    else Gate(
+                        name=p.gate.name,
+                        auto_approve=p.gate.autoApprove,
+                        criteria=tuple(p.gate.criteria),
+                        enforce_constraints=p.gate.enforceConstraints,
+                        gate_id=p.gate.gateId,
+                    )
+                ),
+            )
+            for p in body.phases
+        ),
+    )
+
+
+@router.post("/validate", response_model=ValidationView)
+def validate_edited_flow(body: EditFlowRequest) -> ValidationView:
+    """Check an edit without saving it.
+
+    The editor calls this as the canvas changes, so a person sees a rule break
+    while they are looking at the thing that broke it -- rather than at save,
+    by which point they have made five more changes and have to work out which
+    one the message is about.
+    """
+    if body.baseTemplateId not in FLOWS:
+        raise HTTPException(status_code=404, detail=f"unknown template '{body.baseTemplateId}'")
+    result = validate_flow(_definition_from(body))
+    return ValidationView(valid=result.ok, violations=[str(v) for v in result.violations])
+
+
+@router.post("/versions", response_model=FlowVersionView, status_code=201)
+def save_edited_flow(body: EditFlowRequest) -> FlowVersionView:
+    """Save an edit as a new version, held for approval.
+
+    Never mutates an existing version. A run pins the version it started on,
+    so a version changing underneath would make a completed run's provenance
+    a lie -- and an approval that can be edited afterwards is not an approval.
+    """
+    if body.baseTemplateId not in FLOWS:
+        raise HTTPException(status_code=404, detail=f"unknown template '{body.baseTemplateId}'")
+
+    from api_gateway.chat.tool_approvals import get_approval_store
+
+    base = get_flow(body.baseTemplateId)
+    candidate = _definition_from(body)
+    changes = diff_flows(base, candidate)
+    if not changes:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "this flow is identical to its template; there is nothing to approve. "
+                "Start a run on the template directly."
+            ),
+        )
+
+    version_store = get_version_store()
+    try:
+        version = version_store.save(
+            candidate,
+            base_template_id=body.baseTemplateId,
+            base_version=flow_version(body.baseTemplateId),
+            changes=changes,
+            origin="edited",
+        )
+    except FlowInvariantError as exc:
+        # An edit that breaks an invariant cannot be saved -- the ticket's own
+        # acceptance criterion. 422 rather than 400: the request was
+        # well-formed, the flow was not.
+        logger.info("flow_edit_rejected", template=body.baseTemplateId, error=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    approvals = get_approval_store()
+    run = approvals.create(
+        {
+            "kind": "design_flow_version",
+            "template": body.baseTemplateId,
+            "flow_version_id": version.id,
+            "changes": changes,
+        }
+    )
+    approvals.start(run.id)
+    approvals.request_approval(
+        run.id,
+        reason=f"Approve {len(changes)} change(s) to '{body.baseTemplateId}' before running it.",
+    )
+    version.approval_id = run.id
+    logger.info(
+        "flow_version_held", version_id=version.id, approval_id=run.id, changes=len(changes)
+    )
+    return _version_view(version)
+
+
+@router.get("/versions/{version_id}", response_model=FlowVersionView)
+def get_flow_version(version_id: str) -> FlowVersionView:
+    try:
+        return _version_view(get_version_store().get(version_id))
+    except VersionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _version_view(version: FlowVersion) -> FlowVersionView:
+    definition = version.definition
+    result = validate_flow(definition)
+    return FlowVersionView(
+        versionId=version.id,
+        approvalId=version.approval_id,
+        baseTemplateId=version.base_template_id,
+        baseVersion=version.base_version,
+        status=version.status.value,
+        origin=version.origin,
+        changes=version.changes,
+        valid=result.ok,
+        violations=[str(v) for v in result.violations],
+        flow=DesignFlowView(
+            id=definition.id,
+            name=definition.name,
+            label=f"{version.base_template_id} ({version.origin})",
+            description=version.intent,
+            version=version.frozen.version,
+            isDefault=False,
+            valid=result.ok,
+            violations=[str(v) for v in result.violations],
+            phases=[_phase_view(phase) for phase in definition.phases],
+        ),
+    )

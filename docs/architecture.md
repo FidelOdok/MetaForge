@@ -74,6 +74,49 @@ So Temporal is **runnable and registered**, owns the consolidation pass when
 you hand it over, and as of FORGE-401 is the execution path for design-flow
 runs.
 
+### Editing a flow, and where an edited flow lives (FORGE-399)
+
+FORGE-398 generated a proposal, held it for approval, and stored only a *text
+diff* of it — so approving one gave nobody a flow to start. `versions.py`
+closes that, and it is shared: an edited flow needs exactly the same thing,
+and two stores would have been two answers to "which flow did this run use".
+
+**A version is immutable.** Editing produces a new version with a new id,
+never a mutation, because a run pins the version it started on (FORGE-401
+freezes it into the workflow input and verifies its hash), so a version
+changing underneath would make a completed run's provenance a lie — and an
+approval that can be edited afterwards is not an approval. That is also what
+makes *"edits never change a running flow"* structurally true rather than a
+policy somebody has to observe.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v1/design-flows/validate` | check an edit **without saving it** |
+| `POST /v1/design-flows/versions` | save an edit as a new version, held for approval |
+| `GET /v1/design-flows/versions/{id}` | fetch a stored version |
+
+`POST /v1/runs` accepts a `flow_version_id`. An unapproved version is refused
+there with a 409 rather than at the gate: starting work on a flow nobody
+agreed to and asking afterwards is the shape this epic exists to prevent.
+
+Validation is a separate call from saving so a rule break appears **while the
+person is looking at the change that caused it** — by save time they have made
+five more edits and have to work out which one the message is about. The
+editor holds no validity logic of its own: a second copy of the rules in the
+client would be a second answer, and the copy that disagrees is the one that
+lets an unstartable flow through the UI to be refused at save.
+
+An edit that breaks an invariant **cannot be saved** (422), and nothing is
+stored when a save is refused. Saving a flow identical to its template is also
+refused: an approval with nothing to approve teaches reviewers to click
+through, which is how a real one later gets clicked through too.
+
+The diff is prose rather than a structural patch, because it is read by a
+person deciding whether to approve. Relaxations are shouted —
+`phase 'x' NO LONGER requires 'y'` — since tightening a gate is normal and
+loosening one is the change most worth attention and easiest to lose in a long
+list.
+
 ### Tailoring a flow to a project (FORGE-398)
 
 `POST /v1/design-flows/propose` takes a project's intent and returns a
