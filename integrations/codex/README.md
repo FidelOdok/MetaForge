@@ -23,8 +23,13 @@ plugin and is the path this repo has been running.
 
 ## What is verified
 
-Loaded end to end against codex-cli 0.118.0, by driving
-`codex app-server` over stdio and reading what it reported back:
+Loaded and driven end to end against codex-cli **0.118.0 and
+0.159.2** — the manifest format survived that upgrade unchanged,
+which is the thing most worth knowing, since the format was read
+out of the binary rather than from a published spec.
+
+Installation, checked by driving `codex app-server` over stdio
+rather than by eyeballing `/plugins`:
 
 - `plugin/list` finds the marketplace and returns `metaforge@metaforge`
   with `marketplaceLoadErrors: []` — the manifest parses, `installPolicy`
@@ -33,9 +38,26 @@ Loaded end to end against codex-cli 0.118.0, by driving
 - `plugin/read` resolves all 30 skills and `mcpServers: ["metaforge"]`.
 - `plugin/install` succeeds and writes `[plugins."metaforge@metaforge"]`
   into `~/.codex/config.toml`.
-- Codex then connects to the MCP server itself: its client logs
+- Codex connects to the MCP server itself: its client logs
   `server_info: Implementation { name: "metaforge-mcp" }` at protocol
   `2025-06-18`, and `tools/list` returns the MetaForge tools.
+
+And the agent actually uses them:
+
+- A read goes through. Codex called `project.list` and got back a
+  `status: success` envelope.
+- **A write is held.** Codex called `project.create`; the server
+  refused with `-32001` / `code: approval_required`,
+  `outcome: not_configured`, `retryable: false`, naming the caller
+  as untrusted. A follow-up `project.list` came back empty, so the
+  write did not run — which is the point. A guardrail that returns
+  an error *after* doing the write is worse than none, because the
+  error makes it look like it held.
+
+That second one is why the guardrails exist at all: the same tool
+was gated when a person asked in the dashboard and ungated when an
+external harness asked over MCP. It is gated now, and this is an
+external harness asking.
 
 One cosmetic wart: Codex opens `GET /mcp` for a server-initiated SSE
 stream, the sidecar answers `405` (which the Streamable HTTP spec
