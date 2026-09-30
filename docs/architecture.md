@@ -74,6 +74,42 @@ So Temporal is **runnable and registered**, owns the consolidation pass when
 you hand it over, and as of FORGE-401 is the execution path for design-flow
 runs.
 
+### Flows through the harness plugins (FORGE-400)
+
+Flows were dashboard-only: an agent in Claude Code or Codex could not see
+that any of it existed. Four MCP tools and a run resource change that.
+
+| Tool | |
+| --- | --- |
+| `flow.list` | the catalogue, as the gateway will run it (read) |
+| `flow.propose` | tailor a template to an intent — **held write** |
+| `flow.status` | phase state for one run (read) |
+| `flow.start_run` | start a run on an **approved** version — held write |
+
+Plus `metaforge://flow/run/{id}`, the run as markdown for a client with no
+canvas, and a `/metaforge:flow` prompt.
+
+**The rule that shapes the surface: the agent has no tool that approves its
+own call.** `flow.propose` returns a proposal and an approval id and stops.
+There is no `flow.approve`. An agent that could both propose and approve has
+an approval step in name only — and the name is worse than nothing, because
+it appears in the audit trail. Approving happens where a human is: the
+dashboard queue, or inline elicitation (FORGE-360), both through the same
+ledger, with the approver taken from that record (FORGE-393).
+
+`flow.status` is deliberately *not* held. An agent following a run calls it
+repeatedly; holding every poll for a human would make following a run
+impossible.
+
+**What checking this found.** A catalogue-wide test — "no tool lets a caller
+answer its own approval", matched on behaviour rather than on one forbidden
+name — turned up two tools with the identical FORGE-393 bug:
+`twin.approve_design_loop` took `approved_by` as an argument and
+`twin.approve_engineering_change` took `approver`. FORGE-393 had fixed
+promotion and guarded `ect.approve` against a *blank* approver, which is not
+the same as guarding it against a supplied one. Both now read the approver
+from the approval record, and both are in `HUMAN_AUTHORITY_TOOLS`.
+
 ### Watching a run (FORGE-396)
 
 `GET /v1/runs/{id}/flow-state` returns phase-by-phase state, queried from the

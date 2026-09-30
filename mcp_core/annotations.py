@@ -31,6 +31,12 @@ from typing import Any
 # caller can observe, no external side effect.
 READ_ONLY: frozenset[str] = frozenset(
     {
+        # FORGE-400: the flow catalogue and a run's status. Reading a run
+        # cannot change it -- and an agent following a run will call
+        # flow.status repeatedly, so classifying it as a write would hold
+        # every poll for a human.
+        "flow.list",
+        "flow.status",
         # Geometry and model inspection
         "cadquery.get_properties",
         "cadquery.validate_physics_stability",
@@ -131,6 +137,14 @@ CONDITIONALLY_READ_ONLY: frozenset[str] = frozenset({"twin.query_cypher"})
 # data", which is the difference ``destructiveHint`` exists to carry.
 ADDITIVE: frozenset[str] = frozenset(
     {
+        # FORGE-400. `flow.propose` writes a flow version and an approval
+        # entry; `flow.start_run` starts real work. Both are held.
+        #
+        # Additive rather than destructive: neither overwrites anything, and
+        # marking them destructive would tell a reviewer this might remove
+        # data, which is the kind of inaccurate warning that gets ignored.
+        "flow.propose",
+        "flow.start_run",
         "knowledge.extract",
         "knowledge.ingest",
         "knowledge.populate_bom",

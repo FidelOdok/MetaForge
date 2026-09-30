@@ -277,6 +277,10 @@ async def bootstrap_tool_registry(
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
+    design_flow_catalogue_reader: Any = None,
+    design_flow_proposer: Any = None,
+    design_flow_status_reader: Any = None,
+    design_flow_run_starter: Any = None,
     brief_provider: Any = None,
     parameter_optimizer: Any = None,
     device_instance_registrar: Any = None,
@@ -617,6 +621,41 @@ async def bootstrap_tool_registry(
                     else "disabled via config"
                 ),
             )
+
+        # ----- Design-flow MCP adapter (FORGE-400) -----
+        # Flows were dashboard-only: an agent in Claude Code or Codex could
+        # not see that any of it existed. Registered whenever the gateway
+        # supplies its bindings; each tool registers only if its own
+        # callable is present, so a partial wiring exposes what works rather
+        # than a surface that half-fails.
+        _flow_bindings = (
+            design_flow_catalogue_reader,
+            design_flow_proposer,
+            design_flow_status_reader,
+            design_flow_run_starter,
+        )
+        if any(b is not None for b in _flow_bindings) and _is_adapter_enabled("design_flow"):
+            try:
+                from tool_registry.tools.design_flow.adapter import DesignFlowServer
+
+                flow_server = DesignFlowServer(
+                    catalogue_reader=design_flow_catalogue_reader,
+                    proposer=design_flow_proposer,
+                    run_status_reader=design_flow_status_reader,
+                    run_starter=design_flow_run_starter,
+                )
+                await registry.register_adapter(flow_server)
+                registered.append("design_flow")
+                logger.info(
+                    "design_flow_mcp_adapter_registered",
+                    tools=sorted(flow_server.tool_ids),
+                )
+            except Exception as exc:
+                logger.error("design_flow_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("design_flow")
+        else:
+            skipped.append("design_flow")
 
         # ----- Twin MCP adapter (MET-382) -----
         # Same runtime-injection pattern as knowledge / constraint:

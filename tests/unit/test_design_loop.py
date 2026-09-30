@@ -15,6 +15,11 @@ from api_gateway.twin.design_loop import (
     make_design_loop_starter,
 )
 from api_gateway.twin.optimizer import make_wall_thickness_optimizer
+from mcp_core.guardrails import (
+    APPROVED_BY_ARG,
+    ApproverArgumentRejectedError,
+    HumanAuthorityRequiredError,
+)
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models.enums import EdgeType, WorkProductType
@@ -475,7 +480,7 @@ class TestDesignLoopAdapter:
         assert fetched["loop_id"] == started["loop_id"]
 
         approved = await server.approve_design_loop(
-            {"loop_id": started["loop_id"], "approved_by": "reviewer"}
+            {"loop_id": started["loop_id"], APPROVED_BY_ARG: "user:reviewer"}
         )
         assert approved["approved"] is True
 
@@ -522,9 +527,17 @@ class TestDesignLoopAdapter:
         with pytest.raises(ValueError, match="loop_id"):
             await server.get_design_loop({})
 
+    async def test_a_caller_supplied_approver_is_refused(self, twin: InMemoryTwinAPI) -> None:
+        """FORGE-400 found this tool still had the FORGE-393 bug: it took
+        `approved_by` as a plain argument, so the model named the human
+        recorded as having approved the loop."""
+        server = TwinServer(twin=twin, design_loop_approver=make_design_loop_approver(twin))
+        with pytest.raises(ApproverArgumentRejectedError):
+            await server.approve_design_loop({"loop_id": "loop_1", "approved_by": "Dr Jane Smith"})
+
     async def test_missing_approved_by_rejected(self, twin: InMemoryTwinAPI) -> None:
         server = TwinServer(twin=twin, design_loop_approver=make_design_loop_approver(twin))
-        with pytest.raises(ValueError, match="approved_by"):
+        with pytest.raises(HumanAuthorityRequiredError):
             await server.approve_design_loop({"loop_id": "x"})
 
     async def test_tube_height_tool_registered_and_returns_shape(

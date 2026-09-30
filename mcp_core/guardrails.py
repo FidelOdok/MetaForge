@@ -99,6 +99,17 @@ _EXEMPTIBLE: frozenset[Caller] = frozenset({Caller.LOCAL})
 HUMAN_AUTHORITY_TOOLS: frozenset[str] = frozenset(
     {
         "twin.attempt_promotion",
+        # FORGE-400 found these two while checking that no tool lets an agent
+        # approve its own call. They had the identical FORGE-393 bug:
+        # `twin.approve_design_loop` took `approved_by` as an argument and
+        # `twin.approve_engineering_change` took `approver`, so the model
+        # named the human whose approval was being recorded.
+        #
+        # FORGE-393 fixed promotion and guarded `ect.approve` against a
+        # *blank* approver -- which is not the same as guarding it against a
+        # supplied one, and the difference is the whole bug.
+        "twin.approve_design_loop",
+        "twin.approve_engineering_change",
     }
 )
 
@@ -114,7 +125,7 @@ APPROVED_BY_ARG = "__approved_by__"
 
 #: Argument names through which a caller has historically named the deciding
 #: human. Supplying one is now an error on a human-authority tool.
-CALLER_SUPPLIED_APPROVER_ARGS: frozenset[str] = frozenset({"decided_by", "approver"})
+CALLER_SUPPLIED_APPROVER_ARGS: frozenset[str] = frozenset({"decided_by", "approver", "approved_by"})
 
 
 def strip_reserved_arguments(arguments: dict[str, Any]) -> dict[str, Any]:

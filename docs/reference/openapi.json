@@ -1772,6 +1772,30 @@
         "title": "CreateProposalRequest",
         "type": "object"
       },
+      "CreateReleaseRequest": {
+        "properties": {
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "CreateReleaseRequest",
+        "type": "object"
+      },
       "CreateRunRequest": {
         "description": "Body for ``POST /v1/runs``.",
         "properties": {
@@ -5717,6 +5741,169 @@
           "nodeId"
         ],
         "title": "RealizeHierarchyNodeResponse",
+        "type": "object"
+      },
+      "ReleaseDiff": {
+        "properties": {
+          "bom_delta": {
+            "title": "Bom Delta",
+            "type": "integer"
+          },
+          "compared_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compared To"
+          },
+          "decision_delta": {
+            "title": "Decision Delta",
+            "type": "integer"
+          },
+          "evidence_delta": {
+            "title": "Evidence Delta",
+            "type": "integer"
+          },
+          "hierarchy_delta": {
+            "title": "Hierarchy Delta",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "compared_to",
+          "hierarchy_delta",
+          "bom_delta",
+          "evidence_delta",
+          "decision_delta"
+        ],
+        "title": "ReleaseDiff",
+        "type": "object"
+      },
+      "ReleasePackageListResponse": {
+        "properties": {
+          "releases": {
+            "items": {
+              "$ref": "#/components/schemas/ReleasePackageResponse"
+            },
+            "title": "Releases",
+            "type": "array"
+          }
+        },
+        "required": [
+          "releases"
+        ],
+        "title": "ReleasePackageListResponse",
+        "type": "object"
+      },
+      "ReleasePackageResponse": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "diff_from_previous": {
+            "$ref": "#/components/schemas/ReleaseDiff"
+          },
+          "gate_status": {
+            "title": "Gate Status",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ReleaseSnapshot"
+          },
+          "statement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "node_id",
+          "snapshot",
+          "diff_from_previous",
+          "gate_status"
+        ],
+        "title": "ReleasePackageResponse",
+        "type": "object"
+      },
+      "ReleaseSnapshot": {
+        "properties": {
+          "bom_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bom Item Ids",
+            "type": "array"
+          },
+          "decision_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Decision Ids",
+            "type": "array"
+          },
+          "drawing_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Drawing Ids",
+            "type": "array"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "hierarchy_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hierarchy Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hierarchy_node_ids",
+          "bom_item_ids",
+          "evidence_ids",
+          "decision_ids",
+          "drawing_ids"
+        ],
+        "title": "ReleaseSnapshot",
         "type": "object"
       },
       "RequiredClaimResultView": {
@@ -12828,6 +13015,87 @@
         "summary": "Attempt Promotion Route",
         "tags": [
           "promotion"
+        ]
+      }
+    },
+    "/v1/releases": {
+      "get": {
+        "operationId": "list_releases_v1_releases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleasePackageListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Releases",
+        "tags": [
+          "releases"
+        ]
+      },
+      "post": {
+        "operationId": "create_release_v1_releases_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReleaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleasePackageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Release",
+        "tags": [
+          "releases"
         ]
       }
     },
