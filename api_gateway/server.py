@@ -774,6 +774,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.routes import workflow as approval_workflow
     from api_gateway.requirement_intelligence.promotion import attempt_promotion
     from api_gateway.runs.launcher import make_run_launcher
+    from api_gateway.twin.baseline import make_baseline_creator
     from api_gateway.twin.blob_stager import make_blob_stager
     from api_gateway.twin.calibration import (
         make_calibrated_band_lookup,
@@ -962,6 +963,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     release_package_lister_fn = make_release_package_lister(twin)
 
+    # FORGE-405: a real gateway/MCP-reachable way to create a Baseline --
+    # follow-up to FORGE-299, which found the G8 release gate's
+    # "configuration baseline fixed" check could never pass on a real
+    # project because nothing ever called the pre-existing
+    # twin_core.transactions.baseline.create_baseline.
+    baseline_creator_fn = make_baseline_creator(twin)
+
     # FORGE-265: requirement-driven component selection -- hoisted to a
     # named variable (unlike every other component_recorder use, which is
     # constructed inline at the TwinServer(...) call site below) so this
@@ -1146,6 +1154,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         component_selector=component_selector_fn,
         # FORGE-299: versioned release-package snapshot, gated on G8 (gap G-I3).
         release_package_creator=release_package_creator_fn,
+        # FORGE-405: baseline creation, so G8's baseline check is satisfiable.
+        baseline_creator=baseline_creator_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)

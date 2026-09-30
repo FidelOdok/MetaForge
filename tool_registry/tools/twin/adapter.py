@@ -128,6 +128,7 @@ class TwinServer(McpToolServer):
         concept_selector: Any = None,
         component_selector: Any = None,
         release_package_creator: Any = None,
+        baseline_creator: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -370,6 +371,16 @@ class TwinServer(McpToolServer):
         # seam as every recorder above; None keeps tool_registry free of
         # api_gateway imports.
         self._release_package_creator = release_package_creator
+        # FORGE-405: an injected async ``create(*, project_id, approved_by,
+        # reason, name=None) -> dict`` (make_baseline_creator) -- wraps the
+        # real, pre-existing ``twin_core.transactions.baseline.
+        # create_baseline`` (auto-discovering the project's constraints +
+        # engineering entities as members) so G8's "configuration baseline
+        # fixed" check, and FORGE-299's release_package creation, have a
+        # real way to become satisfiable outside unit tests. Same
+        # injection seam as every recorder above; None keeps tool_registry
+        # free of twin_core.transactions imports.
+        self._baseline_creator = baseline_creator
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -451,6 +462,8 @@ class TwinServer(McpToolServer):
             self._register_select_component()
         if release_package_creator is not None:
             self._register_create_release_package()
+        if baseline_creator is not None:
+            self._register_create_baseline()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4406,6 +4419,89 @@ class TwinServer(McpToolServer):
         return await self._release_package_creator(
             project_id=project_id,
             notes=notes if isinstance(notes, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.create_baseline (FORGE-405, follow-up to FORGE-299)
+    # ------------------------------------------------------------------
+
+    def _register_create_baseline(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.create_baseline",
+                adapter_id="twin",
+                name="Create Baseline",
+                description=(
+                    "Creates an agreed, approved reference configuration: pins "
+                    "the current revision of every Constraint and "
+                    "EngineeringEntity currently recorded for the project, and "
+                    "advances each one's authority to 'baselined'. Real "
+                    "optimistic-concurrency guarantee -- if any member changed "
+                    "underneath this call, nothing is created and the conflict "
+                    "is reported. This is the 'configuration baseline fixed' "
+                    "check twin_core.consistency.gates.evaluate_g8_release "
+                    "requires (and, through it, twin.create_release_package) -- "
+                    "a project with zero baselines can never pass G8."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project whose constraints/entities to baseline.",
+                        },
+                        "approved_by": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Who approved this baseline (at least one name).",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Why this baseline is being created now.",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": ("Optional label. Defaults to 'Baseline <timestamp>'."),
+                        },
+                    },
+                    "required": ["project_id", "approved_by", "reason"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "member_count": {"type": "integer"},
+                        "constraint_count": {"type": "integer"},
+                        "entity_count": {"type": "integer"},
+                        "approved_by": {"type": "array", "items": {"type": "string"}},
+                        "reason": {"type": "string"},
+                        "created_at": {"type": "string"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.create_baseline,
+        )
+
+    async def create_baseline(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_id = arguments.get("project_id")
+        if not project_id or not isinstance(project_id, str):
+            raise ValueError("twin.create_baseline: 'project_id' is required")
+        approved_by = arguments.get("approved_by")
+        if not approved_by or not isinstance(approved_by, list):
+            raise ValueError("twin.create_baseline: 'approved_by' is required (non-empty array)")
+        reason = arguments.get("reason")
+        if not reason or not isinstance(reason, str):
+            raise ValueError("twin.create_baseline: 'reason' is required")
+        name = arguments.get("name")
+        return await self._baseline_creator(
+            project_id=project_id,
+            approved_by=[str(a) for a in approved_by],
+            reason=reason,
+            name=name if isinstance(name, str) else None,
         )
 
     # ------------------------------------------------------------------
