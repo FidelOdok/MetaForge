@@ -10,14 +10,23 @@ import structlog
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
-from tool_registry.tools.cadquery.materials import resolve_density_kg_m3, resolve_elastic_properties
+from tool_registry.tools.cadquery.materials import (
+    resolve_density_kg_m3,
+    resolve_elastic_properties,
+    resolve_thermal_conductivity_w_mk,
+)
 from tool_registry.tools.calculix.accuracy import (
     check_mesh_convergence,
     cross_check_cantilever_bending,
     cross_check_cantilever_frequency,
+    cross_check_thermal_steady_state,
 )
 from tool_registry.tools.calculix.config import CalculixConfig
-from tool_registry.tools.calculix.deck_builder import build_modal_deck, build_static_stress_deck
+from tool_registry.tools.calculix.deck_builder import (
+    build_modal_deck,
+    build_static_stress_deck,
+    build_thermal_deck,
+)
 from tool_registry.tools.calculix.inp_mesh import MeshData, parse_mesh_inp
 from tool_registry.tools.calculix.result_parser import (
     extract_results,
@@ -100,13 +109,14 @@ def _fixed_node_set_span_warning(mesh: MeshData, fixed_node_set: str) -> str | N
 class CalculixServer(McpToolServer):
     """CalculiX FEA tool adapter.
 
-    Provides eight tools:
+    Provides nine tools:
     - calculix.run_fea: static-stress or modal (FORGE-281) FEA analysis
     - calculix.extract_results: parse existing .frd result files
-    - calculix.run_thermal: thermal analysis (steady-state/transient)
+    - calculix.run_thermal: steady-state conduction thermal analysis (FORGE-282)
     - calculix.validate_mesh: validate mesh quality
     - calculix.cross_check_cantilever_beam: hand-calc stress cross-check
     - calculix.cross_check_cantilever_frequency: hand-calc frequency cross-check
+    - calculix.cross_check_thermal_steady_state: hand-calc peak-temperature cross-check (FORGE-282)
     - calculix.check_mesh_convergence: compare results across element sizes
     - calculix.compute_joint_loads: quasi-static joint reaction loads (FORGE-283)
     """
@@ -261,27 +271,91 @@ class CalculixServer(McpToolServer):
                 tool_id="calculix.run_thermal",
                 adapter_id="calculix",
                 name="Run Thermal Analysis",
-                description="Execute thermal analysis using CalculiX solver",
+                description=(
+                    "Steady-state conduction thermal analysis using CalculiX (FORGE-282). "
+                    "Models a real heat source (e.g. a BOM component's known power "
+                    "dissipation -- this adapter has no Twin access, so the caller "
+                    "resolves the component's specifications.powerDissipationW itself "
+                    "and passes the raw wattage here) conducting through the part to a "
+                    "fixed-temperature sink (e.g. a chassis/heatsink mount held near-"
+                    "ambient). Deliberately conduction-only -- no convective (*FILM) "
+                    "boundary to open air, since that needs exposed element-face "
+                    "geometry this mesh-handling codebase doesn't derive anywhere yet; "
+                    "see calculix.cross_check_thermal_steady_state for a hand-calc "
+                    "sanity check against the exact same fixed-sink model."
+                ),
                 capability="thermal_analysis",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "mesh_file": {"type": "string", "description": _MESH_FILE_DESCRIPTION},
-                        "boundary_conditions": {"type": "object"},
                         "analysis_mode": {
                             "type": "string",
                             "enum": ["steady_state", "transient"],
+                            "description": (
+                                "Only 'steady_state' is implemented. 'transient' is "
+                                "accepted in the schema for forward compatibility but "
+                                "raises -- there is no time-stepping deck builder yet."
+                            ),
+                        },
+                        "material": {
+                            "type": "object",
+                            "description": (
+                                "Required. {'name': <materials.py name, e.g. 'steel'/"
+                                "'aluminum_6061'>} or explicit "
+                                "{'thermal_conductivity_w_mk': ...} (SI W/(m*K), NOT "
+                                "the mesh's mm-consistent W/(mm*K) -- converted "
+                                "internally)."
+                            ),
+                            "properties": {
+                                "name": {"type": "string"},
+                                "thermal_conductivity_w_mk": {"type": "number"},
+                            },
+                        },
+                        "heat_source_node_set": {
+                            "type": "string",
+                            "description": (
+                                "Element set name (from freecad.generate_mesh's own "
+                                "mesh) where power_dissipation_w is applied, e.g. the "
+                                "component's mounting face."
+                            ),
+                        },
+                        "power_dissipation_w": {
+                            "type": "number",
+                            "description": (
+                                "TOTAL heat generation in Watts, distributed evenly "
+                                "across heat_source_node_set's nodes."
+                            ),
+                        },
+                        "sink_node_set": {
+                            "type": "string",
+                            "description": (
+                                "Element set name held at a fixed sink_temp_c (e.g. a "
+                                "chassis/heatsink mounting face) -- the boundary heat "
+                                "conducts away through."
+                            ),
+                        },
+                        "sink_temp_c": {
+                            "type": "number",
+                            "description": "Fixed temperature (Celsius) of sink_node_set.",
                         },
                     },
-                    "required": ["mesh_file", "boundary_conditions"],
+                    "required": [
+                        "mesh_file",
+                        "material",
+                        "heat_source_node_set",
+                        "power_dissipation_w",
+                        "sink_node_set",
+                        "sink_temp_c",
+                    ],
                 },
                 output_schema={
                     "type": "object",
                     "properties": {
-                        "max_temperature": {"type": "number"},
-                        "min_temperature": {"type": "number"},
-                        "temperature_distribution": {"type": "object"},
+                        "max_temperature_c": {"type": "number"},
+                        "min_temperature_c": {"type": "number"},
                         "solver_time": {"type": "number"},
+                        "frd_path": {"type": "string"},
                     },
                 },
                 phase=1,
@@ -519,6 +593,84 @@ class CalculixServer(McpToolServer):
                 resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=5),
             ),
             handler=self.handle_cross_check_cantilever_frequency,
+        )
+
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="calculix.cross_check_thermal_steady_state",
+                adapter_id="calculix",
+                name="Cross-Check Thermal Steady State",
+                description=(
+                    "1D steady-state conduction hand calc (FORGE-282) -- the thermal "
+                    "sibling of calculix.cross_check_cantilever_beam, same one-"
+                    "textbook-case discipline, for the exact fixed-temperature-sink "
+                    "model calculix.run_thermal solves (no convection). Compares "
+                    "against a thermal FEA run's own peak temperature within a "
+                    "tolerance."
+                ),
+                capability="accuracy_check",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "conduction_length_mm": {
+                            "type": "number",
+                            "description": "Straight-line distance, heat source to sink, mm.",
+                        },
+                        "cross_section_area_mm2": {
+                            "type": "number",
+                            "description": "Cross-sectional area of the conduction path, mm^2.",
+                        },
+                        "thermal_conductivity_w_mk": {
+                            "type": "number",
+                            "description": "Material thermal conductivity, SI W/(m*K).",
+                        },
+                        "power_dissipation_w": {
+                            "type": "number",
+                            "description": "Total heat generation, Watts.",
+                        },
+                        "sink_temp_c": {
+                            "type": "number",
+                            "description": "Fixed sink temperature, Celsius.",
+                        },
+                        "fea_peak_temp_c": {
+                            "type": "number",
+                            "description": (
+                                "The thermal FEA run's own max nodal temperature, "
+                                "Celsius, to check."
+                            ),
+                        },
+                        "tolerance_pct": {
+                            "type": "number",
+                            "default": 20.0,
+                            "description": (
+                                "Max allowed percent difference between the hand calc "
+                                "and the FEA number before flagging a mismatch."
+                            ),
+                        },
+                    },
+                    "required": [
+                        "conduction_length_mm",
+                        "cross_section_area_mm2",
+                        "thermal_conductivity_w_mk",
+                        "power_dissipation_w",
+                        "sink_temp_c",
+                        "fea_peak_temp_c",
+                    ],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "hand_calc_peak_temp_c": {"type": "number"},
+                        "fea_peak_temp_c": {"type": "number"},
+                        "percent_difference": {"type": "number"},
+                        "tolerance_pct": {"type": "number"},
+                        "within_tolerance": {"type": "boolean"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=64, max_cpu_seconds=5),
+            ),
+            handler=self.handle_cross_check_thermal_steady_state,
         )
 
         self.register_tool(
@@ -890,6 +1042,40 @@ class CalculixServer(McpToolServer):
             span.set_attribute("calculix.within_tolerance", result["within_tolerance"])
             return result
 
+    async def handle_cross_check_thermal_steady_state(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """1D steady-state conduction cross-check for a fixed-temperature
+        sink (FORGE-282)."""
+        required = (
+            "conduction_length_mm",
+            "cross_section_area_mm2",
+            "thermal_conductivity_w_mk",
+            "power_dissipation_w",
+            "sink_temp_c",
+            "fea_peak_temp_c",
+        )
+        missing = [name for name in required if arguments.get(name) is None]
+        if missing:
+            raise ValueError(f"Missing required field(s): {', '.join(missing)}")
+
+        with tracer.start_as_current_span("calculix.cross_check_thermal_steady_state") as span:
+            try:
+                result = cross_check_thermal_steady_state(
+                    conduction_length_mm=float(arguments["conduction_length_mm"]),
+                    cross_section_area_mm2=float(arguments["cross_section_area_mm2"]),
+                    thermal_conductivity_w_mk=float(arguments["thermal_conductivity_w_mk"]),
+                    power_dissipation_w=float(arguments["power_dissipation_w"]),
+                    sink_temp_c=float(arguments["sink_temp_c"]),
+                    fea_peak_temp_c=float(arguments["fea_peak_temp_c"]),
+                    tolerance_pct=float(arguments.get("tolerance_pct", 20.0)),
+                )
+            except ValueError as exc:
+                span.record_exception(exc)
+                raise
+            span.set_attribute("calculix.within_tolerance", result["within_tolerance"])
+            return result
+
     async def handle_check_mesh_convergence(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Compare max stress across already-run element sizes for convergence."""
         points = arguments.get("points")
@@ -962,19 +1148,69 @@ class CalculixServer(McpToolServer):
             }
 
     async def run_thermal(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Execute CalculiX thermal analysis."""
+        """Execute CalculiX steady-state conduction thermal analysis (FORGE-282).
+
+        Validates arguments and delegates to _execute_thermal_solver().
+        """
         mesh_file = arguments.get("mesh_file", "")
-        boundary_conditions = arguments.get("boundary_conditions", {})
         analysis_mode = arguments.get("analysis_mode", "steady_state")
 
         if not mesh_file:
             raise ValueError("mesh_file is required")
-        if not boundary_conditions:
-            raise ValueError("boundary_conditions is required")
+        if analysis_mode != "steady_state":
+            raise ValueError(
+                f"calculix.run_thermal: analysis_mode={analysis_mode!r} is not "
+                "implemented -- only 'steady_state' has a real deck builder. There "
+                "is no time-stepping (*HEAT TRANSFER without STEADY STATE) deck "
+                "builder yet."
+            )
 
-        logger.info("Running thermal analysis", mesh_file=mesh_file, mode=analysis_mode)
+        material = arguments.get("material")
+        heat_source_node_set = arguments.get("heat_source_node_set")
+        power_dissipation_w = arguments.get("power_dissipation_w")
+        sink_node_set = arguments.get("sink_node_set")
+        sink_temp_c = arguments.get("sink_temp_c")
+        missing = [
+            name
+            for name, value in (
+                ("material", material),
+                ("heat_source_node_set", heat_source_node_set),
+                ("power_dissipation_w", power_dissipation_w),
+                ("sink_node_set", sink_node_set),
+                ("sink_temp_c", sink_temp_c),
+            )
+            if value is None or value == ""
+        ]
+        if missing:
+            raise ValueError(
+                f"calculix.run_thermal: {', '.join(missing)} required -- there is no "
+                "default material or boundary condition to build a real thermal "
+                "deck around."
+            )
+        if not isinstance(material, dict):
+            raise ValueError("calculix.run_thermal: 'material' must be an object")
+        conductivity_w_mk = resolve_thermal_conductivity_w_mk(
+            material=material.get("name"),
+            thermal_conductivity_w_mk=material.get("thermal_conductivity_w_mk"),
+        )
+        deck_spec = {
+            # FORGE-282: W/(m*K) -> W/(mm*K) -- see build_thermal_deck's own
+            # docstring for why this conversion can't be skipped.
+            "conductivity_w_mm_k": conductivity_w_mk * 1e-3,
+            "heat_source_node_set": heat_source_node_set,
+            "power_dissipation_w": float(power_dissipation_w),
+            "sink_node_set": sink_node_set,
+            "sink_temp_c": float(sink_temp_c),
+        }
 
-        result = await self._execute_thermal_solver(mesh_file, boundary_conditions, analysis_mode)
+        logger.info(
+            "Running thermal analysis",
+            mesh_file=mesh_file,
+            mode=analysis_mode,
+            deck_spec=deck_spec,
+        )
+
+        result = await self._execute_thermal_solver(mesh_file, deck_spec)
         return result
 
     async def validate_mesh(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1106,21 +1342,28 @@ class CalculixServer(McpToolServer):
     async def _execute_thermal_solver(
         self,
         mesh_file: str,
-        boundary_conditions: dict[str, Any],
-        analysis_mode: str,
+        deck_spec: dict[str, Any],
     ) -> dict[str, Any]:
-        """Execute CalculiX thermal solver.
+        """Execute CalculiX steady-state conduction thermal solver (FORGE-282).
 
-        Thermal analysis uses the same ccx binary with different .inp configuration.
-        This method is designed to be easily mockable in tests.
+        Same "mesh_file is topology-only, build a real deck around it first"
+        shape as ``_execute_solver`` -- see that method's own docstring; the
+        FORGE-232 "no .frd at all" empty-result check applies identically
+        here.
         """
         with tracer.start_as_current_span("calculix.execute_thermal_solver") as span:
             span.set_attribute("calculix.mesh_file", mesh_file)
-            span.set_attribute("calculix.analysis_mode", analysis_mode)
 
             try:
+                mesh = parse_mesh_inp(mesh_file)
+                deck_text = build_thermal_deck(mesh, **deck_spec)
+                solved_path = Path(mesh_file).with_name(f"{Path(mesh_file).stem}_solved.inp")
+                solved_path.write_text(deck_text, encoding="utf-8")
+                solved_file = str(solved_path)
+                span.set_attribute("calculix.solved_file", solved_file)
+
                 solver_result = await solver_run_fea(
-                    mesh_file=mesh_file,
+                    mesh_file=solved_file,
                     load_case="thermal",
                     analysis_type="static_stress",  # ccx uses same binary
                     timeout=self.config.max_solve_time,
@@ -1128,24 +1371,29 @@ class CalculixServer(McpToolServer):
                     work_dir=self.config.work_dir,
                 )
 
-                # Parse nodal temperature (NDTEMP) results from .frd (FORGE-232:
-                # same "no result at all" cases as _execute_solver above).
+                # FORGE-232: same "no result at all" empty-result check as
+                # _execute_solver above.
                 frd_files = [f for f in solver_result.get("result_files", []) if f.endswith(".frd")]
                 if not frd_files:
                     raise SolverError(
                         "CalculiX exited successfully but produced no .frd result file -- "
-                        "nothing was actually solved."
+                        "nothing was actually solved (check the deck has a *STEP with a "
+                        "real heat source/sink and *NODE FILE output request)."
                     )
                 frd_path = frd_files[0]
                 parsed = parse_frd_file(frd_path)
                 temperature = parsed.get("temperature", {})
+                if not temperature.get("nodes"):
+                    raise SolverError(
+                        "CalculiX exited successfully and produced a .frd file, but it "
+                        "has no NDTEMP (temperature) block -- the thermal deck's *NODE "
+                        "FILE request must be missing NT."
+                    )
                 return {
-                    "max_temperature": temperature.get("max", 0.0),
-                    "min_temperature": temperature.get("min", 0.0),
-                    "temperature_distribution": temperature.get("nodes", {}),
+                    "max_temperature_c": temperature.get("max", 0.0),
+                    "min_temperature_c": temperature.get("min", 0.0),
                     "solver_time": solver_result["solver_time_s"],
                     "result_files": solver_result["result_files"],
-                    # FORGE-239: see _execute_solver's own comment.
                     "frd_path": frd_path,
                 }
 

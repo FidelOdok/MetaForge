@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tool_registry.tools.cadquery.materials import (
     DEFAULT_DENSITY_KG_M3,
     MATERIAL_DENSITY_KG_M3,
+    MATERIAL_THERMAL_CONDUCTIVITY_W_MK,
     resolve_density_kg_m3,
+    resolve_thermal_conductivity_w_mk,
 )
 
 
@@ -29,3 +33,30 @@ class TestResolveDensity:
     def test_every_table_entry_is_a_positive_finite_density(self):
         for name, density in MATERIAL_DENSITY_KG_M3.items():
             assert density > 0, f"{name} has a non-positive density"
+
+
+class TestResolveThermalConductivity:
+    def test_known_material_name(self):
+        assert resolve_thermal_conductivity_w_mk("steel") == 50.0
+
+    def test_case_and_separator_insensitive(self):
+        assert resolve_thermal_conductivity_w_mk("Aluminum 6061") == 167.0
+        assert resolve_thermal_conductivity_w_mk("ALUMINUM-6061") == 167.0
+
+    def test_explicit_conductivity_overrides_material(self):
+        assert resolve_thermal_conductivity_w_mk("steel", thermal_conductivity_w_mk=1.0) == 1.0
+
+    def test_explicit_conductivity_alone_needs_no_material(self):
+        assert resolve_thermal_conductivity_w_mk(thermal_conductivity_w_mk=42.0) == 42.0
+
+    def test_unrecognized_material_raises(self):
+        with pytest.raises(ValueError, match="unknown material"):
+            resolve_thermal_conductivity_w_mk("unobtainium")
+
+    def test_missing_everything_raises(self):
+        with pytest.raises(ValueError, match="provide either"):
+            resolve_thermal_conductivity_w_mk()
+
+    def test_every_table_entry_is_a_positive_finite_conductivity(self):
+        for name, conductivity in MATERIAL_THERMAL_CONDUCTIVITY_W_MK.items():
+            assert conductivity > 0, f"{name} has a non-positive thermal conductivity"

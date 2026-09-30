@@ -1,6 +1,6 @@
 """FEA accuracy controls (FORGE-280).
 
-Three independent checks, each usable on its own:
+Independent checks, each usable on its own:
 
 - ``assess_stress_accuracy``: flags a likely stress-concentration/BC
   artifact from a single ``extract_results`` call's own nodal stress
@@ -9,6 +9,11 @@ Three independent checks, each usable on its own:
   textbook case (a beam check FORGE-239 caught manually, see that ticket's
   own note on this gap) -- compares an FEA max stress against the
   analytical answer within a tolerance.
+- ``cross_check_cantilever_frequency`` (FORGE-281): the modal sibling of
+  the above, a closed-form first-bending-mode natural frequency.
+- ``cross_check_thermal_steady_state`` (FORGE-282): a 1D steady-state
+  conduction hand calc (the thermal sibling of the beam check), for the
+  same fixed-temperature-sink model ``build_thermal_deck`` solves.
 - ``check_mesh_convergence``: given results from the same analysis run at
   two or more element sizes (the caller runs ``calculix.run_fea`` itself at
   each size -- this does not orchestrate that sweep), reports whether
@@ -200,6 +205,79 @@ def cross_check_cantilever_frequency(
     return {
         "hand_calc_first_mode_hz": round(hand_calc_hz, 3),
         "fea_first_mode_hz": fea_first_mode_hz,
+        "percent_difference": round(percent_difference, 1),
+        "tolerance_pct": tolerance_pct,
+        "within_tolerance": within_tolerance,
+    }
+
+
+def cross_check_thermal_steady_state(
+    conduction_length_mm: float,
+    cross_section_area_mm2: float,
+    thermal_conductivity_w_mk: float,
+    power_dissipation_w: float,
+    sink_temp_c: float,
+    fea_peak_temp_c: float,
+    tolerance_pct: float = 20.0,
+) -> dict[str, Any]:
+    """1D steady-state conduction hand calc -- the thermal sibling of
+    :func:`cross_check_cantilever_bending` (FORGE-282).
+
+    T_peak = T_sink + Q * L / (k * A), the standard thermal-resistance
+    formula (R = L / (k*A), the same conduction-resistance analogy an
+    electrical-resistance calc uses) for heat Q flowing a straight-line
+    path of length L and cross-sectional area A through a material of
+    conductivity k -- the exact model :func:`~tool_registry.tools.calculix.
+    deck_builder.build_thermal_deck` solves (a fixed-temperature sink, no
+    convection). ``thermal_conductivity_w_mk`` is the ordinary SI W/(m*K)
+    value (same convert-once-at-the-call-site convention as
+    ``resolve_thermal_conductivity_w_mk`` -- converted internally here to
+    W/(mm*K)).
+
+    Deliberately narrow -- one well-understood textbook case (uniform
+    straight conduction path, no convection), not a general thermal
+    solver, matching the same one-case discipline as
+    :func:`cross_check_cantilever_bending`/:func:`cross_check_cantilever_
+    frequency`. It assumes the part's own conduction resistance dominates
+    (i.e. this is the SAME idealization ``build_thermal_deck`` itself
+    makes -- a fixed-temperature sink, not a convective one), so this
+    check validates the FEA result against the deck's own model, not
+    against a real open-air convective boundary.
+    """
+    if conduction_length_mm <= 0:
+        raise ValueError("conduction_length_mm must be positive")
+    if cross_section_area_mm2 <= 0:
+        raise ValueError("cross_section_area_mm2 must be positive")
+    if thermal_conductivity_w_mk <= 0:
+        raise ValueError("thermal_conductivity_w_mk must be positive")
+    if tolerance_pct <= 0:
+        raise ValueError("tolerance_pct must be positive")
+
+    conductivity_w_mm_k = thermal_conductivity_w_mk * 1e-3
+    thermal_resistance_k_per_w = conduction_length_mm / (
+        conductivity_w_mm_k * cross_section_area_mm2
+    )
+    temp_rise_c = power_dissipation_w * thermal_resistance_k_per_w
+    hand_calc_peak_temp_c = sink_temp_c + temp_rise_c
+
+    temp_rise_from_sink = fea_peak_temp_c - sink_temp_c
+    if temp_rise_c == 0:
+        percent_difference = 0.0 if temp_rise_from_sink == 0 else float("inf")
+    else:
+        percent_difference = abs(temp_rise_from_sink - temp_rise_c) / abs(temp_rise_c) * 100
+    within_tolerance = percent_difference <= tolerance_pct
+
+    logger.info(
+        "thermal_steady_state_cross_check",
+        hand_calc_peak_temp_c=round(hand_calc_peak_temp_c, 2),
+        fea_peak_temp_c=fea_peak_temp_c,
+        percent_difference=round(percent_difference, 1),
+        within_tolerance=within_tolerance,
+    )
+
+    return {
+        "hand_calc_peak_temp_c": round(hand_calc_peak_temp_c, 2),
+        "fea_peak_temp_c": fea_peak_temp_c,
         "percent_difference": round(percent_difference, 1),
         "tolerance_pct": tolerance_pct,
         "within_tolerance": within_tolerance,

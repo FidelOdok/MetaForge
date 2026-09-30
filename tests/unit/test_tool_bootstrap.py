@@ -218,12 +218,13 @@ class TestBootstrapToolRegistry:
         calculix.cross_check_cantilever_beam + calculix.check_mesh_
         convergence for 82. FORGE-281 adds
         calculix.cross_check_cantilever_frequency for 83. FORGE-283 adds
-        calculix.compute_joint_loads for 84.
+        calculix.compute_joint_loads for 84. FORGE-282 adds
+        calculix.cross_check_thermal_steady_state for 85.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 84
+        assert len(tools) == 85
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

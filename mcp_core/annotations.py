@@ -44,6 +44,7 @@ READ_ONLY: frozenset[str] = frozenset(
         "calculix.compute_joint_loads",
         "calculix.cross_check_cantilever_beam",
         "calculix.cross_check_cantilever_frequency",
+        "calculix.cross_check_thermal_steady_state",
         "calculix.extract_results",
         "calculix.validate_mesh",
         "gazebo.extract_results",

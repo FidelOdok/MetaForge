@@ -1869,6 +1869,7 @@ The `global_asset_id` property on `BOMItem`, `DeviceInstance`, and `TwinModel` f
 | `reachCompliance` | Enum | Digital Nameplate | `"compliant"` / `"not-assessed"` |
 | `customsTariffNumber` | String | Digital Nameplate | `"8542.31"` |
 | `weightGrams` | Float | Technical Data | `2.5` |
+| `powerDissipationW` | Float | Technical Data | `4.5` (FORGE-282: an actuator/component's known continuous power dissipation, watts — `calculix.run_thermal` has no Twin access itself, so the caller reads this key and passes the raw wattage as `power_dissipation_w`) |
 
 ### A.3 `DesignElement.parameters` Recommended Keys
 

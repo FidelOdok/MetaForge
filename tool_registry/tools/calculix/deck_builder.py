@@ -187,6 +187,138 @@ def build_static_stress_deck(
     return "\n".join(lines) + "\n"
 
 
+def build_thermal_deck(
+    mesh: MeshData,
+    *,
+    conductivity_w_mm_k: float,
+    heat_source_node_set: str,
+    power_dissipation_w: float,
+    sink_node_set: str,
+    sink_temp_c: float,
+    volume_elset: str = "Volume1",
+) -> str:
+    """Return a complete, solvable CalculiX steady-state conduction deck
+    (FORGE-282, gap G-F6) -- same "real cards around the mesh's volume
+    elements only" shape as :func:`build_static_stress_deck`/
+    :func:`build_modal_deck`, but a ``*HEAT TRANSFER, STEADY STATE`` step:
+    ``*CONDUCTIVITY`` instead of ``*ELASTIC``/``*DENSITY``, a ``*CFLUX``
+    heat source (the thermal sibling of ``*CLOAD``, DOF 11 = temperature)
+    instead of ``*CLOAD``, and a fixed-temperature ``*BOUNDARY`` (DOF 11)
+    instead of a fixed-displacement one (DOF 1-3).
+
+    This is deliberately a CONDUCTION-only model: ``sink_node_set`` is held
+    at a fixed ``sink_temp_c`` (e.g. a bracket bolted to a chassis/heatsink
+    held near-ambient by a much larger thermal mass), and heat flows from
+    ``heat_source_node_set`` to it purely by conduction through the part.
+    A convective (``*FILM``) boundary condition to open air is explicitly
+    NOT built here -- CalculiX's ``*FILM`` card is specified per element
+    FACE (or a ``*SURFACE`` group of faces), and nothing in this mesh-
+    handling codebase derives exposed element faces from a mesh today (every
+    existing deck builder only ever references node sets from gmsh's own
+    per-STEP-face named elsets, e.g. ``Surface1``) -- deriving real exposed-
+    face geometry is a separate, more novel piece of work than this
+    function's scope. A fixed-temperature sink is a real, well-precedented
+    simplification (the same "one well-understood case" discipline
+    :func:`build_static_stress_deck`'s own module docstring describes), not
+    a stand-in for a convective model.
+
+    ``conductivity_w_mm_k`` -- CalculiX has no built-in unit system, and the
+    mm+N+MPa consistent triple the static/modal decks use extends naturally
+    to a length-cubed-free thermal quantity: conductivity's SI unit
+    W/(m*K) becomes W/(mm*K) by multiplying by 1e-3 (1/m = 1e-3/mm). Getting
+    this wrong doesn't fail loudly -- it just reports a confidently wrong
+    peak temperature, off by exactly 1e3x (a length-unit error, not
+    length-cubed like the modal deck's density conversion, since
+    conductivity is a "per length" quantity, not "per volume"). Callers
+    should use :func:`tool_registry.tools.cadquery.materials.
+    resolve_thermal_conductivity_w_mk` and convert once at the call site,
+    not duplicate the constant.
+
+    ``power_dissipation_w`` -- a TOTAL heat generation (Watts) distributed
+    EVENLY across every node in ``heat_source_node_set`` (one ``*CFLUX``
+    line per node, each already divided by the node count) -- same
+    total-divided-per-node discipline as ``load_force_n`` in
+    :func:`build_static_stress_deck` (applying it via the node SET name
+    directly would multiply the effective total power by the node count).
+    Watts needs no unit-system conversion here -- like Newtons in the
+    static deck, it's an extensive SI base-compatible quantity independent
+    of the mesh's chosen length unit.
+
+    Same argument-validation contract as :func:`build_static_stress_deck`
+    (unknown volume_elset/node sets, empty node sets, no real volume
+    elements) -- see that function's docstring.
+    """
+    if volume_elset not in mesh.elsets:
+        raise ValueError(
+            f"build_thermal_deck: no element set {volume_elset!r} in this mesh -- "
+            f"available element sets: {sorted(mesh.elsets)}"
+        )
+    heat_source_nodes = mesh.node_ids_for_elset(heat_source_node_set)
+    sink_nodes = mesh.node_ids_for_elset(sink_node_set)
+    if not heat_source_nodes:
+        raise ValueError(f"build_thermal_deck: {heat_source_node_set!r} has no nodes")
+    if not sink_nodes:
+        raise ValueError(f"build_thermal_deck: {sink_node_set!r} has no nodes")
+
+    volume_by_type: dict[str, list[int]] = {}
+    for element_id in mesh.elsets[volume_elset]:
+        etype, _node_ids = mesh.elements[element_id]
+        if etype.startswith(_VOLUME_ELEMENT_PREFIXES):
+            volume_by_type.setdefault(etype, []).append(element_id)
+    if not volume_by_type:
+        raise ValueError(
+            f"build_thermal_deck: element set {volume_elset!r} has no volume (C3D*) "
+            f"elements -- nothing for a thermal solve to act on"
+        )
+    kept_node_ids: set[int] = set()
+    for element_ids in volume_by_type.values():
+        for element_id in element_ids:
+            kept_node_ids.update(mesh.elements[element_id][1])
+    missing = (set(heat_source_nodes) | set(sink_nodes)) - kept_node_ids
+    if missing:
+        raise ValueError(
+            f"build_thermal_deck: {len(missing)} node(s) in "
+            f"{heat_source_node_set!r}/{sink_node_set!r} aren't part of any kept "
+            f"volume element -- e.g. {sorted(missing)[:5]} -- the mesh may be "
+            "inconsistent"
+        )
+
+    sink_nset = f"SINK_{sink_node_set}"
+    n = len(heat_source_nodes)
+    power_per_node = power_dissipation_w / n
+
+    lines: list[str] = ["*Heading", " MetaForge FORGE-282 steady-state thermal deck", "*NODE"]
+    for node_id in sorted(kept_node_ids):
+        x, y, z = mesh.nodes[node_id]
+        lines.append(f"{node_id}, {_fmt(x)}, {_fmt(y)}, {_fmt(z)}")
+
+    for etype, element_ids in volume_by_type.items():
+        lines.append(f"*ELEMENT, TYPE={etype}, ELSET={volume_elset}")
+        for element_id in element_ids:
+            _etype, node_ids = mesh.elements[element_id]
+            lines.append(f"{element_id}, " + ", ".join(str(n) for n in node_ids))
+
+    lines.append(f"*NSET, NSET={sink_nset}")
+    lines.extend(_format_id_list(sink_nodes))
+
+    lines.append("*MATERIAL, NAME=MAT1")
+    lines.append("*CONDUCTIVITY")
+    lines.append(_fmt(conductivity_w_mm_k))
+    lines.append(f"*SOLID SECTION, ELSET={volume_elset}, MATERIAL=MAT1")
+    lines.append("*STEP")
+    lines.append("*HEAT TRANSFER, STEADY STATE")
+    lines.append("*BOUNDARY")
+    lines.append(f"{sink_nset}, 11, 11, {_fmt(sink_temp_c)}")
+    lines.append("*CFLUX")
+    for node_id in heat_source_nodes:
+        lines.append(f"{node_id}, 11, {_fmt(power_per_node)}")
+    lines.append("*NODE FILE")
+    lines.append("NT")
+    lines.append("*END STEP")
+
+    return "\n".join(lines) + "\n"
+
+
 def build_modal_deck(
     mesh: MeshData,
     *,
