@@ -11,6 +11,13 @@ from typing import Any
 import structlog
 
 from mcp_core.progress import ProgressEmitter, reset_emitter, set_emitter
+from mcp_core.protocol import (
+    INVALID_REQUEST,
+    METHOD_NOT_FOUND,
+    RESOURCE_NOT_FOUND,
+    RESOURCE_READ_ERROR,
+    TOOL_EXECUTION_ERROR,
+)
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import (
     ResourceManifestEntry,
@@ -35,12 +42,16 @@ from tool_registry.mcp_server.handlers import (
 logger = structlog.get_logger()
 tracer = get_tracer("tool_registry.mcp_server.server")
 
-# JSON-RPC error codes
-_INVALID_REQUEST = -32600
-_METHOD_NOT_FOUND = -32601
-_TOOL_EXECUTION_ERROR = -32001
-_RESOURCE_NOT_FOUND = -32004
-_RESOURCE_READ_ERROR = -32005
+# FORGE-388: the shared table. This was the third copy of these codes in
+# the repo, and it disagreed with the other two -- it emitted -32004 for a
+# missing resource while the spec (and now mcp_core.protocol) says -32002,
+# so the unified server could not tell an adapter's "not found" from any
+# other failure and flattened it into an execution error.
+_INVALID_REQUEST = INVALID_REQUEST
+_METHOD_NOT_FOUND = METHOD_NOT_FOUND
+_TOOL_EXECUTION_ERROR = TOOL_EXECUTION_ERROR
+_RESOURCE_NOT_FOUND = RESOURCE_NOT_FOUND
+_RESOURCE_READ_ERROR = RESOURCE_READ_ERROR
 
 
 class McpToolServer:
