@@ -62,6 +62,7 @@ from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
+from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
@@ -835,6 +836,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_release_package_creator,
         make_release_package_lister,
     )
+    from api_gateway.twin.repeatability import make_repeatability_estimator
     from api_gateway.twin.revalidation import make_revalidation_executor
     from api_gateway.twin.robot_description_recorder import (
         make_robot_description_recorder,
@@ -1042,6 +1044,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # fields twin_core.consistency.hierarchy_rollup (FORGE-390) already
     # computes; see api_gateway/twin/hierarchy_routes.py.
     harness_estimate_getter_fn = make_harness_estimate_getter(twin)
+
+    # FORGE-285 (gap G-F9): repeatability-estimate half of "controls
+    # validation" -- REST-only (mirrors geometry_diff's own pattern), not
+    # registered as an MCP tool/TwinServer collaborator, since it needs
+    # nothing beyond `twin`. The tracking-error/stability-margin half of
+    # the ticket is deliberately not built -- see
+    # api_gateway/twin/repeatability.py's module docstring.
+    repeatability_estimator_fn = make_repeatability_estimator(twin)
 
     # FORGE-265: requirement-driven component selection -- hoisted to a
     # named variable (unlike every other component_recorder use, which is
@@ -1342,6 +1352,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.harness_estimate_routes import init_harness_estimate
 
     init_harness_estimate(harness_estimate_getter_fn)
+    # FORGE-285: bind the repeatability-estimator getter to its REST route
+    # (api_gateway/twin/repeatability_routes.py) -- same locality rationale
+    # as harness_estimate above.
+    from api_gateway.twin.repeatability_routes import init_repeatability_estimate
+
+    init_repeatability_estimate(repeatability_estimator_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -1992,6 +2008,7 @@ def create_app(
     app.include_router(bringup_router)
     app.include_router(firmware_router)
     app.include_router(harness_estimate_router)
+    app.include_router(repeatability_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:
