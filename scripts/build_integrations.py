@@ -69,7 +69,10 @@ def stdio_plugin_manifest() -> dict:
     manifest["mcpServers"] = {
         "metaforge": {
             "command": "metaforge-mcp",
-            "args": ["--transport", "stdio"],
+            # FORGE-410: stdio has no URL to hang `?profile=` on, so the cap
+            # comes from the flag. Same 30-tool set either way; edit or remove
+            # this to load everything.
+            "args": ["--transport", "stdio", "--profile", "core"],
             "env": {
                 # Without a collector listening, the OTLP exporter retries on
                 # a timer and logs a connection failure every few seconds --
@@ -121,11 +124,37 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 ),
                 "sensitive": True,
             },
+            # FORGE-410: the deployment plugins connect to serves every tool it
+            # has -- 108 at the last count -- because it runs with no
+            # `--profile`. Claude Code copes by loading tools lazily; a harness
+            # with a hard cap truncates, and C1's whole point is that a profile
+            # is chosen rather than a list silently cut off.
+            #
+            # Per connection rather than per deployment, so one sidecar serves
+            # a capped set here and the dashboard's full set at the same time.
+            "tool_profile": {
+                "type": "string",
+                "title": "Tool profile",
+                "description": (
+                    "Which tool set to load: core (project, twin reads, decisions), "
+                    "mechanical, simulation, electronics or robotics. Each is 25-30 "
+                    "tools. Leave as core unless you are working in one discipline; "
+                    "every profile includes health.check so /metaforge:doctor always "
+                    "works. Clear it to load everything, which some harnesses will "
+                    "truncate without saying so."
+                ),
+                "default": "core",
+            },
         },
         "mcpServers": {
             "metaforge": {
                 "type": "http",
-                "url": "${user_config.gateway_url}",
+                # The profile rides on the URL because a plugin manifest has no
+                # way to pass a command-line flag. A gateway_url that already
+                # carries a query string makes this a no-op -- the server then
+                # sees no profile and serves everything, which is the previous
+                # behaviour rather than a failure.
+                "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}",
                 "headers": {"Authorization": "Bearer ${user_config.api_token}"},
             }
         },
@@ -400,7 +429,10 @@ def build_codex(*, default_gateway_url: str) -> Path:
         "# credential instead of as no credential.\n"
         "[[mcp_servers]]\n"
         'name = "metaforge"\n'
-        f'url  = "{default_gateway_url}"\n'
+        # FORGE-410: the same `?profile=core` as .mcp.json. These are two
+        # ways in to one gateway, and whichever the user did not take is the
+        # one that breaks when they drift.
+        f'url  = "{default_gateway_url}?profile=core"\n'
         '# authorization = "Bearer ${METAFORGE_MCP_API_KEY}"\n'
     )
 
@@ -449,7 +481,12 @@ def build_codex(*, default_gateway_url: str) -> Path:
             {
                 "mcpServers": {
                     "metaforge": {
-                        "url": default_gateway_url,
+                        # FORGE-410: `?profile=core` caps the served set at
+                        # ~30 tools. Codex has no userConfig equivalent, so
+                        # this is edited in place; removing the query loads
+                        # everything, which a harness with a hard cap will
+                        # truncate without saying so.
+                        "url": f"{default_gateway_url}?profile=core",
                     }
                 }
             },

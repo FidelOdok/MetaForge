@@ -43,15 +43,47 @@ capability does not exist.
 | `electronics` | 25 | Schematic and board checks, component search, sourcing |
 | `robotics` | 30 | Assemblies, URDF/SDF/USD export, simulators |
 
+Each profile also includes `health.check`, so `/metaforge:doctor` works on
+the connection most likely to need it — a capped one, on a harness that
+truncates.
+
+**Choose it per connection, on the URL** (FORGE-410):
+
+```
+http://localhost:8765/mcp?profile=mechanical
+```
+
+That is how the shipped plugin manifests ask for one: a manifest has no way
+to pass a command-line flag, and `--profile` is deployment-wide — one
+sidecar serves both a plugin and the dashboard chat, so shrinking it for one
+shrinks it for the other. The connection's own choice wins over the flag.
+
 ```bash
+# still available, as a deployment default
 python -m metaforge.mcp --transport http --profile mechanical
 ```
+
+The plugin packages set `core` out of the box: the HTTP plugin through a
+`tool_profile` user-config option, the stdio one through `--profile core`
+(no URL to hang a query on), and the Codex package in its `.mcp.json` and
+`config.toml` together. Without this, the deployment plugins connect to ran
+with no profile at all and served every tool it had.
 
 The sets live in `mcp_core/profiles.py` and are held between 20 and 40
 tools by a test rather than trimmed at runtime — a profile that outgrows
 its ceiling is a decision about what to drop, and silently dropping it is
-the failure profiles exist to prevent. An unknown profile name stops the
-server rather than falling back to serving everything.
+the failure profiles exist to prevent.
+
+An unknown profile name is refused, never resolved to "serve everything": a
+client that asked for a 30-tool set and silently received 108 has been
+handed the exact problem profiles exist to prevent. As a start-up flag it
+stops the server; as a URL parameter it is an `-32602` naming the profiles
+that do exist.
+
+`tools/list` reports `_meta.profile` with the profile's name, how many tools
+were served and which of its tools **no loaded adapter registers** — a
+profile that looks small because an adapter is disabled is a configuration
+problem, not a smaller profile.
 
 ### "No data" is not a pass
 
