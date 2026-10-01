@@ -68,7 +68,7 @@ from domain_agents.mechanical.agent import MechanicalAgent
 from observability.bootstrap import init_observability, shutdown_observability
 from observability.config import ObservabilityConfig, OtlpExporterConfig
 from observability.logging import configure_logging
-from observability.metrics import MetricsCollector, MetricsRegistry
+from observability.metrics import MetricsCollector, collector_for
 from observability.middleware import ObservabilityMiddleware
 from observability.tracing import get_tracer
 from orchestrator.dependency_engine import DependencyGraph
@@ -207,15 +207,14 @@ _otel_state = init_observability(_otel_config)
 
 
 def _create_collector() -> MetricsCollector:
-    """Create a MetricsCollector backed by a real OTel meter (or no-op)."""
-    if _otel_state.is_active and _otel_state.meter_provider is not None:
-        meter = _otel_state.meter_provider.get_meter("metaforge-gateway")
-        collector = MetricsCollector(meter=meter)
-        collector.create_instruments(MetricsRegistry.all_metrics())
-        logger.info("metrics_collector_initialized", instruments=len(MetricsRegistry.all_metrics()))
-        return collector
-    logger.info("metrics_collector_noop", reason="OTel SDK not available or disabled")
-    return MetricsCollector()
+    """Create a MetricsCollector backed by a real OTel meter (or no-op).
+
+    FORGE-413 moved the body to ``observability.metrics.collector_for`` so a
+    second entrypoint gets it by calling one function instead of by
+    remembering to reproduce it -- the MCP sidecar did not, and every MCP
+    metric had zero series as a result.
+    """
+    return collector_for("metaforge-gateway")
 
 
 # ---------------------------------------------------------------------------

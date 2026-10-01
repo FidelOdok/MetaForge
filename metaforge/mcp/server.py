@@ -1487,6 +1487,38 @@ class UnifiedMcpServer:
     #: hang turns one sick adapter into a sick gateway.
     _PROBE_TIMEOUT_SECONDS = 3.0
 
+    def _telemetry_report(self) -> dict[str, Any]:
+        """Is metric recording actually live on this server (FORGE-413)?
+
+        Three-valued for the same reason the code-version check is: a
+        collector that exists but publishes nowhere is not the same as one
+        that was never wired, and calling either "on" is the failure being
+        fixed.
+        """
+        if self._metrics is None:
+            return {
+                "metrics": "not configured",
+                "detail": (
+                    "No metrics collector was passed to this server, so every "
+                    "metaforge_mcp_* metric records nothing and the alert rules "
+                    "on them cannot fire. The entrypoint should pass "
+                    "metrics=collector_for(...)."
+                ),
+            }
+        recording = getattr(self._metrics, "is_recording", None)
+        if recording is False:
+            return {
+                "metrics": "no-op",
+                "detail": (
+                    "A collector is wired but has no OTel SDK meter behind it, "
+                    "so samples go nowhere. Check OTEL_EXPORTER_OTLP_ENDPOINT "
+                    "and that METAFORGE_OTEL_EXPORT is not 'off'."
+                ),
+            }
+        # `None` means a collaborator that predates `is_recording` (a test
+        # double); reported as unknown rather than asserted either way.
+        return {"metrics": "recording" if recording else "unknown"}
+
     def _client_report(self) -> dict[str, Any]:
         """Who is on the other end, and whether we speak the same protocol.
 
@@ -1644,6 +1676,11 @@ class UnifiedMcpServer:
                 else dict(UNKNOWN_AUTH)
             ),
             "client": self._client_report(),
+            # FORGE-413: whether anything this server records reaches
+            # Prometheus. It did not, for every MCP metric, and the only way
+            # to find out was to query Prometheus and get zero series back --
+            # which reads like a quiet system. Asking the doctor is cheaper.
+            "telemetry": self._telemetry_report(),
             # FORGE-371: a doctor that cannot say "links are off" leaves the
             # reader to conclude the tools simply never produce them.
             "dashboard_links": (

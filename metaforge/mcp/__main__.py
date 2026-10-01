@@ -49,6 +49,7 @@ from mcp_core.guardrails import Caller
 from mcp_core.protocol import AUTH_DENIED as AUTH_DENIED_CODE
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
+from observability.metrics import collector_for
 
 logger = structlog.get_logger("metaforge.mcp")
 
@@ -1409,9 +1410,19 @@ async def _bootstrap(
 
     approval_gate = _build_approval_gate()
 
+    # FORGE-413: without this the MCP server holds `metrics=None`, every
+    # recorder returns at its `if counter is not None` guard, and all four
+    # FORGE-379 metrics plus FORGE-411's two emit nothing -- so six alert
+    # rules cannot fire, and Prometheus showed zero series for every one of
+    # them. Exactly the shape of the MET-433 note a few lines above
+    # (`build_unified_server` already accepted the kwarg; only the gateway
+    # wired it) and of FORGE-406's approval gate.
+    metrics = collector_for("metaforge-mcp")
+
     server = await build_unified_server(
         adapter_ids=_adapter_ids_from_args(args.adapters),
         approval_gate=approval_gate,
+        metrics=metrics,
         brief_provider=brief_provider,
         # FORGE-371: unset means no links, reported by health/check. The
         # server cannot know where the dashboard is served from.
