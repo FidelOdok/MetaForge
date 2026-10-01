@@ -83,7 +83,12 @@ class TestToolList:
         raw = await server.handle_request(_request("tool/list"))
         body = json.loads(raw)
         ids = sorted(t["tool_id"] for t in body["result"]["tools"])
-        assert ids == ["alpha.add", "alpha.mul", "beta.boom", "beta.ping"]
+        # FORGE-409: the server owns `health.check` as well as its adapters'
+        # tools, so this asserts the adapters' tools are all present rather
+        # than freezing the whole surface -- which would break again the next
+        # time the server gains one of its own.
+        assert {"alpha.add", "alpha.mul", "beta.boom", "beta.ping"} <= set(ids)
+        assert "health.check" in ids
 
     @pytest.mark.asyncio
     async def test_capability_filter_passthrough(self, server: UnifiedMcpServer) -> None:
@@ -151,9 +156,12 @@ class TestHealth:
         body = json.loads(raw)
         result = body["result"]
         assert result["service"] == "metaforge-mcp"
+        # `adapter_count` counts the adapters the caller wired; the health
+        # reporter excludes itself, so this stays 2 (FORGE-409).
         assert result["adapter_count"] == 2
-        assert result["tool_count"] == 4
         assert sorted(a["adapter_id"] for a in result["adapters"]) == ["alpha", "beta"]
+        # tool_count includes the server's own `health.check`.
+        assert result["tool_count"] == 5
 
 
 class TestProtocolHygiene:
@@ -225,7 +233,7 @@ class TestMcpStandardProtocol:
         raw = await server.handle_request(_request("tools/list"))
         body = json.loads(raw)
         tools = body["result"]["tools"]
-        assert len(tools) == 4
+        assert len(tools) == 5  # 4 adapter tools + the server's health.check
         # Every entry exposes ``name``; the legacy ``tool_id`` /
         # ``input_schema`` keys are not leaked.
         for tool in tools:
@@ -286,5 +294,9 @@ class TestConstruction:
 
     def test_empty_adapter_list_is_legal(self) -> None:
         server = UnifiedMcpServer(adapters=[], caller=Caller.LOCAL)
-        assert server.tool_ids == []
-        assert server.adapters == []
+        # "No adapters" no longer means "no tools": the server owns
+        # `health.check` so that `/metaforge:doctor` works on any deployment,
+        # including one with every adapter disabled -- which is exactly when a
+        # diagnostic is most wanted (FORGE-409).
+        assert server.tool_ids == ["health.check"]
+        assert [a.adapter_id for a in server.adapters] == ["health"]

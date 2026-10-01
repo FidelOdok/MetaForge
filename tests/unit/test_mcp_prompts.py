@@ -91,9 +91,17 @@ class TestTheWordingStaysHonest:
         assert "not an error" in body
 
     def test_doctor_says_to_check_for_missing_adapters(self) -> None:
-        # A shorter tool list looks like a smaller system rather than a
-        # broken one, which is the whole failure mode.
-        assert "_meta" in prompt_body("doctor")
+        """A shorter tool list looks like a smaller system rather than a broken
+        one, which is the whole failure mode.
+
+        This used to assert the prompt mentioned `_meta`. FORGE-409 pointed
+        doctor at the `health.check` tool instead of protocol methods a
+        harness cannot call, and that tool's `adapters` array is now where the
+        answer lives. The property is unchanged; the mechanism moved.
+        """
+        body = prompt_body("doctor")
+        assert "adapters" in body
+        assert "contributes no tools" in body
 
     def test_gate_does_not_offer_to_supply_the_human(self) -> None:
         """The prompt used to say "do not supply one on the user's behalf",

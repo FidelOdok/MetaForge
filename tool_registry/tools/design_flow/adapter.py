@@ -242,16 +242,21 @@ class DesignFlowServer(McpToolServer):
             matcher=lambda uri: uri.startswith(f"{_RESOURCE_PREFIX}run/"),
         )
 
-    async def _read_run_resource(self, uri: str) -> dict[str, Any]:
+    async def _read_run_resource(self, uri: str) -> list[dict[str, Any]]:
         run_id = uri.removeprefix(f"{_RESOURCE_PREFIX}run/").strip("/")
         if not run_id:
             raise ResourceNotFoundError(uri)
         state = await self._run_status_reader(run_id)
-        return {
-            "uri": uri,
-            "mimeType": "text/markdown",
-            "text": render_run_markdown(state),
-        }
+        # A list, not a dict: see the note in metaforge/mcp/health_adapter.py.
+        # FORGE-400 shipped this returning a bare dict, so reading a run
+        # resource answered with the three key names and no run.
+        return [
+            {
+                "uri": uri,
+                "mimeType": "text/markdown",
+                "text": render_run_markdown(state),
+            }
+        ]
 
 
 def render_run_markdown(state: dict[str, Any]) -> str:

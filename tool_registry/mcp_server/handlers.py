@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -296,6 +296,19 @@ async def handle_resources_read(
                 raise
             except Exception as exc:
                 raise ResourceReadError(uri, str(exc)) from exc
+            if isinstance(contents, Mapping):
+                # `list()` on a mapping yields its keys, so a reader that
+                # returns one block instead of a list of blocks produces a
+                # successful response containing ["uri", "mimeType", "text"]
+                # and no content. Two adapters shipped that way before anyone
+                # noticed (FORGE-409), because nothing about it looks like a
+                # failure. Fail loudly instead.
+                raise ResourceReadError(
+                    uri,
+                    "reader returned a single content block; it must return a list of "
+                    "blocks (wrap it in [ ]). Returning a mapping yields its keys as "
+                    "the response content.",
+                )
             return {"contents": list(contents)}
 
     raise ResourceNotFoundError(uri)

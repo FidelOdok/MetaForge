@@ -115,7 +115,10 @@ class TestItStaysUsableAsAReadinessProbe:
         report = await _health(UnifiedMcpServer(adapters=[_Down()]))
         assert report["service"] == "metaforge-mcp"
         assert report["status"] == "degraded"
-        assert report["tool_count"] == 1
+        # +1 for the server's own `health.check` (FORGE-409), which is the
+        # tool that makes this report reachable without a shell -- so it is
+        # present precisely when every adapter is down.
+        assert report["tool_count"] == 2
 
     async def test_registered_tools_are_still_counted(self) -> None:
         # Reported as `tools_registered`, not `tools_available` -- they are

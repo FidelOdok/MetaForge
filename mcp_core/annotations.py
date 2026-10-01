@@ -31,6 +31,11 @@ from typing import Any
 # caller can observe, no external side effect.
 READ_ONLY: frozenset[str] = frozenset(
     {
+        # FORGE-409: the connection diagnostic. A tool with no entry here
+        # inherits the destructive default -- so the first version of
+        # `health.check` was held for approval, which is the FORGE-407 shape
+        # again: a read refused because nothing had classified it.
+        "health.check",
         # FORGE-400: the flow catalogue and a run's status. Reading a run
         # cannot change it -- and an agent following a run will call
         # flow.status repeatedly, so classifying it as a write would hold
