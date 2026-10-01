@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
 from twin_core.api import InMemoryTwinAPI
-from twin_core.consistency.budgets import budget_from_entity
+from twin_core.consistency.budgets import budget_from_entity, missing_budget_metadata
 from twin_core.consistency.hierarchy_budget import (
     _METRIC_ROLLUP_FIELD,
     compute_budget_allocation_status,
@@ -117,8 +117,27 @@ class HierarchyNodeResponse(BaseModel):
     dissipationW: float  # noqa: N815
 
 
+class MalformedBudgetResponse(BaseModel):
+    """A budget this response had to ignore, and why (FORGE-414).
+
+    Previously these were a server-side warning only, so the tab rendered no
+    budget row and the reader concluded nobody had set one. Six of the ten
+    budgets in the live twin were in that state. Naming them here costs one
+    field and turns "there is no budget" into "your budget is unusable, here
+    is what it needs".
+    """
+
+    entityId: str  # noqa: N815 — dashboard contract is camelCase
+    title: str | None = None
+    missing: list[str]
+    detail: str
+
+
 class HierarchyTreeResponse(BaseModel):
     nodes: list[HierarchyNodeResponse]
+    #: Empty in the normal case. Non-empty means a declared budget was
+    #: dropped from the rollup rather than that none exists.
+    malformedBudgets: list[MalformedBudgetResponse] = []  # noqa: N815
 
 
 @router.get("/hierarchy", response_model=HierarchyTreeResponse)
@@ -190,6 +209,7 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
         # budgets apply.
         mass_status_by_node: dict[UUID, Any] = {}
         cost_status_by_node: dict[UUID, Any] = {}
+        malformed_budgets: list[MalformedBudgetResponse] = []
         if scoped is not None:
             budget_entities = await _twin.list_engineering_entities(
                 project_id=scoped, entity_type="budget"
@@ -202,6 +222,18 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                         "hierarchy_budget_entity_malformed",
                         entity_id=str(entity.id),
                         error=str(exc),
+                    )
+                    # FORGE-414: and say so in the response. New budgets are
+                    # rejected at write time now, so anything reaching here is
+                    # an older row -- which still needs fixing by a person who
+                    # cannot see a server log.
+                    malformed_budgets.append(
+                        MalformedBudgetResponse(
+                            entityId=str(entity.id),
+                            title=entity.title,
+                            missing=missing_budget_metadata(entity.metadata),
+                            detail=str(exc),
+                        )
                     )
                     continue
                 if budget.metric not in ("mass", "cost"):
@@ -316,8 +348,13 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                 )
             )
         span.set_attribute("hierarchy.count", len(result))
-        logger.info("hierarchy_tree_listed", count=len(result), project_id=project_id)
-        return HierarchyTreeResponse(nodes=result)
+        logger.info(
+            "hierarchy_tree_listed",
+            count=len(result),
+            project_id=project_id,
+            malformed_budgets=len(malformed_budgets),
+        )
+        return HierarchyTreeResponse(nodes=result, malformedBudgets=malformed_budgets)
 
 
 class RealizeHierarchyNodeRequest(BaseModel):

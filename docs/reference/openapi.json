@@ -3847,6 +3847,14 @@
       },
       "HierarchyTreeResponse": {
         "properties": {
+          "malformedBudgets": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MalformedBudgetResponse"
+            },
+            "title": "Malformedbudgets",
+            "type": "array"
+          },
           "nodes": {
             "items": {
               "$ref": "#/components/schemas/HierarchyNodeResponse"
@@ -4999,6 +5007,44 @@
           "updatedAt"
         ],
         "title": "LoadCaseResponse",
+        "type": "object"
+      },
+      "MalformedBudgetResponse": {
+        "description": "A budget this response had to ignore, and why (FORGE-414).\n\nPreviously these were a server-side warning only, so the tab rendered no\nbudget row and the reader concluded nobody had set one. Six of the ten\nbudgets in the live twin were in that state. Naming them here costs one\nfield and turns \"there is no budget\" into \"your budget is unusable, here\nis what it needs\".",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "entityId": {
+            "title": "Entityid",
+            "type": "string"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "entityId",
+          "missing",
+          "detail"
+        ],
+        "title": "MalformedBudgetResponse",
         "type": "object"
       },
       "ManufactureReleaseResponse": {
