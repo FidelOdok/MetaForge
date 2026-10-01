@@ -28,6 +28,10 @@ import structlog
 
 from api_gateway.twin._ref_resolver import resolve_refs
 from observability.tracing import get_tracer
+from twin_core.consistency.budgets import (
+    BUDGET_REQUIRED_METADATA,
+    missing_budget_metadata,
+)
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType
 from twin_core.models.quantity import is_valid_unit
@@ -118,6 +122,32 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
                     f"engineering entity recorder: metadata['unit'] "
                     f"{metadata['unit']!r} is not a recognized unit"
                 )
+            # FORGE-414: a budget with no numbers used to record successfully
+            # and then vanish. `budget_from_entity` requires metric, unit and
+            # system_total, so the hierarchy route skipped it, logged
+            # `hierarchy_budget_entity_malformed` and carried on -- once per
+            # page load, forever. Six of the ten budgets in the live twin were
+            # in that state, named like real budgets ("Moving mass budget
+            # <= 4.5 kg") with the limit only in the title as prose.
+            #
+            # FORGE-311 put the unit check here deliberately, so a nonsense
+            # unit is a "compile time" error rather than a silent one. The
+            # required fields belong in the same place for the same reason:
+            # rejected once at creation, where the caller can still fix it,
+            # instead of failing on every read by a reader who cannot.
+            if entity_type == "budget":
+                missing_keys = missing_budget_metadata(metadata)
+                if missing_keys:
+                    raise ValueError(
+                        f"engineering entity recorder: a budget needs "
+                        f"{list(BUDGET_REQUIRED_METADATA)} in its metadata; "
+                        f"missing {missing_keys}. Pass them via `extra`, e.g. "
+                        f'extra={{"metric": "mass", "unit": "kg", '
+                        f'"system_total": 4.5}}. A budget without them is '
+                        f"dropped from every rollup, so it would look like no "
+                        f"budget had been set at all. If the limit is only in "
+                        f"the title, put the number here too."
+                    )
 
             entity = EngineeringEntity(
                 entity_type=entity_type,  # type: ignore[arg-type]

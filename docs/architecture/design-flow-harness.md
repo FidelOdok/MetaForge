@@ -308,7 +308,10 @@ was no per-project "the mass budget for this quadruped is 5kg" persistence
 anywhere. An agent now declares one via `twin.record_engineering_entity`
 (`entity_type="budget"` or `"invariant"`, with `metric`/`unit`/
 `system_total` or `limit` in `extra`, and a stable `title` like
-`"mass_budget"`/`"INV-MASS"` for readable check labels) and it is loaded
+`"mass_budget"`/`"INV-MASS"` for readable check labels; a budget is
+**rejected** without those three keys, since FORGE-414 — recording one
+without them used to succeed and then be dropped from every rollup, which
+read as no budget existing) and it is loaded
 automatically on every future G3 evaluation — including the real one
 `TwinConsistencyGateChecker` runs from the executor. A project with none
 declared gets a `NOT_EVALUATED` placeholder (`budgets:none-declared`/
