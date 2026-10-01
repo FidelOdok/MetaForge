@@ -1419,7 +1419,34 @@ async def _bootstrap(
     # wired it) and of FORGE-406's approval gate.
     metrics = collector_for("metaforge-mcp")
 
+    # FORGE-415: the Engineering Intent & Requirements Harness and the
+    # document/constraint recorders registered in the gateway and never here,
+    # so `twin.record_engineering_entity`, `approve_engineering_entity`,
+    # `record_document` and `record_constraint_set` were absent from every
+    # external MCP client. They need only the twin and the project backend,
+    # both of which this function already has.
+    #
+    # `proposal_recorder` is deliberately not in this list: it takes the
+    # gateway's `ApprovalWorkflow`, which the sidecar has no equivalent of --
+    # its approvals go out through the remote gate instead. Wiring it would
+    # mean inventing a second approval path, which is the opposite of what
+    # FORGE-406 was about.
+    from api_gateway.twin.constraint_recorder import make_constraint_recorder
+    from api_gateway.twin.document_recorder import make_document_recorder
+    from api_gateway.twin.engineering_entity_approval import (
+        make_engineering_entity_approver,
+    )
+    from api_gateway.twin.engineering_entity_recorder import (
+        make_engineering_entity_recorder,
+    )
+
+    entity_recorder = make_engineering_entity_recorder(twin, project_backend)
+
     server = await build_unified_server(
+        engineering_entity_recorder=entity_recorder,
+        engineering_entity_approver=make_engineering_entity_approver(twin),
+        document_recorder=make_document_recorder(twin, project_backend),
+        constraint_recorder=make_constraint_recorder(twin, project_backend),
         adapter_ids=_adapter_ids_from_args(args.adapters),
         approval_gate=approval_gate,
         metrics=metrics,
