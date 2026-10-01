@@ -136,12 +136,13 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 "type": "string",
                 "title": "Tool profile",
                 "description": (
-                    "Which tool set to load: core (project, twin reads, decisions), "
-                    "mechanical, simulation, electronics or robotics. Each is 25-30 "
-                    "tools. Leave as core unless you are working in one discipline; "
-                    "every profile includes health.check so /metaforge:doctor always "
-                    "works. Clear it to load everything, which some harnesses will "
-                    "truncate without saying so."
+                    "Which tool set to load: core (project, twin reads, "
+                    "requirements and intent, decisions), mechanical, simulation, "
+                    "electronics or robotics. Each is 25-35 tools. Leave as core "
+                    "unless you are working in one discipline; every profile "
+                    "includes health.check so /metaforge:doctor always works. Clear "
+                    "it to load everything, which some harnesses will truncate "
+                    "without saying so."
                 ),
                 "default": "core",
             },
