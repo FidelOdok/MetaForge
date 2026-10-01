@@ -217,10 +217,25 @@ with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
+Selecting a `simulation_result` node adds an **FEA result** panel to the
+inspector: max von Mises and max displacement with their units, the
+load case that produced them, and the mesh statistics. It links to
+`/sim`, which is where two results compare side by side.
+
+Two things that panel deliberately does not do. It is not the toolbar's
+**Sim** button, which is an unrelated robotics-physics preview (gravity,
+joint constraints, a Run/Stop toggle gated on a `robot_description`
+node) and shares nothing with an FEA result but the word. And it shows
+no stress contour on the geometry: per-element results live in the
+CalculiX `.frd` file, which is not persisted anywhere today, so a
+contour would have to be invented rather than read.
+
 - **Backed by:** `GET /v1/twin/nodes`, `GET /v1/twin/relationships`,
   `GET /v1/twin/nodes/{id}/model`, `GET /v1/twin/nodes/{id}/file`,
   `GET /v1/twin/nodes/{id}/versions`, and the chat routes under
-  `/v1/chat`.
+  `/v1/chat`. The FEA panel reads the node's own `meshStats` plus the
+  scalar `max_von_mises_mpa` / `max_displacement_mm` / `load_case`
+  properties; `GET /v1/simulation/results` backs the `/sim` listing.
 - **Sample workspace.** `/twin?demo=1&node=sample-pcb` (the topbar's
   **Sample** link) opens an illustrative drone flight-controller
   workspace that runs entirely in the browser with no gateway. It is

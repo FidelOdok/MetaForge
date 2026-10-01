@@ -45,6 +45,13 @@ class TwinNodeResponse(BaseModel):
     # None for every other node type, or a robot_description with no saved
     # poses yet.
     poses: dict[str, dict[str, float]] | None = None
+    # FORGE-305: a simulation_result node's mesh_stats ({num_nodes,
+    # num_elements, ...}). The scalar-only `properties` loop above drops it
+    # silently, like MET-630's geometry_features before it -- so the one piece
+    # of an FEA result that says how much to trust it was the one piece the
+    # inspector could not show. None for every other node type, or a result
+    # recorded without mesh stats.
+    meshStats: dict[str, Any] | None = None  # noqa: N815
 
 
 class AssemblyJoint(BaseModel):

@@ -163,6 +163,14 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         # FORGE-250: {pose_name: {joint_name: value}} -- None for every
         # other node type, or a robot_description with no saved poses yet.
         poses=wp.metadata.get("poses") if isinstance(wp.metadata.get("poses"), dict) else None,
+        # FORGE-305: {num_nodes, num_elements, ...} for a simulation_result --
+        # the same metadata key GET /v1/simulation/results already surfaces,
+        # reached here from a node id rather than a project listing.
+        meshStats=(
+            wp.metadata.get("mesh_stats")
+            if isinstance(wp.metadata.get("mesh_stats"), dict)
+            else None
+        ),
     )
 
 
