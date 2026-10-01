@@ -454,3 +454,38 @@ groups:
             reviewers are refusing work -- those are counted separately as
             outcome="rejected", and confusing the two hides an unattended
             queue behind what looks like normal review.
+
+      # ── Code staleness (FORGE-411) ───────────────────────────────────
+      - alert: McpRunningStaleCode
+        expr: >-
+          rate(metaforge_mcp_code_version_check_total{result="stale"}[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The MCP sidecar is running code other than the checkout beside it"
+          description: >-
+            The image's baked build SHA does not match the mounted source,
+            and this process does not hot-reload. It answers every request
+            correctly -- for code nobody is reading. That is why this is
+            alerted rather than left to a health call: the last time it
+            happened the symptoms (a shorter protocol version, missing
+            tools) read as a smaller deployment, four bugs were filed
+            against the run and two of their findings were not real.
+            Restart the sidecar, or rebuild it if dependencies moved.
+
+      - alert: McpCodeVersionUndetectable
+        expr: >-
+          rate(metaforge_mcp_code_version_check_total{result="unknown"}[1h]) > 0
+        for: 2h
+        labels:
+          severity: info
+        annotations:
+          summary: "Code staleness cannot be detected on this build"
+          description: >-
+            No METAFORGE_BUILD_SHA was baked into the image, so the staleness
+            check above can never fire. Reported rather than treated as a
+            pass, because a check that silently cannot run is how the
+            original bug stayed invisible. Build with
+            --build-arg METAFORGE_BUILD_SHA=$(git rev-parse HEAD); CI does
+            this already, so this firing means the image was built by hand.

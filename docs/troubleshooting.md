@@ -313,6 +313,66 @@ Reaching for `OTEL_SDK_DISABLED` when you only meant "don't export" is
 the trap: it also makes the SDK hand out no-op tracers, which silently
 breaks any test that asserts on span attributes.
 
+## The MCP sidecar is serving old code (FORGE-411)
+
+Symptoms read like a *smaller deployment*, not like staleness: an older
+protocol version in the `initialize` result, tools missing from
+`tools/list`, a prompt that does not exist. The first time this happened,
+four bugs were filed against the run and two of their findings were not
+real.
+
+The cause is that `mcp-http` and `gateway` pick up a new checkout
+differently:
+
+| Service | How it loads code | A `git checkout` on the host |
+|---------|-------------------|------------------------------|
+| `gateway` | uvicorn's reloader supervises it (`--reload`) | picked up within seconds |
+| `mcp-http` | calls `uvicorn.Server.serve()` in the bootstrap's own event loop, so there is no reloader to supervise it (MET-477 G3) | **ignored** until the container restarts |
+
+So the sidecar needs restarting on deploy. It is not a rebuild:
+
+```bash
+docker compose up -d --force-recreate mcp-http
+```
+
+`mcp-http` runs the CI-published gateway image rather than a local build,
+so after a merge the sequence is `docker compose pull mcp-http` then the
+command above. Do **not** `docker compose build mcp-http` — the service
+has no `build:` stanza on purpose, because the same Dockerfile built two
+ways can diverge without anything saying so.
+
+### Ask instead of inferring
+
+`health.check` answers it directly now — it is a tool, so any harness can
+call it with no shell:
+
+```json
+"code": {
+  "build_sha": "97020586ec2b",
+  "source_sha": "4f1ac0b77e91",
+  "stale": true,
+  "result": "stale",
+  "reloads": false
+}
+```
+
+A stale process reports `"status": "stale"` rather than `"healthy"`: it
+answers every request correctly, for code nobody is reading.
+
+Two caveats worth knowing before you trust it:
+
+- `result: "unknown"` means the image was built without
+  `--build-arg METAFORGE_BUILD_SHA=$(git rev-parse HEAD)`, so the check
+  cannot run at all. CI passes it; a hand-built image may not.
+- `reloads: true` (the gateway) never reports stale, because for a
+  supervised process a difference between the two SHAs is expected and
+  transient.
+
+Prometheus carries the same thing as
+`metaforge_mcp_code_version_check_total{result="stale"}`, which is what
+the `McpRunningStaleCode` alert fires on — the point being to be told
+without looking.
+
 ## When to escalate
 
 If the issue is:

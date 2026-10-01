@@ -504,6 +504,19 @@ class MetricsRegistry:
         description="Adapter health probes by adapter and outcome",
         labels=["adapter_id", "result"],
     )
+    #: Is this process running the code sitting next to it (FORGE-411)?
+    #:
+    #: A counter rather than a gauge for the reason given above, and
+    #: three-valued rather than boolean: ``unknown`` is its own result
+    #: because an image with no build SHA baked in cannot answer the
+    #: question, and reporting that as ``current`` is exactly the silent
+    #: pass this metric exists to end.
+    MCP_CODE_VERSION_CHECK_TOTAL = MetricDefinition(
+        name="metaforge_mcp_code_version_check_total",
+        type="counter",
+        description="Code-version checks by outcome (current, stale, unknown)",
+        labels=["result", "reloads"],
+    )
 
     # ── Class methods for grouped access ───────────────────────────────
 
@@ -544,6 +557,7 @@ class MetricsRegistry:
             cls.MCP_TOOL_CALL_DURATION,
             cls.MCP_ERROR_TOTAL,
             cls.MCP_ADAPTER_PROBE_TOTAL,
+            cls.MCP_CODE_VERSION_CHECK_TOTAL,
         ]
 
     @classmethod
@@ -1145,6 +1159,19 @@ class MetricsCollector:
                     "result": "reachable" if reachable else "unreachable",
                 },
             )
+
+    def record_mcp_code_version(self, result: str, reloads: bool = False) -> None:
+        """Record one code-version check (FORGE-411).
+
+        ``result`` is ``stale``, ``current`` or ``unknown``. ``reloads`` says
+        whether the process picks the mounted source up by itself, which is
+        what makes a difference between the two SHAs expected rather than a
+        fault -- it is a label so an alert can exclude the gateway without
+        needing a second metric.
+        """
+        counter = self._instruments.get(MetricsRegistry.MCP_CODE_VERSION_CHECK_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"result": result, "reloads": str(reloads).lower()})
 
     def record_harness_provider_call(
         self, provider: str, model: str, role: str, duration: float

@@ -161,6 +161,7 @@ class UnifiedMcpServer:
         session_capture: SessionCapture | None = None,
         tool_registry: ToolRegistry | None = None,
         profile: str | None = None,
+        reloads: bool = False,
         caller: Caller = Caller.UNTRUSTED,
         approval_gate: ApprovalGateFn | None = None,
         exempt_local_writes: bool = True,
@@ -236,6 +237,12 @@ class UnifiedMcpServer:
         # which adapters answered, what protocol was negotiated -- and no
         # caller is in a position to assemble it.
         from metaforge.mcp.health_adapter import HealthServer
+
+        # FORGE-411: the gateway runs under uvicorn's reloader and picks the
+        # mounted source up; this server calls uvicorn programmatically and
+        # does not. That difference is the whole staleness question, so it is
+        # recorded rather than guessed.
+        self._reloads = reloads
 
         self._health_adapter = HealthServer(self._health_check)
         self._adapters = [*self._adapters, self._health_adapter]
@@ -1587,10 +1594,38 @@ class UnifiedMcpServer:
                 except Exception as exc:  # noqa: BLE001 — never fail health
                     logger.warning("mcp_adapter_probe_metric_failed", error=str(exc))
 
+        # FORGE-411: which code this process is actually running. The sidecar
+        # on fidel-dev served two-day-old code beside a current checkout and
+        # nothing said so -- the symptoms looked like a smaller deployment, so
+        # four bug reports were filed against that run and two of their
+        # findings were not real. The expensive part was not the stale image;
+        # it was that staleness took inference to establish.
+        from metaforge.mcp.build_info import code_version
+
+        version_info = code_version(reloads=self._reloads)
+        code = version_info.report()
+        if self._metrics is not None:
+            try:
+                self._metrics.record_mcp_code_version(version_info.result, reloads=self._reloads)
+            except Exception as exc:  # noqa: BLE001 — never fail health
+                logger.warning("mcp_code_version_metric_failed", error=str(exc))
+        if version_info.stale:
+            # Logged as well as reported, because the alert is what makes this
+            # useful to somebody who is not already looking at the health
+            # call -- which is the entire failure being fixed.
+            logger.warning(
+                "mcp_running_stale_code",
+                build_sha=code["build_sha"],
+                source_sha=code["source_sha"],
+            )
+
         report: dict[str, Any] = {
             "service": "metaforge-mcp",
             "version": self._version,
-            "status": "degraded" if unreachable else "healthy",
+            "code": code,
+            # A stale process is not "healthy": it answers every request
+            # correctly for code nobody is looking at.
+            "status": "stale" if code.get("stale") else "degraded" if unreachable else "healthy",
             "uptime_seconds": round(uptime, 1),
             # Excludes the health adapter itself: it is the reporter, not a
             # reportee, and counting it would tell an operator they have one

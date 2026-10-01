@@ -72,9 +72,17 @@ services:
   # hot-reload picks up changes. DATABASE_URL points at the in-cluster
   # postgres so knowledge + memory adapters wire up.
   mcp-http:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # FORGE-411: the CI-published gateway image, not a local build. This
+    # service had a `build:` and no `image:`, so it could only ever run an
+    # image built on whatever box it was started on -- which is how it ended
+    # up predating `pint` and `temporalio` and crash-looping on restart, while
+    # the gateway beside it (same Dockerfile, but with an `image:`) was fine.
+    #
+    # The `build:` is deliberately gone rather than kept alongside: a stray
+    # `docker compose build mcp-http` is what produced the divergent local
+    # image in the first place. The gateway service owns the build; this uses
+    # what it produces.
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
