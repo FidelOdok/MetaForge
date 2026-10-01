@@ -322,6 +322,41 @@ test.describe('Digital Twin Viewer', () => {
     await expect(rows.nth(1)).toContainText('2');
   });
 
+  test('Structure tab: Harness estimate and power column (FORGE-275)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await expect(upperArmRow).toBeVisible();
+    // The demo's shoulder node carries a real sample power draw -- proves
+    // the Structure tree's new Power column renders the hierarchy rollup's
+    // drawAverageW, not just a static placeholder.
+    const shoulderRow = page.locator('.tw-structure-row', { hasText: 'shoulder' });
+    await expect(shoulderRow).toContainText('165.6W');
+
+    await expect(upperArmRow.getByTestId(/^harness-estimate-button-/)).toBeVisible();
+    await upperArmRow.getByTestId(/^harness-estimate-button-/).click();
+    const panel = page.getByTestId('harness-estimate-panel');
+    await expect(panel).toBeVisible();
+
+    const joints = panel.getByTestId('harness-estimate-joints');
+    await expect(joints).toBeVisible({ timeout: 10_000 });
+    // Same topological-sort proof as the bring-up-checklist/firmware-scaffold
+    // tests above: joint_1 (shoulder_mount -> upper_arm_link) must come
+    // before joint_2 (upper_arm_link -> elbow_actuator), and joint_2's
+    // cumulative cable length must include joint_1's own segment
+    // (sqrt(40^2+160^2) = 164.92mm), not just its own 120mm segment --
+    // proving the chain actually accumulates rather than reporting each
+    // joint in isolation.
+    const rows = joints.locator('tbody tr');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText('joint_1');
+    await expect(rows.nth(1)).toContainText('joint_2');
+    await expect(rows.nth(1)).toContainText('284.9'); // 164.92 (joint_1) + 120 (joint_2)
+  });
+
   test('Assembly tab: joints are editable and persist', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the graph canvas.

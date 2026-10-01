@@ -370,6 +370,72 @@ class TestGeometryFields:
         assert result.nodes[0].realizedByWorkProductId is None
 
 
+class TestPowerFields:
+    """FORGE-275 (gap G-E2): drawPeakW/drawAverageW/outputW/dissipationW --
+    the hierarchy rollup has computed these since FORGE-390; this just
+    surfaces them to the dashboard tree, turning it into a power-tree view."""
+
+    async def test_node_with_no_power_data_reports_zero(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        node = await twin.create_hierarchy_node(HierarchyNode(name="Bracket slot", kind="assembly"))
+
+        result = await get_hierarchy_tree()
+        assert result.nodes[0].id == str(node.id)
+        assert result.nodes[0].drawPeakW == 0.0
+        assert result.nodes[0].drawAverageW == 0.0
+        assert result.nodes[0].outputW == 0.0
+        assert result.nodes[0].dissipationW == 0.0
+
+    async def test_realized_by_power_data_rolls_up(self) -> None:
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        node = await twin.create_hierarchy_node(
+            HierarchyNode(name="Actuator slot", kind="assembly")
+        )
+        cad = await twin.create_work_product(
+            WorkProduct(
+                name="Actuator",
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash="deadbeef",
+                format="step",
+                created_by="test",
+                metadata={"draw_peak_w": 20.0, "draw_average_w": 10.0, "output_w": 6.0},
+            )
+        )
+        await twin.add_edge(node.id, cad.id, EdgeType.REALIZED_BY)
+
+        result = await get_hierarchy_tree()
+        assert result.nodes[0].drawPeakW == 20.0
+        assert result.nodes[0].drawAverageW == 10.0
+        assert result.nodes[0].outputW == 6.0
+        assert result.nodes[0].dissipationW == 4.0  # 10 (average) - 6 (output)
+
+    async def test_instance_of_bom_item_power_data_rolls_up(self) -> None:
+        from twin_core.models.bom_item import BOMItem
+
+        twin = InMemoryTwinAPI.create()
+        init_twin(twin)
+        node = await twin.create_hierarchy_node(
+            HierarchyNode(name="Actuator slot", kind="assembly")
+        )
+        bom = await twin.add_bom_item(
+            BOMItem(
+                part_number="AK80-8 KV60",
+                manufacturer="CubeMars",
+                specifications={"draw_average_w": 331.2},
+            )
+        )
+        await twin.add_edge(node.id, bom.id, EdgeType.INSTANCE_OF)
+
+        result = await get_hierarchy_tree()
+        assert result.nodes[0].drawAverageW == 331.2
+        # No output_w declared -- dissipation is assumed equal to draw (FORGE-390).
+        assert result.nodes[0].dissipationW == 331.2
+
+
 class TestRealizeHierarchyNodeRoute:
     @pytest.fixture(autouse=True)
     def _wire(self):

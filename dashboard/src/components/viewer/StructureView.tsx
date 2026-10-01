@@ -8,6 +8,7 @@ import { useOverhangCheck } from '../../hooks/use-dfm';
 import { useManufactureRelease } from '../../hooks/use-manufacture';
 import { useBringupChecklists, useCreateBringupChecklist } from '../../hooks/use-bringup';
 import { useCreateFirmwareScaffold } from '../../hooks/use-firmware';
+import { useHarnessEstimate } from '../../hooks/use-harness-estimate';
 import type { ManufactureProcess } from '../../api/endpoints/manufacture';
 import { iconForHierarchyKind } from '../../utils/wp-icons';
 import { DecisionList } from '../shared/DecisionList';
@@ -633,6 +634,82 @@ function FirmwareScaffoldPanel({
   );
 }
 
+/** FORGE-275 (gap G-E2): "Power-tree view; harness list per joint" -- the
+ * power-tree half needs no panel at all (it's columns on the Structure
+ * tree itself, see TreeRow's power cell below, since the rollup already
+ * walks the same CONTAINS tree mass/cost do). This panel is the "harness
+ * list per joint" half: a per-joint cumulative cable-length ESTIMATE
+ * (sum of straight segments along the real kinematic chain, not a routed
+ * path -- see api_gateway/twin/harness_estimate.py's own docstring for why
+ * a single straight line from one origin would be wrong on joints' relative
+ * anchor coordinates). */
+function HarnessEstimatePanel({
+  node,
+  onClose,
+}: {
+  node: HierarchyNode;
+  onClose: () => void;
+}) {
+  const workProductId = node.realizedByWorkProductId ?? undefined;
+  const { data, isLoading, isError } = useHarnessEstimate(workProductId);
+
+  return (
+    <div
+      data-testid="harness-estimate-panel"
+      className="mt-2 rounded-lg p-3"
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-on-surface">Harness estimate: {node.name}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-on-surface-variant hover:text-on-surface"
+        >
+          Close
+        </button>
+      </div>
+      <p className="mb-2 text-[11px] text-on-surface-variant">
+        Cable length is a straight-segment-along-the-chain ESTIMATE, not a real routed path.
+      </p>
+
+      {isLoading && <p className="text-xs text-on-surface-variant">Loading…</p>}
+
+      {isError && (
+        <p className="text-xs" style={{ color: 'var(--mf-c-ff-b4-ab)' }}>
+          Could not estimate harness lengths -- the assembly's joint graph may be cyclic, or it may
+          have no assembly.joints metadata yet.
+        </p>
+      )}
+
+      {data && (
+        <div data-testid="harness-estimate-joints">
+          <table className="w-full text-xs text-on-surface">
+            <thead>
+              <tr className="text-on-surface-variant">
+                <th className="text-left font-normal">Joint</th>
+                <th className="text-left font-normal">Type</th>
+                <th className="text-left font-normal">Segment (mm)</th>
+                <th className="text-left font-normal">Cable est. (mm)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.joints.map((j) => (
+                <tr key={j.jointName}>
+                  <td>{j.jointName}</td>
+                  <td>{j.jointType}</td>
+                  <td>{j.segmentLengthMm.toFixed(1)}</td>
+                  <td>{j.cableLengthEstimateMm.toFixed(1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TreeRow({
   node,
   depth,
@@ -650,6 +727,8 @@ function TreeRow({
   onToggleBringupCheck,
   firmwareScaffoldingId,
   onToggleFirmwareScaffold,
+  harnessEstimatingId,
+  onToggleHarnessEstimate,
 }: {
   node: TreeNode;
   depth: number;
@@ -667,6 +746,8 @@ function TreeRow({
   onToggleBringupCheck: (id: string) => void;
   firmwareScaffoldingId: string | null;
   onToggleFirmwareScaffold: (id: string) => void;
+  harnessEstimatingId: string | null;
+  onToggleHarnessEstimate: (id: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
@@ -677,6 +758,7 @@ function TreeRow({
   const isReleasing = releasingId === node.id;
   const isBringupChecking = bringupCheckingId === node.id;
   const isFirmwareScaffolding = firmwareScaffoldingId === node.id;
+  const isHarnessEstimating = harnessEstimatingId === node.id;
 
   return (
     <>
@@ -733,6 +815,12 @@ function TreeRow({
         >
           {formatCost(node.cost, node.costBudget)}
         </span>
+        <span
+          className="tw-structure-power"
+          title={`Peak ${node.drawPeakW.toFixed(1)}W / dissipation ${node.dissipationW.toFixed(1)}W`}
+        >
+          {node.drawAverageW > 0 ? `${node.drawAverageW.toFixed(1)}W` : '—'}
+        </span>
         <button
           type="button"
           data-testid={`realize-node-button-${node.id}`}
@@ -786,6 +874,17 @@ function TreeRow({
             Firmware scaffold
           </button>
         )}
+        {node.realizedByWorkProductId && (
+          <button
+            type="button"
+            data-testid={`harness-estimate-button-${node.id}`}
+            onClick={() => onToggleHarnessEstimate(node.id)}
+            className="rounded px-2 py-0.5 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            Harness estimate
+          </button>
+        )}
       </div>
       {isRealizing && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
@@ -820,6 +919,11 @@ function TreeRow({
           />
         </div>
       )}
+      {isHarnessEstimating && (
+        <div style={{ paddingLeft: depth * 20 + 28 }}>
+          <HarnessEstimatePanel node={node} onClose={() => onToggleHarnessEstimate(node.id)} />
+        </div>
+      )}
       {hasChildren && !isCollapsed && (
         <div>
           {node.children.map((child) => (
@@ -841,6 +945,8 @@ function TreeRow({
               onToggleBringupCheck={onToggleBringupCheck}
               firmwareScaffoldingId={firmwareScaffoldingId}
               onToggleFirmwareScaffold={onToggleFirmwareScaffold}
+              harnessEstimatingId={harnessEstimatingId}
+              onToggleHarnessEstimate={onToggleHarnessEstimate}
             />
           ))}
         </div>
@@ -879,6 +985,9 @@ export function StructureView({
   // FORGE-276 (gap G-E3): which node's "Firmware scaffold" panel is open,
   // at most one at a time (independent of the others above).
   const [firmwareScaffoldingId, setFirmwareScaffoldingId] = useState<string | null>(null);
+  // FORGE-275 (gap G-E2): which node's "Harness estimate" panel is open,
+  // at most one at a time (independent of the others above).
+  const [harnessEstimatingId, setHarnessEstimatingId] = useState<string | null>(null);
 
   const forest = useMemo(() => buildForest(nodes ?? []), [nodes]);
 
@@ -928,6 +1037,7 @@ export function StructureView({
             <span>Qty</span>
             <span>Mass</span>
             <span>Cost</span>
+            <span>Power</span>
             <span>Geometry</span>
           </div>
           {forest.map((root) => (
@@ -953,6 +1063,10 @@ export function StructureView({
               firmwareScaffoldingId={firmwareScaffoldingId}
               onToggleFirmwareScaffold={(id) =>
                 setFirmwareScaffoldingId((cur) => (cur === id ? null : id))
+              }
+              harnessEstimatingId={harnessEstimatingId}
+              onToggleHarnessEstimate={(id) =>
+                setHarnessEstimatingId((cur) => (cur === id ? null : id))
               }
             />
           ))}

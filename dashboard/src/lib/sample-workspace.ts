@@ -1097,6 +1097,10 @@ const SAMPLE_WORKSPACE_SEED = {
       interfaces: [],
       realizedByWorkProductId: null,
       instanceOfBomItemId: null,
+      drawPeakW: 0,
+      drawAverageW: 0,
+      outputW: 0,
+      dissipationW: 0,
     },
     {
       id: 'sample-hier-upper-arm',
@@ -1128,6 +1132,10 @@ const SAMPLE_WORKSPACE_SEED = {
       // CAD_MODEL work product id, unlike a BOMItem-only INSTANCE_OF).
       realizedByWorkProductId: 'sample-wp-upper-arm',
       instanceOfBomItemId: null,
+      drawPeakW: 0,
+      drawAverageW: 0,
+      outputW: 0,
+      dissipationW: 0,
     },
     {
       id: 'sample-hier-shoulder',
@@ -1159,6 +1167,12 @@ const SAMPLE_WORKSPACE_SEED = {
       ],
       realizedByWorkProductId: null,
       instanceOfBomItemId: null,
+      // FORGE-275 (gap G-E2): a real sample power draw, so the sample
+      // workspace demonstrates the Structure tree's new Power column.
+      drawPeakW: 331.2,
+      drawAverageW: 165.6,
+      outputW: 0,
+      dissipationW: 165.6,
     },
     // FORGE-266 (gap G-C2): a genuine placeholder leaf -- no REALIZED_BY/
     // INSTANCE_OF edge yet -- so the sample workspace demonstrates "Replace
@@ -1184,6 +1198,10 @@ const SAMPLE_WORKSPACE_SEED = {
       interfaces: [],
       realizedByWorkProductId: null,
       instanceOfBomItemId: null,
+      drawPeakW: 0,
+      drawAverageW: 0,
+      outputW: 0,
+      dissipationW: 0,
     },
   ] as HierarchyNode[],
   // FORGE-266: real-looking recorded parts a "Replace placeholder with
@@ -1453,6 +1471,58 @@ function route(
     if (path === '/testplans') return { entries: s.testPlanEntries };
     if (path === '/bringup') return { entries: s.bringupChecklists };
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
+    if (path === '/wiring/harness-estimate') {
+      // FORGE-275: the same illustrative two-joint chain /firmware/scaffold
+      // uses, now carrying real-shaped anchors so the mocked cumulative
+      // cable-length math is genuinely derived, not canned.
+      type AnchorJoint = {
+        name: string;
+        type: string;
+        base: string;
+        follower: string;
+        anchor: [number, number, number];
+      };
+      const joints: AnchorJoint[] = [
+        { name: 'joint_2', type: 'revolute', base: 'upper_arm_link', follower: 'elbow_actuator', anchor: [0, 0, 120] },
+        { name: 'joint_1', type: 'revolute', base: 'shoulder_mount', follower: 'upper_arm_link', anchor: [0, -40, 160] },
+      ];
+      const bases = new Set(joints.map((j) => j.base));
+      const followers = new Set(joints.map((j) => j.follower));
+      const placed = new Set([...bases].filter((b) => !followers.has(b)));
+      const remaining = [...joints];
+      const ordered: (AnchorJoint & { step_number: number })[] = [];
+      let step = 1;
+      while (remaining.length > 0) {
+        const buildable = remaining
+          .filter((j) => placed.has(j.base))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (buildable.length === 0) break; // cyclic -- won't happen for this illustrative chain
+        for (const j of buildable) {
+          ordered.push({ ...j, step_number: step });
+          placed.add(j.follower);
+          step += 1;
+          remaining.splice(remaining.indexOf(j), 1);
+        }
+      }
+      const cumulative = new Map<string, number>();
+      const resultJoints = ordered.map((j) => {
+        const [x, y, z] = j.anchor;
+        const segment = Math.sqrt(x * x + y * y + z * z);
+        const base = cumulative.get(j.base) ?? 0;
+        const total = base + segment;
+        cumulative.set(j.follower, total);
+        return {
+          step_number: j.step_number,
+          joint_name: j.name,
+          joint_type: j.type,
+          base: j.base,
+          follower: j.follower,
+          segment_length_mm: Math.round(segment * 100) / 100,
+          cable_length_estimate_mm: Math.round(total * 100) / 100,
+        };
+      });
+      return { work_product_id: params.work_product_id ?? 'sample-wp-upper-arm', joints: resultJoints };
+    }
     if (path === '/bom') {
       const category = params.category ? String(params.category).toLowerCase() : null;
       const components = category

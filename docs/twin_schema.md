@@ -1976,6 +1976,7 @@ The `global_asset_id` property on `BOMItem`, `DeviceInstance`, and `TwinModel` f
 | `customsTariffNumber` | String | Digital Nameplate | `"8542.31"` |
 | `weightGrams` | Float | Technical Data | `2.5` |
 | `powerDissipationW` | Float | Technical Data | `4.5` (FORGE-282: an actuator/component's known continuous power dissipation, watts — `calculix.run_thermal` has no Twin access itself, so the caller reads this key and passes the raw wattage as `power_dissipation_w`) |
+| `draw_w` / `draw_peak_w` / `draw_average_w` / `output_w` | Float | Technical Data | `331.2` (FORGE-390/275: real power the hierarchy rollup — `twin_core.consistency.hierarchy_rollup.compute_hierarchy_rollup` — reads off `WorkProduct.metadata` (via REALIZED_BY) or `BOMItem.specifications` (via INSTANCE_OF) to compute peak/average draw, output work, and derived dissipation per hierarchy branch. Snake_case, not this table's usual camelCase — these are the literal keys the rollup code reads, and documentation follows the real code rather than a convention it doesn't use. `draw_w` alone counts as both peak and average if a caller hasn't distinguished them; `output_w` omitted defaults dissipation to the full draw, recorded as a tracked `PowerAssumption` rather than applied silently) |
 
 ### A.3 `DesignElement.parameters` Recommended Keys
 

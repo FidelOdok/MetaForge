@@ -3390,7 +3390,7 @@ button:disabled {
 }
 .tw-structure-row {
   display: grid;
-  grid-template-columns: 24px 20px minmax(120px, 1fr) 90px 50px 70px 70px 118px;
+  grid-template-columns: 24px 20px minmax(120px, 1fr) 90px 50px 70px 70px 60px 118px;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
@@ -3445,7 +3445,7 @@ button:disabled {
   color: var(--mf-c-9a9aaa);
   text-transform: capitalize;
 }
-.tw-structure-qty, .tw-structure-mass, .tw-structure-cost {
+.tw-structure-qty, .tw-structure-mass, .tw-structure-cost, .tw-structure-power {
   font-family: 'Roboto Mono', monospace;
   font-size: 12px;
   color: var(--mf-c-9a9aaa);
