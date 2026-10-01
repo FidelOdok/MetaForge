@@ -317,7 +317,14 @@ def test_the_error_paths_actually_mark_the_span(
 
     monkeypatch.setattr(UnifiedMcpServer, "_mark_failed", staticmethod(_spy))
     server = UnifiedMcpServer([_Adapter()])
-    assert "error" in _call(server, tool, args)
+    response = _call(server, tool, args)
+    # FORGE-419: a handler that ran and refused now answers with isError on
+    # the result rather than a JSON-RPC error. Either shape counts as failing
+    # here -- what this test guards is that the span still gets marked, and
+    # moving the conversion into `handle_request` was specifically so that
+    # kept happening.
+    failed = "error" in response or response.get("result", {}).get("isError") is True
+    assert failed, response
     assert marked == [expected]
 
 

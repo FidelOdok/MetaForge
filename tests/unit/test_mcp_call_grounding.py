@@ -110,7 +110,14 @@ class TestTheReference:
             adapters=[_Adapter()], caller=Caller.LOCAL, session_capture=SessionCapture(store)
         )
         response = json.loads(await server.handle_request(_req("twin.boom")))
-        assert "error" in response
+        # FORGE-419: the refusal comes back as an isError result now, so the
+        # reason reaches the model. The reference still has to be there --
+        # that is this test's point, and the conversion carries `callId`
+        # through precisely so a failed call stays citable.
+        result = response.get("result", {})
+        assert "error" in response or result.get("isError") is True, response
+        if result:
+            assert result["_meta"]["callId"]
 
         recorded = [e.data.get("call_id") for e in await _events(store)]
         assert [r for r in recorded if r], "a failed call left no reference in the timeline"
