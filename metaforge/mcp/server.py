@@ -540,10 +540,17 @@ class UnifiedMcpServer:
     # Method handlers — standard MCP protocol (Claude Code, Cursor, etc.)
     # ------------------------------------------------------------------
 
-    # Protocol version we negotiate with. The MCP spec rev that Claude
-    # Code 2.1.x speaks; bumping this is a coordinated change with the
-    # client side, not a routine bump.
-    _MCP_PROTOCOL_VERSION = "2024-11-05"
+    #: The oldest revision we speak -- our floor, and the pre-handshake
+    #: value of ``_negotiated_protocol``.
+    #:
+    #: FORGE-416 removed a second constant, ``_MCP_PROTOCOL_VERSION``, that
+    #: held the same string beside this one and was described as "the protocol
+    #: version we negotiate with". That stopped being true once
+    #: ``_SUPPORTED_PROTOCOL_VERSIONS`` made this an allow-list, and the
+    #: duplication was not harmless: a test asserting the server answers "our
+    #: oldest" compared against a constant named "default" and passed, which
+    #: is part of why the downgrade survived. The newest revision is
+    #: ``max(_SUPPORTED_PROTOCOL_VERSIONS)``, never a hand-maintained copy.
     _DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 
     #: Revisions this server will negotiate up to when a client asks for
@@ -558,6 +565,51 @@ class UnifiedMcpServer:
     #: that revision, so not emitting ``outputSchema`` is conformant.
     #: Anything outside that list is a reason not to add a revision here.
     _SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = ("2024-11-05", "2025-06-18")
+
+    @classmethod
+    def _negotiate_protocol(cls, requested: str | None) -> str:
+        """Which revision to answer an ``initialize`` with (FORGE-416).
+
+        The spec: answer the requested revision when supported, otherwise
+        "another protocol version it supports", which SHOULD be the latest.
+        This returned ``_DEFAULT_PROTOCOL_VERSION`` -- the *oldest* -- for
+        anything unsupported, so Claude Code 2.1.286 asking for 2025-11-25
+        was answered 2024-11-05. Elicitation exists only from 2025-06-18, so
+        ``can_elicit`` was false and every held write went to the dashboard
+        queue instead of being answered inline. The feature was built
+        (FORGE-360) and unreachable for the client most likely to use it.
+
+        Three cases, because "latest supported" alone is not safe for a
+        client that pinned an older revision:
+
+        ``supported``
+            echo it.
+        ``newer than anything we speak``
+            our newest. This is the spec's recommended answer and the case
+            that was broken: a client ahead of us is asking us to do our
+            best, not to fall back to our floor.
+        ``older than our newest, and not one we speak``
+            the newest revision we support that is **not newer than** what
+            was asked for. A client that pinned 2025-03-26 gets 2024-11-05
+            and keeps working; answering 2025-06-18 would invite it to
+            disconnect, which the spec permits but nobody wants. This is a
+            deliberate, narrow deviation from a SHOULD, and only in the
+            direction of not breaking an older client.
+
+        Revisions are ISO dates, so string ordering is version ordering.
+        """
+        supported = sorted(cls._SUPPORTED_PROTOCOL_VERSIONS)
+        newest = supported[-1]
+        if not requested:
+            # No version asked for at all: nothing to be compatible with,
+            # so offer the most capable thing we have.
+            return newest
+        if requested in cls._SUPPORTED_PROTOCOL_VERSIONS:
+            return requested
+        if requested > newest:
+            return newest
+        older = [v for v in supported if v <= requested]
+        return older[-1] if older else supported[0]
 
     def _initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         """Standard MCP handshake — return server capabilities.
@@ -589,17 +641,14 @@ class UnifiedMcpServer:
         # otherwise answer with our own; pinning unconditionally meant a
         # client asking for 2025-06-18 was told 2024-11-05 and then, quite
         # correctly, stopped expecting anything that revision added.
-        if self._client_protocol in self._SUPPORTED_PROTOCOL_VERSIONS:
-            self._negotiated_protocol = self._client_protocol
-        else:
-            self._negotiated_protocol = self._DEFAULT_PROTOCOL_VERSION
-            if self._client_protocol:
-                logger.warning(
-                    "mcp_protocol_skew",
-                    requested=self._client_protocol,
-                    negotiated=self._negotiated_protocol,
-                    client=(self._client_info or {}).get("name"),
-                )
+        self._negotiated_protocol = self._negotiate_protocol(self._client_protocol)
+        if self._client_protocol and self._client_protocol not in self._SUPPORTED_PROTOCOL_VERSIONS:
+            logger.warning(
+                "mcp_protocol_skew",
+                requested=self._client_protocol,
+                negotiated=self._negotiated_protocol,
+                client=(self._client_info or {}).get("name"),
+            )
         logger.info(
             "mcp_initialize",
             client=(self._client_info or {}).get("name"),

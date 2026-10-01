@@ -956,7 +956,23 @@ as `client.can_elicit`:
    the request.
 
 The server negotiates the revision the client asked for when it is one of
-`2024-11-05` or `2025-06-18`, and otherwise answers `2024-11-05`.
+`2024-11-05` or `2025-06-18`. Otherwise (FORGE-416):
+
+- a client **ahead of us** — Claude Code 2.1.286 asks for `2025-11-25` — is
+  answered `2025-06-18`, the newest we speak. This is the MCP spec's
+  recommended answer, and answering `2024-11-05` instead is what kept inline
+  approvals unreachable for that client: `elicitation/create` does not exist
+  before `2025-06-18`, so `can_elicit` was false and every held write went to
+  the dashboard queue.
+- a client asking for an **older** revision we do not speak — say
+  `2025-03-26` — is answered the newest revision not newer than its request,
+  so `2024-11-05`. The spec would have us answer `2025-06-18` here too, and
+  then permits such a client to disconnect; answering downward keeps a client
+  that pinned an older revision working. A deliberate, narrow deviation from a
+  SHOULD, only ever in the direction of not breaking an older client.
+
+Either way the connection is still reported as skewed by `health.check`:
+answering better than before is not the same as answering what was asked.
 
 The three-action response maps onto the outcomes above:
 
@@ -1068,10 +1084,10 @@ the other three things `/metaforge:doctor` is asked about.
     "connected": true,
     "name": "claude-code",
     "version": "2.1.4",
-    "protocol_requested": "2025-06-18",
-    "protocol_negotiated": "2024-11-05",
+    "protocol_requested": "2025-11-25",
+    "protocol_negotiated": "2025-06-18",
     "protocol_skew": true,
-    "detail": "client asked for MCP 2025-06-18; this server pinned 2024-11-05. Anything added after the pinned revision is not available on this connection."
+    "detail": "client asked for MCP 2025-11-25; this server answered 2025-06-18, the newest it speaks. Anything added after that revision is not available on this connection."
   }
 }
 ```

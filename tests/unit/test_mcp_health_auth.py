@@ -139,7 +139,7 @@ def test_no_handshake_reports_not_connected() -> None:
     """Rather than an anonymous client that failed to identify itself."""
     client = _health(_server())["client"]
     assert client["connected"] is False
-    assert client["protocol_negotiated"] == UnifiedMcpServer._MCP_PROTOCOL_VERSION
+    assert client["protocol_negotiated"] == UnifiedMcpServer._DEFAULT_PROTOCOL_VERSION
 
 
 def test_initialize_is_remembered() -> None:
@@ -152,7 +152,7 @@ def test_initialize_is_remembered() -> None:
                     "id": "1",
                     "method": "initialize",
                     "params": {
-                        "protocolVersion": UnifiedMcpServer._MCP_PROTOCOL_VERSION,
+                        "protocolVersion": UnifiedMcpServer._DEFAULT_PROTOCOL_VERSION,
                         "clientInfo": {"name": "claude-code", "version": "2.1.4"},
                     },
                 }
@@ -194,7 +194,10 @@ def test_protocol_skew_is_named() -> None:
     client = _health(server)["client"]
     assert client["protocol_skew"] is True
     assert client["protocol_requested"] == "2099-01-01"
-    assert client["protocol_negotiated"] == UnifiedMcpServer._MCP_PROTOCOL_VERSION
+    # FORGE-416: the newest revision we support, not `_MCP_PROTOCOL_VERSION`
+    # (our oldest), which is what this used to assert -- and which is why
+    # Claude Code never got elicitation.
+    assert client["protocol_negotiated"] == max(UnifiedMcpServer._SUPPORTED_PROTOCOL_VERSIONS)
     assert "not available" in client["detail"]
 
 

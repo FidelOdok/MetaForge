@@ -226,7 +226,12 @@ def test_protocol_is_negotiated_not_pinned() -> None:
     assert json.loads(raw)["result"]["protocolVersion"] == ELICIT_VERSION
 
 
-def test_unsupported_revision_still_falls_back_and_says_so() -> None:
+def test_a_client_ahead_of_us_is_answered_with_our_newest_not_our_oldest() -> None:
+    """FORGE-416. This asserted 2024-11-05 -- our *oldest* -- and so encoded
+    the bug: Claude Code 2.1.286 asks for 2025-11-25, was told 2024-11-05, and
+    elicitation (2025-06-18 only) therefore never engaged for the client most
+    likely to use it. The spec says answer with another version we support,
+    which SHOULD be the latest."""
     server = UnifiedMcpServer([_Adapter()])
     raw = asyncio.run(
         server.handle_request(
@@ -240,7 +245,9 @@ def test_unsupported_revision_still_falls_back_and_says_so() -> None:
             )
         )
     )
-    assert json.loads(raw)["result"]["protocolVersion"] == "2024-11-05"
+    assert json.loads(raw)["result"]["protocolVersion"] == ELICIT_VERSION
+    # Still skew -- we did not give them what they asked for, and the doctor
+    # should keep saying so.
     client = asyncio.run(server._health_check())["client"]
     assert client["protocol_skew"] is True
 
