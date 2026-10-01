@@ -1598,7 +1598,11 @@ function route(
       const workProductId = String(params.work_product_id ?? '');
       const drawings = s.technicalDrawings
         .filter((d) => d.work_product_id === workProductId)
-        .map(({ work_product_id: _wp, ...rest }) => rest);
+        .map((d) => {
+          const copy: Partial<SampleTechnicalDrawing> = { ...d };
+          delete copy.work_product_id;
+          return copy;
+        });
       return { drawings };
     }
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
