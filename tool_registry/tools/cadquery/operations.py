@@ -874,11 +874,31 @@ class CadqueryOperations:
         parent.mkdir(parents=True, exist_ok=True)
 
     def _get_shape_properties(self, shape: Any) -> dict[str, Any]:
-        """Extract geometric properties from a CadQuery shape/Workplane."""
+        """Extract geometric properties from a CadQuery shape/Workplane.
+
+        FORGE-272: a genuinely empty shape (e.g. the result of
+        ``intersect``-ing two solids with zero overlap -- confirmed by
+        ``Solids() == []``) has a well-defined zero volume/area (CadQuery's
+        own ``Volume()``/``Area()`` return ``0.0`` safely for it), but OCCT's
+        ``BoundingBox()`` raises ``Standard_ConstructionError: Bnd_Box is
+        void`` rather than returning a degenerate box -- there's nothing to
+        bound. No caller of this helper (``boolean_operation`` included) had
+        ever exercised a genuinely empty result before FORGE-272's real
+        interference check ran a real, non-overlapping intersect on fidel-dev
+        and hit this live. Guard it explicitly: an empty shape is a real,
+        describable state (zero volume, no bounding box), not an error.
+        """
         if hasattr(shape, "val"):
             solid = shape.val()
         else:
             solid = shape
+
+        if hasattr(solid, "Solids") and not solid.Solids():
+            return {
+                "volume_mm3": 0.0,
+                "surface_area_mm2": 0.0,
+                "bounding_box": None,
+            }
 
         bb = solid.BoundingBox()
         return {
