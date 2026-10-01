@@ -227,6 +227,31 @@ test.describe('Digital Twin Viewer', () => {
     await expect(panel.getByTestId('dfm-flagged-faces')).toContainText('Surface2');
   });
 
+  test('Structure tab: check interference (FORGE-272)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await expect(upperArmRow).toBeVisible();
+    await expect(upperArmRow.getByTestId(/^interference-check-button-/)).toBeVisible();
+
+    await upperArmRow.getByTestId(/^interference-check-button-/).click();
+    const panel = page.getByTestId('interference-check-panel');
+    await expect(panel).toBeVisible();
+
+    const runButton = panel.getByTestId('run-interference-check');
+    await expect(runButton).toBeDisabled();
+    await panel.getByTestId('interference-other-part-input').fill('sample-wp-actuator');
+    await expect(runButton).not.toBeDisabled();
+    await runButton.click();
+
+    const summary = panel.getByTestId('interference-result-summary');
+    await expect(summary).toBeVisible({ timeout: 10_000 });
+    await expect(summary).toContainText('No interference');
+  });
+
   test('Structure tab: Release for manufacture (FORGE-294)', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the tree.

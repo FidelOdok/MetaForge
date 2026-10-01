@@ -56,6 +56,7 @@ from api_gateway.twin.schemas import (
 )
 from api_gateway.twin.version_schemas import (
     GeometryDiffResponse,
+    InterferenceCheckResponse,
     IterateRequest,
     RevisionDiff,
     WorkProductRevision,
@@ -113,6 +114,20 @@ def init_geometry_diff(differ: Any) -> None:
     """Wire in the geometry-diff callable (server lifespan)."""
     global _geometry_diff  # noqa: PLW0603
     _geometry_diff = differ
+
+
+# FORGE-272: an injected async
+# ``check(*, work_product_id_a, work_product_id_b) -> dict`` (built in
+# server.py over ``interference_check.make_interference_check``) -- a real
+# boolean-intersection clearance/interference check between two named
+# parts. None until the server lifespan wires it in.
+_interference_check: Any = None
+
+
+def init_interference_check(checker: Any) -> None:
+    """Wire in the interference-check callable (server lifespan)."""
+    global _interference_check  # noqa: PLW0603
+    _interference_check = checker
 
 
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
@@ -989,6 +1004,44 @@ async def diff_geometry(node_id: str) -> GeometryDiffResponse:
             span.record_exception(exc)
             raise HTTPException(status_code=502, detail=f"geometry diff failed: {exc}") from exc
         return GeometryDiffResponse(**result)
+
+
+@router.get("/interference-check", response_model=InterferenceCheckResponse)
+async def check_interference(
+    work_product_id_a: str = Query(...), work_product_id_b: str = Query(...)
+) -> InterferenceCheckResponse:
+    """Real boolean-intersection clearance/interference check between two
+    named parts' committed STEP geometry (FORGE-272, gap G-D4).
+
+    Deliberately a pairwise check on two caller-named parts, not an
+    all-pairs sweep across an entire assembly, and deliberately not an ISO
+    286 tolerance-grade/fit classification -- see
+    ``api_gateway.twin.interference_check``'s module docstring for why
+    both are out of scope here.
+    """
+    if _interference_check is None:
+        raise HTTPException(status_code=503, detail="interference check is not configured")
+    with tracer.start_as_current_span("twin.check_interference") as span:
+        span.set_attribute("twin.work_product_id_a", work_product_id_a)
+        span.set_attribute("twin.work_product_id_b", work_product_id_b)
+        try:
+            result = await _interference_check(
+                work_product_id_a=work_product_id_a, work_product_id_b=work_product_id_b
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 -- surface a clean 502 with the cause
+            logger.warning(
+                "interference_check_failed",
+                work_product_id_a=work_product_id_a,
+                work_product_id_b=work_product_id_b,
+                error=str(exc),
+            )
+            span.record_exception(exc)
+            raise HTTPException(
+                status_code=502, detail=f"interference check failed: {exc}"
+            ) from exc
+        return InterferenceCheckResponse(**result)
 
 
 @router.post("/nodes/{node_id}/approve-sketch", response_model=ApproveSketchResponse)

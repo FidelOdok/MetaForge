@@ -65,3 +65,16 @@ class GeometryDiffResponse(BaseModel):
     area_delta_mm2: float
     current_bounding_box: dict[str, Any]
     previous_bounding_box: dict[str, Any]
+
+
+class InterferenceCheckResponse(BaseModel):
+    """Real boolean-intersection result between two named parts (FORGE-272)
+    -- a pairwise clearance/interference check, not an ISO 286 fit
+    classification (which this capability deliberately does not attempt;
+    see ``api_gateway.twin.interference_check``'s module docstring)."""
+
+    work_product_id_a: str
+    work_product_id_b: str
+    interferes: bool
+    interference_volume_mm3: float
+    interference_area_mm2: float

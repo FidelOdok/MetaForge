@@ -130,6 +130,37 @@ describe('StructureView', () => {
     expect(runButton).not.toBeDisabled();
   });
 
+  it('shows a Check interference button only for a node with real geometry', () => {
+    mockUseHierarchyTree.mockReturnValue({
+      data: [
+        node({ id: 'n1', name: 'realized', realizedByWorkProductId: 'wp-1' }),
+        node({ id: 'n2', name: 'placeholder' }),
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchyTree>);
+    render(<StructureView projectId="p1" onSelect={() => {}} />);
+    expect(screen.getByTestId('interference-check-button-n1')).toBeInTheDocument();
+    expect(screen.queryByTestId('interference-check-button-n2')).not.toBeInTheDocument();
+  });
+
+  it('opens the interference check panel with a disabled run button until a second part id is entered', () => {
+    mockUseHierarchyTree.mockReturnValue({
+      data: [node({ id: 'n1', name: 'upper_arm', realizedByWorkProductId: 'wp-1' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchyTree>);
+    render(<StructureView projectId="p1" onSelect={() => {}} />);
+
+    fireEvent.click(screen.getByTestId('interference-check-button-n1'));
+    expect(screen.getByTestId('interference-check-panel')).toBeInTheDocument();
+    const runButton = screen.getByTestId('run-interference-check');
+    expect(runButton).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('interference-other-part-input'), {
+      target: { value: 'wp-2' },
+    });
+    expect(runButton).not.toBeDisabled();
+  });
+
   it('shows a Release for manufacture button only for a node with real geometry', () => {
     mockUseHierarchyTree.mockReturnValue({
       data: [

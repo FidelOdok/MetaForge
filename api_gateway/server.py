@@ -828,6 +828,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_hierarchy_node_recorder,
         make_hierarchy_rollup_fn,
     )
+    from api_gateway.twin.interference_check import make_interference_check
     from api_gateway.twin.manufacture_release import make_manufacture_release
     from api_gateway.twin.measurement_recorder import make_measurement_recorder
     from api_gateway.twin.metric_evaluator import make_metric_evaluator
@@ -930,6 +931,16 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin,
         blob_stager=blob_stager_fn,
         mcp_bridge=geometry_diff_bridge,
+    )
+    # FORGE-272: same lazy-bridge seam, for interference_check's real
+    # cadquery.boolean_operation(operation="intersect") call (reuses
+    # blob_stager_fn -- both named parts are resolved by node id, no new
+    # staging logic).
+    interference_check_bridge = _LazyBridge()
+    interference_check_fn = make_interference_check(
+        twin,
+        blob_stager=blob_stager_fn,
+        mcp_bridge=interference_check_bridge,
     )
     # FORGE-268: same lazy-bridge seam, for bom_risk's real
     # distributors.resolve_offers / {distributor}.get_product calls.
@@ -1292,6 +1303,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-294: same for manufacture_release_bridge (manufacture_release's
     # cadquery.export_geometry call).
     manufacture_release_bridge.bridge = active_bridge
+    # FORGE-272: same for interference_check_bridge (interference_check's
+    # real cadquery.boolean_operation call).
+    interference_check_bridge.bridge = active_bridge
     # FORGE-301: same for geometry_diff_bridge (geometry_diff's
     # freecad.describe_step_file calls).
     geometry_diff_bridge.bridge = active_bridge
@@ -1315,6 +1329,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.routes import init_geometry_diff
 
     init_geometry_diff(geometry_diff_fn)
+    # FORGE-272: bind the interference-check evaluator to its route in
+    # api_gateway/twin/routes.py (not a separate module -- it's the direct
+    # sibling of /nodes/{id}/geometry-diff there).
+    from api_gateway.twin.routes import init_interference_check
+
+    init_interference_check(interference_check_fn)
     # FORGE-268: same, for the BOM risk REST route
     # (api_gateway/bom/risk_routes.py).
     from api_gateway.bom.risk_routes import init_bom_risk_scorer
