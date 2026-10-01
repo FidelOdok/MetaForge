@@ -705,6 +705,45 @@ def _build_assembly_sdf(
     joint-type mapping (SDF's is more permissive than URDF's: it also
     supports `ball` natively). Returns ``(xml, emitted_joints)`` -- see
     ``_build_assembly_urdf``'s docstring for what ``emitted_joints`` is.
+
+    FORGE-304: unlike URDF (where a link's frame position is implicit in the
+    accumulated chain of parent-relative joint ``<origin>`` elements), SDF
+    positions every ``<link>`` independently via its own ``//link/pose``,
+    which defaults to being relative to the *model* frame -- confirmed from
+    the primary source (gazebosim/sdf_tutorials' pose_frame_semantics
+    tutorial.md, fetched while fixing this: "If the //pose/@relative_to
+    attribute is not defined, the //pose of an entity is relative to its
+    parent entity's frame by default, such as a link's pose relative to its
+    parent model's frame"). So each link's ``<pose>`` is simply its
+    ``_link_world_offsets_mm()`` position converted to metres -- no
+    accumulation, no negation (unlike URDF's mesh-origin compensation, which
+    offsets the *mesh* within an already-chain-positioned link frame; here
+    the link's own frame pose *is* the position).
+
+    A link's ``<inertial><pose>`` is relative to that *link's own* frame
+    (not the model frame), so the raw world-frame ``com_m`` must be
+    re-expressed relative to the link's new ``_link_world_offsets_mm()``
+    position the same way URDF's inertial ``<origin>`` already is -- this
+    was a latent, identically-shaped bug that only became visible once link
+    poses were added (previously harmless because every link's pose was
+    implicitly zero, so the model frame and every link frame coincided).
+
+    The same primary source documents joint poses as the one exception to
+    the "relative to parent entity" default: "the joint's pose is relative
+    to the frames of links that the joint connects" (specifically the
+    *child* link's frame, per that document's "Joint frame ... attached to
+    the child link at the joint's origin"). Re-deriving a joint anchor in
+    the child link's (potentially offset) local frame would need the same
+    kind of parent-relative math URDF's joint ``<origin>`` already does, but
+    SDF offers a simpler, equally spec-correct option that avoids it
+    entirely: the reserved frame name ``__model__`` (confirmed from the same
+    primary-source family -- SDFormat's model-frame documentation) can be
+    named explicitly via ``relative_to`` to override the default. Every
+    joint ``<pose>`` here is written as ``relative_to="__model__"``, so it
+    is simply the joint's real-world anchor converted to metres -- exactly
+    the same model-frame convention the link poses already use, with no
+    per-joint accumulation needed (mirroring why ``_link_world_offsets_mm``
+    itself needs no topological walk).
     """
     sdf = ET.Element("sdf", version="1.11")
     parent = sdf
@@ -713,15 +752,24 @@ def _build_assembly_sdf(
 
     model = ET.SubElement(parent, "model", name=model_name)
     ET.SubElement(model, "static").text = "true" if static else "false"
+    world_offset_mm = _link_world_offsets_mm(links, joints)
 
     for link in links:
         link_el = ET.SubElement(model, "link", name=link["name"])
+        offset_mm = world_offset_mm[link["name"]]
+        pose_m = tuple(v * _MM_TO_M for v in offset_mm)
+        ET.SubElement(
+            link_el, "pose"
+        ).text = f"{pose_m[0]:.9g} {pose_m[1]:.9g} {pose_m[2]:.9g} 0 0 0"
+
         ixx, ixy, ixz, iyy, iyz, izz = link["inertia_kgm2"]
-        com_m = link["com_m"]
+        com_local_m = _sub_mm_to_m(link["com_m"], offset_mm)
 
         inertial = ET.SubElement(link_el, "inertial")
         ET.SubElement(inertial, "mass").text = f"{link['mass_kg']:.9g}"
-        ET.SubElement(inertial, "pose").text = f"{com_m[0]:.9g} {com_m[1]:.9g} {com_m[2]:.9g} 0 0 0"
+        ET.SubElement(
+            inertial, "pose"
+        ).text = f"{com_local_m[0]:.9g} {com_local_m[1]:.9g} {com_local_m[2]:.9g} 0 0 0"
         inertia = ET.SubElement(inertial, "inertia")
         for tag, val in (
             ("ixx", ixx),
@@ -756,6 +804,10 @@ def _build_assembly_sdf(
         joint_el = ET.SubElement(model, "joint", name=joint_name, type=sdf_type)
         ET.SubElement(joint_el, "parent").text = joint["base"]
         ET.SubElement(joint_el, "child").text = joint["follower"]
+        anchor = joint.get("anchor") or (0.0, 0.0, 0.0)
+        anchor_m = tuple(v * _MM_TO_M for v in anchor)
+        pose_el = ET.SubElement(joint_el, "pose", relative_to="__model__")
+        pose_el.text = f"{anchor_m[0]:.9g} {anchor_m[1]:.9g} {anchor_m[2]:.9g} 0 0 0"
 
         emitted_limits: dict[str, float] | None = None
         if sdf_type in ("continuous", "prismatic", "revolute"):
