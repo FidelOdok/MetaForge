@@ -34,6 +34,7 @@ jobs:
     # Keep a job here only if it genuinely needs something installed on that
     # host (FORGE-308).
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -47,6 +48,7 @@ jobs:
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -86,6 +88,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -125,6 +128,7 @@ jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: github.event_name == 'pull_request'
     outputs:
       dashboard: ${{ steps.filter.outputs.dashboard }}
@@ -153,6 +157,7 @@ jobs:
   dashboard:
     name: Dashboard Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: changes
     if: needs.changes.outputs.dashboard == 'true'
     steps:
@@ -190,6 +195,7 @@ jobs:
   marketing:
     name: Marketing Site Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: changes
     if: needs.changes.outputs.marketing == 'true'
     steps:
