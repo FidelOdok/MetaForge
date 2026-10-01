@@ -993,10 +993,70 @@ class UnifiedMcpServer:
         # resources still belong here; today there are none, and an empty
         # list is the honest answer rather than a malformed full one.
         concrete = [r for r in resources if "uri" in r]
+
+        # FORGE-408: a template stops being a template once its one parameter
+        # is known. Every MetaForge resource is keyed by project, and since
+        # FORGE-335 the session carries a project -- so with one open, these
+        # *are* concrete and belong here.
+        #
+        # Leaving them out was spec-correct and useless: a client that calls
+        # `resources/list` (which is most of them, and was the agent in the
+        # FORGE-408 transcript) saw an empty list and concluded MetaForge
+        # publishes no context at all. The brief it needed was reachable only
+        # by reading `resources/templates/list` and assembling the URI by
+        # hand.
+        # ``params`` rather than ``{}``: a client may name the project
+        # explicitly, which is the only route open to one whose session the
+        # server cannot bind scope to (stdio without a session header --
+        # `project.open` tells it so via `scope_bound: false`). Without this
+        # the feature would exist only for clients that already had it easy.
+        project_id = _effective_project(params)
+        expanded = self._expand_templates_for_project(resources, project_id)
+        concrete.extend(expanded)
+
         result: dict[str, Any] = {"resources": concrete}
+        meta: dict[str, Any] = {}
         if unavailable:
-            result["_meta"] = {"unavailableAdapters": unavailable}
+            meta["unavailableAdapters"] = unavailable
+        if project_id:
+            meta["project"] = project_id
+        elif expanded == []:
+            # Why the list is short, rather than leaving the model to guess.
+            # "No project is open" and "this server has no resources" look
+            # identical in an empty list and mean entirely different things.
+            meta["hint"] = (
+                "No project is in scope, so project resources are not listed. Call "
+                "project.open (or pass project_id) and list again; the parameterised "
+                "set is in resources/templates/list meanwhile."
+            )
+        if meta:
+            result["_meta"] = meta
         return result
+
+    def _expand_templates_for_project(
+        self, resources: list[dict[str, Any]], project_id: str | None
+    ) -> list[dict[str, Any]]:
+        """Turn ``.../{project_id}`` templates into concrete resources.
+
+        Only that one placeholder. A template with any other parameter is
+        still a template, and guessing a value for it would publish a URI
+        that does not resolve -- worse than not listing it, because a model
+        will read it.
+        """
+        if not project_id:
+            return []
+        out: list[dict[str, Any]] = []
+        for entry in resources:
+            template = entry.get("uri_template") or entry.get("uriTemplate")
+            if not isinstance(template, str) or "{project_id}" not in template:
+                continue
+            filled = template.replace("{project_id}", project_id)
+            if "{" in filled:
+                continue
+            concrete = {k: v for k, v in entry.items() if k not in ("uri_template", "uriTemplate")}
+            concrete["uri"] = filled
+            out.append(concrete)
+        return out
 
     async def _resources_templates_list(self, params: dict[str, Any]) -> dict[str, Any]:
         """``resources/templates/list`` -- the parameterised ones.
