@@ -870,6 +870,103 @@
         "title": "BooleanCutResponse",
         "type": "object"
       },
+      "BringupChecklistListEntry": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/BringupStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "node_id",
+          "created_at",
+          "title",
+          "statement",
+          "steps"
+        ],
+        "title": "BringupChecklistListEntry",
+        "type": "object"
+      },
+      "BringupChecklistListResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/BringupChecklistListEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "BringupChecklistListResponse",
+        "type": "object"
+      },
+      "BringupStep": {
+        "properties": {
+          "base": {
+            "title": "Base",
+            "type": "string"
+          },
+          "follower": {
+            "title": "Follower",
+            "type": "string"
+          },
+          "instruction": {
+            "title": "Instruction",
+            "type": "string"
+          },
+          "joint_name": {
+            "title": "Joint Name",
+            "type": "string"
+          },
+          "joint_type": {
+            "title": "Joint Type",
+            "type": "string"
+          },
+          "step_number": {
+            "title": "Step Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "step_number",
+          "joint_name",
+          "joint_type",
+          "base",
+          "follower",
+          "instruction"
+        ],
+        "title": "BringupStep",
+        "type": "object"
+      },
       "Candidate": {
         "properties": {
           "manufacturer": {
@@ -1518,6 +1615,56 @@
         "title": "CreateAssemblyRequest",
         "type": "object"
       },
+      "CreateBringupChecklistRequest": {
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id"
+        ],
+        "title": "CreateBringupChecklistRequest",
+        "type": "object"
+      },
+      "CreateBringupChecklistResponse": {
+        "properties": {
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/BringupStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "statement",
+          "steps"
+        ],
+        "title": "CreateBringupChecklistResponse",
+        "type": "object"
+      },
       "CreateConstraintRequest": {
         "properties": {
           "expectedEvidence": {
@@ -1604,6 +1751,56 @@
           "setWorkProductId"
         ],
         "title": "CreateConstraintResponse",
+        "type": "object"
+      },
+      "CreateFirmwareScaffoldRequest": {
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id"
+        ],
+        "title": "CreateFirmwareScaffoldRequest",
+        "type": "object"
+      },
+      "CreateFirmwareScaffoldResponse": {
+        "properties": {
+          "firmware_source_node_id": {
+            "title": "Firmware Source Node Id",
+            "type": "string"
+          },
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/FirmwareJointEntry"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "pinmap_node_id": {
+            "title": "Pinmap Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pinmap_node_id",
+          "firmware_source_node_id",
+          "joints"
+        ],
+        "title": "CreateFirmwareScaffoldResponse",
         "type": "object"
       },
       "CreateLoadCaseRequest": {
@@ -2581,6 +2778,43 @@
         "title": "FileLinkResponse",
         "type": "object"
       },
+      "FirmwareJointEntry": {
+        "properties": {
+          "can_id": {
+            "title": "Can Id",
+            "type": "integer"
+          },
+          "joint_name": {
+            "title": "Joint Name",
+            "type": "string"
+          },
+          "joint_type": {
+            "title": "Joint Type",
+            "type": "string"
+          },
+          "limits": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limits"
+          }
+        },
+        "required": [
+          "joint_name",
+          "joint_type",
+          "can_id"
+        ],
+        "title": "FirmwareJointEntry",
+        "type": "object"
+      },
       "FixRequirementResponse": {
         "properties": {
           "conclusions": {
@@ -3130,6 +3364,67 @@
         "title": "GenerateTestPlanResponse",
         "type": "object"
       },
+      "GeometryDiffResponse": {
+        "description": "Real volume/area/bounding-box delta vs. a SUPERSEDES predecessor\n(FORGE-301) -- distinct from ``RevisionDiff`` above, which diffs one\nnode's own metadata revisions and never sees geometry changes.",
+        "properties": {
+          "area_delta_mm2": {
+            "title": "Area Delta Mm2",
+            "type": "number"
+          },
+          "current_area_mm2": {
+            "title": "Current Area Mm2",
+            "type": "number"
+          },
+          "current_bounding_box": {
+            "additionalProperties": true,
+            "title": "Current Bounding Box",
+            "type": "object"
+          },
+          "current_volume_mm3": {
+            "title": "Current Volume Mm3",
+            "type": "number"
+          },
+          "current_work_product_id": {
+            "title": "Current Work Product Id",
+            "type": "string"
+          },
+          "previous_area_mm2": {
+            "title": "Previous Area Mm2",
+            "type": "number"
+          },
+          "previous_bounding_box": {
+            "additionalProperties": true,
+            "title": "Previous Bounding Box",
+            "type": "object"
+          },
+          "previous_volume_mm3": {
+            "title": "Previous Volume Mm3",
+            "type": "number"
+          },
+          "previous_work_product_id": {
+            "title": "Previous Work Product Id",
+            "type": "string"
+          },
+          "volume_delta_mm3": {
+            "title": "Volume Delta Mm3",
+            "type": "number"
+          }
+        },
+        "required": [
+          "current_work_product_id",
+          "previous_work_product_id",
+          "current_volume_mm3",
+          "previous_volume_mm3",
+          "volume_delta_mm3",
+          "current_area_mm2",
+          "previous_area_mm2",
+          "area_delta_mm2",
+          "current_bounding_box",
+          "previous_bounding_box"
+        ],
+        "title": "GeometryDiffResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3141,6 +3436,70 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HarnessEstimateResponse": {
+        "properties": {
+          "joints": {
+            "items": {
+              "$ref": "#/components/schemas/HarnessJointEntry"
+            },
+            "title": "Joints",
+            "type": "array"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id",
+          "joints"
+        ],
+        "title": "HarnessEstimateResponse",
+        "type": "object"
+      },
+      "HarnessJointEntry": {
+        "properties": {
+          "base": {
+            "title": "Base",
+            "type": "string"
+          },
+          "cable_length_estimate_mm": {
+            "title": "Cable Length Estimate Mm",
+            "type": "number"
+          },
+          "follower": {
+            "title": "Follower",
+            "type": "string"
+          },
+          "joint_name": {
+            "title": "Joint Name",
+            "type": "string"
+          },
+          "joint_type": {
+            "title": "Joint Type",
+            "type": "string"
+          },
+          "segment_length_mm": {
+            "title": "Segment Length Mm",
+            "type": "number"
+          },
+          "step_number": {
+            "title": "Step Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "step_number",
+          "joint_name",
+          "joint_type",
+          "base",
+          "follower",
+          "segment_length_mm",
+          "cable_length_estimate_mm"
+        ],
+        "title": "HarnessJointEntry",
         "type": "object"
       },
       "HealthResponse": {
@@ -3332,6 +3691,18 @@
             ],
             "title": "Costoverbudget"
           },
+          "dissipationW": {
+            "title": "Dissipationw",
+            "type": "number"
+          },
+          "drawAverageW": {
+            "title": "Drawaveragew",
+            "type": "number"
+          },
+          "drawPeakW": {
+            "title": "Drawpeakw",
+            "type": "number"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -3410,6 +3781,10 @@
             "title": "Name",
             "type": "string"
           },
+          "outputW": {
+            "title": "Outputw",
+            "type": "number"
+          },
           "parentId": {
             "anyOf": [
               {
@@ -3461,7 +3836,11 @@
           "name",
           "kind",
           "massKg",
-          "cost"
+          "cost",
+          "drawPeakW",
+          "drawAverageW",
+          "outputW",
+          "dissipationW"
         ],
         "title": "HierarchyNodeResponse",
         "type": "object"
@@ -8356,6 +8735,18 @@
             "title": "Id",
             "type": "string"
           },
+          "meshStats": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meshstats"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -9742,6 +10133,131 @@
         "summary": "List Hierarchical Bom",
         "tags": [
           "bom"
+        ]
+      }
+    },
+    "/v1/bom/risk": {
+      "get": {
+        "operationId": "get_bom_risk_v1_bom_risk_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Bom Risk V1 Bom Risk Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Bom Risk",
+        "tags": [
+          "bom"
+        ]
+      }
+    },
+    "/v1/bringup": {
+      "get": {
+        "operationId": "list_bringup_checklists_v1_bringup_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BringupChecklistListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bringup Checklists",
+        "tags": [
+          "bringup"
+        ]
+      },
+      "post": {
+        "operationId": "create_bringup_checklist_v1_bringup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBringupChecklistRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateBringupChecklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Bringup Checklist",
+        "tags": [
+          "bringup"
         ]
       }
     },
@@ -11898,6 +12414,47 @@
         "summary": "Get Feature Diff",
         "tags": [
           "features"
+        ]
+      }
+    },
+    "/v1/firmware/scaffold": {
+      "post": {
+        "operationId": "create_firmware_scaffold_v1_firmware_scaffold_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFirmwareScaffoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateFirmwareScaffoldResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Firmware Scaffold",
+        "tags": [
+          "firmware"
         ]
       }
     },
@@ -15129,6 +15686,49 @@
         ]
       }
     },
+    "/v1/twin/nodes/{node_id}/geometry-diff": {
+      "get": {
+        "description": "Diff a work product's real geometry against its SUPERSEDES predecessor.\n\nUnlike ``/diff`` above (a metadata-revision diff on the SAME node --\n``/iterate`` never changes the underlying blob, so no two revisions of one\nnode ever have different geometry), this walks the real SUPERSEDES edge a\nre-committed, same-named CAD_MODEL gets (``api_gateway.twin.geometry_\nrecorder``) and compares the two NODES' actual STEP files.",
+        "operationId": "diff_geometry_v1_twin_nodes__node_id__geometry_diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeometryDiffResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Geometry",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/nodes/{node_id}/iterate": {
       "post": {
         "description": "Record a new revision and apply metadata updates to a work product.",
@@ -15547,6 +16147,48 @@
         "summary": "List Twin Relationships",
         "tags": [
           "twin"
+        ]
+      }
+    },
+    "/v1/wiring/harness-estimate": {
+      "get": {
+        "operationId": "get_harness_estimate_v1_wiring_harness_estimate_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HarnessEstimateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Harness Estimate",
+        "tags": [
+          "wiring"
         ]
       }
     }

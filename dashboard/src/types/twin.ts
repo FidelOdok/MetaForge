@@ -47,6 +47,11 @@ export interface TwinNode {
   // ({poseName: {jointName: value}}) — undefined for every other node
   // type, or a robot_description with no saved poses yet.
   poses?: Record<string, Record<string, number>>;
+  // FORGE-305: a simulation_result node's mesh statistics ({num_nodes,
+  // num_elements, ...}). Undefined for every other node type, or a result
+  // recorded without them. Like geometryParameters above, this is here
+  // because `properties` is scalar-only and silently drops objects.
+  meshStats?: Record<string, unknown>;
 }
 
 export interface TwinRelationship {

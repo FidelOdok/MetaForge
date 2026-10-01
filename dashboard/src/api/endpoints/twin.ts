@@ -22,6 +22,8 @@ interface TwinNodeApiResponse {
   hasScript?: boolean;
   assembly?: AssemblyDescription | null;
   poses?: Record<string, Record<string, number>> | null;
+  // FORGE-305: a simulation_result's mesh_stats.
+  meshStats?: Record<string, unknown> | null;
 }
 
 export interface TwinNodeScript {
@@ -61,6 +63,7 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     hasScript: node.hasScript,
     assembly: node.assembly ?? undefined,
     poses: node.poses ?? undefined,
+    meshStats: node.meshStats ?? undefined,
   }));
 }
 
@@ -80,6 +83,7 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       hasScript: node.hasScript,
       assembly: node.assembly ?? undefined,
       poses: node.poses ?? undefined,
+      meshStats: node.meshStats ?? undefined,
     };
   } catch {
     return undefined;

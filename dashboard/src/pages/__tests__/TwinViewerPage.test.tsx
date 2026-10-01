@@ -675,3 +675,115 @@ describe('deep links (FORGE-371)', () => {
     expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
+
+// ── FEA result inspector (FORGE-305) ────────────────────────────────────────
+/** FORGE-246 landed the simulation_result work product; FORGE-279 the read
+ *  route the Sim page lists from. The inspector never got its half, so a
+ *  selected result rendered as untyped scalar rows -- `max_von_mises_mpa:
+ *  182.4`, no units, no ordering, indistinguishable from the forty other
+ *  properties beside it. */
+describe('TwinViewerPage FEA result view (FORGE-305)', () => {
+  const meshStats = { num_nodes: 12500, num_elements: 48000 };
+
+  function resultNode(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'sr1',
+      name: 'bracket-fea-run-3',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {
+        wp_type: 'simulation_result',
+        max_von_mises_mpa: 182.43,
+        max_displacement_mm: 0.4126,
+        load_case: 'tip-load-500N',
+      },
+      meshStats,
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  function selectNode(node: Record<string, unknown>) {
+    window.history.pushState({}, '', '/twin');
+    useLayoutStore.setState({ sidebarCollapsed: false });
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /bracket-fea-run-3/ }));
+  }
+
+  it('shows the summary with units for a simulation_result node', () => {
+    selectNode(resultNode());
+    const panel = screen.getByTestId('fea-result-section');
+    // The units are the point: 182.43 on its own is not an answer.
+    expect(within(panel).getByText('182.4')).toBeInTheDocument();
+    expect(within(panel).getByText('MPa')).toBeInTheDocument();
+    expect(within(panel).getByText('0.413')).toBeInTheDocument();
+    expect(within(panel).getByText('mm')).toBeInTheDocument();
+  });
+
+  it('names the load case that produced it', () => {
+    selectNode(resultNode());
+    expect(
+      within(screen.getByTestId('fea-result-section')).getByText(/tip-load-500N/),
+    ).toBeInTheDocument();
+  });
+
+  it('says so when the load case was not recorded, rather than showing a blank', () => {
+    selectNode(resultNode({ properties: { wp_type: 'simulation_result', max_von_mises_mpa: 1 } }));
+    expect(
+      within(screen.getByTestId('fea-result-section')).getByText(/not recorded/),
+    ).toBeInTheDocument();
+  });
+
+  it('shows mesh stats, which the scalar-only properties projection drops', () => {
+    // The whole reason meshStats needed surfacing separately: `properties` is
+    // scalar-only, so an object value never reaches the client at all.
+    selectNode(resultNode());
+    const panel = screen.getByTestId('fea-result-section');
+    expect(within(panel).getByText('num_elements')).toBeInTheDocument();
+    expect(within(panel).getByText('48,000')).toBeInTheDocument();
+  });
+
+  it('does not render for a node that is not a simulation result', () => {
+    selectNode(resultNode({ properties: { wp_type: 'cad_model' } }));
+    expect(screen.queryByTestId('fea-result-section')).not.toBeInTheDocument();
+  });
+
+  it('says the numbers are missing rather than rendering an empty panel', () => {
+    // A blank panel reads as "the view is broken", which is the wrong
+    // conclusion to lead a reader to.
+    selectNode(resultNode({ properties: { wp_type: 'simulation_result' }, meshStats: undefined }));
+    expect(
+      within(screen.getByTestId('fea-result-section')).getByText(/never reached it/),
+    ).toBeInTheDocument();
+  });
+
+  it('treats an empty-string measurement as absent, not as zero stress', () => {
+    // `Number('')` is 0, which would render as a real measurement of zero --
+    // the kind of fabricated reading that is worse than a dash.
+    selectNode(
+      resultNode({
+        properties: { wp_type: 'simulation_result', max_von_mises_mpa: '', max_displacement_mm: 0.5 },
+      }),
+    );
+    const panel = screen.getByTestId('fea-result-section');
+    expect(within(panel).queryByText('0.0')).not.toBeInTheDocument();
+    expect(within(panel).getByText('0.500')).toBeInTheDocument();
+  });
+
+  it('points at the Sim page for comparison instead of duplicating it', () => {
+    selectNode(resultNode());
+    const link = within(screen.getByTestId('fea-result-section')).getByRole('link', {
+      name: /Compare in Sim/,
+    });
+    expect(link).toHaveAttribute('href', '/sim');
+  });
+});

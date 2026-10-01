@@ -22,7 +22,9 @@ describe('sample workspace', () => {
   it('serves the Drone FC nodes, relationships and project offline', async () => {
     expect(isSampleMode()).toBe(true);
     const nodes = await client.get('/twin/nodes', { params: { project_id: SAMPLE_PROJECT_ID } });
-    expect(nodes.data.total).toBe(12);
+    // 14 since FORGE-305 added the two simulation_result nodes the sample
+    // /simulation/results handler has been serving since FORGE-279.
+    expect(nodes.data.total).toBe(14);
     expect(nodes.data.nodes.map((n: { id: string }) => n.id)).toContain('sample-pcb');
 
     const rels = await client.get('/twin/relationships');
@@ -30,6 +32,30 @@ describe('sample workspace', () => {
 
     const project = await client.get(`/projects/${SAMPLE_PROJECT_ID}`);
     expect(project.data.name).toBe('Drone FC · sample');
+  });
+
+  it('gives the FEA results and the twin nodes the same ids (FORGE-305)', async () => {
+    // Two views of one analysis: the Sim page lists /simulation/results, the
+    // Twin Viewer's inspector reads the node. Different ids would make the
+    // sample workspace show the same FEA run as two unrelated things.
+    const results = await client.get('/simulation/results');
+    const resultIds = results.data.results.map((r: { id: string }) => r.id).sort();
+
+    const nodes = await client.get('/twin/nodes', { params: { project_id: SAMPLE_PROJECT_ID } });
+    const feaNodeIds = nodes.data.nodes
+      .filter((n: { properties: Record<string, unknown> }) => n.properties.wp_type === 'simulation_result')
+      .map((n: { id: string }) => n.id)
+      .sort();
+
+    expect(feaNodeIds).toEqual(resultIds);
+    expect(feaNodeIds).toHaveLength(2);
+  });
+
+  it('carries mesh stats on the FEA nodes, which `properties` cannot (FORGE-305)', async () => {
+    const nodes = await client.get('/twin/nodes', { params: { project_id: SAMPLE_PROJECT_ID } });
+    const rev1 = nodes.data.nodes.find((n: { id: string }) => n.id === 'sample-fea-rev1');
+    expect(rev1.meshStats).toEqual({ num_nodes: 12500, num_elements: 48000 });
+    expect(rev1.properties.mesh_stats).toBeUndefined();
   });
 
   it('returns node detail, revisions and the sample GLB model', async () => {

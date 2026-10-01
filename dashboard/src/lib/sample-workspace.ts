@@ -272,6 +272,44 @@ const SAMPLE_WORKSPACE_SEED = {
       },
       updatedAt: '2026-09-22T10:00:00Z',
     },
+    // FORGE-305: the two FEA results below are the same two the
+    // /simulation/results handler serves, with the same ids -- so the Sim
+    // page's comparison and the Twin Viewer's inspector are talking about
+    // one analysis rather than two unrelated sets of numbers. Without a
+    // node of this wp_type the inspector's FEA panel had no demo path at
+    // all, which is also how it went unbuilt for so long.
+    {
+      id: 'sample-fea-rev1',
+      name: 'Rev 1 FEA \u2014 static 1g',
+      domain: 'simulation',
+      status: 'valid',
+      type: 'work_product',
+      properties: {
+        wp_type: 'simulation_result',
+        max_von_mises_mpa: 62.4,
+        max_displacement_mm: 0.41,
+        load_case: 'static_1g',
+        source: 'Synthetic result; no solver executed',
+      },
+      meshStats: { num_nodes: 12500, num_elements: 48000 },
+      updatedAt: '2026-09-20T10:00:00Z',
+    },
+    {
+      id: 'sample-fea-rev2',
+      name: 'Rev 2 FEA \u2014 static 1g',
+      domain: 'simulation',
+      status: 'valid',
+      type: 'work_product',
+      properties: {
+        wp_type: 'simulation_result',
+        max_von_mises_mpa: 45.1,
+        max_displacement_mm: 0.29,
+        load_case: 'static_1g',
+        source: 'Synthetic result; no solver executed',
+      },
+      meshStats: { num_nodes: 12500, num_elements: 48000 },
+      updatedAt: '2026-09-22T10:00:00Z',
+    },
     {
       id: 'sample-runtime',
       name: 'Flight duration requirement',
