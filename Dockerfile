@@ -59,6 +59,18 @@ RUN pip install --no-cache-dir --no-deps .
 ENV PYTHONUNBUFFERED=1
 ENV METAFORGE_ENV=docker
 
+# FORGE-411: stamp the commit this image was built from, so a running process
+# can say whether it matches the checkout beside it. The sidecar mounts source
+# and does not hot-reload, so "image SHA vs mounted SHA" is the staleness
+# signal -- and it served two-day-old code for two days because nothing
+# published either number.
+#
+# Unset is handled: health/check then says staleness cannot be detected rather
+# than reporting a false pass. CI passes
+# --build-arg METAFORGE_BUILD_SHA=$(git rev-parse HEAD).
+ARG METAFORGE_BUILD_SHA=""
+ENV METAFORGE_BUILD_SHA=${METAFORGE_BUILD_SHA}
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \

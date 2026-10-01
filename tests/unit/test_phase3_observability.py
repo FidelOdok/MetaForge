@@ -93,8 +93,8 @@ class TestTelemetryMetricsGroupAccess:
         # 32 originally; +5 retrieval metrics in MET-326; +1 knowledge in MET-401;
         # +1 twin in MET-439; +6 consolidation in MET-454/455;
         # +5 harness (production-harness audit follow-up); +4 MCP in FORGE-379;
-        # +3 design-flow engine in FORGE-401.
-        assert len(MetricsRegistry.all_metrics()) == 57
+        # +3 design-flow engine in FORGE-401; +1 code staleness in FORGE-411.
+        assert len(MetricsRegistry.all_metrics()) == 58
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

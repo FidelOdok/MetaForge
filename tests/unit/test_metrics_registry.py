@@ -57,8 +57,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 4 constraint + 5 retrieval (MET-326) + 1 knowledge (MET-401)
         # + 1 twin (MET-439) + 6 consolidation (MET-454/455)
         # + 5 harness (production-harness audit follow-up)
-        # + 4 MCP (FORGE-379) + 3 design-flow (FORGE-401)
-        assert len(all_metrics) == 57
+        # + 5 MCP (FORGE-379, FORGE-411) + 3 design-flow (FORGE-401)
+        assert len(all_metrics) == 58
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

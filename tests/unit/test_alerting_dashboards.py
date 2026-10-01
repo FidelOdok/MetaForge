@@ -91,10 +91,11 @@ class TestAlertingRules:
         #   MET-476)
         # + 2 harness (production-harness audit follow-up)
         # + 4 MCP surface (FORGE-379)
-        # + 2 design-flow engine (FORGE-401).
+        # + 2 design-flow engine (FORGE-401)
+        # + 2 code staleness (FORGE-411).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 29
+        assert len(rules) == 31
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -127,11 +128,14 @@ class TestAlertingRules:
         # + 2 harness (production-harness audit follow-up)
         # + 3 MCP surface (FORGE-379; the fourth is severity: info)
         # + 1 design-flow gates-never-answered (FORGE-401; the engine-down
-        #   rule alongside it is critical).
+        #   rule alongside it is critical)
+        # + 1 code staleness (FORGE-411; the undetectable-skew rule beside it
+        #   is severity: info, because it says the check cannot run, not that
+        #   something is broken).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 21
+        assert len(warnings) == 22
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -169,6 +173,10 @@ class TestAlertingRules:
                 "DesignFlowGatesNeverAnswered",
                 "McpAdapterUnreachable",
                 "McpErrorRateHigh",
+                # FORGE-411: the process is serving code other than the
+                # checkout beside it. Warning rather than critical because it
+                # answers every request correctly -- for code nobody reads.
+                "McpRunningStaleCode",
                 "McpUnexpectedErrors",
                 "DeviceOffline",
                 "ErrorBudgetBurnRate",
