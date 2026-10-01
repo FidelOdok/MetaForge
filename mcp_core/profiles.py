@@ -47,6 +47,13 @@ class UnknownProfileError(ValueError):
 # to earn its place in all five.
 _BASE: frozenset[str] = frozenset(
     {
+        # FORGE-418: the entry point. `/metaforge:use` returns the project
+        # brief by calling this, and a profile without it left the default
+        # plugin install unable to reach the brief at all -- the agent
+        # rebuilt status from `project.get`'s work-product list instead,
+        # which is the long way round to a worse answer. It also binds the
+        # session's project scope, so omitting it cost resources/list too.
+        "project.open",
         "project.get",
         "project.list",
         "session.start",
