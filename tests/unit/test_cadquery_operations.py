@@ -1833,3 +1833,79 @@ class TestGenerateRos2Launch:
                 "widget", "/tmp/widget.urdf", output_path=str(tmp_path / "w.launch.py")
             )
         assert Path(result["output_file"]).exists()
+
+
+class _FakeEmptySolid:
+    """A test double for a genuinely empty CadQuery/OCCT shape (e.g. the
+    result of intersect()-ing two non-overlapping solids) -- real OCCT's
+    own Volume()/Area() return 0.0 safely for this, but BoundingBox()
+    raises Standard_ConstructionError: Bnd_Box is void (confirmed live
+    against the real cadquery-adapter on fidel-dev, FORGE-272)."""
+
+    def Solids(self):
+        return []
+
+    def Volume(self):
+        return 0.0
+
+    def Area(self):
+        return 0.0
+
+    def BoundingBox(self):
+        raise AssertionError(
+            "BoundingBox() must not be called on a shape with no Solids() -- "
+            "real OCCT raises Standard_ConstructionError: Bnd_Box is void here"
+        )
+
+
+class _FakeNonEmptySolid:
+    """A test double for a real, non-empty shape -- the existing (pre-
+    FORGE-272) code path, confirming the guard doesn't change behavior
+    for the common case."""
+
+    def Solids(self):
+        return [object()]
+
+    def Volume(self):
+        return 500.0
+
+    def Area(self):
+        return 400.0
+
+    def BoundingBox(self):
+        class _BB:
+            xmin, ymin, zmin = 0.0, -5.0, -5.0
+            xmax, ymax, zmax = 5.0, 5.0, 5.0
+
+        return _BB()
+
+
+class TestGetShapePropertiesEmptyShapeGuard:
+    """FORGE-272: _get_shape_properties must describe a genuinely empty
+    shape (zero Solids()) as zero volume/area with no bounding box,
+    rather than crashing on BoundingBox()'s OCCT exception -- the real
+    bug a real, non-overlapping interference check hit live on
+    fidel-dev (two real AR4 arm links, 'Bnd_Box is void')."""
+
+    def test_empty_shape_returns_zero_volume_no_bounding_box(self):
+        ops = CadqueryOperations()
+        props = ops._get_shape_properties(_FakeEmptySolid())
+        assert props == {
+            "volume_mm3": 0.0,
+            "surface_area_mm2": 0.0,
+            "bounding_box": None,
+        }
+
+    def test_non_empty_shape_still_computes_real_bounding_box(self):
+        ops = CadqueryOperations()
+        props = ops._get_shape_properties(_FakeNonEmptySolid())
+        assert props["volume_mm3"] == 500.0
+        assert props["surface_area_mm2"] == 400.0
+        assert props["bounding_box"] == {
+            "min_x": 0.0,
+            "min_y": -5.0,
+            "min_z": -5.0,
+            "max_x": 5.0,
+            "max_y": 5.0,
+            "max_z": 5.0,
+        }
