@@ -1450,6 +1450,42 @@ function route(
         : s.bomComponents;
       return { components, total: components.length };
     }
+    if (path === '/bom/risk') {
+      // FORGE-268: illustrative placeholder scores, not a real distributor
+      // resolution -- sample mode has no backend to call
+      // distributors.resolve_offers against. Real (non-demo) requests hit
+      // api_gateway.twin.bom_risk, which resolves real offers per part.
+      const partScores = s.bomComponents.map((c, i) => {
+        const overallScore = i === 0 ? 62 : 8;
+        return {
+          mpn: c.partNumber,
+          manufacturer: c.manufacturer,
+          overall_score: overallScore,
+          risk_level: overallScore > 50 ? 'high' : 'low',
+          factors: [
+            {
+              name: 'single_source',
+              weight: 0.25,
+              score: i === 0 ? 100 : 0,
+              description: i === 0 ? 'Single-source part -- high supply chain risk' : 'Multi-source -- low risk',
+            },
+          ],
+          flagged: overallScore > 50,
+        };
+      });
+      return {
+        project_id: String(params.project_id ?? ''),
+        total_parts: partScores.length,
+        overall_score: Math.round(
+          partScores.reduce((sum, p) => sum + p.overall_score, 0) / (partScores.length || 1),
+        ),
+        critical_count: 0,
+        high_count: partScores.filter((p) => p.risk_level === 'high').length,
+        medium_count: 0,
+        low_count: partScores.filter((p) => p.risk_level === 'low').length,
+        part_scores: partScores,
+      };
+    }
     if (path === '/manufacture/release') {
       // FORGE-294: illustrative placeholder bytes, not real geometry --
       // sample mode has no backend/cadquery to actually export from. Real

@@ -81,6 +81,22 @@ test.describe('BOM Page', () => {
     await expect(result).toContainText('MG996R');
     await expect(result).toContainText('meets all required specs');
   });
+
+  test('supply-chain risk badge (FORGE-268)', async ({ page }) => {
+    await page.goto('/bom?demo=1');
+
+    const riskButton = page.getByRole('button', { name: 'Supply-chain risk' });
+    await expect(riskButton).toBeVisible();
+    await riskButton.click();
+
+    const panel = page.getByTestId('bom-risk-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Overall risk:');
+    // The sample fixture's first BOM component (single-source) is flagged;
+    // the second (multi-source) is not shown as a badge.
+    await expect(panel).toContainText('DS3218MG');
+    await expect(panel).not.toContainText('MG996R');
+  });
 });
 
 test.describe('Evals Page', () => {

@@ -4,6 +4,7 @@ import { StatusBadge } from '../components/shared/StatusBadge';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { useBom, useHierarchicalBom } from '../hooks/use-bom';
+import { useBomRisk } from '../hooks/use-bom-risk';
 import { useActiveProject } from '../hooks/use-active-project';
 import { useSelectComponent } from '../hooks/use-component-selection';
 import type { BomComponent, HierarchicalBomLine } from '../types/bom';
@@ -526,6 +527,7 @@ export function BomPage() {
     activeProjectId ?? undefined,
   );
   const isLoading = view === 'flat' ? flatLoading : hierarchicalLoading;
+  const bomRisk = useBomRisk();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -660,8 +662,80 @@ export function BomPage() {
               CSV
             </button>
           )}
+          {view === 'flat' && activeProjectId && (
+            <button
+              type="button"
+              onClick={() => bomRisk.mutate(activeProjectId)}
+              disabled={bomRisk.isPending}
+              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors disabled:opacity-50"
+              style={{
+                background: 'var(--mf-c-282a30)',
+                border: '1px solid var(--mf-r-65-72-90-0p3)',
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>shield</span>
+              {bomRisk.isPending ? 'Scoring…' : 'Supply-chain risk'}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Supply-chain risk panel (FORGE-268, gap G-C4) -- on-demand, since
+          each run resolves real distributor offers for every real BOM line. */}
+      {view === 'flat' && bomRisk.data && (
+        <div
+          className="mb-3 rounded px-3 py-2 text-xs"
+          data-testid="bom-risk-panel"
+          style={{
+            background: 'var(--mf-c-191b22)',
+            border: '1px solid var(--mf-r-65-72-90-0p2)',
+          }}
+        >
+          <div className="flex items-center gap-3 font-mono text-on-surface">
+            <span>
+              Overall risk: <strong>{bomRisk.data.overallScore}</strong>/100
+            </span>
+            <span className="text-on-surface-variant">
+              {bomRisk.data.totalParts} part(s) scored -- {bomRisk.data.criticalCount} critical,{' '}
+              {bomRisk.data.highCount} high, {bomRisk.data.mediumCount} medium,{' '}
+              {bomRisk.data.lowCount} low
+            </span>
+          </div>
+          {bomRisk.data.partScores.some((p) => p.flagged) && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {bomRisk.data.partScores
+                .filter((p) => p.flagged)
+                .map((p) => (
+                  <span
+                    key={p.mpn}
+                    title={p.factors.map((f) => `${f.name}: ${f.description}`).join('\n')}
+                    className="rounded px-1.5 py-0.5 font-mono"
+                    style={{
+                      background:
+                        p.riskLevel === 'critical' ? 'rgba(255, 138, 128, 0.15)' : 'rgba(255, 193, 7, 0.15)',
+                      color: p.riskLevel === 'critical' ? 'var(--mf-c-ff8a80, #ff8a80)' : 'var(--mf-c-ffc107, #ffc107)',
+                      border: `1px solid ${p.riskLevel === 'critical' ? 'var(--mf-c-ff8a80, #ff8a80)' : 'var(--mf-c-ffc107, #ffc107)'}`,
+                    }}
+                  >
+                    {p.mpn} &middot; {p.riskLevel} ({p.overallScore})
+                  </span>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+      {view === 'flat' && bomRisk.isError && (
+        <div
+          className="mb-3 rounded px-3 py-2 font-mono text-xs"
+          style={{
+            background: 'var(--mf-c-191b22)',
+            border: '1px solid var(--mf-r-65-72-90-0p2)',
+            color: 'var(--mf-c-ff8a80, #ff8a80)',
+          }}
+        >
+          Supply-chain risk scoring failed.
+        </div>
+      )}
 
       {/* Toolbar (flat view only -- the hierarchical view is already structured) */}
       {view === 'flat' && (
