@@ -87,6 +87,13 @@ PROFILES: dict[str, frozenset[str]] = {
         "knowledge.ingest",
         "memory.list_insights",
         "memory.retrieve_similar_experience",
+        # FORGE-462: starting a gated design flow is a core action. The run.*
+        # pair were listed here while no sidecar registered them; flow.* is
+        # the approved-version path a person signs off on first.
+        "flow.list",
+        "flow.propose",
+        "flow.start_run",
+        "flow.status",
         "run.get_status",
         "run.start_design_flow",
         "twin.compute_hierarchy_rollup",

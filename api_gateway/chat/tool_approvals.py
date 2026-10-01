@@ -109,6 +109,52 @@ def init_approval_ledger(ledger: SqliteRunLedger | None) -> None:
     logger.info("tool_approval_ledger_wired", restored=restored, orphaned=orphaned)
 
 
+#: Approvals whose answer is also the decision on a stored flow version.
+_FLOW_VERSION_KINDS = frozenset({"design_flow_proposal", "design_flow_version"})
+
+
+def _decide_flow_version(run: Run, *, approved: bool) -> None:
+    """Carry an approval's answer to the flow version it was about (FORGE-462).
+
+    ``flow.propose`` and ``POST /v1/design-flows/versions`` hold a version for
+    a person and park an approval for it. Answering that approval moved the
+    approval and nothing else: the version stayed ``proposed``, so
+    ``POST /v1/runs`` refused it with 409 forever, and "approve, then start"
+    could not be done by anyone.
+
+    The approver is the one recorded on the approval run, never anything the
+    request body said (FORGE-393).
+    """
+    if run.request.get("kind") not in _FLOW_VERSION_KINDS:
+        return
+    version_id = run.request.get("flow_version_id")
+    if not version_id:
+        return
+    from orchestrator.design_flow.versions import VersionNotFoundError, get_version_store
+
+    try:
+        get_version_store().decide(
+            str(version_id), approved=approved, decided_by=run.approved_by or ""
+        )
+    except (VersionNotFoundError, ValueError) as exc:
+        # The approval itself is recorded either way. A version that is gone
+        # (gateway restart) or already decided is reported, not raised: the
+        # person's answer must not be turned into an error after it landed.
+        logger.warning(
+            "flow_version_decision_not_applied",
+            approval_id=run.id,
+            version_id=version_id,
+            error=str(exc),
+        )
+        return
+    logger.info(
+        "flow_version_decided_by_approval",
+        approval_id=run.id,
+        version_id=version_id,
+        approved=approved,
+    )
+
+
 @router.get("", response_model=RunListResponse)
 def list_pending_approvals() -> RunListResponse:
     """All tool-call approvals currently awaiting a decision."""
@@ -193,6 +239,7 @@ def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -
         raise HTTPException(status_code=404, detail=f"approval '{run_id}' not found") from exc
     except InvalidTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _decide_flow_version(run, approved=body.decision == ApprovalDecision.APPROVE.value)
     logger.info(
         "tool_approval_submitted",
         run_id=run_id,

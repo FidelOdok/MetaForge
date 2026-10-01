@@ -127,6 +127,33 @@ ledger, with the approver taken from that record (FORGE-393).
 repeatedly; holding every poll for a human would make following a run
 impossible.
 
+**Served by the sidecar too (FORGE-462).** Until FORGE-462 only the gateway
+passed the flow bindings to `bootstrap_tool_registry`. The adapters register
+only when a binding is supplied, so the HTTP sidecar (which every harness
+plugin talks to) skipped both `design_flow` and `run`, and none of `flow.*`
+or `run.*` reached any plugin. The sidecar now builds them in
+`metaforge/mcp/__main__.py` (`_build_flow_bindings`), chosen the same way as
+the approval gate above:
+
+- `METAFORGE_GATEWAY_URL` set: `metaforge/mcp/remote_flows.py` calls the
+  gateway's own routes (`GET /v1/design-flows`,
+  `POST /v1/design-flows/propose`, `POST /v1/runs`, `GET /v1/runs/{id}`,
+  `GET /v1/runs/{id}/flow-state`). The flow-version store, the approval
+  ledger and the run store are all process-level, so this is what makes a
+  proposal from a plugin the one the dashboard shows and a run from a plugin
+  one `/v1/runs` lists. Results have the same shape as the in-process
+  bindings, asserted by test.
+- Unset: the in-process bindings, correct only inside the gateway, with
+  `mcp_flow_bindings_in_process` logged at start-up.
+
+**Answering the approval decides the version.** Approving a proposal used to
+move the approval and nothing else: the flow version stayed `proposed` and
+`POST /v1/runs` refused it with 409 forever, so "approve, then start" could
+not be completed from anywhere. `POST /v1/chat/tool_approvals/{id}` now
+carries the decision to the version for `design_flow_proposal` and
+`design_flow_version` approvals, with the approver taken from the approval
+record (FORGE-393).
+
 **What checking this found.** A catalogue-wide test — "no tool lets a caller
 answer its own approval", matched on behaviour rather than on one forbidden
 name — turned up two tools with the identical FORGE-393 bug:
