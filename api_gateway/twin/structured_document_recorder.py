@@ -514,6 +514,12 @@ def make_technical_drawing_recorder(twin: Any, project_backend: Any = None) -> A
             surface_finishes or [],
             inspection_requirements or [],
         )
+        # FORGE-293: an explicit approval gate, same shape as
+        # design_sketch_recorder's -- a human signs off on the drawing
+        # package before it's treated as final, tracked here rather than
+        # inferred from "a technical_drawing node exists."
+        metadata["approved"] = False
+        metadata["approved_at"] = None
         result = await _persist_structured_document(
             twin=twin,
             project_backend=project_backend,

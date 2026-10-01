@@ -252,6 +252,33 @@ test.describe('Digital Twin Viewer', () => {
     await expect(summary).toContainText('No interference');
   });
 
+  test('Structure tab: technical drawing viewer and approval (FORGE-293)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await expect(upperArmRow).toBeVisible();
+    await expect(upperArmRow.getByTestId(/^technical-drawing-button-/)).toBeVisible();
+
+    await upperArmRow.getByTestId(/^technical-drawing-button-/).click();
+    const panel = page.getByTestId('technical-drawing-panel');
+    await expect(panel).toBeVisible();
+
+    const content = panel.getByTestId('technical-drawing-content');
+    await expect(content).toBeVisible();
+    await expect(content).toContainText('bore_diameter');
+    await expect(content).toContainText('flatness');
+    await expect(content).toContainText('bore_surface');
+    await expect(content).toContainText('CMM bore diameter check');
+    await expect(content).toContainText('Not yet approved');
+
+    await panel.getByTestId('approve-technical-drawing').click();
+    await expect(content).toContainText('Approved', { timeout: 10_000 });
+    await expect(panel.getByTestId('approve-technical-drawing')).not.toBeVisible();
+  });
+
   test('Structure tab: Release for manufacture (FORGE-294)', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the tree.

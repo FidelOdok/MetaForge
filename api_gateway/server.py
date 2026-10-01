@@ -57,6 +57,7 @@ from api_gateway.robot_loads.routes import router as robot_loads_router
 from api_gateway.runs.routes import router as runs_router
 from api_gateway.sessions.routes import router as sessions_router
 from api_gateway.simulation.routes import router as simulation_router
+from api_gateway.technical_drawings.routes import router as technical_drawings_router
 from api_gateway.testplans.routes import router as testplans_router
 from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.decision_routes import router as decisions_router
@@ -1034,6 +1035,18 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     bringup_checklist_lister_fn = make_bringup_checklist_lister(twin)
 
+    # FORGE-293: the dashboard-facing read/approve half of a real,
+    # pre-existing technical_drawing recorder (PR #734) that had no
+    # dashboard consumer (gap G-H1). REST-only closures, no MCP
+    # registration, so neither touches tool_registry/bootstrap.py.
+    from api_gateway.twin.technical_drawing_viewer import (
+        make_technical_drawing_approver,
+        make_technical_drawing_lister,
+    )
+
+    technical_drawing_lister_fn = make_technical_drawing_lister(twin)
+    technical_drawing_approver_fn = make_technical_drawing_approver(twin)
+
     # MET-588: hoisted to a named variable (previously only constructed
     # inline at the TwinServer(...) call site below) so this SAME instance
     # can also back firmware_scaffold_creator_fn below (FORGE-276).
@@ -1360,6 +1373,13 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.bringup.routes import init_bringup_checklist
 
     init_bringup_checklist(bringup_checklist_creator_fn, bringup_checklist_lister_fn)
+    # FORGE-293: bind the technical-drawing lister to the dashboard's REST
+    # route (api_gateway/technical_drawings/routes.py) -- same locality
+    # rationale as bringup_checklist above. The approver binds separately,
+    # below, into twin/routes.py alongside the design-sketch approver.
+    from api_gateway.technical_drawings.routes import init_technical_drawing_lister
+
+    init_technical_drawing_lister(technical_drawing_lister_fn)
     # FORGE-276: bind the firmware scaffold creator to the dashboard's REST
     # route (api_gateway/firmware/routes.py) -- same locality rationale as
     # bringup_checklist above.
@@ -1411,7 +1431,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.decision_routes import init_twin as init_decisions_twin
     from api_gateway.twin.hierarchy_routes import init_hierarchy_geometry_linker
     from api_gateway.twin.hierarchy_routes import init_twin as init_hierarchy_twin
-    from api_gateway.twin.routes import init_design_sketch_approver
+    from api_gateway.twin.routes import init_design_sketch_approver, init_technical_drawing_approver
     from api_gateway.twin.routes import init_twin as init_twin_viewer
 
     chat_backend = await create_backend()
@@ -1532,6 +1552,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # design_sketch work product (twin.commit_design_sketch is the agent
     # side of this same gate, wired above via bootstrap_tool_registry).
     init_design_sketch_approver(make_design_sketch_approver(twin))
+    init_technical_drawing_approver(technical_drawing_approver_fn)
 
     # MET-197 has been in the tree since 2026-03-08 and nothing ever
     # constructed the publisher: `KAFKA_BOOTSTRAP_SERVERS` was passed to the
@@ -2026,6 +2047,7 @@ def create_app(
     app.include_router(releases_router)
     app.include_router(testplans_router)
     app.include_router(bringup_router)
+    app.include_router(technical_drawings_router)
     app.include_router(firmware_router)
     app.include_router(harness_estimate_router)
     app.include_router(repeatability_router)

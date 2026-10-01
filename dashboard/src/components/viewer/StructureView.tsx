@@ -10,6 +10,10 @@ import { useManufactureRelease } from '../../hooks/use-manufacture';
 import { useBringupChecklists, useCreateBringupChecklist } from '../../hooks/use-bringup';
 import { useCreateFirmwareScaffold } from '../../hooks/use-firmware';
 import { useHarnessEstimate } from '../../hooks/use-harness-estimate';
+import {
+  useApproveTechnicalDrawing,
+  useTechnicalDrawings,
+} from '../../hooks/use-technical-drawing';
 import type { ManufactureProcess } from '../../api/endpoints/manufacture';
 import { iconForHierarchyKind } from '../../utils/wp-icons';
 import { DecisionList } from '../shared/DecisionList';
@@ -803,6 +807,175 @@ function HarnessEstimatePanel({
   );
 }
 
+/** FORGE-293 (gap G-H1): "Drawing viewer per part; approve drawing" -- the
+ * real technical_drawing work product data (dimensions, GD&T callouts,
+ * surface finishes, inspection requirements) already existed before this
+ * ticket, persisted by `generate_technical_drawing`/`twin.commit_technical_
+ * drawing` -- it just had no dashboard consumer. Renders the structured
+ * data as tables, not a rendered 2D vector drawing: no TechDraw-equivalent
+ * generator exists anywhere in this codebase (see
+ * api_gateway/twin/technical_drawing_viewer.py's own module docstring). */
+function TechnicalDrawingPanel({
+  node,
+  onClose,
+}: {
+  node: HierarchyNode;
+  onClose: () => void;
+}) {
+  const workProductId = node.realizedByWorkProductId ?? undefined;
+  const { data: drawings, isLoading, isError } = useTechnicalDrawings(workProductId);
+  const approve = useApproveTechnicalDrawing(workProductId);
+
+  const latest = drawings && drawings.length > 0 ? drawings[drawings.length - 1] : null;
+
+  return (
+    <div
+      data-testid="technical-drawing-panel"
+      className="mt-2 rounded-lg p-3"
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-on-surface">Technical drawing: {node.name}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-on-surface-variant hover:text-on-surface"
+        >
+          Close
+        </button>
+      </div>
+
+      {isLoading && <p className="text-xs text-on-surface-variant">Loading…</p>}
+
+      {isError && (
+        <p className="text-xs" style={{ color: 'var(--mf-c-ff-b4-ab)' }}>
+          Could not load this part's technical drawings.
+        </p>
+      )}
+
+      {!isLoading && !isError && drawings && drawings.length === 0 && (
+        <p className="text-xs text-on-surface-variant">No technical drawing recorded yet.</p>
+      )}
+
+      {latest && (
+        <div data-testid="technical-drawing-content">
+          <div className="mb-2 flex items-center justify-between">
+            <span
+              className="text-xs font-medium"
+              style={{ color: latest.approved ? 'var(--mf-c-a6-d6-a1)' : 'var(--mf-c-ff-b4-ab)' }}
+            >
+              {latest.approved
+                ? `Approved${latest.approvedBy ? ` by ${latest.approvedBy}` : ''}`
+                : 'Not yet approved'}
+            </span>
+            {!latest.approved && (
+              <Button
+                size="sm"
+                data-testid="approve-technical-drawing"
+                disabled={approve.isPending}
+                onClick={() => approve.mutate({ nodeId: latest.nodeId })}
+              >
+                {approve.isPending ? 'Approving…' : 'Approve drawing'}
+              </Button>
+            )}
+          </div>
+
+          {latest.dimensions.length > 0 && (
+            <>
+              <p className="mb-1 text-[11px] font-medium text-on-surface-variant">Dimensions</p>
+              <table className="mb-2 w-full text-xs text-on-surface">
+                <thead>
+                  <tr className="text-on-surface-variant">
+                    <th className="text-left font-normal">Feature</th>
+                    <th className="text-left font-normal">Nominal (mm)</th>
+                    <th className="text-left font-normal">+Tol</th>
+                    <th className="text-left font-normal">-Tol</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {latest.dimensions.map((d) => (
+                    <tr key={d.feature}>
+                      <td>{d.feature}</td>
+                      <td>{d.nominalMm}</td>
+                      <td>{d.tolerancePlusMm}</td>
+                      <td>{d.toleranceMinusMm}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {latest.gdtCallouts.length > 0 && (
+            <>
+              <p className="mb-1 text-[11px] font-medium text-on-surface-variant">GD&T callouts</p>
+              <table className="mb-2 w-full text-xs text-on-surface">
+                <thead>
+                  <tr className="text-on-surface-variant">
+                    <th className="text-left font-normal">Feature</th>
+                    <th className="text-left font-normal">Symbol</th>
+                    <th className="text-left font-normal">Tol (mm)</th>
+                    <th className="text-left font-normal">Datums</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {latest.gdtCallouts.map((g) => (
+                    <tr key={`${g.feature}-${g.symbol}`}>
+                      <td>{g.feature}</td>
+                      <td>{g.symbol}</td>
+                      <td>{g.toleranceValueMm}</td>
+                      <td>{g.datumRefs.join(', ')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {latest.surfaceFinishes.length > 0 && (
+            <>
+              <p className="mb-1 text-[11px] font-medium text-on-surface-variant">
+                Surface finishes
+              </p>
+              <table className="mb-2 w-full text-xs text-on-surface">
+                <thead>
+                  <tr className="text-on-surface-variant">
+                    <th className="text-left font-normal">Feature</th>
+                    <th className="text-left font-normal">Ra (µm)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {latest.surfaceFinishes.map((s) => (
+                    <tr key={s.feature}>
+                      <td>{s.feature}</td>
+                      <td>{s.raUm}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {latest.inspectionRequirements.length > 0 && (
+            <>
+              <p className="mb-1 text-[11px] font-medium text-on-surface-variant">
+                Inspection requirements
+              </p>
+              <ul className="mb-1 flex flex-col gap-1">
+                {latest.inspectionRequirements.map((r) => (
+                  <li key={r} className="text-xs text-on-surface">
+                    • {r}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TreeRow({
   node,
   depth,
@@ -824,6 +997,8 @@ function TreeRow({
   onToggleHarnessEstimate,
   interferenceCheckingId,
   onToggleInterferenceCheck,
+  technicalDrawingViewingId,
+  onToggleTechnicalDrawing,
 }: {
   node: TreeNode;
   depth: number;
@@ -845,6 +1020,8 @@ function TreeRow({
   onToggleHarnessEstimate: (id: string) => void;
   interferenceCheckingId: string | null;
   onToggleInterferenceCheck: (id: string) => void;
+  technicalDrawingViewingId: string | null;
+  onToggleTechnicalDrawing: (id: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
@@ -857,6 +1034,7 @@ function TreeRow({
   const isFirmwareScaffolding = firmwareScaffoldingId === node.id;
   const isHarnessEstimating = harnessEstimatingId === node.id;
   const isCheckingInterference = interferenceCheckingId === node.id;
+  const isViewingTechnicalDrawing = technicalDrawingViewingId === node.id;
 
   return (
     <>
@@ -994,6 +1172,17 @@ function TreeRow({
             Check interference
           </button>
         )}
+        {node.realizedByWorkProductId && (
+          <button
+            type="button"
+            data-testid={`technical-drawing-button-${node.id}`}
+            onClick={() => onToggleTechnicalDrawing(node.id)}
+            className="rounded px-2 py-0.5 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            Technical drawing
+          </button>
+        )}
       </div>
       {isRealizing && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
@@ -1041,6 +1230,11 @@ function TreeRow({
           />
         </div>
       )}
+      {isViewingTechnicalDrawing && (
+        <div style={{ paddingLeft: depth * 20 + 28 }}>
+          <TechnicalDrawingPanel node={node} onClose={() => onToggleTechnicalDrawing(node.id)} />
+        </div>
+      )}
       {hasChildren && !isCollapsed && (
         <div>
           {node.children.map((child) => (
@@ -1066,6 +1260,8 @@ function TreeRow({
               onToggleHarnessEstimate={onToggleHarnessEstimate}
               interferenceCheckingId={interferenceCheckingId}
               onToggleInterferenceCheck={onToggleInterferenceCheck}
+              technicalDrawingViewingId={technicalDrawingViewingId}
+              onToggleTechnicalDrawing={onToggleTechnicalDrawing}
             />
           ))}
         </div>
@@ -1110,6 +1306,9 @@ export function StructureView({
   // FORGE-272 (gap G-D4): which node's "Check interference" panel is
   // open, at most one at a time (independent of the others above).
   const [interferenceCheckingId, setInterferenceCheckingId] = useState<string | null>(null);
+  // FORGE-293 (gap G-H1): which node's "Technical drawing" panel is open,
+  // at most one at a time (independent of the others above).
+  const [technicalDrawingViewingId, setTechnicalDrawingViewingId] = useState<string | null>(null);
 
   const forest = useMemo(() => buildForest(nodes ?? []), [nodes]);
 
@@ -1193,6 +1392,10 @@ export function StructureView({
               interferenceCheckingId={interferenceCheckingId}
               onToggleInterferenceCheck={(id) =>
                 setInterferenceCheckingId((cur) => (cur === id ? null : id))
+              }
+              technicalDrawingViewingId={technicalDrawingViewingId}
+              onToggleTechnicalDrawing={(id) =>
+                setTechnicalDrawingViewingId((cur) => (cur === id ? null : id))
               }
             />
           ))}

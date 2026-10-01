@@ -159,6 +159,49 @@
         "title": "ApproveSketchResponse",
         "type": "object"
       },
+      "ApproveTechnicalDrawingRequest": {
+        "description": "Human sign-off on a technical_drawing work product (FORGE-293).",
+        "properties": {
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Identifier of the human approving this drawing.",
+            "title": "Approved By"
+          }
+        },
+        "title": "ApproveTechnicalDrawingRequest",
+        "type": "object"
+      },
+      "ApproveTechnicalDrawingResponse": {
+        "description": "Result of approving a technical_drawing \u2014 the gate's new state.",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "approved_at": {
+            "title": "Approved At",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "approved",
+          "approved_at"
+        ],
+        "title": "ApproveTechnicalDrawingResponse",
+        "type": "object"
+      },
       "AssemblyJoint": {
         "description": "One mate/joint between two committed parts (FORGE-271).\n\nSame shape as ``AssemblyDescription['joints'][n]`` (``types/twin.ts``) /\nthe export panel's own ``JointRow`` -- a joint authored here and one\nauthored via the URDF/SDF/USD export form are structurally identical.",
         "properties": {
@@ -4381,6 +4424,40 @@
         "title": "InterfaceSummary",
         "type": "object"
       },
+      "InterferenceCheckResponse": {
+        "description": "Real boolean-intersection result between two named parts (FORGE-272)\n-- a pairwise clearance/interference check, not an ISO 286 fit\nclassification (which this capability deliberately does not attempt;\nsee ``api_gateway.twin.interference_check``'s module docstring).",
+        "properties": {
+          "interference_area_mm2": {
+            "title": "Interference Area Mm2",
+            "type": "number"
+          },
+          "interference_volume_mm3": {
+            "title": "Interference Volume Mm3",
+            "type": "number"
+          },
+          "interferes": {
+            "title": "Interferes",
+            "type": "boolean"
+          },
+          "work_product_id_a": {
+            "title": "Work Product Id A",
+            "type": "string"
+          },
+          "work_product_id_b": {
+            "title": "Work Product Id B",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_product_id_a",
+          "work_product_id_b",
+          "interferes",
+          "interference_volume_mm3",
+          "interference_area_mm2"
+        ],
+        "title": "InterferenceCheckResponse",
+        "type": "object"
+      },
       "IterateRequest": {
         "description": "Request body for POST /v1/twin/nodes/{id}/iterate.",
         "properties": {
@@ -6421,6 +6498,105 @@
         "title": "ReleaseSnapshot",
         "type": "object"
       },
+      "RepeatabilityContribution": {
+        "properties": {
+          "actuator": {
+            "title": "Actuator",
+            "type": "string"
+          },
+          "contribution_mm": {
+            "title": "Contribution Mm",
+            "type": "number"
+          },
+          "jacobian_mm_per_rad": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jacobian Mm Per Rad"
+          },
+          "joint_name": {
+            "title": "Joint Name",
+            "type": "string"
+          },
+          "resolution_rad": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Rad"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "joint_name",
+          "actuator",
+          "source",
+          "contribution_mm"
+        ],
+        "title": "RepeatabilityContribution",
+        "type": "object"
+      },
+      "RepeatabilityEstimateResponse": {
+        "properties": {
+          "contributions": {
+            "items": {
+              "$ref": "#/components/schemas/RepeatabilityContribution"
+            },
+            "title": "Contributions",
+            "type": "array"
+          },
+          "passes": {
+            "title": "Passes",
+            "type": "boolean"
+          },
+          "requirement_mm": {
+            "title": "Requirement Mm",
+            "type": "number"
+          },
+          "target_part": {
+            "title": "Target Part",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          },
+          "worst_case_repeatability_mm": {
+            "title": "Worst Case Repeatability Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "work_product_id",
+          "target_part",
+          "requirement_mm",
+          "worst_case_repeatability_mm",
+          "passes",
+          "contributions",
+          "warnings"
+        ],
+        "title": "RepeatabilityEstimateResponse",
+        "type": "object"
+      },
       "RequiredClaimResultView": {
         "properties": {
           "decision": {
@@ -8400,6 +8576,190 @@
         "title": "SynthesizeResponse",
         "type": "object"
       },
+      "TechnicalDrawingDimension": {
+        "description": "One toleranced dimension on a technical_drawing (FORGE-293).",
+        "properties": {
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "nominal_mm": {
+            "title": "Nominal Mm",
+            "type": "number"
+          },
+          "tolerance_minus_mm": {
+            "default": 0.0,
+            "title": "Tolerance Minus Mm",
+            "type": "number"
+          },
+          "tolerance_plus_mm": {
+            "default": 0.0,
+            "title": "Tolerance Plus Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature",
+          "nominal_mm"
+        ],
+        "title": "TechnicalDrawingDimension",
+        "type": "object"
+      },
+      "TechnicalDrawingGdtCallout": {
+        "description": "One GD&T callout (ASME Y14.5 style) on a technical_drawing (FORGE-293).",
+        "properties": {
+          "datum_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Datum Refs",
+            "type": "array"
+          },
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "tolerance_value_mm": {
+            "title": "Tolerance Value Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature",
+          "symbol",
+          "tolerance_value_mm"
+        ],
+        "title": "TechnicalDrawingGdtCallout",
+        "type": "object"
+      },
+      "TechnicalDrawingListResponse": {
+        "description": "A part's real recorded technical drawings, oldest first (FORGE-293).",
+        "properties": {
+          "drawings": {
+            "items": {
+              "$ref": "#/components/schemas/TechnicalDrawingSummary"
+            },
+            "title": "Drawings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "drawings"
+        ],
+        "title": "TechnicalDrawingListResponse",
+        "type": "object"
+      },
+      "TechnicalDrawingSummary": {
+        "description": "A real recorded technical_drawing work product, listed for a part.",
+        "properties": {
+          "approved": {
+            "title": "Approved",
+            "type": "boolean"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "dimensions": {
+            "items": {
+              "$ref": "#/components/schemas/TechnicalDrawingDimension"
+            },
+            "title": "Dimensions",
+            "type": "array"
+          },
+          "gdt_callouts": {
+            "items": {
+              "$ref": "#/components/schemas/TechnicalDrawingGdtCallout"
+            },
+            "title": "Gdt Callouts",
+            "type": "array"
+          },
+          "inspection_requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inspection Requirements",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "part_name": {
+            "title": "Part Name",
+            "type": "string"
+          },
+          "surface_finishes": {
+            "items": {
+              "$ref": "#/components/schemas/TechnicalDrawingSurfaceFinish"
+            },
+            "title": "Surface Finishes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "created_at",
+          "name",
+          "part_name",
+          "dimensions",
+          "gdt_callouts",
+          "surface_finishes",
+          "inspection_requirements",
+          "approved"
+        ],
+        "title": "TechnicalDrawingSummary",
+        "type": "object"
+      },
+      "TechnicalDrawingSurfaceFinish": {
+        "description": "One surface-finish requirement on a technical_drawing (FORGE-293).",
+        "properties": {
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "ra_um": {
+            "title": "Ra Um",
+            "type": "number"
+          }
+        },
+        "required": [
+          "feature",
+          "ra_um"
+        ],
+        "title": "TechnicalDrawingSurfaceFinish",
+        "type": "object"
+      },
       "TestPlanEntry": {
         "properties": {
           "acceptance_value": {
@@ -8848,6 +9208,18 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "technicalDrawing": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Technicaldrawing"
           },
           "type": {
             "title": "Type",
@@ -11676,6 +12048,74 @@
         "summary": "Synthesize Constraint",
         "tags": [
           "constraint"
+        ]
+      }
+    },
+    "/v1/controls/repeatability-estimate": {
+      "get": {
+        "operationId": "get_repeatability_estimate_v1_controls_repeatability_estimate_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "requirement_mm",
+            "required": false,
+            "schema": {
+              "default": 0.5,
+              "title": "Requirement Mm",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_effector_part",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Effector Part"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepeatabilityEstimateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Repeatability Estimate",
+        "tags": [
+          "controls"
         ]
       }
     },
@@ -14847,6 +15287,48 @@
         ]
       }
     },
+    "/v1/technical-drawings": {
+      "get": {
+        "operationId": "list_technical_drawings_v1_technical_drawings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "work_product_id",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TechnicalDrawingListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Technical Drawings",
+        "tags": [
+          "technical-drawings"
+        ]
+      }
+    },
     "/v1/testplans": {
       "get": {
         "operationId": "list_test_plan_v1_testplans_get",
@@ -15208,6 +15690,58 @@
         ]
       }
     },
+    "/v1/twin/interference-check": {
+      "get": {
+        "description": "Real boolean-intersection clearance/interference check between two\nnamed parts' committed STEP geometry (FORGE-272, gap G-D4).\n\nDeliberately a pairwise check on two caller-named parts, not an\nall-pairs sweep across an entire assembly, and deliberately not an ISO\n286 tolerance-grade/fit classification -- see\n``api_gateway.twin.interference_check``'s module docstring for why\nboth are out of scope here.",
+        "operationId": "check_interference_v1_twin_interference_check_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "work_product_id_a",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id A",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_product_id_b",
+            "required": true,
+            "schema": {
+              "title": "Work Product Id B",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterferenceCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Interference",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/links": {
       "get": {
         "description": "List file links with live sync status, optionally scoped to a project.\n\nA link has no project of its own; scoping (MET-517) keeps only links whose\nlinked work product belongs to ``project_id``.",
@@ -15508,6 +16042,60 @@
           }
         },
         "summary": "Approve Design Sketch",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/nodes/{node_id}/approve-technical-drawing": {
+      "post": {
+        "description": "Human sign-off on a technical_drawing work product (FORGE-293, gap G-H1).\n\nMirrors ``approve_design_sketch`` above -- a real work product, a real\napproval gate, not a dashboard-local checkbox.",
+        "operationId": "approve_technical_drawing_v1_twin_nodes__node_id__approve_technical_drawing_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveTechnicalDrawingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveTechnicalDrawingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Technical Drawing",
         "tags": [
           "twin"
         ]
