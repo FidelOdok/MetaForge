@@ -13,11 +13,30 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
     # ``pydantic-ai`` (the umbrella) pulls every provider's extras
-    # (gradio, xai-sdk, vertex, bedrock, …) and the resolver backtracks
+    # (gradio, xai-sdk, vertex, bedrock, ...) and the resolver backtracks
     # forever (MET-377). MetaForge only uses the openai + anthropic
-    # providers — pin the slim variant with just those, so Docker
+    # providers -- pin the slim variant with just those, so Docker
     # builds finish in minutes not hours.
-    "pydantic-ai-slim[openai,anthropic]>=0.1",
+    #
+    # FORGE-323: the ``>=0.1`` floor left the resolver free to consider
+    # every ``pydantic-ai-slim`` release from 0.1.0 through 2.x -- a
+    # ~300-version search space. Adding an unrelated pure-Python package
+    # (``pint``, FORGE-311) was enough to reopen the exact MET-377
+    # pathology: pip tries the newest candidate first, hits a conflict,
+    # and backtracks one version at a time (~350-400s per candidate on
+    # fidel-dev, observed walking 2.35.3 -> 2.35.1 -> ... -> 2.32.1
+    # without resolving). The 2.x line also switches its HTTP client dep
+    # from ``httpx`` to a different package, ``httpx2`` -- a likely
+    # contributor to the conflict. Pin to the exact version already
+    # verified working in this repo's own dev environment (1.68.0, the
+    # last release before the 2.0 jump, still on plain ``httpx``) to
+    # remove the ambiguity. ``pydantic-graph`` is pinned to match: it's
+    # already locked in lockstep by pydantic-ai-slim's own metadata
+    # (``pydantic-graph==<same version>``), but declaring it explicitly
+    # lets pip resolve it immediately instead of fetching pydantic-ai-
+    # slim's metadata first to discover the exact pin.
+    "pydantic-ai-slim[openai,anthropic]==1.68.0",
+    "pydantic-graph==1.68.0",
     "structlog>=24.0",
     # Cap below FastAPI 0.137 / Starlette 1.0: Starlette 1.x wraps
     # ``include_router`` results in ``_IncludedRouter`` objects without a
