@@ -43,6 +43,7 @@ from api_gateway.design_loop.routes import router as design_loop_router
 from api_gateway.dfm.routes import router as dfm_router
 from api_gateway.evals.routes import router as evals_router
 from api_gateway.features.routes import router as features_router
+from api_gateway.firmware.routes import router as firmware_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
@@ -816,6 +817,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.engineering_entity_approval import make_engineering_entity_approver
     from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
     from api_gateway.twin.evidence_recorder import make_evidence_recorder
+    from api_gateway.twin.firmware_scaffold import make_firmware_scaffold_creator
     from api_gateway.twin.geometry_diff import make_geometry_diff
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
@@ -1018,6 +1020,20 @@ async def _init_orchestrator(app: FastAPI) -> None:
     )
     bringup_checklist_lister_fn = make_bringup_checklist_lister(twin)
 
+    # MET-588: hoisted to a named variable (previously only constructed
+    # inline at the TwinServer(...) call site below) so this SAME instance
+    # can also back firmware_scaffold_creator_fn below (FORGE-276).
+    document_recorder_fn = make_document_recorder(twin, project_backend)
+
+    # FORGE-276: derives a per-joint CAN node table + a minimal firmware
+    # header scaffold from a work product's real metadata.assembly.joints
+    # (gap G-E3). Reuses the SAME document_recorder_fn instance
+    # api_gateway/runs/fw_handlers.py's design-flow phase already goes
+    # through for its own pinmap/firmware_source pair.
+    firmware_scaffold_creator_fn = make_firmware_scaffold_creator(
+        twin, document_recorder=document_recorder_fn
+    )
+
     # FORGE-265: requirement-driven component selection -- hoisted to a
     # named variable (unlike every other component_recorder use, which is
     # constructed inline at the TwinServer(...) call site below) so this
@@ -1107,7 +1123,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # notes) — it fell back to twin.propose_change, whose apply-on-approve
         # executor only implements a `record_decision` action, so anything
         # else silently no-ops even after a human approves it.
-        document_recorder=make_document_recorder(twin, project_backend),
+        document_recorder=document_recorder_fn,
         # MET-618: lets an agent recover a committed work product's actual
         # file (STEP, mesh, ...) by node id once its authoring session is
         # gone, unknown, or was never its own. Hoisted above (FORGE-294) so
@@ -1216,6 +1232,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         test_plan_generator=test_plan_generator_fn,
         # FORGE-295: bring-up checklist derived from assembly joints (gap G-H3).
         bringup_checklist_creator=bringup_checklist_creator_fn,
+        # FORGE-276: firmware scaffold derived from assembly joints (gap G-E3).
+        firmware_scaffold_creator=firmware_scaffold_creator_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -1301,6 +1319,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.bringup.routes import init_bringup_checklist
 
     init_bringup_checklist(bringup_checklist_creator_fn, bringup_checklist_lister_fn)
+    # FORGE-276: bind the firmware scaffold creator to the dashboard's REST
+    # route (api_gateway/firmware/routes.py) -- same locality rationale as
+    # bringup_checklist above.
+    from api_gateway.firmware.routes import init_firmware_scaffold
+
+    init_firmware_scaffold(firmware_scaffold_creator_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -1949,6 +1973,7 @@ def create_app(
     app.include_router(releases_router)
     app.include_router(testplans_router)
     app.include_router(bringup_router)
+    app.include_router(firmware_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

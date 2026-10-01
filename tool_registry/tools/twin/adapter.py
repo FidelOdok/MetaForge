@@ -131,6 +131,7 @@ class TwinServer(McpToolServer):
         baseline_creator: Any = None,
         test_plan_generator: Any = None,
         bringup_checklist_creator: Any = None,
+        firmware_scaffold_creator: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -399,6 +400,13 @@ class TwinServer(McpToolServer):
         # injection seam as every recorder above; None keeps tool_registry
         # free of api_gateway imports.
         self._bringup_checklist_creator = bringup_checklist_creator
+        # FORGE-276: an injected async ``create(*, work_product_id,
+        # project_id=None) -> dict`` (make_firmware_scaffold_creator) --
+        # assigns deterministic per-joint CAN IDs from a work product's real
+        # metadata.assembly.joints and records a PINMAP + FIRMWARE_SOURCE
+        # work product pair. Same injection seam as every recorder above;
+        # None keeps tool_registry free of api_gateway imports.
+        self._firmware_scaffold_creator = firmware_scaffold_creator
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -486,6 +494,8 @@ class TwinServer(McpToolServer):
             self._register_generate_test_plan()
         if bringup_checklist_creator is not None:
             self._register_create_bringup_checklist()
+        if firmware_scaffold_creator is not None:
+            self._register_create_firmware_scaffold()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4644,6 +4654,78 @@ class TwinServer(McpToolServer):
             raise ValueError("twin.create_bringup_checklist: 'work_product_id' is required")
         project_id = arguments.get("project_id")
         return await self._bringup_checklist_creator(
+            work_product_id=work_product_id,
+            project_id=project_id if isinstance(project_id, str) else None,
+        )
+
+    # ------------------------------------------------------------------
+    # twin.create_firmware_scaffold (FORGE-276)
+    # ------------------------------------------------------------------
+
+    def _register_create_firmware_scaffold(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.create_firmware_scaffold",
+                adapter_id="twin",
+                name="Create Firmware Scaffold",
+                description=(
+                    "Derives a per-joint CAN node table from a work "
+                    "product's real metadata.assembly.joints (FORGE-271), "
+                    "assigning each joint a deterministic 1-indexed CAN "
+                    "node ID (the same topological build order "
+                    "twin.create_bringup_checklist derives -- a "
+                    "placeholder scheme, not a real hardware-specific "
+                    "allocation). Records a PINMAP work product (CSV: "
+                    "joint name/type/CAN ID/limits) and a FIRMWARE_SOURCE "
+                    "work product (a minimal C header: a per-joint struct "
+                    "with CAN ID + limit constants from the real joint "
+                    "'limits' data), both linked to the source work "
+                    "product. Raises if the joint graph is cyclic rather "
+                    "than guessing at an order. Out of scope: real CAN bus "
+                    "protocol/message-format implementation; "
+                    "control-loop/PID logic; real GPIO/MCU-specific pin "
+                    "assignment beyond the CAN-ID placeholder; RTOS "
+                    "configuration (see firmware.configure_rtos); "
+                    "hardware-in-the-loop testing."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "Work product carrying metadata.assembly.joints "
+                                "to derive a firmware scaffold from."
+                            ),
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Optional project to link the new work products to.",
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "pinmap_node_id": {"type": "string"},
+                        "firmware_source_node_id": {"type": "string"},
+                        "joints": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.create_firmware_scaffold,
+        )
+
+    async def create_firmware_scaffold(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.create_firmware_scaffold: 'work_product_id' is required")
+        project_id = arguments.get("project_id")
+        return await self._firmware_scaffold_creator(
             work_product_id=work_product_id,
             project_id=project_id if isinstance(project_id, str) else None,
         )

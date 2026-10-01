@@ -178,6 +178,11 @@ ADDITIVE: frozenset[str] = frozenset(
         # a work product's existing assembly.joints metadata -- a pure
         # append, never overwrites the source work product or its joints.
         "twin.create_bringup_checklist",
+        # FORGE-276: records a new PINMAP + FIRMWARE_SOURCE work product
+        # pair derived from a work product's existing assembly.joints
+        # metadata -- a pure append, never overwrites the source work
+        # product or its joints.
+        "twin.create_firmware_scaffold",
         "twin.optimize_parameter",
         "twin.propose_change",
         "twin.propose_engineering_change",

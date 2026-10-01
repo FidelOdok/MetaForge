@@ -1108,6 +1108,21 @@ A cyclic joint graph (some joint's `base` never becomes reachable by placing joi
 
 *Source: `api_gateway/twin/bringup_checklist.py`, `api_gateway/bringup/routes.py`, `twin_core/models/engineering_entity.py`, `api_gateway/twin/schemas.py` (`AssemblyJoint`)*
 
+### 2.29 Firmware scaffolds: CAN node table + header skeleton from assembly joints (FORGE-276, gap G-E3)
+
+`twin.create_firmware_scaffold` (`api_gateway/twin/firmware_scaffold.py`) derives a per-joint CAN node table from the same work product `metadata.assembly.joints` section 2.28 reads, reusing its topological build order (joints are assigned a deterministic, 1-indexed CAN node ID equal to their position in that order -- a placeholder scheme, not a real hardware-specific allocation, since no target MCU or bus topology exists anywhere in this codebase to derive one from). Unlike `bringup_checklist`/`release_package`/`test_plan` (one `EngineeringEntity` holding structured metadata), this records a pair of ordinary loadable `WorkProduct`s via the generic `document_recorder` (`api_gateway/twin/document_recorder.py` -- the same facade `api_gateway/runs/fw_handlers.py`'s design-flow phase already uses for its own pinmap/firmware_source pair):
+
+- a `pinmap` work product: a CSV table (`joint_name,joint_type,can_id,lower_limit,upper_limit`), with the same rows mirrored into the work product's own `metadata.joints` (the "content for loadability, metadata for direct reads" convention `twin.record_document`'s own docstring establishes for `simulation_result`) so the dashboard can render a table without parsing the blob;
+- a `firmware_source` work product: a minimal C header (`#ifndef`-guarded, one `joint_config_t` struct literal per joint carrying `can_id`/`lower_limit`/`upper_limit`) -- structural scaffolding, not a control loop or CAN protocol implementation.
+
+Both are linked back to the source assembly via a `PARENT_OF` edge (`source_part_node_ids`). A cyclic joint graph raises the same `AssemblyGraphError` as section 2.28 rather than guessing at an order.
+
+`POST /v1/firmware/scaffold` (dashboard's "Firmware" panel, mirroring FORGE-295's bring-up checklist panel placement) creates one pair and returns the per-joint table for immediate display.
+
+**Deliberately out of scope**: real CAN bus protocol/message-format implementation (e.g. CANopen frame definitions); actual control-loop/PID logic; real GPIO/MCU-specific pin assignment beyond the CAN-ID placeholder (needs a real target-MCU selection, which doesn't exist as an input); RTOS configuration (`domain_agents/firmware`'s existing generic `configure_rtos` skill already covers this, unrelated to this joint-specific ticket); hardware-in-the-loop testing.
+
+*Source: `api_gateway/twin/firmware_scaffold.py`, `api_gateway/firmware/routes.py`, `api_gateway/twin/document_recorder.py`, `api_gateway/twin/schemas.py` (`AssemblyJoint`)*
+
 ---
 
 ## 3. Edge Types
