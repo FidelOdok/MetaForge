@@ -1426,6 +1426,21 @@ function route(
       if (segment(path, 3) !== 'sample-enclosure') return undefined;
       return SAMPLE_GEOMETRY_DIFF;
     }
+    if (path === '/twin/interference-check') {
+      // FORGE-272: a real-shaped boolean-intersection result -- the demo
+      // upper-arm part genuinely does not overlap its own illustrative
+      // "other part" id, same "real computation over mocked geometry"
+      // honesty the overhang-check mock below established.
+      const idA = String(params.work_product_id_a ?? '');
+      const idB = String(params.work_product_id_b ?? '');
+      return {
+        work_product_id_a: idA,
+        work_product_id_b: idB,
+        interferes: false,
+        interference_volume_mm3: 0,
+        interference_area_mm2: 0,
+      };
+    }
     if (path.endsWith('/diff') && path.startsWith('/features/')) {
       // FORGE-270 (gap G-D2): the sample enclosure is the only node with an
       // illustrative SUPERSEDES-linked prior version -- every other sample

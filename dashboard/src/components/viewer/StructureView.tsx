@@ -5,6 +5,7 @@ import { Boxes } from 'lucide-react';
 import { useHierarchyTree, useRealizeHierarchyNode } from '../../hooks/use-hierarchy';
 import { useBom } from '../../hooks/use-bom';
 import { useOverhangCheck } from '../../hooks/use-dfm';
+import { useInterferenceCheck } from '../../hooks/use-interference';
 import { useManufactureRelease } from '../../hooks/use-manufacture';
 import { useBringupChecklists, useCreateBringupChecklist } from '../../hooks/use-bringup';
 import { useCreateFirmwareScaffold } from '../../hooks/use-firmware';
@@ -391,6 +392,98 @@ function DfmOverhangPanel({
   );
 }
 
+/** FORGE-272 (gap G-D4): "Check interference" -- a real boolean-
+ * intersection clearance/interference check between this node's committed
+ * geometry and a second, explicitly-named work product's geometry.
+ * Pairwise only (not an all-pairs assembly sweep) and reports pass/fail +
+ * overlap volume, not a 3D-highlighted overlay or an ISO 286 fit
+ * classification -- see api_gateway/twin/interference_check.py's module
+ * docstring for why both are out of scope here. The second part's id is a
+ * real, explicit input (no part-picker UI exists in this dashboard yet),
+ * matching the same "honest input, not a hidden assumption" precedent the
+ * DFM check's mesh-file field established above. */
+function InterferenceCheckPanel({
+  node,
+  onClose,
+}: {
+  node: HierarchyNode;
+  onClose: () => void;
+}) {
+  const [otherWorkProductId, setOtherWorkProductId] = useState('');
+  const check = useInterferenceCheck();
+
+  const runCheck = () => {
+    if (!otherWorkProductId.trim() || !node.realizedByWorkProductId) return;
+    check.mutate({
+      workProductIdA: node.realizedByWorkProductId,
+      workProductIdB: otherWorkProductId.trim(),
+    });
+  };
+
+  const result = check.data;
+
+  return (
+    <div
+      data-testid="interference-check-panel"
+      className="mt-2 rounded-lg p-3"
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-on-surface">Check interference: {node.name}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-on-surface-variant hover:text-on-surface"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs text-on-surface-variant" style={{ flex: 1, minWidth: '220px' }}>
+          Other part's work product id
+          <input
+            type="text"
+            value={otherWorkProductId}
+            onChange={(e) => setOtherWorkProductId(e.target.value)}
+            placeholder="e.g. the mounting bracket's work product id"
+            data-testid="interference-other-part-input"
+            className="rounded px-2 py-1 text-xs text-on-surface focus:outline-none"
+            style={{ ...FIELD_STYLE, width: '100%' }}
+          />
+        </label>
+        <Button
+          size="sm"
+          data-testid="run-interference-check"
+          disabled={!otherWorkProductId.trim() || check.isPending}
+          onClick={runCheck}
+        >
+          {check.isPending ? 'Checking…' : 'Run check'}
+        </Button>
+      </div>
+
+      {check.isError && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--mf-c-ff-b4-ab)' }}>
+          Could not run the interference check.
+        </p>
+      )}
+
+      {result && (
+        <div className="mt-3" data-testid="interference-result-summary">
+          <p
+            className="text-xs font-medium"
+            style={{ color: result.interferes ? 'var(--mf-c-ff-b4-ab)' : 'var(--mf-c-a6-d6-a1)' }}
+          >
+            {result.interferes
+              ? `Interference found -- ${result.interferenceVolumeMm3.toFixed(2)} mm³ overlap`
+              : 'No interference -- clear'}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** FORGE-294 (gap G-H2): "Release for manufacture" -- chain a hierarchy
  * node's real committed geometry into a real manufacturing output file
  * (STL for 3D printing, STEP for CNC) via the gateway's
@@ -729,6 +822,8 @@ function TreeRow({
   onToggleFirmwareScaffold,
   harnessEstimatingId,
   onToggleHarnessEstimate,
+  interferenceCheckingId,
+  onToggleInterferenceCheck,
 }: {
   node: TreeNode;
   depth: number;
@@ -748,6 +843,8 @@ function TreeRow({
   onToggleFirmwareScaffold: (id: string) => void;
   harnessEstimatingId: string | null;
   onToggleHarnessEstimate: (id: string) => void;
+  interferenceCheckingId: string | null;
+  onToggleInterferenceCheck: (id: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
@@ -759,6 +856,7 @@ function TreeRow({
   const isBringupChecking = bringupCheckingId === node.id;
   const isFirmwareScaffolding = firmwareScaffoldingId === node.id;
   const isHarnessEstimating = harnessEstimatingId === node.id;
+  const isCheckingInterference = interferenceCheckingId === node.id;
 
   return (
     <>
@@ -885,6 +983,17 @@ function TreeRow({
             Harness estimate
           </button>
         )}
+        {node.realizedByWorkProductId && (
+          <button
+            type="button"
+            data-testid={`interference-check-button-${node.id}`}
+            onClick={() => onToggleInterferenceCheck(node.id)}
+            className="rounded px-2 py-0.5 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            Check interference
+          </button>
+        )}
       </div>
       {isRealizing && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
@@ -924,6 +1033,14 @@ function TreeRow({
           <HarnessEstimatePanel node={node} onClose={() => onToggleHarnessEstimate(node.id)} />
         </div>
       )}
+      {isCheckingInterference && (
+        <div style={{ paddingLeft: depth * 20 + 28 }}>
+          <InterferenceCheckPanel
+            node={node}
+            onClose={() => onToggleInterferenceCheck(node.id)}
+          />
+        </div>
+      )}
       {hasChildren && !isCollapsed && (
         <div>
           {node.children.map((child) => (
@@ -947,6 +1064,8 @@ function TreeRow({
               onToggleFirmwareScaffold={onToggleFirmwareScaffold}
               harnessEstimatingId={harnessEstimatingId}
               onToggleHarnessEstimate={onToggleHarnessEstimate}
+              interferenceCheckingId={interferenceCheckingId}
+              onToggleInterferenceCheck={onToggleInterferenceCheck}
             />
           ))}
         </div>
@@ -988,6 +1107,9 @@ export function StructureView({
   // FORGE-275 (gap G-E2): which node's "Harness estimate" panel is open,
   // at most one at a time (independent of the others above).
   const [harnessEstimatingId, setHarnessEstimatingId] = useState<string | null>(null);
+  // FORGE-272 (gap G-D4): which node's "Check interference" panel is
+  // open, at most one at a time (independent of the others above).
+  const [interferenceCheckingId, setInterferenceCheckingId] = useState<string | null>(null);
 
   const forest = useMemo(() => buildForest(nodes ?? []), [nodes]);
 
@@ -1067,6 +1189,10 @@ export function StructureView({
               harnessEstimatingId={harnessEstimatingId}
               onToggleHarnessEstimate={(id) =>
                 setHarnessEstimatingId((cur) => (cur === id ? null : id))
+              }
+              interferenceCheckingId={interferenceCheckingId}
+              onToggleInterferenceCheck={(id) =>
+                setInterferenceCheckingId((cur) => (cur === id ? null : id))
               }
             />
           ))}
