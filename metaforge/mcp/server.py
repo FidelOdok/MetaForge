@@ -227,6 +227,18 @@ class UnifiedMcpServer:
         # Commit-by-reference stash: remembers freecad.export_model STEP output so
         # twin.commit_geometry can be called with just (session_id, obj_id).
         self._geom_stash = GeometryStash()
+        # FORGE-409: health was reachable only as a JSON-RPC method, so the
+        # doctor command told the agent to call something a harness cannot
+        # call. This adapter exposes the same report as a `health.check` tool
+        # and a `metaforge://health` resource. Appended here rather than
+        # supplied by a caller because the report is about *this server* --
+        # which adapters answered, what protocol was negotiated -- and no
+        # caller is in a position to assemble it.
+        from metaforge.mcp.health_adapter import HealthServer
+
+        self._health_adapter = HealthServer(self._health_check)
+        self._adapters = [*self._adapters, self._health_adapter]
+
         # tool_id → adapter (built once at construction; tool sets are
         # static after each adapter's ``__init__``).
         self._tool_index: dict[str, McpToolServer] = {}
@@ -245,6 +257,10 @@ class UnifiedMcpServer:
             tool_count=len(self._tool_index),
             adapter_ids=[a.adapter_id for a in self._adapters],
         )
+
+    def _domain_adapters(self) -> list[McpToolServer]:
+        """Every adapter except the server's own health reporter."""
+        return [a for a in self._adapters if a is not getattr(self, "_health_adapter", None)]
 
     def attach_elicitor(self, elicitor: Elicitor) -> None:
         """Give this server a way to put a question to the connected client.
@@ -1507,8 +1523,11 @@ class UnifiedMcpServer:
         now = datetime.now(UTC)
         uptime = (now - self._start_time).total_seconds()
 
+        # The reporter does not probe itself: an entry that is reachable by
+        # construction is noise in a diagnostic, and it would disagree with
+        # `adapter_count` (FORGE-409).
         adapter_health = list(
-            await asyncio.gather(*(self._probe_adapter(a) for a in self._adapters))
+            await asyncio.gather(*(self._probe_adapter(a) for a in self._domain_adapters()))
         )
         unreachable = [a["adapter_id"] for a in adapter_health if not a["reachable"]]
         # FORGE-379: publish each probe so an alert can fire on a down
@@ -1527,7 +1546,10 @@ class UnifiedMcpServer:
             "version": self._version,
             "status": "degraded" if unreachable else "healthy",
             "uptime_seconds": round(uptime, 1),
-            "adapter_count": len(self._adapters),
+            # Excludes the health adapter itself: it is the reporter, not a
+            # reportee, and counting it would tell an operator they have one
+            # more tool adapter than they wired (FORGE-409).
+            "adapter_count": len(self._domain_adapters()),
             "tool_count": len(self._tool_index),
             # FORGE-332: A5 asks the doctor about four things -- gateway,
             # adapters, auth and version skew. The adapters are probed

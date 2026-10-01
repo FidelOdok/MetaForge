@@ -136,7 +136,8 @@ class TestOverTheWire:
         data = json.loads(raw)["error"]["data"]
         assert data["tool_id"] == "twin.get_nodes"
         assert "twin.get_node" in data["did_you_mean"]
-        assert data["tool_count"] == 4
+        # 4 adapter tools + the server's own health.check (FORGE-409).
+        assert data["tool_count"] == 5
 
     async def test_an_aliased_call_actually_runs(self, server: UnifiedMcpServer) -> None:
         import json

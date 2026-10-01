@@ -183,4 +183,9 @@ class TestServing:
         # presence is itself the signal.
         result = await _tools_list(UnifiedMcpServer(adapters=[_Twin()]))
         assert "_meta" not in result
-        assert len(result["tools"]) == len(_Twin.TOOLS)
+        # +1 for the server's own `health.check` (FORGE-409). Asserted as
+        # a set difference rather than a count so the point of the test --
+        # that nothing was dropped -- survives the next server-owned tool.
+        served = {t["name"] for t in result["tools"]}
+        assert set(_Twin.TOOLS) <= served
+        assert served - set(_Twin.TOOLS) == {"health.check"}

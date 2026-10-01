@@ -91,7 +91,10 @@ class TestReachable:
         server = UnifiedMcpServer(adapters=[_Twin(), _Knowledge()])
         result = (await _rpc(server, "resources/templates/list"))["result"]
         names = {r["name"] for r in result["resourceTemplates"]}
-        assert names == {"Project brief", "Ingested document"}
+        # The server also publishes its own connection-health resource
+        # (FORGE-409), so this asserts the adapters' resources are all present
+        # rather than freezing the whole set.
+        assert {"Project brief", "Ingested document"} <= names
         assert all("uriTemplate" in r for r in result["resourceTemplates"])
         assert all("uri_template" not in r for r in result["resourceTemplates"])
 
@@ -116,7 +119,10 @@ class TestNothingVanishes:
         # a model as "that context does not exist".
         server = UnifiedMcpServer(adapters=[_Twin(), _Down()])
         result = (await _rpc(server, "resources/templates/list"))["result"]
-        assert len(result["resourceTemplates"]) == 1
+        # The reachable adapter's one template, plus the server's own health
+        # resource (FORGE-409). What matters is that the down adapter is
+        # reported rather than dropped, which the next assertion checks.
+        assert len(result["resourceTemplates"]) == 2
         reported = {a["adapter_id"] for a in result["_meta"]["unavailableAdapters"]}
         assert "calculix" in reported
 
