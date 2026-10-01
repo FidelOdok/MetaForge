@@ -142,11 +142,13 @@ def build_remote_approval_gate(
                     outcome=outcome.value,
                     approved_by=approver.actor_id if approver else None,
                 )
-                return ApprovalResolution(outcome=outcome, approver=approver)
+                # FORGE-417: the run id goes back with the answer, so the
+                # caller can cite the ledger entry rather than assert a hold.
+                return ApprovalResolution(outcome=outcome, approver=approver, approval_id=run_id)
 
             logger.info("mcp_remote_approval_timed_out", run_id=run_id, tool_id=ask.tool_id)
             # Distinct from rejected: nobody said no, nobody said anything.
-            return ApprovalResolution(outcome=ApprovalOutcome.TIMED_OUT)
+            return ApprovalResolution(outcome=ApprovalOutcome.TIMED_OUT, approval_id=run_id)
         finally:
             if owned:
                 await http.aclose()

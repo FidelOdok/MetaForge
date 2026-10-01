@@ -987,6 +987,47 @@ An `accept` whose content does not carry a boolean `approve` is treated
 as a refusal. The failure mode of guessing the other way is an unreviewed
 write.
 
+### The result says it was held (FORGE-417)
+
+An approved call used to return a success envelope identical to one that was
+never held, so a client had no way to tell the difference — and an agent
+reading it told the user "writes from this external harness are not being
+held for approval", which the gateway ledger flatly contradicted. The
+guardrail worked; the result did not mention it, so the model guessed.
+
+A held call now carries the outcome in two places:
+
+```json
+"_meta": {
+  "callId": "…",
+  "approval": {
+    "held": true,
+    "outcome": "approved",
+    "route": "dashboard",
+    "heldSeconds": 8.2,
+    "approvalId": "run_b42aa3ea023f46c0",
+    "approvedBy": "Fidel",
+    "approverVerified": false
+  }
+}
+```
+
+and as a **second content block**, because a model reads content and
+`_meta` alone is what "technically present and never looked at" looks like:
+
+> This write was held for human approval and was approved by Fidel (approval
+> `run_b42aa3ea023f46c0`) after 8.2s via dashboard, identity unverified.
+
+Three things it is careful about. The tool's own output stays in the first
+block untouched, since that block belongs to the adapter's declared schema.
+`approverVerified` is reported separately from the name, because a local
+gateway runs with auth off and has no identity to check — "approved by
+Fidel" must not read as a verified signature. And `rejected` and `timed_out`
+remain **errors** naming the outcome: a refused write reported as a success
+with a note attached would be a worse version of the bug this fixes.
+
+A call that was never held carries no `approval` key and no second block.
+
 **Elicitation is preferred, not chained.** A client that can be asked is
 asked, and the dashboard queue is not consulted; going on to the queue
 after the user had already answered would put the same question to a
