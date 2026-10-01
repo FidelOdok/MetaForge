@@ -21,6 +21,7 @@ from api_gateway.auth import (
     AuthSettings,
     load_auth_settings,
 )
+from api_gateway.bom.risk_routes import router as bom_risk_router
 from api_gateway.bom.routes import router as bom_router
 from api_gateway.bringup.routes import router as bringup_router
 from api_gateway.cad.routes import router as cad_router
@@ -784,6 +785,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.baseline import make_baseline_creator
     from api_gateway.twin.blob_stager import make_blob_stager
+    from api_gateway.twin.bom_risk import make_bom_risk_scorer
     from api_gateway.twin.bringup_checklist import (
         make_bringup_checklist_creator,
         make_bringup_checklist_lister,
@@ -924,6 +926,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         blob_stager=blob_stager_fn,
         mcp_bridge=geometry_diff_bridge,
     )
+    # FORGE-268: same lazy-bridge seam, for bom_risk's real
+    # distributors.resolve_offers / {distributor}.get_product calls.
+    bom_risk_bridge = _LazyBridge()
+    bom_risk_fn = make_bom_risk_scorer(twin, mcp_bridge=bom_risk_bridge)
     # FORGE-316: dispatch table for twin.execute_revalidation_plan --
     # every tool a stale Evidence's metadata["replay"]["tool_id"] can name.
     # Only twin.evaluate_metric exists today; adding a future evaluator/
@@ -1250,6 +1256,9 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-301: same for geometry_diff_bridge (geometry_diff's
     # freecad.describe_step_file calls).
     geometry_diff_bridge.bridge = active_bridge
+    # FORGE-268: same for bom_risk_bridge (bom_risk's distributors.
+    # resolve_offers / {distributor}.get_product calls).
+    bom_risk_bridge.bridge = active_bridge
     # FORGE-273: bind the same evaluator closure to the dashboard's REST
     # route (api_gateway/dfm/routes.py) -- only now, after the bridge above
     # is bound, since the closure calls mcp_bridge.invoke internally.
@@ -1267,6 +1276,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.routes import init_geometry_diff
 
     init_geometry_diff(geometry_diff_fn)
+    # FORGE-268: same, for the BOM risk REST route
+    # (api_gateway/bom/risk_routes.py).
+    from api_gateway.bom.risk_routes import init_bom_risk_scorer
+
+    init_bom_risk_scorer(bom_risk_fn)
     # FORGE-299: bind the release-package creator/lister to the dashboard's
     # REST route (api_gateway/releases/routes.py) -- unlike the evaluators
     # above, this doesn't call mcp_bridge at all (pure graph reads/writes +
@@ -1918,6 +1932,7 @@ def create_app(
     app.include_router(twin_router)
     app.include_router(hierarchy_router)
     app.include_router(bom_router)
+    app.include_router(bom_risk_router)
     app.include_router(simulation_router)
     app.include_router(constraint_router)
     app.include_router(requirements_router)

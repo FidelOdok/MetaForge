@@ -7,6 +7,11 @@ vi.mock('../../hooks/use-bom', () => ({
   useHierarchicalBom: vi.fn(),
 }));
 
+const mockUseBomRisk = vi.fn();
+vi.mock('../../hooks/use-bom-risk', () => ({
+  useBomRisk: () => mockUseBomRisk(),
+}));
+
 const mockUseActiveProject = vi.fn(() => ({
   activeProjectId: null as string | null,
   activeProject: undefined,
@@ -32,6 +37,12 @@ describe('BomPage', () => {
       data: undefined,
       isLoading: false,
     } as ReturnType<typeof useHierarchicalBom>);
+    mockUseBomRisk.mockReturnValue({
+      mutate: vi.fn(),
+      data: undefined,
+      isPending: false,
+      isError: false,
+    });
   });
 
   it('shows loading state', () => {
@@ -137,5 +148,88 @@ describe('BomPage', () => {
     expect(screen.getByText('MG996R')).toBeInTheDocument();
     expect(screen.getByText('TowerPro')).toBeInTheDocument();
     expect(screen.getByText('COTS')).toBeInTheDocument();
+  });
+
+  // FORGE-268: supply-chain risk badge.
+  it('does not show the risk button without an active project', () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: null,
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseBom.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useBom>);
+    render(<BomPage />);
+    expect(screen.queryByText('Supply-chain risk')).not.toBeInTheDocument();
+  });
+
+  it('triggers risk scoring for the active project on click', async () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'p1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseBom.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useBom>);
+    const mutate = vi.fn();
+    mockUseBomRisk.mockReturnValue({ mutate, data: undefined, isPending: false, isError: false });
+
+    const user = userEvent.setup();
+    render(<BomPage />);
+    await user.click(screen.getByText('Supply-chain risk'));
+
+    expect(mutate).toHaveBeenCalledWith('p1');
+  });
+
+  it('renders the overall score and flagged parts once a report comes back', () => {
+    mockUseActiveProject.mockReturnValue({
+      activeProjectId: 'p1',
+      activeProject: undefined,
+      setActiveProjectId: vi.fn(),
+      projects: [],
+    });
+    mockUseBom.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useBom>);
+    mockUseBomRisk.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false,
+      isError: false,
+      data: {
+        projectId: 'p1',
+        totalParts: 2,
+        overallScore: 34,
+        criticalCount: 0,
+        highCount: 1,
+        mediumCount: 0,
+        lowCount: 1,
+        partScores: [
+          {
+            mpn: 'MG996R',
+            manufacturer: 'TowerPro',
+            overallScore: 68,
+            riskLevel: 'high',
+            factors: [
+              { name: 'single_source', weight: 0.25, score: 100, description: 'Single-source part' },
+            ],
+            flagged: true,
+          },
+          {
+            mpn: 'DS3218MG',
+            manufacturer: 'Miuzei',
+            overallScore: 5,
+            riskLevel: 'low',
+            factors: [],
+            flagged: false,
+          },
+        ],
+      },
+    });
+
+    render(<BomPage />);
+
+    expect(screen.getByTestId('bom-risk-panel')).toBeInTheDocument();
+    expect(screen.getByText('34')).toBeInTheDocument();
+    expect(screen.getByText(/MG996R/)).toBeInTheDocument();
+    // Only the flagged part is shown as a badge.
+    expect(screen.queryByText(/DS3218MG/)).not.toBeInTheDocument();
   });
 });
