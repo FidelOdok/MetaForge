@@ -11,7 +11,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import structlog
 from pydantic import BaseModel, field_validator
+
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Metric definition model
@@ -700,6 +703,18 @@ class MetricsCollector:
         self._meter = meter
         self._instruments: dict[str, Any] = {}
 
+    @property
+    def is_recording(self) -> bool:
+        """True when this collector will actually publish samples.
+
+        FORGE-413: ``metrics is not None`` was never the right question. A
+        no-op collector is not None and records nothing, so a caller that
+        checked only for None would report healthy telemetry while every
+        sample went nowhere -- which is how four metrics stayed at zero
+        series through a release that added alert rules on them.
+        """
+        return self._meter is not None and bool(self._instruments)
+
     def create_instruments(self, definitions: list[MetricDefinition]) -> None:
         """Create OTel instruments from *definitions*.  No-op if no meter."""
         if self._meter is None:
@@ -1180,3 +1195,54 @@ class MetricsCollector:
         hist = self._instruments.get(MetricsRegistry.HARNESS_PROVIDER_CALL_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes={"provider": provider, "model": model, "role": role})
+
+
+def collector_for(component: str) -> MetricsCollector:
+    """A :class:`MetricsCollector` on this process's active OTel meter.
+
+    FORGE-413. Every MCP metric had zero series in Prometheus because the
+    sidecar built no collector and passed none to the MCP server, so each
+    recorder hit its ``if counter is not None`` guard and returned. Four
+    FORGE-379 metrics and two FORGE-411 ones had never emitted a sample, and
+    six alert rules could not fire.
+
+    The gateway had this logic inline. It is here instead so a second
+    entrypoint gets it by calling one function rather than by remembering to
+    reproduce six lines -- the forgetting is the bug.
+
+    ``init_observability`` publishes the SDK meter provider globally, so this
+    needs no state passed through: whoever initialised telemetry first wins,
+    and a process that initialised none gets a working no-op collector.
+
+    It says which it got, unconditionally. A no-op collector is invisible by
+    construction -- that is the whole failure mode -- so the one place it can
+    be noticed is the line it writes at startup.
+    """
+    try:
+        from opentelemetry import metrics as otel_metrics
+    except ImportError:
+        logger.info("metrics_collector_noop", component=component, reason="opentelemetry absent")
+        return MetricsCollector()
+
+    provider = otel_metrics.get_meter_provider()
+    # A proxy provider is what you get before (or without) an SDK: it hands
+    # out meters whose instruments go nowhere. Named rather than duck-typed
+    # because "has get_meter" is true of both.
+    if (
+        type(provider).__name__.startswith("_Proxy")
+        or type(provider).__name__ == "NoOpMeterProvider"
+    ):
+        logger.warning(
+            "metrics_collector_noop",
+            component=component,
+            reason="no OTel SDK meter provider is configured, so nothing this "
+            "component records will reach Prometheus",
+            provider=type(provider).__name__,
+        )
+        return MetricsCollector()
+
+    collector = MetricsCollector(meter=provider.get_meter(component))
+    definitions = MetricsRegistry.all_metrics()
+    collector.create_instruments(definitions)
+    logger.info("metrics_collector_initialized", component=component, instruments=len(definitions))
+    return collector
