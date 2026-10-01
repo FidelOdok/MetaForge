@@ -112,6 +112,9 @@ READ_ONLY: frozenset[str] = frozenset(
         "twin.evaluate_overhang_metric",
         "twin.find_by_property",
         "twin.get_design_loop",
+        # FORGE-275: pure computation over a work product's existing
+        # assembly.joints metadata -- reads only, writes nothing.
+        "twin.get_harness_estimate",
         "twin.get_node",
         "twin.rank_sensitivity",
         "twin.thread_for",

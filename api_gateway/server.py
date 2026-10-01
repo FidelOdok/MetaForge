@@ -60,6 +60,7 @@ from api_gateway.simulation.routes import router as simulation_router
 from api_gateway.testplans.routes import router as testplans_router
 from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.decision_routes import router as decisions_router
+from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
 from api_gateway.twin.routes import router as twin_router
 from domain_agents.electronics.agent import ElectronicsAgent
@@ -821,6 +822,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.geometry_diff import make_geometry_diff
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.git_repo_registry import GitRepoRegistry, init_git_registry
+    from api_gateway.twin.harness_estimate import make_harness_estimate_getter
     from api_gateway.twin.hierarchy_recorder import (
         make_hierarchy_geometry_linker,
         make_hierarchy_node_recorder,
@@ -1034,6 +1036,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
         twin, document_recorder=document_recorder_fn
     )
 
+    # FORGE-275: per-joint cumulative cable-length estimate from a work
+    # product's real metadata.assembly.joints (gap G-E2). The power-tree
+    # half of this ticket (draw/dissipation per hierarchy node) needed no
+    # new wiring -- it extends the existing hierarchy tree response with
+    # fields twin_core.consistency.hierarchy_rollup (FORGE-390) already
+    # computes; see api_gateway/twin/hierarchy_routes.py.
+    harness_estimate_getter_fn = make_harness_estimate_getter(twin)
+
     # FORGE-265: requirement-driven component selection -- hoisted to a
     # named variable (unlike every other component_recorder use, which is
     # constructed inline at the TwinServer(...) call site below) so this
@@ -1234,6 +1244,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         bringup_checklist_creator=bringup_checklist_creator_fn,
         # FORGE-276: firmware scaffold derived from assembly joints (gap G-E3).
         firmware_scaffold_creator=firmware_scaffold_creator_fn,
+        # FORGE-275: per-joint cable-length estimate from assembly joints (gap G-E2).
+        harness_estimate_getter=harness_estimate_getter_fn,
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -1325,6 +1337,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.firmware.routes import init_firmware_scaffold
 
     init_firmware_scaffold(firmware_scaffold_creator_fn)
+    # FORGE-275: bind the harness-estimate getter to the dashboard's REST
+    # route (api_gateway/twin/harness_estimate_routes.py) -- same locality
+    # rationale as firmware_scaffold/bringup_checklist above.
+    from api_gateway.twin.harness_estimate_routes import init_harness_estimate
+
+    init_harness_estimate(harness_estimate_getter_fn)
     logger.info(
         "mcp_bridge_active",
         bridge_type=type(active_bridge).__name__,
@@ -1974,6 +1992,7 @@ def create_app(
     app.include_router(testplans_router)
     app.include_router(bringup_router)
     app.include_router(firmware_router)
+    app.include_router(harness_estimate_router)
 
     # -- FastAPI auto-instrumentation (traces all routes automatically) ----
     try:

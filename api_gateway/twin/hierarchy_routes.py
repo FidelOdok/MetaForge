@@ -107,6 +107,14 @@ class HierarchyNodeResponse(BaseModel):
     # placeholder with part" rather than "Replace part".
     realizedByWorkProductId: str | None = None  # noqa: N815
     instanceOfBomItemId: str | None = None  # noqa: N815
+    # FORGE-275 (gap G-E2): the hierarchy rollup has computed these since
+    # FORGE-390, but nothing surfaced them to the dashboard -- turns the
+    # existing Structure tree into a power-tree view by adding the same
+    # columns mass/cost already have, no new route needed.
+    drawPeakW: float  # noqa: N815
+    drawAverageW: float  # noqa: N815
+    outputW: float  # noqa: N815
+    dissipationW: float  # noqa: N815
 
 
 class HierarchyTreeResponse(BaseModel):
@@ -264,10 +272,15 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
             try:
                 rollup = await compute_hierarchy_rollup(_twin, node.id)
                 mass_kg, cost = rollup.mass_kg, rollup.cost
+                draw_peak_w = rollup.draw_peak_w
+                draw_average_w = rollup.draw_average_w
+                output_w = rollup.output_w
+                dissipation_w = rollup.dissipation_w
             except KeyError:
                 # Shouldn't happen (every node here came from list_hierarchy_nodes
                 # itself), but a rollup failure must never break the whole list.
                 mass_kg, cost = 0.0, 0.0
+                draw_peak_w = draw_average_w = output_w = dissipation_w = 0.0
             parent_id = parent_of.get(node.id)
             mass_status = mass_status_by_node.get(node.id)
             cost_status = cost_status_by_node.get(node.id)
@@ -296,6 +309,10 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                     instanceOfBomItemId=(
                         str(instance_of_of[node.id]) if node.id in instance_of_of else None
                     ),
+                    drawPeakW=draw_peak_w,
+                    drawAverageW=draw_average_w,
+                    outputW=output_w,
+                    dissipationW=dissipation_w,
                 )
             )
         span.set_attribute("hierarchy.count", len(result))

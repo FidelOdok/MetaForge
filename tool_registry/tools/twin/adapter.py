@@ -132,6 +132,7 @@ class TwinServer(McpToolServer):
         test_plan_generator: Any = None,
         bringup_checklist_creator: Any = None,
         firmware_scaffold_creator: Any = None,
+        harness_estimate_getter: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -407,6 +408,12 @@ class TwinServer(McpToolServer):
         # work product pair. Same injection seam as every recorder above;
         # None keeps tool_registry free of api_gateway imports.
         self._firmware_scaffold_creator = firmware_scaffold_creator
+        # FORGE-275: an injected async ``get(*, work_product_id) -> dict``
+        # (make_harness_estimate_getter) -- derives a per-joint cumulative
+        # cable-length estimate along the real base->follower kinematic
+        # chain from a work product's real metadata.assembly.joints. Same
+        # injection seam as every recorder above.
+        self._harness_estimate_getter = harness_estimate_getter
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -496,6 +503,8 @@ class TwinServer(McpToolServer):
             self._register_create_bringup_checklist()
         if firmware_scaffold_creator is not None:
             self._register_create_firmware_scaffold()
+        if harness_estimate_getter is not None:
+            self._register_get_harness_estimate()
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -4729,6 +4738,65 @@ class TwinServer(McpToolServer):
             work_product_id=work_product_id,
             project_id=project_id if isinstance(project_id, str) else None,
         )
+
+    # ------------------------------------------------------------------
+    # twin.get_harness_estimate (FORGE-275)
+    # ------------------------------------------------------------------
+
+    def _register_get_harness_estimate(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.get_harness_estimate",
+                adapter_id="twin",
+                name="Get Harness Estimate",
+                description=(
+                    "Derives a per-joint cable-length estimate from a work "
+                    "product's real metadata.assembly.joints (FORGE-271). "
+                    "Each joint's anchor is relative to its own parent "
+                    "frame (URDF convention), so this sums segment lengths "
+                    "along the real base->follower kinematic chain (the "
+                    "same topological order twin.create_bringup_checklist "
+                    "derives) rather than taking a single straight-line "
+                    "distance from a fixed origin, which would be "
+                    "physically meaningless on relative coordinates. This "
+                    "is a straight-segment-along-the-chain ESTIMATE, not a "
+                    "real routed path. Out of scope: real connector/"
+                    "wire-gauge selection (no schema concept exists); a "
+                    "real routed cable path; motor-driver component "
+                    "selection/sizing."
+                ),
+                capability="twin_evaluate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": (
+                                "Work product carrying metadata.assembly.joints "
+                                "to derive a harness estimate from."
+                            ),
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {"type": "string"},
+                        "joints": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=256, max_cpu_seconds=60),
+            ),
+            handler=self.get_harness_estimate,
+        )
+
+    async def get_harness_estimate(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.get_harness_estimate: 'work_product_id' is required")
+        return await self._harness_estimate_getter(work_product_id=work_product_id)
 
     # ------------------------------------------------------------------
     # twin.execute_revalidation_plan (FORGE-316)

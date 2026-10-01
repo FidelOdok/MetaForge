@@ -45,4 +45,11 @@ export interface HierarchyNode {
    * Both null means "placeholder". */
   realizedByWorkProductId: string | null;
   instanceOfBomItemId: string | null;
+  /** FORGE-275 (gap G-E2): rolled up over this node's own CONTAINS subtree,
+   * same as massKg/cost -- the hierarchy rollup has computed these since
+   * FORGE-390, this just surfaces them (power-tree view). */
+  drawPeakW: number;
+  drawAverageW: number;
+  outputW: number;
+  dissipationW: number;
 }
