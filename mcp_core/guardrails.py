@@ -311,6 +311,14 @@ class ApprovalResolution:
     #: fine for an ordinary write and disqualifying for a human-authority tool.
     approver: Approver | None = None
 
+    #: The ledger entry this approval lives in, e.g. ``run_b42aa3ea023f46c0``
+    #: (FORGE-417). Carried back to the caller so a claim about the approval
+    #: can be checked against the gateway rather than taken on trust: an
+    #: agent that says "this was held and approved" should be citing an id
+    #: somebody can look up. ``None`` for a gate with no durable record,
+    #: such as an inline elicitation answered in the client.
+    approval_id: str | None = None
+
 
 def resolve_approval(raw: ApprovalOutcome | ApprovalResolution) -> ApprovalResolution:
     """Normalise what a gate returned.

@@ -26,6 +26,7 @@ import difflib
 import json
 import re
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -145,6 +146,58 @@ class PromptNotFoundError(Exception):
     """``prompts/get`` named a workflow that does not exist (FORGE-340)."""
 
 
+@dataclass(frozen=True)
+class ApprovalRecord:
+    """That a call was held, and how it ended (FORGE-417).
+
+    A held-then-approved write returned a plain success envelope, identical
+    to one that was never held. The agent read that and told the user "writes
+    from this external harness are not being held for approval" -- false, and
+    contradicted by the gateway ledger entry sitting right there. The
+    guardrail worked; the client had no way to know, so the model filled the
+    gap with a guess.
+
+    This is what the result needs to carry for that claim to be checkable.
+    """
+
+    outcome: str
+    route: str
+    held_seconds: float
+    approval_id: str | None = None
+    approver: str | None = None
+    approver_verified: bool = False
+
+    def as_meta(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "held": True,
+            "outcome": self.outcome,
+            "route": self.route,
+            "heldSeconds": round(self.held_seconds, 3),
+        }
+        if self.approval_id:
+            out["approvalId"] = self.approval_id
+        if self.approver:
+            out["approvedBy"] = self.approver
+            out["approverVerified"] = self.approver_verified
+        return out
+
+    def as_sentence(self) -> str:
+        """One line the model will actually read.
+
+        `_meta` is the right home for structured facts, but a model reads the
+        text content. Putting it only in `_meta` is how this stayed invisible:
+        the information was technically present and never looked at.
+        """
+        who = f" by {self.approver}" if self.approver else ""
+        ident = f" (approval {self.approval_id})" if self.approval_id else ""
+        unverified = "" if self.approver_verified or not self.approver else ", identity unverified"
+        return (
+            f"This write was held for human approval and was {self.outcome}"
+            f"{who}{ident} after {self.held_seconds:.1f}s"
+            f" via {self.route}{unverified}."
+        )
+
+
 class UnifiedMcpServer:
     """Holds a set of ``McpToolServer`` adapters and dispatches across them.
 
@@ -191,6 +244,9 @@ class UnifiedMcpServer:
         # transports declare what they actually are.
         self._caller = caller
         self._approval_gate = approval_gate
+        # FORGE-417: call id -> how its approval ended, read once by the
+        # MCP envelope and popped. Bounded by that pop; see _remember_hold.
+        self._approval_records: dict[str, ApprovalRecord] = {}
         self._exempt_local_writes = exempt_local_writes
         self._version = version
         # FORGE-332: what the transport in front of us enforces. Only the
@@ -815,17 +871,27 @@ class UnifiedMcpServer:
         links = links_for(self._deeplinks, tool_name, result)
         if links:
             meta["links"] = links
+        # FORGE-417: say that this call was held. Without it a held-then-
+        # approved write is byte-identical to one that was never held, and an
+        # agent reading the result told the user writes "are not being held
+        # for approval" -- false, with the ledger entry sitting right there.
+        held = self.take_approval_record(call_id)
+        if held is not None:
+            meta["approval"] = held.as_meta()
         # Body is wrapped in MCP's ``content`` array. We use ``text``
         # type with a JSON-serialised payload — the adapter outputs are
         # structured dicts, and clients can json.parse the text. If we
         # add binary outputs later we'll branch here on result shape.
+        content: list[dict[str, Any]] = [{"type": "text", "text": json.dumps(result)}]
+        if held is not None:
+            # A second block rather than text merged into the first: the first
+            # is the tool's own output and belongs to its schema. But `_meta`
+            # alone was not enough -- a model reads content, and information
+            # that is technically present and never looked at is how this
+            # stayed invisible in the first place.
+            content.append({"type": "text", "text": held.as_sentence()})
         return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(result),
-                }
-            ],
+            "content": content,
             "isError": False,
             # The reference lives in `_meta` rather than inside the text
             # payload: the text is the tool's own output and belongs to the
@@ -1326,7 +1392,9 @@ class UnifiedMcpServer:
         prefix = requested.split(".")[0].split("_")[0].lower()
         return [tid for tid in known if tid.lower().startswith(prefix)][:limit]
 
-    async def _authorise(self, tool_id: str, arguments: dict[str, Any]) -> Approver | None:
+    async def _authorise(
+        self, tool_id: str, arguments: dict[str, Any], call_id: str = ""
+    ) -> Approver | None:
         """Hold a write until a human approves it, whoever asked (FORGE-359).
 
         Raises rather than returning a flag: every path out of here that is
@@ -1390,6 +1458,8 @@ class UnifiedMcpServer:
             reason=decision.reason,
             route="elicitation" if can_elicit else "dashboard",
         )
+        route = "elicitation" if can_elicit else "dashboard"
+        held_from = time.monotonic()
         resolution = resolve_approval(
             await gate(
                 ApprovalAsk(
@@ -1401,6 +1471,7 @@ class UnifiedMcpServer:
                 )
             )
         )
+        held_seconds = time.monotonic() - held_from
         outcome = resolution.outcome
         if outcome is not ApprovalOutcome.APPROVED:
             logger.info(
@@ -1426,7 +1497,38 @@ class UnifiedMcpServer:
                 "the approval was granted but the gate did not identify who granted it",
             )
 
+        if call_id:
+            self._remember_hold(
+                call_id,
+                ApprovalRecord(
+                    outcome=outcome.value,
+                    route=route,
+                    held_seconds=held_seconds,
+                    approval_id=resolution.approval_id,
+                    approver=(
+                        resolution.approver.label if resolution.approver is not None else None
+                    ),
+                    approver_verified=(
+                        resolution.approver.verified if resolution.approver is not None else False
+                    ),
+                ),
+            )
         return resolution.approver
+
+    def _remember_hold(self, call_id: str, record: ApprovalRecord) -> None:
+        """Keep one hold until the envelope for that call reads it.
+
+        Popped by `_tools_call`. A legacy-dialect caller never reads it, and a
+        raised error can skip the pop, so the map is capped rather than
+        trusted to drain -- an observability aid must not become a leak.
+        """
+        if len(self._approval_records) > 64:
+            self._approval_records.clear()
+        self._approval_records[call_id] = record
+
+    def take_approval_record(self, call_id: str) -> ApprovalRecord | None:
+        """The hold for ``call_id``, removed. ``None`` when it was not held."""
+        return self._approval_records.pop(call_id, None)
 
     async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route ``tool/call`` to the adapter that owns ``tool_id``."""
@@ -1434,7 +1536,9 @@ class UnifiedMcpServer:
         adapter = self._tool_index[tool_id]
         # `_call_id` is protocol bookkeeping, not an argument. Adapters
         # validate what they are given, and an unexpected key is exactly the
-        # kind of thing a strict schema rejects.
+        # kind of thing a strict schema rejects. Kept here first, because
+        # FORGE-417's approval record is filed against it.
+        call_id = str(params.get("_call_id") or "")
         params = {k: v for k, v in params.items() if k != "_call_id"}
         params["tool_id"] = tool_id
 
@@ -1443,7 +1547,7 @@ class UnifiedMcpServer:
         arguments = strip_reserved_arguments(params.get("arguments") or {})
         params["arguments"] = arguments
 
-        approver = await self._authorise(tool_id, arguments)
+        approver = await self._authorise(tool_id, arguments, call_id)
         if approver is not None and requires_human_authority(tool_id):
             # The tool reads its deciding human from here and nowhere else.
             arguments[APPROVED_BY_ARG] = approver.label
