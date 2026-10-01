@@ -857,6 +857,43 @@ class UnifiedMcpServer:
             result["_meta"] = meta
         return result
 
+    def _profile_report(self) -> dict[str, Any]:
+        """What this connection is served, and why it is not everything.
+
+        Reported even when no profile is active, because "all of them" is an
+        answer and a missing key is not: a doctor that cannot tell "no profile"
+        from "this build does not say" has to guess, and guessing is what
+        produced the 96-missing-tools report.
+        """
+        try:
+            profile = self._requested_profile()
+        except UnknownProfileError as exc:
+            # A connection asking for a profile that does not exist is a real
+            # fault and the doctor should say so, rather than this raising
+            # inside a health check.
+            return {"active": None, "error": str(exc), "available": sorted(PROFILES)}
+        if not profile:
+            return {
+                "active": None,
+                "served_tool_count": len(self._tool_index),
+                "available": sorted(PROFILES),
+                "detail": (
+                    "No profile is active, so every registered tool is served on this connection."
+                ),
+            }
+        served = len(set(tools_for_profile(profile)) & set(self._tool_index))
+        return {
+            "active": profile,
+            "served_tool_count": served,
+            "available": sorted(PROFILES),
+            "detail": (
+                f"Profile {profile!r} serves {served} of {len(self._tool_index)} "
+                "registered tools on this connection. The rest are not missing "
+                "and nothing is down -- connect with a different profile to "
+                "reach them."
+            ),
+        }
+
     def _requested_profile(self) -> str | None:
         """Which profile to serve this call, per connection (FORGE-410).
 
@@ -1896,6 +1933,14 @@ class UnifiedMcpServer:
             # more tool adapter than they wired (FORGE-409).
             "adapter_count": len(self._domain_adapters()),
             "tool_count": len(self._tool_index),
+            # FORGE-420: with the `core` profile the client sees 21 tools and
+            # this said 117, so /metaforge:doctor reported "96 tools are not
+            # reaching the client" and named cadquery, freecad, calculix and
+            # kicad as missing. That was the profile working as designed,
+            # diagnosed as a fault. `tool_count` stays the registered
+            # catalogue -- it is a real fact and other callers read it -- and
+            # this says what *this connection* is actually served.
+            "profile": self._profile_report(),
             # FORGE-332: A5 asks the doctor about four things -- gateway,
             # adapters, auth and version skew. The adapters are probed
             # above; these two are the rest, and neither was answerable
