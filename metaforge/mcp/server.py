@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import inspect
 import json
 import re
 import time
@@ -2047,6 +2048,18 @@ def _effective_project(arguments: dict[str, Any]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+#: Collaborator names ``bootstrap_tool_registry`` accepts, resolved once from
+#: the real function at import (FORGE-415).
+#:
+#: Read here rather than per call because the module global is rebindable: a
+#: test that patches ``bootstrap_tool_registry`` would otherwise have the
+#: validation check the *patch's* signature and reject every real
+#: collaborator -- which is how this was first written, and a test caught it.
+_BOOTSTRAP_COLLABORATORS: frozenset[str] = frozenset(
+    inspect.signature(bootstrap_tool_registry).parameters
+)
+
+
 async def build_unified_server(
     adapter_ids: list[str] | None = None,
     knowledge_service: Any = None,
@@ -2070,6 +2083,7 @@ async def build_unified_server(
     metrics: Any = None,
     caller: Caller = Caller.UNTRUSTED,
     approval_gate: Any = None,
+    **collaborators: Any,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
 
@@ -2107,24 +2121,52 @@ async def build_unified_server(
     link. ``None`` skips registration (same pattern as
     ``decision_recorder``).
     """
-    registry: ToolRegistry = await bootstrap_tool_registry(
-        adapter_ids=adapter_ids,
-        knowledge_service=knowledge_service,
-        twin=twin,
-        constraint_engine=constraint_engine,
-        project_backend=project_backend,
-        memory_client=memory_client,
-        memory_insight_store=memory_insight_store,
-        twin_allow_mutations=twin_allow_mutations,
-        agent_session_store=agent_session_store,
-        decision_recorder=decision_recorder,
-        geometry_recorder=geometry_recorder,
-        blob_stager=blob_stager,
-        component_catalog_store=component_catalog_store,
-        component_intent_llm=component_intent_llm,
-        component_recorder=component_recorder,
-        brief_provider=brief_provider,
-    )
+    # FORGE-415: this used to name each collaborator again, a second list
+    # beside `bootstrap_tool_registry`'s own -- and it was 38 short. Each
+    # missing one gates a tool registration, so those tools registered in the
+    # gateway and never in the sidecar: `twin.record_engineering_entity`, the
+    # whole Engineering Intent & Requirements Harness, `record_document`,
+    # `record_constraint_set`, `propose_change` and more were invisible to
+    # every external MCP client.
+    #
+    # Nothing could see it. Every unit test constructs the adapter directly
+    # and supplies the collaborator itself, so the factory being narrower
+    # than the thing it builds is exactly the gap tests do not cover -- the
+    # same shape as FORGE-406 (an approval gate with no production caller)
+    # and FORGE-413 (a metrics collector never passed).
+    #
+    # So the second list is gone. Named parameters this function has its own
+    # use for stay named; everything else is forwarded, and an unknown key is
+    # rejected rather than silently dropped -- a typo'd collaborator name
+    # would otherwise reproduce this bug one tool at a time.
+    forwarded: dict[str, Any] = {
+        "adapter_ids": adapter_ids,
+        "knowledge_service": knowledge_service,
+        "twin": twin,
+        "constraint_engine": constraint_engine,
+        "project_backend": project_backend,
+        "memory_client": memory_client,
+        "memory_insight_store": memory_insight_store,
+        "twin_allow_mutations": twin_allow_mutations,
+        "agent_session_store": agent_session_store,
+        "decision_recorder": decision_recorder,
+        "geometry_recorder": geometry_recorder,
+        "blob_stager": blob_stager,
+        "component_catalog_store": component_catalog_store,
+        "component_intent_llm": component_intent_llm,
+        "component_recorder": component_recorder,
+        "brief_provider": brief_provider,
+    }
+    if collaborators:
+        unknown = sorted(set(collaborators) - _BOOTSTRAP_COLLABORATORS)
+        if unknown:
+            raise TypeError(
+                "build_unified_server: bootstrap_tool_registry accepts no "
+                f"collaborator named {unknown}. A silently ignored name is how "
+                "a tool goes missing from one deployment and not another."
+            )
+        forwarded.update(collaborators)
+    registry: ToolRegistry = await bootstrap_tool_registry(**forwarded)
     capture = (
         SessionCapture(agent_session_store)
         if capture_sessions and agent_session_store is not None
