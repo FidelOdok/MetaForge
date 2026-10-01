@@ -72,3 +72,45 @@ class TestItIsNotJustTheBrief:
         server = UnifiedMcpServer(adapters=[], profile="core")
         assert "project.open" in tools_for_profile("core")
         del server
+
+
+class TestTheIntentHarnessOnTheDefaultProfile:
+    """FORGE-415 follow-up.
+
+    Wiring `engineering_entity_recorder` into the sidecar made
+    `twin.record_engineering_entity` *reachable* — it registers, and an
+    unprofiled connection can call it. A default plugin install still could
+    not see it, because `core` did not list it: the same gap one layer up,
+    and the reason the live check after FORGE-415 showed `served: False` on
+    `core` while the unprofiled catalogue showed `served: True`.
+    """
+
+    def test_core_serves_the_entry_point(self) -> None:
+        assert "twin.record_engineering_entity" in tools_for_profile("core")
+
+    def test_it_is_in_core_and_not_in_base(self) -> None:
+        """`core` is what an engineer needs before picking a discipline,
+        which is what this is. `_BASE` is a tax every profile pays, and a
+        mechanical or electronics session is not where intents get recorded.
+        """
+        others = [p for p in PROFILES if p != "core"]
+        assert others, "this test stops meaning anything with one profile"
+        for profile in others:
+            assert "twin.record_engineering_entity" not in tools_for_profile(profile), profile
+
+    def test_the_approver_is_deliberately_not_served(self) -> None:
+        """Pinned so the omission reads as a decision rather than the next
+        thing somebody forgot. Approving a waiver or release_approval is a
+        reviewer action, and the dashboard is where the approver is an
+        authenticated principal rather than whoever the agent runs as —
+        the same reasoning FORGE-393 applies to human-authority tools.
+        """
+        for profile in PROFILES:
+            assert "twin.approve_engineering_entity" not in tools_for_profile(profile), profile
+
+    def test_recording_is_useful_without_the_approver(self) -> None:
+        """The pairing that makes record-only coherent: an entity recorded
+        here is read back by the G3 feasibility gate automatically, so a
+        budget or invariant does its job with nobody approving anything."""
+        served = set(tools_for_profile("core"))
+        assert {"twin.record_engineering_entity", "twin.record_claim"} <= served
