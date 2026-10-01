@@ -1502,6 +1502,136 @@ class TestBuildAssemblySdf:
         assert "<model" in xml
 
 
+class TestBuildAssemblySdfPoseCorrectness:
+    """FORGE-304: a 3-link chain built from world-frame parts must emit a
+    real <pose> on every <link> and <joint> -- previously omitted entirely,
+    leaving every link rendered wherever its raw STEP world-frame vertices
+    happened to put it and every joint with no spatial origin at all.
+
+    Per the primary source (gazebosim/sdf_tutorials' pose_frame_semantics
+    tutorial, fetched while fixing this), a link's <pose> defaults to being
+    relative to the model frame -- so it's simply each link's
+    `_link_world_offsets_mm()` position in metres, no accumulation. A
+    joint's default pose frame is the *child* link's frame (the one SDF
+    exception to "relative to parent entity"), so this fix sidesteps that
+    by writing every joint <pose relative_to="__model__">, making it (like
+    the link poses) simply the joint's real-world anchor in metres.
+    """
+
+    _LINKS = [
+        {
+            "name": "base",
+            "mesh_uri": "base.stl",
+            "mass_kg": 1.0,
+            "com_m": (0.0, 0.0, 0.0),
+            "inertia_kgm2": (1.0, 0.0, 0.0, 1.0, 0.0, 1.0),
+        },
+        {
+            "name": "l1",
+            "mesh_uri": "l1.stl",
+            "mass_kg": 0.5,
+            # World-frame COM -- authored where the part physically sits,
+            # not relative to any link-local frame.
+            "com_m": (0.05, 0.0, 0.1),
+            "inertia_kgm2": (0.1, 0.0, 0.0, 0.1, 0.0, 0.1),
+        },
+        {
+            "name": "l2",
+            "mesh_uri": "l2.stl",
+            "mass_kg": 0.25,
+            "com_m": (0.15, -0.02, 0.28),
+            "inertia_kgm2": (0.05, 0.0, 0.0, 0.05, 0.0, 0.05),
+        },
+    ]
+
+    # World-frame anchors (mm), a non-trivial chain (not axis-aligned, not
+    # starting at the origin) -- same values as FORGE-243's URDF FK test.
+    _J1_ANCHOR_MM = (0.0, 0.0, 100.0)
+    _J2_ANCHOR_MM = (0.0, 0.0, 280.0)
+
+    def _joints(self):
+        return [
+            {
+                "name": "j1",
+                "type": "revolute",
+                "base": "base",
+                "follower": "l1",
+                "axis": (0, 1, 0),
+                "anchor": self._J1_ANCHOR_MM,
+            },
+            {
+                "name": "j2",
+                "type": "revolute",
+                "base": "l1",
+                "follower": "l2",
+                "axis": (0, 1, 0),
+                "anchor": self._J2_ANCHOR_MM,
+            },
+        ]
+
+    @staticmethod
+    def _link_pose_m(xml: str, link_name: str) -> tuple[float, ...]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        link_el = next(el for el in root.findall(".//link") if el.get("name") == link_name)
+        return tuple(float(v) for v in link_el.find("pose").text.split())
+
+    @staticmethod
+    def _inertial_pose_m(xml: str, link_name: str) -> tuple[float, ...]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        link_el = next(el for el in root.findall(".//link") if el.get("name") == link_name)
+        return tuple(float(v) for v in link_el.find("inertial/pose").text.split())
+
+    @staticmethod
+    def _joint_pose(xml: str, joint_name: str) -> tuple[tuple[float, ...], str | None]:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        joint_el = next(el for el in root.findall(".//joint") if el.get("name") == joint_name)
+        pose_el = joint_el.find("pose")
+        return tuple(float(v) for v in pose_el.text.split()), pose_el.get("relative_to")
+
+    def test_link_poses_are_the_real_world_frame_anchors_no_accumulation(self):
+        xml, _ = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=self._joints(), static=False, world_name=""
+        )
+        # base is a chain root -> pose is the origin.
+        assert self._link_pose_m(xml, "base") == pytest.approx((0, 0, 0, 0, 0, 0))
+        # l1 sits at j1's anchor (its own single lookup, unlike URDF's
+        # parent-relative chain -- SDF link poses are each independently
+        # model-frame, so this is the raw anchor, not a difference).
+        assert self._link_pose_m(xml, "l1") == pytest.approx((0, 0, 0.1, 0, 0, 0))
+        # l2 sits at j2's anchor, likewise un-accumulated.
+        assert self._link_pose_m(xml, "l2") == pytest.approx((0, 0, 0.28, 0, 0, 0))
+
+    def test_joint_poses_are_model_relative_real_world_anchors(self):
+        xml, _ = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=self._joints(), static=False, world_name=""
+        )
+        j1_pose, j1_rel = self._joint_pose(xml, "j1")
+        j2_pose, j2_rel = self._joint_pose(xml, "j2")
+        assert j1_rel == "__model__"
+        assert j2_rel == "__model__"
+        assert j1_pose == pytest.approx((0, 0, 0.1, 0, 0, 0))
+        assert j2_pose == pytest.approx((0, 0, 0.28, 0, 0, 0))
+
+    def test_inertial_poses_are_re_expressed_relative_to_each_links_own_frame(self):
+        xml, _ = _build_assembly_sdf(
+            model_name="bot", links=self._LINKS, joints=self._joints(), static=False, world_name=""
+        )
+        # base is a chain root (link pose == origin) -> inertial pose is
+        # unchanged from its raw world-frame COM.
+        assert self._inertial_pose_m(xml, "base") == pytest.approx((0, 0, 0, 0, 0, 0))
+        # l1's link pose is (0, 0, 0.1) -- its COM (0.05, 0, 0.1) must be
+        # re-expressed relative to that, not left as the raw world value.
+        assert self._inertial_pose_m(xml, "l1") == pytest.approx((0.05, 0.0, 0.0, 0, 0, 0))
+        # l2's link pose is (0, 0, 0.28) -- same re-expression.
+        assert self._inertial_pose_m(xml, "l2") == pytest.approx((0.15, -0.02, 0.0, 0, 0, 0))
+
+
 class TestExportSdfAssembly:
     """MET-706 session (tier-2a): the multi-part CadQuery-facing entry point."""
 
