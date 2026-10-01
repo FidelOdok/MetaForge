@@ -268,3 +268,62 @@ class TestMetricsDoNotDependOnSessionCapture:
         metrics = await self._run(_Capture(), {"ok": True})
         assert metrics.calls == [("twin.query_cypher", "ok")]
         assert seen == ["twin.query_cypher"]
+
+
+@pytest.mark.asyncio
+class TestAHeldCallThatThenFails:
+    """Where FORGE-417 and FORGE-419 meet.
+
+    A write can be held, approved, and *then* fail in the handler. The hold
+    still happened, and the agent should not have to guess whether a human
+    saw it -- FORGE-417's reasoning does not stop applying because the
+    outcome was an error.
+    """
+
+    class _Adapter(McpToolServer):
+        def __init__(self) -> None:
+            super().__init__(adapter_id="twin", version="0.1.0")
+            self.register_tool(
+                ToolManifest(
+                    tool_id="twin.record_decision",
+                    adapter_id="twin",
+                    name="record decision",
+                    description="stub",
+                    capability="test",
+                ),
+                self._handler,
+            )
+
+        async def _handler(self, _args: dict[str, Any]) -> dict[str, Any]:
+            raise ValueError("disk full")
+
+    async def _run(self) -> tuple[dict[str, Any], UnifiedMcpServer]:
+        from mcp_core.guardrails import ApprovalOutcome, ApprovalResolution, Approver
+
+        async def gate(_ask: Any) -> ApprovalResolution:
+            return ApprovalResolution(
+                outcome=ApprovalOutcome.APPROVED,
+                approver=Approver(actor_id="user:f", verified=True, display_name="Fidel"),
+                approval_id="run_abc",
+            )
+
+        server = UnifiedMcpServer([self._Adapter()], caller=Caller.UNTRUSTED, approval_gate=gate)
+        response = await _mcp_call(server, "twin.record_decision", {})
+        return dict(response["result"]), server
+
+    async def test_the_error_still_says_it_was_held_and_by_whom(self) -> None:
+        result, _ = await self._run()
+        assert result["isError"] is True
+        assert result["_meta"]["approval"]["approvedBy"] == "Fidel"
+        assert "held for human approval" in result["content"][1]["text"]
+
+    async def test_the_failure_reason_is_still_first(self) -> None:
+        """Order matters: the thing to act on leads."""
+        result, _ = await self._run()
+        assert "disk full" in result["content"][0]["text"]
+
+    async def test_the_approval_record_is_drained_on_the_error_path_too(self) -> None:
+        """The success path pops it. Without the same on failure, every held
+        call that then failed would leave one behind until the cap cleared."""
+        _, server = await self._run()
+        assert server._approval_records == {}

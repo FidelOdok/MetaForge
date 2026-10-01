@@ -609,20 +609,35 @@ class UnifiedMcpServer:
                     # The legacy `tool/call` dialect keeps the JSON-RPC error
                     # below: its callers are internal and already read
                     # `data.details`.
+                    call_id = str(getattr(exc, "call_id", "") or "")
+                    error_content: list[dict[str, Any]] = [
+                        {"type": "text", "text": _tool_error_text(exc)}
+                    ]
+                    error_meta: dict[str, Any] = {
+                        "callId": call_id,
+                        "error": {
+                            "toolId": exc.tool_id,
+                            "details": exc.details,
+                            "durationMs": round(exc.duration_ms, 2),
+                        },
+                    }
+                    # A call can be held, approved, and *then* fail. The hold
+                    # still happened, and FORGE-417's reasoning applies to an
+                    # error result exactly as to a success: the agent should
+                    # not have to guess whether a human saw this. Taking the
+                    # record also drains it, which the success path does by
+                    # popping it.
+                    held = self.take_approval_record(call_id) if call_id else None
+                    if held is not None:
+                        error_meta["approval"] = held.as_meta()
+                        error_content.append({"type": "text", "text": held.as_sentence()})
                     return json.dumps(
                         make_success(
                             request_id,
                             {
-                                "content": [{"type": "text", "text": _tool_error_text(exc)}],
+                                "content": error_content,
                                 "isError": True,
-                                "_meta": {
-                                    "callId": getattr(exc, "call_id", None) or "",
-                                    "error": {
-                                        "toolId": exc.tool_id,
-                                        "details": exc.details,
-                                        "durationMs": round(exc.duration_ms, 2),
-                                    },
-                                },
+                                "_meta": error_meta,
                             },
                         )
                     )
