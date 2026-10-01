@@ -52,6 +52,11 @@ class TwinNodeResponse(BaseModel):
     # inspector could not show. None for every other node type, or a result
     # recorded without mesh stats.
     meshStats: dict[str, Any] | None = None  # noqa: N815
+    # FORGE-293: a technical_drawing node's own structured dimensions/GD&T/
+    # surface-finish/inspection data and approval state (same "real data,
+    # scalar-only properties loop drops it" shape as meshStats above).
+    # None for every other node type.
+    technicalDrawing: dict[str, Any] | None = None  # noqa: N815
 
 
 class AssemblyJoint(BaseModel):
@@ -148,3 +153,66 @@ class ApproveSketchResponse(BaseModel):
     node_id: str
     approved: bool
     approved_at: str
+
+
+class ApproveTechnicalDrawingRequest(BaseModel):
+    """Human sign-off on a technical_drawing work product (FORGE-293)."""
+
+    approved_by: str | None = Field(
+        default=None, description="Identifier of the human approving this drawing."
+    )
+
+
+class ApproveTechnicalDrawingResponse(BaseModel):
+    """Result of approving a technical_drawing — the gate's new state."""
+
+    node_id: str
+    approved: bool
+    approved_at: str
+
+
+class TechnicalDrawingDimension(BaseModel):
+    """One toleranced dimension on a technical_drawing (FORGE-293)."""
+
+    feature: str
+    nominal_mm: float
+    tolerance_plus_mm: float = 0.0
+    tolerance_minus_mm: float = 0.0
+
+
+class TechnicalDrawingGdtCallout(BaseModel):
+    """One GD&T callout (ASME Y14.5 style) on a technical_drawing (FORGE-293)."""
+
+    feature: str
+    symbol: str
+    tolerance_value_mm: float
+    datum_refs: list[str] = Field(default_factory=list)
+
+
+class TechnicalDrawingSurfaceFinish(BaseModel):
+    """One surface-finish requirement on a technical_drawing (FORGE-293)."""
+
+    feature: str
+    ra_um: float
+
+
+class TechnicalDrawingSummary(BaseModel):
+    """A real recorded technical_drawing work product, listed for a part."""
+
+    node_id: str
+    created_at: str
+    name: str
+    part_name: str
+    dimensions: list[TechnicalDrawingDimension]
+    gdt_callouts: list[TechnicalDrawingGdtCallout]
+    surface_finishes: list[TechnicalDrawingSurfaceFinish]
+    inspection_requirements: list[str]
+    approved: bool
+    approved_at: str | None = None
+    approved_by: str | None = None
+
+
+class TechnicalDrawingListResponse(BaseModel):
+    """A part's real recorded technical drawings, oldest first (FORGE-293)."""
+
+    drawings: list[TechnicalDrawingSummary]

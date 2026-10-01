@@ -99,6 +99,45 @@ interface SampleBringupChecklist {
   steps: SampleBringupStep[];
 }
 
+// FORGE-293 (gap G-H1): illustrative shape of one recorded technical_drawing
+// work product, mirroring api_gateway/technical_drawings/routes.py's own
+// snake_case response -- the real data (dimensions/GD&T/surface finishes/
+// inspection requirements) predates this ticket (PR #734); this mock just
+// gives the dashboard's new viewer something real-shaped to render.
+interface SampleTechnicalDrawingDimension {
+  feature: string;
+  nominal_mm: number;
+  tolerance_plus_mm: number;
+  tolerance_minus_mm: number;
+}
+
+interface SampleTechnicalDrawingGdtCallout {
+  feature: string;
+  symbol: string;
+  tolerance_value_mm: number;
+  datum_refs: string[];
+}
+
+interface SampleTechnicalDrawingSurfaceFinish {
+  feature: string;
+  ra_um: number;
+}
+
+interface SampleTechnicalDrawing {
+  node_id: string;
+  created_at: string;
+  name: string;
+  part_name: string;
+  dimensions: SampleTechnicalDrawingDimension[];
+  gdt_callouts: SampleTechnicalDrawingGdtCallout[];
+  surface_finishes: SampleTechnicalDrawingSurfaceFinish[];
+  inspection_requirements: string[];
+  approved: boolean;
+  approved_at: string | null;
+  approved_by: string | null;
+  work_product_id: string;
+}
+
 // FORGE-276 (gap G-E3): illustrative shape of one generated firmware
 // scaffold's per-joint table, mirroring api_gateway/firmware/routes.py's
 // own snake_case response.
@@ -1029,6 +1068,32 @@ const SAMPLE_WORKSPACE_SEED = {
   // validation added one).
   testPlanEntries: [] as SampleTestPlanEntry[],
   bringupChecklists: [] as SampleBringupChecklist[],
+  // FORGE-293 (gap G-H1): one real-shaped drawing already recorded for the
+  // demo's 'upper_arm' part (sample-wp-upper-arm) -- unlike bringupChecklists
+  // above (empty until generated), a technical_drawing is normally produced
+  // upstream by an agent skill this dashboard doesn't itself trigger, so an
+  // honest demo needs one pre-seeded to show the viewer actually works.
+  technicalDrawings: [
+    {
+      node_id: 'sample-technical-drawing-1',
+      created_at: '2026-09-25T10:00:00Z',
+      name: 'Upper Arm Drawing',
+      part_name: 'upper_arm',
+      dimensions: [
+        { feature: 'bore_diameter', nominal_mm: 10, tolerance_plus_mm: 0.02, tolerance_minus_mm: 0 },
+        { feature: 'overall_length', nominal_mm: 180, tolerance_plus_mm: 0.1, tolerance_minus_mm: 0.1 },
+      ],
+      gdt_callouts: [
+        { feature: 'mounting_face', symbol: 'flatness', tolerance_value_mm: 0.05, datum_refs: ['A'] },
+      ],
+      surface_finishes: [{ feature: 'bore_surface', ra_um: 1.6 }],
+      inspection_requirements: ['CMM bore diameter check', 'Surface finish verification'],
+      approved: false,
+      approved_at: null,
+      approved_by: null,
+      work_product_id: 'sample-wp-upper-arm',
+    },
+  ] as SampleTechnicalDrawing[],
   // FORGE-289 (gap G-G3): decisions keyed by the node id they're related
   // to (a hierarchy node's own id, or a converged design loop's winning
   // iteration id) -- mirrors GET /v1/decisions?related_to=<node_id>'s own
@@ -1523,6 +1588,19 @@ function route(
     if (path === '/releases') return { releases: s.releasePackages };
     if (path === '/testplans') return { entries: s.testPlanEntries };
     if (path === '/bringup') return { entries: s.bringupChecklists };
+    if (path === '/technical-drawings') {
+      // FORGE-293: filter by work_product_id, same real-backend behaviour
+      // api_gateway/technical_drawings/routes.py's list closure has (one
+      // part's drawings, not every drawing in the project) -- then strip the
+      // internal-only work_product_id field, which the real response schema
+      // doesn't carry (a drawing is already scoped to the query, not
+      // self-describing its own part id).
+      const workProductId = String(params.work_product_id ?? '');
+      const drawings = s.technicalDrawings
+        .filter((d) => d.work_product_id === workProductId)
+        .map(({ work_product_id: _wp, ...rest }) => rest);
+      return { drawings };
+    }
     if (path === '/twin/hierarchy') return { nodes: s.hierarchyNodes };
     if (path === '/wiring/harness-estimate') {
       // FORGE-275: the same illustrative two-joint chain /firmware/scaffold
@@ -2178,6 +2256,20 @@ function route(
       };
       s.releasePackages.push(created);
       return created;
+    }
+    if (path.endsWith('/approve-technical-drawing') && path.startsWith('/twin/nodes/')) {
+      // FORGE-293: flip the matching sample drawing's approved flag, same
+      // real state-transition shape api_gateway/twin/technical_drawing_
+      // viewer.py's approver returns -- a real find-and-mutate over the
+      // seeded sample, not a canned always-true response.
+      const nodeId = segment(path, 3);
+      const drawing = s.technicalDrawings.find((d) => d.node_id === nodeId);
+      if (!drawing) return undefined;
+      const approvedBy = typeof body.approved_by === 'string' ? body.approved_by : null;
+      drawing.approved = true;
+      drawing.approved_at = new Date().toISOString();
+      drawing.approved_by = approvedBy;
+      return { node_id: drawing.node_id, approved: true, approved_at: drawing.approved_at };
     }
     if (path === '/testplans') {
       // FORGE-298: sample mode has no real Constraint objects with

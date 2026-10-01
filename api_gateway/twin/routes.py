@@ -44,6 +44,8 @@ from api_gateway.twin.import_service import (
 from api_gateway.twin.schemas import (
     ApproveSketchRequest,
     ApproveSketchResponse,
+    ApproveTechnicalDrawingRequest,
+    ApproveTechnicalDrawingResponse,
     BooleanCutRequest,
     BooleanCutResponse,
     TwinNodeListResponse,
@@ -130,6 +132,20 @@ def init_interference_check(checker: Any) -> None:
     _interference_check = checker
 
 
+# FORGE-293: an injected async ``approve(node_id, ...)`` (built in server.py
+# over ``technical_drawing_viewer.make_technical_drawing_approver``) -- the
+# dashboard's human-approval action for a technical_drawing work product,
+# mirroring ``_design_sketch_approver`` above. None until the server
+# lifespan wires it in.
+_technical_drawing_approver: Any = None
+
+
+def init_technical_drawing_approver(approver: Any) -> None:
+    """Wire in the technical-drawing approval callable (server lifespan)."""
+    global _technical_drawing_approver  # noqa: PLW0603
+    _technical_drawing_approver = approver
+
+
 router = APIRouter(prefix="/v1/twin", tags=["twin"])
 
 
@@ -184,6 +200,25 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         meshStats=(
             wp.metadata.get("mesh_stats")
             if isinstance(wp.metadata.get("mesh_stats"), dict)
+            else None
+        ),
+        # FORGE-293: a technical_drawing node's own structured dimensions/
+        # GD&T/surface-finish/inspection data and approval state, keyed by
+        # wp.type rather than a shape-sniff (unlike `assembly` above, there's
+        # no key-name collision risk here since no other WorkProductType
+        # writes these fields). None for every other node type.
+        technicalDrawing=(
+            {
+                "part_name": wp.metadata.get("part_name", ""),
+                "dimensions": wp.metadata.get("dimensions", []),
+                "gdt_callouts": wp.metadata.get("gdt_callouts", []),
+                "surface_finishes": wp.metadata.get("surface_finishes", []),
+                "inspection_requirements": wp.metadata.get("inspection_requirements", []),
+                "approved": bool(wp.metadata.get("approved")),
+                "approved_at": wp.metadata.get("approved_at"),
+                "approved_by": wp.metadata.get("approved_by"),
+            }
+            if wp.type == WorkProductType.TECHNICAL_DRAWING
             else None
         ),
     )
@@ -1067,6 +1102,36 @@ async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> Ap
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ApproveSketchResponse(
+        node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
+    )
+
+
+@router.post(
+    "/nodes/{node_id}/approve-technical-drawing", response_model=ApproveTechnicalDrawingResponse
+)
+async def approve_technical_drawing(
+    node_id: UUID, body: ApproveTechnicalDrawingRequest
+) -> ApproveTechnicalDrawingResponse:
+    """Human sign-off on a technical_drawing work product (FORGE-293, gap G-H1).
+
+    Mirrors ``approve_design_sketch`` above -- a real work product, a real
+    approval gate, not a dashboard-local checkbox.
+    """
+    if _technical_drawing_approver is None:
+        raise HTTPException(status_code=503, detail="technical-drawing approval is not configured")
+    wp = await _twin.get_work_product(node_id)
+    if wp is None:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found")
+    if wp.type != WorkProductType.TECHNICAL_DRAWING:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Node {node_id} is a {wp.type.value}, not a technical_drawing",
+        )
+    try:
+        result = await _technical_drawing_approver(str(node_id), approved_by=body.approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ApproveTechnicalDrawingResponse(
         node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
     )
 
