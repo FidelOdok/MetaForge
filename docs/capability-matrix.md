@@ -1076,6 +1076,12 @@ and reports what came back. It does not read the registration table.
   "status": "degraded",
   "adapter_count": 3,
   "tool_count": 100,
+  "profile": {
+    "active": "core",
+    "served_tool_count": 21,
+    "available": ["core", "electronics", "mechanical", "robotics", "simulation"],
+    "detail": "Profile 'core' serves 21 of 100 registered tools on this connection. The rest are not missing and nothing is down -- connect with a different profile to reach them."
+  },
   "unreachable_adapters": ["calculix", "freecad"],
   "detail": "2 of 3 adapters did not answer: calculix, freecad. Their tools are registered but calls to them will fail.",
   "adapters": [
@@ -1107,6 +1113,28 @@ The HTTP status stays **200** even when degraded. The MCP server is up and
 answering — it is telling you the truth about something else. A 503 here
 would have an orchestrator restart the gateway to cure a sick CAD
 container, which does not work and takes the working half down with it.
+
+### Why the tool list is shorter than `tool_count` (FORGE-420)
+
+`tool_count` is the **registered catalogue**; `profile.served_tool_count` is
+what *this connection* can call. With the `core` profile those are 100 and
+21, and nothing used to reconcile them -- so `/metaforge:doctor` reported
+"96 tools are not reaching the client" and named cadquery, freecad, calculix
+and kicad as missing. That was the profile working exactly as designed.
+
+Two causes make the list shorter and they need telling apart:
+
+| Cause | How to see it |
+|---|---|
+| A tool profile is active | `profile.active` is set, and `profile.detail` says so |
+| An adapter is down | it appears in `unreachable_adapters`, and `reachable: false` in `adapters` |
+
+`profile.active` is `null` when no profile is in force, rather than the key
+being absent: a reader that cannot tell "no profile" from "this build does
+not report one" has to guess, and guessing is what produced the original
+diagnosis. A per-connection `?profile=` naming something unknown is reported
+as `profile.error` rather than raising -- a health check that raises tells
+nobody anything.
 
 ### What is protecting this connection
 

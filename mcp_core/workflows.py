@@ -174,11 +174,22 @@ WORKFLOWS: dict[str, tuple[str, str]] = {
         "asked for and the one the server pinned.\n"
         "- `version`, the gateway version, against the version of the plugin "
         "package you are running from.\n\n"
-        "An adapter whose container is down contributes no tools and no "
-        "resources, and the list simply looks shorter. Name any that are "
-        "missing rather than describing what is left as if it were "
-        "everything -- `health.check`'s `adapters` array is the reliable "
-        "source for that, since you can read it without a shell.\n\n"
+        "- `profile`. **Check this before concluding anything is missing.** "
+        "If `profile.active` is set, your tool list is shorter by design: "
+        "`profile.served_tool_count` of `tool_count` registered tools are "
+        "served on this connection, and `profile.available` names the "
+        'others. Say "profile `core`: 21 tools; connect with a different '
+        'profile for CAD/FEA" -- not that tools are missing. FORGE-420: '
+        'this reported "96 tools are not reaching the client ... something '
+        'between the gateway and this client is cutting the list down" and '
+        "named cadquery, freecad, calculix and kicad as broken, when the "
+        "profile was working exactly as designed.\n\n"
+        "Only once the profile accounts for the difference: an adapter whose "
+        "container is down contributes no tools and no resources, and the "
+        "list simply looks shorter that way too. Name any that are missing "
+        "rather than describing what is left as if it were everything -- "
+        "`health.check`'s `adapters` array is the reliable source for that, "
+        "since you can read it without a shell.\n\n"
         "Finally, look for MetaForge registered **twice** -- a plugin plus a "
         "user-scope server entry. If any tool name appears more than once in "
         "your own tool list, say so: calls can land on whichever gateway "
