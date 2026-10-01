@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "metaforge": {
-      "url": "http://localhost:8765/mcp"
+      "url": "http://localhost:8765/mcp?profile=core"
     }
   }
 }

@@ -60,6 +60,16 @@ class McpCallContext(BaseModel):
         default_factory=uuid.uuid4,
         description="Per-request id for tying back to the harness's own trace.",
     )
+    profile: str | None = Field(
+        default=None,
+        description=(
+            "Tool profile this connection asked for (FORGE-410). The server-wide "
+            "``--profile`` is a deployment choice; this is a per-connection one, so "
+            "one sidecar can serve a 30-tool plugin and the dashboard's full set at "
+            "once. Set from the ``?profile=`` query parameter."
+        ),
+    )
+
     actor_verified: bool = Field(
         default=False,
         description=(

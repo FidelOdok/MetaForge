@@ -53,9 +53,10 @@ from mcp_core.guardrails import (
     resolve_approval,
     strip_reserved_arguments,
 )
-from mcp_core.profiles import tools_for_profile
+from mcp_core.profiles import PROFILES, UnknownProfileError, tools_for_profile
 from mcp_core.protocol import (
     AUTH_DENIED,
+    INVALID_PARAMS,
     INVALID_REQUEST,
     METHOD_NOT_FOUND,
     RESOURCE_NOT_FOUND,
@@ -429,6 +430,25 @@ class UnifiedMcpServer:
                         {"uri": getattr(exc, "uri", None), "retryable": False},
                     )
                 )
+            except UnknownProfileError as exc:
+                self._mark_failed(span, exc)
+                # FORGE-410: a per-connection profile comes off the URL, so a
+                # typo is a client mistake and has to come back as something
+                # the client can read. Letting it escape gives a dropped
+                # connection, and serving everything instead would hand a
+                # client that asked for 30 tools the 108 it was avoiding.
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        INVALID_PARAMS,
+                        str(exc),
+                        {
+                            "code": "unknown_profile",
+                            "available": sorted(PROFILES),
+                            "retryable": False,
+                        },
+                    )
+                )
             except (ApproverArgumentRejectedError, HumanAuthorityRequiredError) as exc:
                 self._mark_failed(span, exc)
                 # FORGE-393. Same reasoning as the approval errors below: the
@@ -616,7 +636,8 @@ class UnifiedMcpServer:
         """
         legacy = await self._tool_list(params)
         mutations_on = self._twin_mutations_enabled()
-        allowed = set(tools_for_profile(self._profile)) if self._profile else None
+        profile = self._requested_profile()
+        allowed = set(tools_for_profile(profile)) if profile else None
         mcp_tools: list[dict[str, Any]] = []
         for entry in legacy.get("tools", []):
             tool_id = entry.get("tool_id") or entry.get("name", "")
@@ -649,7 +670,7 @@ class UnifiedMcpServer:
         if allowed is not None:
             served = {t["name"] for t in mcp_tools}
             meta["profile"] = {
-                "name": self._profile,
+                "name": profile,
                 "toolCount": len(mcp_tools),
                 # A profile naming a tool no loaded adapter registers is a
                 # configuration mistake, not a smaller profile. Say so.
@@ -658,6 +679,31 @@ class UnifiedMcpServer:
         if meta:
             result["_meta"] = meta
         return result
+
+    def _requested_profile(self) -> str | None:
+        """Which profile to serve this call, per connection (FORGE-410).
+
+        The connection's own choice wins over the deployment's ``--profile``:
+        one sidecar then serves a 30-tool set to a plugin and everything to
+        the dashboard, instead of a single flag shrinking the list for every
+        consumer at once. That mattered because the deployment plugins connect
+        to runs with no ``--profile`` at all, so C1's cap never reached them --
+        and a harness with a hard tool limit silently truncates.
+
+        An unrecognised name raises rather than falling back to "serve
+        everything". A client that asked for a 30-tool set and got 108 has
+        been given the exact failure profiles exist to prevent.
+        """
+        try:
+            from mcp_core.context import current_context
+
+            requested = current_context().profile
+        except Exception:  # noqa: BLE001 — no context is not an error here
+            requested = None
+        chosen = requested or self._profile
+        if chosen:
+            tools_for_profile(chosen)  # raises UnknownProfileError
+        return chosen
 
     def _twin_mutations_enabled(self) -> bool:
         """Whether the twin adapter currently accepts mutating Cypher.

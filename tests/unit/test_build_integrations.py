@@ -37,14 +37,19 @@ class TestTheConnectionIsAsked_Not_Assumed:
         # A hardcoded URL would make the package a deployment decision and
         # force a rebuild to change it.
         server = plugin_manifest(default_gateway_url=DEFAULT_GATEWAY_URL)["mcpServers"]["metaforge"]
-        assert server["url"] == "${user_config.gateway_url}"
+        # The gateway is a substitution, never a literal -- that is the point
+        # of the test. FORGE-410 appended the profile, also a substitution, so
+        # this asserts both are placeholders rather than freezing the string.
+        assert "${user_config.gateway_url}" in server["url"]
+        assert "${user_config.tool_profile}" in server["url"]
+        assert "localhost" not in server["url"]
         assert "localhost" not in json.dumps(server)
 
     def test_the_default_can_point_anywhere(self) -> None:
         manifest = plugin_manifest(default_gateway_url="https://mcp.example.com/mcp")
         assert manifest["userConfig"]["gateway_url"]["default"] == "https://mcp.example.com/mcp"
         # ...and still not into the server config.
-        assert manifest["mcpServers"]["metaforge"]["url"] == "${user_config.gateway_url}"
+        assert manifest["mcpServers"]["metaforge"]["url"].startswith("${user_config.gateway_url}")
 
     def test_the_token_is_marked_sensitive(self) -> None:
         # Otherwise it lands in settings.json in the clear.
@@ -197,7 +202,10 @@ class TestLocalFirstPackage:
     def test_it_launches_a_process_rather_than_calling_a_url(self) -> None:
         servers = self._local()["mcpServers"]
         assert servers["metaforge"]["command"] == "metaforge-mcp"
-        assert servers["metaforge"]["args"] == ["--transport", "stdio"]
+        # FORGE-410: stdio has no URL to carry `?profile=`, so the cap is a
+        # flag. The transport is still what this test is about.
+        assert servers["metaforge"]["args"][:2] == ["--transport", "stdio"]
+        assert servers["metaforge"]["args"][-2:] == ["--profile", "core"]
         assert "url" not in servers["metaforge"]
 
     def test_the_launch_command_is_a_real_console_script(self) -> None:

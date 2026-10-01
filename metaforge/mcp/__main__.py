@@ -662,6 +662,14 @@ def build_http_app(
         if issued_session is not None:
             headers[HEADER_SESSION] = issued_session
         ctx = context_from_headers(headers)
+        # FORGE-410: `?profile=core` on the MCP URL. A plugin manifest can set
+        # it where it cannot pass a command-line flag, and one sidecar then
+        # serves a capped set to the plugin and everything to the dashboard --
+        # rather than a single `--profile` shrinking the tool list for every
+        # consumer at once.
+        requested_profile = request.query_params.get("profile")
+        if requested_profile:
+            ctx = ctx.model_copy(update={"profile": requested_profile.strip()})
         # FORGE-330: a verified token outranks whatever the client put in
         # X-MetaForge-Actor. The header is a convenience for unauthenticated
         # local use; it must never be able to overwrite an identity the

@@ -6,5 +6,5 @@
 # credential instead of as no credential.
 [[mcp_servers]]
 name = "metaforge"
-url  = "http://localhost:8765/mcp"
+url  = "http://localhost:8765/mcp?profile=core"
 # authorization = "Bearer ${METAFORGE_MCP_API_KEY}"

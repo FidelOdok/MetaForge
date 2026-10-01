@@ -59,6 +59,12 @@ _BASE: frozenset[str] = frozenset(
         "twin.record_evidence",
         "twin.constraint_violations",
         "knowledge.search",
+        # FORGE-410/409: the connection diagnostic. A profile that omits it
+        # takes `/metaforge:doctor` away from exactly the connection most
+        # likely to need it -- a capped one, on a harness that truncates. It
+        # is one read-only tool, so the tax it adds to all five is the
+        # smallest in this set.
+        "health.check",
     }
 )
 

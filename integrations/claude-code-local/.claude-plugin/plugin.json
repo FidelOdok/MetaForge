@@ -23,7 +23,9 @@
       "command": "metaforge-mcp",
       "args": [
         "--transport",
-        "stdio"
+        "stdio",
+        "--profile",
+        "core"
       ],
       "env": {
         "METAFORGE_OTEL_EXPORT": "false"

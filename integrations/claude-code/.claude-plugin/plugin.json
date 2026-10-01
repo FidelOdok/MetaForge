@@ -31,12 +31,18 @@
       "title": "API token",
       "description": "Only needed for a gateway that requires one. A local gateway started with no auth configured does not.",
       "sensitive": true
+    },
+    "tool_profile": {
+      "type": "string",
+      "title": "Tool profile",
+      "description": "Which tool set to load: core (project, twin reads, decisions), mechanical, simulation, electronics or robotics. Each is 25-30 tools. Leave as core unless you are working in one discipline; every profile includes health.check so /metaforge:doctor always works. Clear it to load everything, which some harnesses will truncate without saying so.",
+      "default": "core"
     }
   },
   "mcpServers": {
     "metaforge": {
       "type": "http",
-      "url": "${user_config.gateway_url}",
+      "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}",
       "headers": {
         "Authorization": "Bearer ${user_config.api_token}"
       }
