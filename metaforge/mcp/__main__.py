@@ -39,6 +39,7 @@ from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
+    Response,
     StreamingResponse,
 )
 
@@ -643,7 +644,11 @@ def build_http_app(
     async def mcp_post(
         request: Request,
         authorization: str | None = Header(default=None),
-    ) -> JSONResponse:
+        # FORGE-422: `Response`, not `JSONResponse` -- a 204 is returned as a
+        # bare Response (no body), and JSONResponse is a subclass, so this
+        # widens to cover both rather than the 204 being forced into a shape
+        # that must carry one.
+    ) -> Response:
         verified_actor = _check_auth(request, authorization)
         raw_body = await request.body()
         # MET-387: install per-request McpCallContext from headers so
@@ -691,15 +696,23 @@ def build_http_app(
             response = await server.handle_request(raw_body.decode("utf-8"))
         # JSON-RPC notifications produce no body — return 204 so the
         # client doesn't try to json-parse an empty string.
+        #
+        # FORGE-422: a bare Response, not JSONResponse(content=None). The
+        # latter serialises None to b"null" -- four bytes on a status that
+        # MUST carry none -- so uvicorn sets Content-Length 0 and then raises
+        # "Response content longer than Content-Length". The client still got
+        # its 204, so it looked fine from outside while the server logged an
+        # ASGI traceback on every connection: `notifications/initialized` is
+        # the first thing a spec-compliant client sends.
         if not response:
-            return JSONResponse(content=None, status_code=204)
+            return Response(status_code=204)
         out = JSONResponse(json.loads(response))
         if issued_session is not None:
             out.headers[MCP_SESSION_HEADER] = issued_session
         return out
 
     @app.delete("/mcp")
-    async def mcp_delete(request: Request) -> JSONResponse:
+    async def mcp_delete(request: Request) -> Response:  # FORGE-422: 204 has no body
         """Explicit session termination, per the Streamable HTTP spec.
 
         A client that is done SHOULD send DELETE with its ``Mcp-Session-Id``.
@@ -720,7 +733,9 @@ def build_http_app(
         except ValueError:
             return JSONResponse({"error": "Mcp-Session-Id is not a known session"}, status_code=404)
         logger.info("mcp_session_terminated", session_id=raw)
-        return JSONResponse(content=None, status_code=204)
+        # FORGE-422: same reason as the notification path above -- a 204
+        # must not carry a body.
+        return Response(status_code=204)
 
     if enable_sse:
 
