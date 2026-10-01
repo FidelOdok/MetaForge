@@ -45,9 +45,15 @@ from fastapi.responses import (
 
 from mcp_core.auth import AUTH_DENIED, AuthPosture, redact, verify_api_key
 from mcp_core.context import HEADER_SESSION
-from mcp_core.elicitation import ElicitAction, ElicitResult
+from mcp_core.elicitation import ElicitAction, ElicitResult, result_from_payload
 from mcp_core.guardrails import Caller
 from mcp_core.protocol import AUTH_DENIED as AUTH_DENIED_CODE
+from metaforge.mcp.http_elicitation import (
+    ElicitationHub,
+    HttpElicitor,
+    is_jsonrpc_response,
+    session_uuid,
+)
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
 from observability.metrics import collector_for
@@ -281,20 +287,11 @@ class StdioElicitor:
             logger.warning("mcp_elicitation_timeout", message_id=message_id)
             return ElicitResult(ElicitAction.CANCEL)
 
-        if "error" in payload:
-            # The client could not put the question. Not an answer, so it
-            # must not read as one.
-            logger.warning("mcp_elicitation_error", error=payload["error"])
-            return ElicitResult(ElicitAction.CANCEL)
-        result = payload.get("result") or {}
-        raw_action = result.get("action")
-        try:
-            action = ElicitAction(raw_action if isinstance(raw_action, str) else "")
-        except ValueError:
-            logger.warning("mcp_elicitation_bad_action", action=raw_action)
-            return ElicitResult(ElicitAction.CANCEL)
-        content = result.get("content")
-        return ElicitResult(action, content if isinstance(content, dict) else {})
+        # FORGE-423: shared with the HTTP elicitor. The three defaults here
+        # are the easy part to get wrong, and getting them wrong on one
+        # transport and not the other is worse than getting them wrong on
+        # both.
+        return result_from_payload(payload)
 
 
 def _is_response(raw: str) -> tuple[bool, str, dict[str, Any]]:
@@ -640,6 +637,49 @@ def build_http_app(
         body = json.loads(raw)
         return JSONResponse(body.get("result", body))
 
+    # FORGE-423: the server-to-client direction. Without it `can_elicit` is
+    # false for every HTTP client -- which is every plugin -- so FORGE-360's
+    # inline approvals existed only on stdio and every held write went to the
+    # dashboard queue.
+    hub = ElicitationHub()
+    server.attach_elicitor(HttpElicitor(hub))
+
+    @app.get("/mcp")
+    async def mcp_stream(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        """The long-lived SSE stream the server pushes requests down.
+
+        Distinct from ``GET /mcp/sse``, which is a request/response
+        convenience (queue work as ``?request=`` params, server closes with
+        ``event: done``). This one carries server-initiated messages and
+        stays open, which is what the Streamable HTTP spec means by the
+        server-to-client direction.
+
+        A stream with no session id is refused rather than opened on an
+        invented one: an approval pushed down a stream nobody can be
+        correlated with is a question asked into the void.
+        """
+        _check_auth(request, authorization)
+        session_id = request.headers.get(MCP_SESSION_HEADER)
+        if session_uuid(session_id) is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{MCP_SESSION_HEADER} is required to open the event stream, and "
+                    "must be the id this server issued at initialize. Without it an "
+                    "approval request cannot be routed back to the connection that "
+                    "asked for it."
+                ),
+            )
+        assert session_id is not None  # narrowed by session_uuid above
+        return StreamingResponse(
+            hub.stream(session_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/mcp")
     async def mcp_post(
         request: Request,
@@ -692,8 +732,34 @@ def build_http_app(
             # switches on.
             proven = bool(oauth and oauth.config.verified_identity)
             ctx = ctx.model_copy(update={"actor_id": verified_actor, "actor_verified": proven})
+        # FORGE-423: the client answering something *we* asked. Routed by id
+        # rather than dispatched -- sending our own answer to handle_request
+        # comes back as "Unknown method: None", the same misroute the stdio
+        # loop had to learn to avoid.
+        try:
+            inbound = json.loads(raw_body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            inbound = None
+        if is_jsonrpc_response(inbound) and hub.resolve(inbound):
+            # Accepted, and there is nothing to say back.
+            return Response(status_code=202)
+
         with with_context(ctx):
             response = await server.handle_request(raw_body.decode("utf-8"))
+        # FORGE-423: record what this session declared, from its own
+        # handshake. The server's copy is whichever client initialised last,
+        # and routing an approval on that would ask the wrong person.
+        if issued_session is not None and _is_initialize(raw_body):
+            negotiated = ""
+            try:
+                negotiated = str(json.loads(response)["result"]["protocolVersion"])
+            except (ValueError, KeyError, TypeError):
+                pass
+            hub.note_initialize(
+                issued_session,
+                capabilities=(inbound or {}).get("params", {}).get("capabilities"),
+                negotiated_protocol=negotiated,
+            )
         # JSON-RPC notifications produce no body — return 204 so the
         # client doesn't try to json-parse an empty string.
         #

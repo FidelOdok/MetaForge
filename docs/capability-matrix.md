@@ -1034,6 +1034,41 @@ after the user had already answered would put the same question to a
 second person and discard the first answer. Clients that cannot elicit
 use the queue exactly as before.
 
+### Over HTTP (FORGE-423)
+
+Until FORGE-423 an elicitor was attached only on the stdio path, so
+`can_elicit` was false for every HTTP client whatever it declared — and
+every plugin connects over HTTP, so inline approvals existed for a
+transport almost nobody uses. The channel is now:
+
+| | |
+|---|---|
+| `GET /mcp` | a long-lived SSE stream the server pushes `elicitation/create` down. Requires `Mcp-Session-Id` — a stream that cannot be correlated is a question asked into the void, so it is refused with 400 rather than opened on an invented session. |
+| `POST /mcp` with a JSON-RPC *response* | the client's answer, routed by id and acknowledged with 202. An id nothing is waiting for falls through to ordinary dispatch rather than being dropped. |
+
+`GET /mcp/sse` is unchanged and unrelated: it is a request/response
+convenience where the caller queues work as `?request=` params and the
+server closes with `event: done`.
+
+**Eligibility is per connection, not per server.** One sidecar serves many
+clients from one server instance, so `can_elicit` consults the elicitor
+rather than the server's own `_client_capabilities` — which are whichever
+client initialised last. A session is eligible only when its stream is
+open, *its* handshake declared `elicitation`, and *its* negotiated revision
+is `2025-06-18` or later. A connection that fails any of those falls back
+to the dashboard queue; choosing elicitation and then having nowhere to ask
+would hang the write to its timeout instead of parking it where somebody
+can see it.
+
+**Inline approval cannot satisfy a human-authority tool.** `twin.attempt_promotion`,
+`twin.approve_design_loop` and `twin.approve_engineering_change` record who
+decided (FORGE-393), and an elicitation answer carries no identity — the
+client can report that a user clicked yes, not which user. Those calls are
+still *asked* inline, and then refused with "the approval was granted but
+the gate did not identify who granted it" rather than recorded against an
+authority that does not exist. They go through the dashboard, where the
+approver is the authenticated principal who clicked.
+
 Arguments are summarised into the prompt, redacted on any field whose
 name looks like a credential and clipped to keep the dialog readable. The
 spec is explicit that a server must not *request* sensitive information

@@ -34,7 +34,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
+import structlog
+
 from mcp_core.guardrails import ApprovalAsk, ApprovalGateFn, ApprovalOutcome
+
+logger = structlog.get_logger(__name__)
 
 __all__ = [
     "ELICITATION_PROTOCOL_VERSION",
@@ -44,6 +48,7 @@ __all__ = [
     "ElicitationUnavailableError",
     "approval_request",
     "elicitation_gate",
+    "result_from_payload",
 ]
 
 #: The protocol revision that introduced ``elicitation/create``. A client
@@ -164,6 +169,37 @@ def approval_request(ask: ApprovalAsk) -> tuple[str, dict[str, Any]]:
         "required": ["approve"],
     }
     return message, schema
+
+
+def result_from_payload(payload: dict[str, Any]) -> ElicitResult:
+    """Map one JSON-RPC response to ``elicitation/create`` onto a result.
+
+    Transport-agnostic, and shared (FORGE-423) because the three defaults
+    below are the easy part to get wrong and getting them wrong in one
+    transport and not the other is worse than getting them wrong in both:
+
+    * an ``error`` response means the client could not put the question.
+      Not an answer, so it must not read as one.
+    * an ``action`` the spec does not define is a client that did not honour
+      the contract. Also not an answer.
+    * both resolve to ``cancel``, which the gate maps to ``TIMED_OUT`` --
+      "nobody looked", rather than "a reviewer said no".
+
+    Every unknown resolves toward *not* having an answer, because the
+    failure mode in the other direction is an unreviewed write.
+    """
+    if "error" in payload:
+        logger.warning("elicitation_client_error", error=payload["error"])
+        return ElicitResult(ElicitAction.CANCEL)
+    result = payload.get("result") or {}
+    raw_action = result.get("action")
+    try:
+        action = ElicitAction(raw_action if isinstance(raw_action, str) else "")
+    except ValueError:
+        logger.warning("elicitation_bad_action", action=raw_action)
+        return ElicitResult(ElicitAction.CANCEL)
+    content = result.get("content")
+    return ElicitResult(action, content if isinstance(content, dict) else {})
 
 
 def elicitation_gate(elicitor: Elicitor) -> ApprovalGateFn:

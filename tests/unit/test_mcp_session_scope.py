@@ -176,6 +176,14 @@ def _app():
         def declare_caller(self, caller) -> None:
             pass
 
+        # FORGE-423: and the elicitor it attaches. `build_http_app` calls
+        # this unconditionally rather than guarding with getattr, because a
+        # server that cannot accept one would silently lose inline approvals
+        # -- which is the bug FORGE-423 fixed, and not one to reintroduce as
+        # a kindness to a test double.
+        def attach_elicitor(self, elicitor) -> None:
+            pass
+
         async def handle_request(self, raw: str) -> str:
             message = json.loads(raw)
             return json.dumps({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})

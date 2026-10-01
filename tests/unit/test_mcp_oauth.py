@@ -309,6 +309,13 @@ def client():
         def declare_caller(self, caller) -> None:
             self.caller = caller
 
+        # FORGE-423: build_http_app attaches an elicitor so an HTTP client
+        # can be asked to approve a held write. Called unconditionally
+        # rather than guarded, because a server that cannot take one loses
+        # inline approvals silently -- which was the bug.
+        def attach_elicitor(self, elicitor) -> None:
+            self.elicitor = elicitor
+
         async def handle_request(self, raw: str) -> str:
             return '{"jsonrpc":"2.0","id":"health","result":{"status":"ok"}}'
 
@@ -333,6 +340,13 @@ def test_http_app_declares_oauth_posture() -> None:
 
         def declare_caller(self, caller) -> None:
             self.caller = caller
+
+        # FORGE-423: build_http_app attaches an elicitor so an HTTP client
+        # can be asked to approve a held write. Called unconditionally
+        # rather than guarded, because a server that cannot take one loses
+        # inline approvals silently -- which was the bug.
+        def attach_elicitor(self, elicitor) -> None:
+            self.elicitor = elicitor
 
         async def handle_request(self, raw: str) -> str:
             return "{}"

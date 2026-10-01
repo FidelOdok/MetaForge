@@ -397,9 +397,24 @@ class UnifiedMcpServer:
         ``elicitation/create`` exists. A client that declares the capability
         while negotiating an older revision is not listening for it.
         """
+        if self._elicitor is None:
+            return False
+        # FORGE-423: an elicitor may serve many connections from one server
+        # -- the HTTP one does -- so "is there an elicitor" is not the same
+        # question as "can *this* connection be asked". When it can answer
+        # per connection, its answer wins: it knows whether a stream is open
+        # and what that session's own handshake declared, where the fields
+        # below are whichever client initialised last.
+        #
+        # Without this the gate would choose elicitation for an HTTP client
+        # with no stream and then have nowhere to ask, which is worse than
+        # never choosing it: a write would hang to its timeout and come back
+        # TIMED_OUT instead of waiting in a queue somebody can see.
+        available = getattr(self._elicitor, "available", None)
+        if callable(available):
+            return bool(available())
         return (
-            self._elicitor is not None
-            and "elicitation" in self._client_capabilities
+            "elicitation" in self._client_capabilities
             and self._negotiated_protocol >= ELICITATION_PROTOCOL_VERSION
         )
 
