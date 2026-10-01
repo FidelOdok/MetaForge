@@ -170,6 +170,31 @@ describe('StructureView', () => {
     expect(screen.getByTestId('run-bringup-checklist')).not.toBeDisabled();
   });
 
+  it('shows a Firmware scaffold button only for a node with real geometry', () => {
+    mockUseHierarchyTree.mockReturnValue({
+      data: [
+        node({ id: 'n1', name: 'realized', realizedByWorkProductId: 'wp-1' }),
+        node({ id: 'n2', name: 'placeholder' }),
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchyTree>);
+    render(<StructureView projectId="p1" onSelect={() => {}} />);
+    expect(screen.getByTestId('firmware-scaffold-button-n1')).toBeInTheDocument();
+    expect(screen.queryByTestId('firmware-scaffold-button-n2')).not.toBeInTheDocument();
+  });
+
+  it('opens the firmware scaffold panel with an enabled generate button', () => {
+    mockUseHierarchyTree.mockReturnValue({
+      data: [node({ id: 'n1', name: 'upper_arm', realizedByWorkProductId: 'wp-1' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useHierarchyTree>);
+    render(<StructureView projectId="p1" onSelect={() => {}} />);
+
+    fireEvent.click(screen.getByTestId('firmware-scaffold-button-n1'));
+    expect(screen.getByTestId('firmware-scaffold-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('run-firmware-scaffold')).not.toBeDisabled();
+  });
+
   it('shows the allocation owner as a title on the mass cell', () => {
     mockUseHierarchyTree.mockReturnValue({
       data: [

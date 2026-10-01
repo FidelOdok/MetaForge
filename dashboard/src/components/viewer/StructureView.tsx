@@ -7,6 +7,7 @@ import { useBom } from '../../hooks/use-bom';
 import { useOverhangCheck } from '../../hooks/use-dfm';
 import { useManufactureRelease } from '../../hooks/use-manufacture';
 import { useBringupChecklists, useCreateBringupChecklist } from '../../hooks/use-bringup';
+import { useCreateFirmwareScaffold } from '../../hooks/use-firmware';
 import type { ManufactureProcess } from '../../api/endpoints/manufacture';
 import { iconForHierarchyKind } from '../../utils/wp-icons';
 import { DecisionList } from '../shared/DecisionList';
@@ -550,6 +551,88 @@ function BringupChecklistPanel({
   );
 }
 
+/** FORGE-276 (gap G-E3): "Firmware work product with joint table linked to
+ * the robot description" -- derives a per-joint CAN node table + a minimal
+ * C header scaffold from a hierarchy node's real committed
+ * metadata.assembly.joints, reusing the same topological build order the
+ * bring-up checklist panel above already derives. Renders a plain table,
+ * not the ticket's generated firmware source itself -- the header is a
+ * loadable work product, not something rendered inline here. */
+function FirmwareScaffoldPanel({
+  node,
+  projectId,
+  onClose,
+}: {
+  node: HierarchyNode;
+  projectId: string | null;
+  onClose: () => void;
+}) {
+  const workProductId = node.realizedByWorkProductId ?? undefined;
+  const create = useCreateFirmwareScaffold(workProductId, projectId ?? undefined);
+
+  return (
+    <div
+      data-testid="firmware-scaffold-panel"
+      className="mt-2 rounded-lg p-3"
+      style={{ background: 'var(--mf-r-30-31-38-0p85)', border: '1px solid var(--mf-r-65-72-90-0p2)' }}
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-on-surface">Firmware scaffold: {node.name}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-on-surface-variant hover:text-on-surface"
+        >
+          Close
+        </button>
+      </div>
+
+      <Button
+        size="sm"
+        data-testid="run-firmware-scaffold"
+        disabled={!workProductId || create.isPending}
+        onClick={() => create.mutate()}
+      >
+        {create.isPending ? 'Generating…' : 'Generate scaffold'}
+      </Button>
+
+      {create.isError && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--mf-c-ff-b4-ab)' }}>
+          Could not generate a scaffold -- the assembly's joint graph may be cyclic, or it may have
+          no assembly.joints metadata yet.
+        </p>
+      )}
+
+      {create.data && (
+        <div className="mt-3" data-testid="firmware-scaffold-joints">
+          <table className="w-full text-xs text-on-surface">
+            <thead>
+              <tr className="text-on-surface-variant">
+                <th className="text-left font-normal">Joint</th>
+                <th className="text-left font-normal">Type</th>
+                <th className="text-left font-normal">CAN ID</th>
+                <th className="text-left font-normal">Limits</th>
+              </tr>
+            </thead>
+            <tbody>
+              {create.data.joints.map((j) => (
+                <tr key={j.jointName}>
+                  <td>{j.jointName}</td>
+                  <td>{j.jointType}</td>
+                  <td>{j.canId}</td>
+                  <td>
+                    {j.limits ? `${j.limits.lower ?? '—'} .. ${j.limits.upper ?? '—'}` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TreeRow({
   node,
   depth,
@@ -565,6 +648,8 @@ function TreeRow({
   onToggleRelease,
   bringupCheckingId,
   onToggleBringupCheck,
+  firmwareScaffoldingId,
+  onToggleFirmwareScaffold,
 }: {
   node: TreeNode;
   depth: number;
@@ -580,6 +665,8 @@ function TreeRow({
   onToggleRelease: (id: string) => void;
   bringupCheckingId: string | null;
   onToggleBringupCheck: (id: string) => void;
+  firmwareScaffoldingId: string | null;
+  onToggleFirmwareScaffold: (id: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isCollapsed = collapsed.has(node.id);
@@ -589,6 +676,7 @@ function TreeRow({
   const isDfmChecking = dfmCheckingId === node.id;
   const isReleasing = releasingId === node.id;
   const isBringupChecking = bringupCheckingId === node.id;
+  const isFirmwareScaffolding = firmwareScaffoldingId === node.id;
 
   return (
     <>
@@ -687,6 +775,17 @@ function TreeRow({
             Bring-up checklist
           </button>
         )}
+        {node.realizedByWorkProductId && (
+          <button
+            type="button"
+            data-testid={`firmware-scaffold-button-${node.id}`}
+            onClick={() => onToggleFirmwareScaffold(node.id)}
+            className="rounded px-2 py-0.5 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
+            style={{ background: 'var(--mf-c-282a30)', border: '1px solid var(--mf-r-65-72-90-0p3)' }}
+          >
+            Firmware scaffold
+          </button>
+        )}
       </div>
       {isRealizing && (
         <div style={{ paddingLeft: depth * 20 + 28 }}>
@@ -712,6 +811,15 @@ function TreeRow({
           />
         </div>
       )}
+      {isFirmwareScaffolding && (
+        <div style={{ paddingLeft: depth * 20 + 28 }}>
+          <FirmwareScaffoldPanel
+            node={node}
+            projectId={projectId}
+            onClose={() => onToggleFirmwareScaffold(node.id)}
+          />
+        </div>
+      )}
       {hasChildren && !isCollapsed && (
         <div>
           {node.children.map((child) => (
@@ -731,6 +839,8 @@ function TreeRow({
               onToggleRelease={onToggleRelease}
               bringupCheckingId={bringupCheckingId}
               onToggleBringupCheck={onToggleBringupCheck}
+              firmwareScaffoldingId={firmwareScaffoldingId}
+              onToggleFirmwareScaffold={onToggleFirmwareScaffold}
             />
           ))}
         </div>
@@ -766,6 +876,9 @@ export function StructureView({
   // FORGE-295 (gap G-H3): which node's "Bring-up checklist" panel is open,
   // at most one at a time (independent of the others above).
   const [bringupCheckingId, setBringupCheckingId] = useState<string | null>(null);
+  // FORGE-276 (gap G-E3): which node's "Firmware scaffold" panel is open,
+  // at most one at a time (independent of the others above).
+  const [firmwareScaffoldingId, setFirmwareScaffoldingId] = useState<string | null>(null);
 
   const forest = useMemo(() => buildForest(nodes ?? []), [nodes]);
 
@@ -837,6 +950,10 @@ export function StructureView({
               onToggleRelease={(id) => setReleasingId((cur) => (cur === id ? null : id))}
               bringupCheckingId={bringupCheckingId}
               onToggleBringupCheck={(id) => setBringupCheckingId((cur) => (cur === id ? null : id))}
+              firmwareScaffoldingId={firmwareScaffoldingId}
+              onToggleFirmwareScaffold={(id) =>
+                setFirmwareScaffoldingId((cur) => (cur === id ? null : id))
+              }
             />
           ))}
         </div>

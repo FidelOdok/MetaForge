@@ -99,6 +99,16 @@ interface SampleBringupChecklist {
   steps: SampleBringupStep[];
 }
 
+// FORGE-276 (gap G-E3): illustrative shape of one generated firmware
+// scaffold's per-joint table, mirroring api_gateway/firmware/routes.py's
+// own snake_case response.
+interface SampleFirmwareJoint {
+  joint_name: string;
+  joint_type: string;
+  can_id: number;
+  limits: { lower?: number; upper?: number } | null;
+}
+
 interface SampleMaturityGate {
   gateId: string;
   level: string;
@@ -2109,6 +2119,65 @@ function route(
       };
       s.bringupChecklists.push(created);
       return { node_id: created.node_id, statement: created.statement, steps: created.steps };
+    }
+    if (path === '/firmware/scaffold') {
+      // FORGE-276: the SAME real topological-sort math /bringup above
+      // uses (deterministic CAN IDs = build-order index), over the same
+      // illustrative two-joint chain, now carrying real-shaped limits so
+      // the mocked header/pinmap content is genuinely derived rather
+      // than canned.
+      type Joint = {
+        name: string;
+        type: string;
+        base: string;
+        follower: string;
+        limits: { lower: number; upper: number };
+      };
+      const joints: Joint[] = [
+        {
+          name: 'joint_2',
+          type: 'revolute',
+          base: 'upper_arm_link',
+          follower: 'elbow_actuator',
+          limits: { lower: -1.0, upper: 1.0 },
+        },
+        {
+          name: 'joint_1',
+          type: 'revolute',
+          base: 'shoulder_mount',
+          follower: 'upper_arm_link',
+          limits: { lower: -1.57, upper: 1.57 },
+        },
+      ];
+      const bases = new Set(joints.map((j) => j.base));
+      const followers = new Set(joints.map((j) => j.follower));
+      const placed = new Set([...bases].filter((b) => !followers.has(b)));
+      const remaining = [...joints];
+      const ordered: (Joint & { can_id: number })[] = [];
+      let canId = 1;
+      while (remaining.length > 0) {
+        const buildable = remaining
+          .filter((j) => placed.has(j.base))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (buildable.length === 0) break; // cyclic -- won't happen for this illustrative chain
+        for (const j of buildable) {
+          ordered.push({ ...j, can_id: canId });
+          placed.add(j.follower);
+          canId += 1;
+          remaining.splice(remaining.indexOf(j), 1);
+        }
+      }
+      const resultJoints: SampleFirmwareJoint[] = ordered.map((j) => ({
+        joint_name: j.name,
+        joint_type: j.type,
+        can_id: j.can_id,
+        limits: j.limits,
+      }));
+      return {
+        pinmap_node_id: `sample-firmware-pinmap-${Date.now()}`,
+        firmware_source_node_id: `sample-firmware-source-${Date.now()}`,
+        joints: resultJoints,
+      };
     }
   }
   if (method === 'patch') {

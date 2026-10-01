@@ -291,6 +291,37 @@ test.describe('Digital Twin Viewer', () => {
     );
   });
 
+  test('Structure tab: Firmware scaffold (FORGE-276)', async ({ page }) => {
+    await page.goto('/twin?demo=1');
+    // The agent chat panel is open by default and overlaps the tree.
+    await page.getByRole('button', { name: 'Agent' }).click();
+    await page.getByRole('button', { name: 'Structure', exact: true }).click();
+
+    const upperArmRow = page.locator('.tw-structure-row', { hasText: 'upper_arm' });
+    await expect(upperArmRow).toBeVisible();
+    await expect(upperArmRow.getByTestId(/^firmware-scaffold-button-/)).toBeVisible();
+
+    await upperArmRow.getByTestId(/^firmware-scaffold-button-/).click();
+    const panel = page.getByTestId('firmware-scaffold-panel');
+    await expect(panel).toBeVisible();
+
+    await panel.getByTestId('run-firmware-scaffold').click();
+
+    const joints = panel.getByTestId('firmware-scaffold-joints');
+    await expect(joints).toBeVisible({ timeout: 10_000 });
+    // The demo's two joints are provided in reverse dependency order, so
+    // this proves the same real topological sort the bring-up checklist
+    // test above proves ran here too -- joint_1 (shoulder_mount ->
+    // upper_arm_link) must get CAN ID 1, before joint_2 (upper_arm_link
+    // -> elbow_actuator) gets CAN ID 2.
+    const rows = joints.locator('tbody tr');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText('joint_1');
+    await expect(rows.nth(0)).toContainText('1');
+    await expect(rows.nth(1)).toContainText('joint_2');
+    await expect(rows.nth(1)).toContainText('2');
+  });
+
   test('Assembly tab: joints are editable and persist', async ({ page }) => {
     await page.goto('/twin?demo=1');
     // The agent chat panel is open by default and overlaps the graph canvas.

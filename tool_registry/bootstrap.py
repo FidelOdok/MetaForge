@@ -295,6 +295,7 @@ async def bootstrap_tool_registry(
     baseline_creator: Any = None,
     test_plan_generator: Any = None,
     bringup_checklist_creator: Any = None,
+    firmware_scaffold_creator: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -713,6 +714,7 @@ async def bootstrap_tool_registry(
                     baseline_creator=baseline_creator,
                     test_plan_generator=test_plan_generator,
                     bringup_checklist_creator=bringup_checklist_creator,
+                    firmware_scaffold_creator=firmware_scaffold_creator,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")
