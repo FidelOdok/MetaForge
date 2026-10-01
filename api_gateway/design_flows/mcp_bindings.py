@@ -71,11 +71,23 @@ def make_proposer() -> Any:
     """``flow.propose`` — tailor a template and hold it for a human."""
 
     async def propose(
-        *, intent: str, project_id: str | None, requirements: list[str]
+        *,
+        intent: str,
+        project_id: str | None,
+        requirements: list[str],
+        manufacturing_context: dict[str, Any] | None = None,
+        target_maturity: str | None = None,
+        loads_and_use: str | None = None,
+        budget: str | None = None,
     ) -> dict[str, Any]:
-        from fastapi import HTTPException
+        from fastapi import HTTPException, Response
+        from pydantic import ValidationError
 
-        from api_gateway.design_flows.routes import ProposeFlowRequest, propose_flow
+        from api_gateway.design_flows.routes import (
+            FlowNeedsInputView,
+            ProposeFlowRequest,
+            propose_flow,
+        )
 
         class _NoPrincipal:
             """`propose_flow` takes a Request only to resolve an approver.
@@ -88,28 +100,65 @@ def make_proposer() -> Any:
             state = type("S", (), {})()
 
         try:
+            body = ProposeFlowRequest.model_validate(
+                {
+                    "intent": intent,
+                    "projectId": project_id,
+                    "requirements": requirements,
+                    "manufacturing_context": manufacturing_context,
+                    "target_maturity": target_maturity,
+                    "loads_and_use": loads_and_use,
+                    "budget": budget,
+                }
+            )
+        except ValidationError as exc:
+            # An unknown route or maturity value: say which, in plain words.
+            raise RuntimeError(f"flow.propose: invalid input: {exc}") from exc
+
+        try:
             view = await propose_flow(
-                ProposeFlowRequest(intent=intent, projectId=project_id, requirements=requirements),
+                body,
                 _NoPrincipal(),  # type: ignore[arg-type]
+                Response(),
             )
         except HTTPException as exc:
             # Surfaced as a tool error with the gateway's own words rather
             # than a bare failure; the detail already says what to do.
             raise RuntimeError(str(exc.detail)) from exc
 
+        if isinstance(view, FlowNeedsInputView):
+            return {
+                "status": "needs_input",
+                "questions": [q.model_dump() for q in view.questions],
+                "notes": view.notes,
+                # Nothing to approve, so nothing to wait for: the agent's job
+                # is to ask, not to fill the answers in itself.
+                "next_step": (
+                    "No flow was proposed and nothing is held. Ask the user these "
+                    "questions -- do not answer them yourself or guess -- then call "
+                    "flow.propose again with the answers in manufacturing_context, "
+                    "target_maturity and loads_and_use."
+                ),
+            }
+
         return {
+            "status": "proposed",
             "version_id": view.versionId,
             "approval_id": view.approvalId,
             "base_template_id": view.baseTemplateId,
             "base_version": view.baseVersion,
             "startable": view.valid,
             "violations": view.violations,
+            "requirements_pending": view.requirementsPending,
+            "assumptions": view.assumptions,
+            "open_questions": [q.model_dump() for q in view.openQuestions],
             "changes": [
                 {
                     "op": c.op,
                     "phase": c.phase,
                     "value": c.value,
                     "rationale": c.rationale,
+                    "basis": c.basis,
                 }
                 for c in view.changes
             ],

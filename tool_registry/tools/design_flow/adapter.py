@@ -104,7 +104,13 @@ class DesignFlowServer(McpToolServer):
                     "supports elicitation), and only then can a run start.\n\n"
                     "You cannot approve your own proposal and there is no tool that "
                     "would let you. Report the proposal and the approval id to the "
-                    "user and stop; do not poll for an approval you were not given."
+                    "user and stop; do not poll for an approval you were not given.\n\n"
+                    "If manufacturing_context.route, target_maturity or loads_and_use "
+                    "is missing, nothing is proposed: the result has status "
+                    "'needs_input' and a list of questions. Ask the USER those "
+                    "questions -- never answer them yourself -- and call again with "
+                    "the answers. 'undecided' (route) and 'unknown' (loads) are "
+                    "valid answers."
                 ),
                 capability="design_flow_write",
                 input_schema={
@@ -120,6 +126,47 @@ class DesignFlowServer(McpToolServer):
                             "items": {"type": "string"},
                             "description": "Known requirements, if any are recorded yet.",
                         },
+                        "manufacturing_context": {
+                            "type": "object",
+                            "description": "What the product can actually be made with.",
+                            "properties": {
+                                "route": {
+                                    "type": "string",
+                                    "enum": ["in_house", "vendor", "undecided"],
+                                },
+                                "processes": {"type": "array", "items": {"type": "string"}},
+                                "machines": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Free-form capability descriptions, e.g. "
+                                        "'table saw, 600 mm rip capacity'."
+                                    ),
+                                },
+                                "stock_materials": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "production_quantity": {"type": "integer", "minimum": 1},
+                            },
+                        },
+                        "target_maturity": {
+                            "type": "string",
+                            "enum": [
+                                "concept",
+                                "sim_validated",
+                                "physically_validated",
+                                "released",
+                            ],
+                        },
+                        "loads_and_use": {
+                            "type": "string",
+                            "description": (
+                                "What it carries or endures and how it is used. "
+                                "'unknown' is allowed and keeps verification in the flow."
+                            ),
+                        },
+                        "budget": {"type": "string"},
                     },
                     "required": ["intent"],
                 },
@@ -191,9 +238,15 @@ class DesignFlowServer(McpToolServer):
                 intent=intent,
                 project_id=arguments.get("project_id"),
                 requirements=list(arguments.get("requirements") or []),
+                manufacturing_context=arguments.get("manufacturing_context"),
+                target_maturity=arguments.get("target_maturity"),
+                loads_and_use=arguments.get("loads_and_use"),
+                budget=arguments.get("budget"),
             )
+            span.set_attribute("flow.status", str(result.get("status", "proposed")))
         logger.info(
             "flow_proposed_over_mcp",
+            status=result.get("status", "proposed"),
             approval_id=result.get("approval_id"),
             version_id=result.get("version_id"),
         )

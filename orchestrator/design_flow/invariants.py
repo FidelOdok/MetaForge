@@ -20,13 +20,18 @@ declares no required deliverables" tells them what to change.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
+
+if TYPE_CHECKING:
+    from orchestrator.design_flow.context import FlowContext
 
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "ALTERNATIVE_VERIFICATION_ARTIFACT",
+    "PHYSICAL_EVIDENCE_ARTIFACTS",
     "RELEASE_GATE_MARKERS",
     "FlowInvariantError",
     "Violation",
@@ -38,6 +43,14 @@ __all__ = [
 #: flows that exist name it in prose and adding a flag would mean editing
 #: every template to satisfy a rule about the templates.
 RELEASE_GATE_MARKERS: tuple[str, ...] = ("release", "sign-off", "signoff", "acceptance")
+
+#: Artifacts that are evidence a physical design meets its structural or
+#: physical requirements -- what a simulation / V&V phase produces.
+PHYSICAL_EVIDENCE_ARTIFACTS: tuple[str, ...] = ("simulation_result", "verification_report")
+
+#: The artifact that stands in for that evidence when the phase producing it
+#: is dropped: a test plan, required at a gate so it cannot be skipped.
+ALTERNATIVE_VERIFICATION_ARTIFACT = "test_plan"
 
 
 @dataclass(frozen=True)
@@ -205,9 +218,14 @@ def _rule_requirements_are_verifiable(phases: list[Any]) -> list[Violation]:
     produces a twin full of claims nothing checks — which reads, on every
     dashboard, exactly like a product that passed.
     """
+    # A phase *called* requirements counts, whatever it records them as.
+    # mech_v1 records its requirements as a design_decision, so keying only on
+    # constraint_set/prd let a mech flow drop its V&V and pass this rule
+    # vacuously (FORGE-463).
     produces_requirements = any(
         "constraint_set" in (getattr(p, "expected_artifacts", ()) or ())
         or "prd" in (getattr(p, "expected_artifacts", ()) or ())
+        or getattr(p, "id", "") == "requirements"
         for p in phases
     )
     if not produces_requirements:
@@ -228,6 +246,64 @@ def _rule_requirements_are_verifiable(phases: list[Any]) -> list[Violation]:
     ]
 
 
+def _rule_physical_verification_kept(
+    phases: list[Any], context: FlowContext | None
+) -> list[Violation]:
+    """A physical design keeps its evidence, or names what replaces it.
+
+    The FORGE-463 rule. A flow that authors geometry but has no phase
+    producing a simulation_result or verification_report has dropped the only
+    thing that would show the part carries its load. That is allowed only
+    with a recorded alternative -- a ``test_plan`` *required* at a gate, so it
+    cannot quietly not happen -- and never while the loads are unknown: a
+    test plan with no load case to test against verifies nothing, and "load
+    testing will suffice" is a guess, not a plan.
+
+    ``context`` is ``None`` when the caller was not told anything about the
+    project (an edited flow, a stored version re-checked at run start). The
+    alternative-verification half still applies then; the loads half applies
+    whenever the generator was told the loads, or told they are unknown.
+    """
+    designs_physical = any(
+        "cad_model" in (getattr(p, "expected_artifacts", ()) or ()) for p in phases
+    )
+    if not designs_physical:
+        return []
+    has_evidence = any(
+        artifact in (getattr(p, "expected_artifacts", ()) or ())
+        for p in phases
+        for artifact in PHYSICAL_EVIDENCE_ARTIFACTS
+    )
+    if has_evidence:
+        return []
+    if context is not None and not context.loads_known:
+        return [
+            Violation(
+                "physical-verification-kept",
+                "the flow designs a physical part but no phase produces a "
+                "simulation_result or verification_report, and the loads are unknown -- "
+                "the simulation/V&V phase cannot be dropped until the loads and use are "
+                "stated, because nothing else would show the part carries them",
+            )
+        ]
+    alternative = any(
+        ALTERNATIVE_VERIFICATION_ARTIFACT in (getattr(p, "required_deliverables", ()) or ())
+        and getattr(p, "gate", None) is not None
+        for p in phases
+    )
+    if alternative:
+        return []
+    return [
+        Violation(
+            "physical-verification-kept",
+            "the flow designs a physical part but no phase produces a simulation_result "
+            "or verification_report, and no gated phase requires a test_plan in its "
+            "place -- keep the simulation/V&V phase or require a test_plan as the "
+            "recorded alternative verification",
+        )
+    ]
+
+
 _RULES = (
     _rule_has_phases,
     _rule_unique_phase_ids,
@@ -239,18 +315,27 @@ _RULES = (
 )
 
 
-def validate_flow(definition: Any) -> ValidationResult:
+#: Rules that read what the generator was told about the project.
+_CONTEXT_RULES = (_rule_physical_verification_kept,)
+
+
+def validate_flow(definition: Any, *, context: FlowContext | None = None) -> ValidationResult:
     """Check a flow against every invariant. Reports all of them, not the first.
 
     Returning the full list matters: a model fixing one violation at a time
     needs three round trips to learn what a single response could have told
     it, and a person editing on the canvas wants the whole list under the
     save button.
+
+    ``context`` is what the generator was told about the project (FORGE-463);
+    rules that depend on it, such as whether the loads are known, read it.
     """
     phases = list(getattr(definition, "phases", ()) or ())
     violations: list[Violation] = []
     for rule in _RULES:
         violations.extend(rule(phases))
+    for context_rule in _CONTEXT_RULES:
+        violations.extend(context_rule(phases, context))
     result = ValidationResult(violations=violations)
     if not result.ok:
         logger.info(

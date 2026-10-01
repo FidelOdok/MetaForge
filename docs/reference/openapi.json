@@ -2893,6 +2893,11 @@
       },
       "FlowChangeView": {
         "properties": {
+          "basis": {
+            "default": "",
+            "title": "Basis",
+            "type": "string"
+          },
           "op": {
             "title": "Op",
             "type": "string"
@@ -2921,6 +2926,46 @@
           "rationale"
         ],
         "title": "FlowChangeView",
+        "type": "object"
+      },
+      "FlowNeedsInputView": {
+        "description": "The proposal could not be made without guessing, so it asks instead.\n\nCarries no flow and no ``approvalId``: nothing was generated, stored or\nheld. Answer the questions and resubmit the same request with them.",
+        "properties": {
+          "intent": {
+            "title": "Intent",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionView"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "status": {
+            "const": "needs_input",
+            "default": "needs_input",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "questions",
+          "message"
+        ],
+        "title": "FlowNeedsInputView",
         "type": "object"
       },
       "FlowPhaseState": {
@@ -2984,6 +3029,13 @@
             "title": "Approvalid",
             "type": "string"
           },
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
           "baseTemplateId": {
             "title": "Basetemplateid",
             "type": "string"
@@ -3004,6 +3056,24 @@
           },
           "intent": {
             "title": "Intent",
+            "type": "string"
+          },
+          "openQuestions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionView"
+            },
+            "title": "Openquestions",
+            "type": "array"
+          },
+          "requirementsPending": {
+            "default": false,
+            "title": "Requirementspending",
+            "type": "boolean"
+          },
+          "status": {
+            "const": "proposed",
+            "default": "proposed",
+            "title": "Status",
             "type": "string"
           },
           "valid": {
@@ -5162,6 +5232,65 @@
         "title": "ManufactureReleaseResponse",
         "type": "object"
       },
+      "ManufacturingContextBody": {
+        "description": "What the project can actually be made with (FORGE-463).",
+        "properties": {
+          "machines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Machines",
+            "type": "array"
+          },
+          "processes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Processes",
+            "type": "array"
+          },
+          "productionQuantity": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Productionquantity"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManufacturingRoute"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stockMaterials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stockmaterials",
+            "type": "array"
+          }
+        },
+        "title": "ManufacturingContextBody",
+        "type": "object"
+      },
+      "ManufacturingRoute": {
+        "enum": [
+          "in_house",
+          "vendor",
+          "undecided"
+        ],
+        "title": "ManufacturingRoute",
+        "type": "string"
+      },
       "MaturityGateSummary": {
         "properties": {
           "blockedReason": {
@@ -6152,9 +6281,41 @@
       },
       "ProposeFlowRequest": {
         "properties": {
+          "budget": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
           "intent": {
             "title": "Intent",
             "type": "string"
+          },
+          "loadsAndUse": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loadsanduse"
+          },
+          "manufacturingContext": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManufacturingContextBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model": {
             "anyOf": [
@@ -6195,6 +6356,16 @@
             },
             "title": "Requirements",
             "type": "array"
+          },
+          "targetMaturity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetMaturity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6270,6 +6441,56 @@
           }
         },
         "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "QuestionView": {
+        "properties": {
+          "answerType": {
+            "title": "Answertype",
+            "type": "string"
+          },
+          "field": {
+            "default": "",
+            "title": "Field",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "source": {
+            "default": "metaforge",
+            "title": "Source",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "question",
+          "why",
+          "answerType"
+        ],
+        "title": "QuestionView",
         "type": "object"
       },
       "RealizeHierarchyNodeRequest": {
@@ -8575,6 +8796,16 @@
         ],
         "title": "SynthesizeResponse",
         "type": "object"
+      },
+      "TargetMaturity": {
+        "enum": [
+          "concept",
+          "sim_validated",
+          "physically_validated",
+          "released"
+        ],
+        "title": "TargetMaturity",
+        "type": "string"
       },
       "TechnicalDrawingDimension": {
         "description": "One toleranced dimension on a technical_drawing (FORGE-293).",
@@ -12404,7 +12635,7 @@
     },
     "/v1/design-flows/propose": {
       "post": {
-        "description": "Tailor a template to a project's intent, and hold it for a human.\n\nThe response carries an ``approvalId``, not a run. FORGE-398's rule is\nthat nothing starts before approval, and the way to make that true is for\nthe endpoint that generates a flow to have no ability to start one.",
+        "description": "Tailor a template to a project's intent, and hold it for a human.\n\nThe response carries an ``approvalId``, not a run. FORGE-398's rule is\nthat nothing starts before approval, and the way to make that true is for\nthe endpoint that generates a flow to have no ability to start one.\n\nIf the manufacturing route, target maturity or loads are missing, the\nanswer is ``200`` with ``status: \"needs_input\"`` and the questions to\nanswer -- no flow, no stored version, no held approval (FORGE-463). A\ngenerator that guesses those produces a flow that reads as tailored and\nis not.",
         "operationId": "propose_flow_v1_design_flows_propose_post",
         "requestBody": {
           "content": {
@@ -12417,11 +12648,29 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowNeedsInputView"
+                }
+              }
+            },
+            "description": "Inputs missing; nothing held"
+          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FlowProposalView"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/FlowProposalView"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FlowNeedsInputView"
+                    }
+                  ],
+                  "title": "Response Propose Flow V1 Design Flows Propose Post"
                 }
               }
             },
