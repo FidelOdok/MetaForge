@@ -264,6 +264,13 @@ For long-running tools, the server can send progress updates:
 
 ### 4.4 `tool/error` — Error Response
 
+> **On the MCP dialect (`tools/call`), a tool that ran and refused is not an
+> error response at all (FORGE-419).** It comes back as a normal result with
+> `isError: true`, the reason as text content, and `_meta.error` carrying
+> `toolId / details / durationMs` — plus `_meta.callId`, so a failed call
+> stays as citable as a successful one. See §4.4.1. The envelope below is the
+> legacy `tool/call` dialect, whose callers already read `data.details`.
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -280,6 +287,43 @@ For long-running tools, the server can send progress updates:
   }
 }
 ```
+
+#### 4.4.1 `tools/call` — a tool that ran and refused (FORGE-419)
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "req-002",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "twin.query_cypher failed: call context is scoped to project 7b8a but no 'project_id' parameter was bound. Add WHERE n.project_id = $project_id and pass {'project_id': ...}"
+      }
+    ],
+    "isError": true,
+    "_meta": {
+      "callId": "3cb7ee97145e4726",
+      "error": {
+        "toolId": "twin.query_cypher",
+        "details": "call context is scoped to project 7b8a but no 'project_id' parameter was bound. …",
+        "durationMs": 4.1
+      }
+    }
+  }
+}
+```
+
+This is the MCP-recommended shape, and the reason it changed is concrete.
+The refusal above says exactly how to fix the query. It used to live only in
+JSON-RPC `error.data.details`, and Claude Code shows `error.message` — the
+constant string `"Tool execution failed"`. The agent retried blind, failed
+the same way, gave up, and reported the tool as broken.
+
+**Protocol errors stay JSON-RPC errors.** An unknown method or unknown tool
+is not something the model can fix by changing its arguments, and the
+unknown-tool error already carries a did-you-mean. The split is "did the
+tool run?", not "was there a problem".
 
 ### 4.5 `health/check` — Adapter Health
 
@@ -916,7 +960,7 @@ All MCP errors use standard JSON-RPC 2.0 error codes plus MetaForge-specific app
 | `-32600` | `INVALID_REQUEST` | Malformed JSON-RPC request |
 | `-32601` | `METHOD_NOT_FOUND` | Unknown method (e.g., `tool/call` with invalid tool_id) |
 | `-32602` | `INVALID_PARAMS` | Tool arguments fail schema validation |
-| `-32001` | `TOOL_EXECUTION_ERROR` | Tool ran but produced an error (solver crash, invalid input) |
+| `-32001` | `TOOL_EXECUTION_ERROR` | Tool ran but produced an error (solver crash, invalid input). **Legacy `tool/call` only** — on `tools/call` this is an `isError` result instead (§4.4.1) |
 | `-32002` | `RESOURCE_NOT_FOUND` | No such resource. **The code the MCP spec assigns**, so a spec-aware client reads it this way whatever we intend |
 | `-32003` | `TOOL_UNAVAILABLE` | Tool adapter is unhealthy or not registered |
 | `-32005` | `RESOURCE_READ_ERROR` | The resource exists and could not be read |

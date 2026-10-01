@@ -198,6 +198,25 @@ class ApprovalRecord:
         )
 
 
+def _tool_error_text(exc: ToolHandlerError) -> str:
+    """What the model should read when a tool refuses (FORGE-419).
+
+    The details are the actionable part and often the whole fix, so they lead.
+    The tool id is named because a transcript shows several calls and an
+    unattributed error is a guess about which one failed.
+    """
+    details = (exc.details or "").strip()
+    if not details:
+        # Better than an empty string, and says what to do about it rather
+        # than leaving the agent to infer a cause that was never recorded.
+        return (
+            f"{exc.tool_id} failed, and the handler gave no reason. "
+            "This is a server-side gap, not something to fix by changing the "
+            "arguments -- retrying the same call will fail the same way."
+        )
+    return f"{exc.tool_id} failed: {details}"
+
+
 class UnifiedMcpServer:
     """Holds a set of ``McpToolServer`` adapters and dispatches across them.
 
@@ -576,6 +595,37 @@ class UnifiedMcpServer:
                     duration_ms=round(exc.duration_ms, 2),
                     details=exc.details,
                 )
+                if method == "tools/call":
+                    # FORGE-419: a tool that ran and refused is a *result*
+                    # with isError, per the spec's own recommendation -- not
+                    # a protocol error. The refusal usually says exactly how
+                    # to fix the call (`twin.query_cypher`: "add WHERE
+                    # n.project_id = $project_id and pass {...}"), and that
+                    # text lived in `error.data.details`, where Claude Code
+                    # shows only `error.message`: "Tool execution failed".
+                    # The agent retried blind, failed the same way, gave up,
+                    # and reported the tool as broken.
+                    #
+                    # The legacy `tool/call` dialect keeps the JSON-RPC error
+                    # below: its callers are internal and already read
+                    # `data.details`.
+                    return json.dumps(
+                        make_success(
+                            request_id,
+                            {
+                                "content": [{"type": "text", "text": _tool_error_text(exc)}],
+                                "isError": True,
+                                "_meta": {
+                                    "callId": getattr(exc, "call_id", None) or "",
+                                    "error": {
+                                        "toolId": exc.tool_id,
+                                        "details": exc.details,
+                                        "durationMs": round(exc.duration_ms, 2),
+                                    },
+                                },
+                            },
+                        )
+                    )
                 return json.dumps(
                     make_error(
                         request_id,
@@ -860,12 +910,19 @@ class UnifiedMcpServer:
             if isinstance(params.get("_meta"), dict):
                 legacy["_meta"] = params["_meta"]
             result = await self._tool_call(legacy)
-        except (ToolNotFoundError, ToolHandlerError):
-            # Re-raise so the outer handler emits a JSON-RPC error
-            # envelope. The MCP spec also accepts isError=true content
-            # responses, but JSON-RPC errors are clearer for "tool not
-            # found" / hard execution failures and Claude Code surfaces
-            # both correctly.
+        except ToolNotFoundError:
+            raise
+        except ToolHandlerError as exc:
+            # Propagates. `handle_request` is where the span is marked and the
+            # dialect is known, so FORGE-419's isError conversion happens
+            # there -- returning early from here would have quietly stopped
+            # `_mark_failed` running, trading one invisible failure for
+            # another.
+            #
+            # The call id rides along because a failed call still has to be
+            # citable (FORGE-362): "I tried this and it refused" is exactly
+            # as worth checking as a claimed success.
+            exc.call_id = call_id  # type: ignore[attr-defined]
             raise
         meta: dict[str, Any] = {"callId": call_id}
         links = links_for(self._deeplinks, tool_name, result)
@@ -971,10 +1028,15 @@ class UnifiedMcpServer:
         into the bound agent session. Capture is best-effort and never alters
         the tool result or masks an error. ``ToolNotFoundError`` is not
         captured (no such tool ran).
-        """
-        if self._capture is None:
-            return await self._dispatch_tool_call(params)
 
+        FORGE-421: this used to return early when no session capture was
+        configured -- and ``_record_call`` lives *below* that return, so every
+        ``metaforge_mcp_*`` metric recorded only on a deployment that happened
+        to run with ``--capture-sessions``. Two unrelated concerns tangled by
+        one early return, and it quietly undid FORGE-413 the same day: the
+        collector was wired, the alerts still could not fire. Metrics are now
+        unconditional and capture is the optional part.
+        """
         tool_id = params.get("tool_id", "")
         arguments = params.get("arguments", {}) or {}
         call_id = params.get("_call_id") or uuid4().hex[:16]
@@ -984,27 +1046,29 @@ class UnifiedMcpServer:
         except ToolHandlerError as exc:
             elapsed = time.monotonic() - t0
             self._record_call(tool_id, "error", elapsed, exc)
-            await self._capture.on_tool_call(
-                tool_id,
-                arguments,
-                status="error",
-                duration_ms=elapsed * 1000,
-                error=exc.details,
-                call_id=call_id,
-                attribution=self.attribution(params),
-            )
+            if self._capture is not None:
+                await self._capture.on_tool_call(
+                    tool_id,
+                    arguments,
+                    status="error",
+                    duration_ms=elapsed * 1000,
+                    error=exc.details,
+                    call_id=call_id,
+                    attribution=self.attribution(params),
+                )
             raise
         elapsed = time.monotonic() - t0
         self._record_call(tool_id, "ok", elapsed)
-        await self._capture.on_tool_call(
-            tool_id,
-            arguments,
-            status="ok",
-            duration_ms=elapsed * 1000,
-            result=result,
-            call_id=call_id,
-            attribution=self.attribution(params),
-        )
+        if self._capture is not None:
+            await self._capture.on_tool_call(
+                tool_id,
+                arguments,
+                status="ok",
+                duration_ms=elapsed * 1000,
+                result=result,
+                call_id=call_id,
+                attribution=self.attribution(params),
+            )
         return result
 
     @staticmethod

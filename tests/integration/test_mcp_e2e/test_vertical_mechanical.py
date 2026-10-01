@@ -38,7 +38,7 @@ from typing import Any
 import httpx
 import pytest
 
-from ._helpers import McpRpcError, call_tool
+from ._helpers import McpRpcError, McpToolError, call_tool
 
 
 async def _auto_approve(ask: object) -> object:
@@ -130,20 +130,22 @@ async def _attempt(
             "executed": True,
             "data": envelope.get("data"),
         }
-    except McpRpcError as exc:
-        # Dispatch errors are real failures; tool-execution errors are
-        # backend-missing-in-CI and expected.
-        if exc.code in (-32600, -32601):
-            raise AssertionError(
-                f"{tool}: dispatcher-level error {exc.code} (wire-up broken): {exc.message}"
-            ) from exc
-        assert exc.code == -32001, f"{tool}: unexpected error code {exc.code} ({exc.message})"
+    except McpToolError as exc:
+        # The tool ran and refused -- backend-missing-in-CI, and expected.
+        # FORGE-419 made this its own exception type, which is exactly the
+        # distinction this branch used to draw by comparing error codes.
         return {
             "tool": tool,
             "status": "tool_execution_error",
             "executed": False,
             "data": exc.data,
         }
+    except McpRpcError as exc:
+        # Anything still arriving as a JSON-RPC error is dispatch-level, and
+        # that is a real failure: the wire-up is broken.
+        raise AssertionError(
+            f"{tool}: dispatcher-level error {exc.code} (wire-up broken): {exc.message}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
