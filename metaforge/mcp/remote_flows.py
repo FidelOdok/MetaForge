@@ -377,7 +377,7 @@ def build_remote_flow_bindings(
                     # yet" is the expected answer right after proposing.
                     raise RuntimeError(
                         f"{exc.detail} This is the expected result until a person answers "
-                        "the approval — it is not a failure."
+                        "the approval -- it is not a failure."
                     ) from exc
                 raise
         logger.info("design_flow_run_started_over_mcp", run_id=run["id"], via="gateway")
