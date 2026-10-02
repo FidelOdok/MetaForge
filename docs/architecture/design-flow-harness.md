@@ -402,7 +402,11 @@ safety-factor limits are compared to the latest `simulation_result` linked to
 each current `cad_model` (`metadata.source_cad_model_id` or a `derives_from`
 edge), by `api_gateway/runs/analysis_constraints.py`. Values are read from
 `max_displacement_mm`, `max_von_mises_mpa` and `safety_factor` (or any
-`*_sf_*` key). Every constraint ends as passed, violated (with the numbers) or
+`*_sf_*` key). The constraint's unit decides what it is (FORGE-499): length units
+(`mm`, `m`) are deflection, pressure units (`MPa`, `Pa`, `N/mm2`) are stress, dimensionless
+is safety factor, and force units (`N`, `kN`) are load requirements that are skipped
+as inputs, not result checks. The name is used only when the unit is absent, and a
+unit that contradicts the name is not evaluated with the reason. Every constraint ends as passed, violated (with the numbers) or
 not evaluated (with the reason), all shown in the gate reason; a violation on
 an enforcing gate marks it not ready. Load-case scaling: a limit that names its
 basis (`service` or `factored`) is compared after scaling the result linearly
