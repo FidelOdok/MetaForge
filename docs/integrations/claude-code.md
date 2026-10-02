@@ -250,6 +250,32 @@ Running over **stdio on your own machine**, writes are not held by
 default: there is nowhere to answer an approval in that transport yet.
 That changes when a deployment sets `exempt_local_writes=False`.
 
+## Design flows from Claude Code
+
+The sidecar serves the design-flow tools, and they are in the `core`
+profile the plugin installs by default (FORGE-462):
+
+| Tool | |
+| --- | --- |
+| `flow.list` | every launchable flow, with its phases and gates (read) |
+| `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (held write) |
+| `flow.start_run` | start a run on a flow version a person has **approved** (held write) |
+| `flow.status` | phase-by-phase state of one run (read) |
+| `run.start_design_flow` | start one of the built-in flows on a goal (held write) |
+| `run.get_status` | a run's state, gate reason and result (read) |
+
+They act on the gateway's state, not the sidecar's: a flow proposed here
+is the one on the dashboard's **Approvals** page, and a run started here
+is the one in `GET /v1/runs`. That needs `METAFORGE_GATEWAY_URL` on the
+sidecar (the dev compose file sets it to `http://gateway:8000`). Unset,
+the tools still register but bind to the sidecar's own in-process stores,
+which the dashboard cannot see, and the sidecar logs
+`mcp_flow_bindings_in_process` on start-up to say so.
+
+The loop is propose, a person approves, then start. `flow.start_run`
+right after `flow.propose` is refused with a message saying the version
+is not approved yet; that is the expected answer, not a fault.
+
 ## Tool annotations and unknown-tool errors
 
 Every tool on `tools/list` carries the MCP annotation hints, so Claude Code
@@ -323,6 +349,11 @@ The launcher is `--adapters`-aware. Either:
   registers as a no-op and `knowledge.*` tools disappear from
   `tool/list`. Boot Postgres (`docker compose up -d postgres`) and
   restart Claude Code.
+* No `flow.*` or `run.*` tools: the sidecar image predates FORGE-462,
+  or the adapters are switched off with
+  `METAFORGE_ADAPTER_DESIGN_FLOW_ENABLED=false` /
+  `METAFORGE_ADAPTER_RUN_ENABLED=false` (or a `METAFORGE_ADAPTERS` list
+  that omits `design_flow` / `run`).
 
 ### Knowledge tools are listed but every search returns empty
 

@@ -123,6 +123,9 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
 # ``skipped`` simultaneously, even though it registered successfully.
 _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     {"knowledge", "constraint", "twin", "project", "run", "session", "memory"}
+    # FORGE-462: named in the sidecar's --adapters list now, so it must not
+    # read as unknown there.
+    | {"design_flow"}
     | {"digikey", "mouser", "nexar"}
     | {"component", "offer_resolver"}
     | {"web"}

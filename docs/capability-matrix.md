@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (115 across 17 adapters)
+## MCP tools (119 across 18 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -17,12 +17,12 @@ Gazebo, the OpenUSD conversion adapter, and Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-One hundred eight of the 115 are described in the table below. The seven
+One hundred twelve of the 119 are described in the table below. The seven
 that are not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 114 does carry an MCP
+they simply have no row here yet. Every one of the 119 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -37,11 +37,11 @@ capability does not exist.
 
 | Profile | Tools | For |
 |---|---|---|
-| `core` | 30 | Projects, sessions, twin reads and the records that are not domain-specific |
-| `mechanical` | 29 | CAD authoring across both kernels, plus geometry commit |
-| `simulation` | 29 | FEA, load cases, meshes and the evidence they produce |
-| `electronics` | 25 | Schematic and board checks, component search, sourcing |
-| `robotics` | 30 | Assemblies, URDF/SDF/USD export, simulators |
+| `core` | 36 | Projects, sessions, twin reads and the records that are not domain-specific |
+| `mechanical` | 31 | CAD authoring across both kernels, plus geometry commit |
+| `simulation` | 31 | FEA, load cases, meshes and the evidence they produce |
+| `electronics` | 27 | Schematic and board checks, component search, sourcing |
+| `robotics` | 32 | Assemblies, URDF/SDF/USD export, simulators |
 
 Each profile also includes `health.check`, so `/metaforge:doctor` works on
 the connection most likely to need it — a capped one, on a harness that
@@ -1290,6 +1290,10 @@ what the server will actually enforce.
 | `twin` | `twin.realize_hierarchy_node` | "Replace placeholder with part" (FORGE-266, gap G-C2): attach or REPLACE a hierarchy node's `REALIZED_BY` (a cad_model work product, e.g. from `twin.import_work_product`/the FreeCAD authoring tools) and/or `INSTANCE_OF` (a BOMItem, e.g. from `twin.record_component_selection`/`twin.select_component`) geometry after the node already exists — `twin.record_hierarchy_node` only ever sets these once, at creation time. Any existing edge of that type is removed first, so a node always has at most one of each. Classified DESTRUCTIVE (unlike the ADDITIVE `twin.record_hierarchy_node`) since it genuinely replaces prior state. `POST /v1/twin/hierarchy/{node_id}/realize` exposes the same action to the dashboard's Structure-tab "Replace placeholder with part" panel (upload a real STEP file via the existing `POST /v1/twin/import`, with a real GLB preview via the existing `GET /v1/twin/nodes/{id}/model`, or pick an already-recorded BOMItem) | unit-verified (FORGE-266) |
 | `run` | `run.start_design_flow` | Start a gated design lifecycle (hardware_v1 / mech_v1 / design_v1) for a goal, project-scoped; every phase gate still requires human approval | unit-verified (MET-587) |
 | `run` | `run.get_status` | Check a design-flow run's status / gate reason / result | unit-verified (MET-587) |
+| `design_flow` | `flow.list` | Every launchable flow with its phases, gates, required deliverables and whether it passes the server-enforced invariants (read). Served by the sidecar from `GET /v1/design-flows` when `METAFORGE_GATEWAY_URL` is set (FORGE-462) | unit-verified (FORGE-400/462) |
+| `design_flow` | `flow.propose` | Tailor a template to an intent and hold it for a person: returns the changes, a flow version id and an approval id, and starts nothing. Missing route, maturity or loads returns `status: needs_input` with questions instead (FORGE-463); the sidecar passes `manufacturing_context`, `target_maturity`, `loads_and_use` and `budget` through unchanged. Held write. The sidecar posts it to `POST /v1/design-flows/propose`, so the approval lands in the gateway's ledger | unit-verified (FORGE-400/462) |
+| `design_flow` | `flow.start_run` | Start a run on a flow version a person has approved; refused with an explanatory message until then. Held write, via `POST /v1/runs` from the sidecar | unit-verified (FORGE-400/462) |
+| `design_flow` | `flow.status` | Phase-by-phase state of one run, `unknown` when the engine cannot be queried (read), via `GET /v1/runs/{id}/flow-state` from the sidecar | unit-verified (FORGE-400/462) |
 | `constraint` (default) | `constraint.validate` | Pre-flight validate proposed graph changes | [`tier1/constraint-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/constraint-hp.md) |
 | `cadquery` (default) | `cadquery.create_parametric` | Generate a parametric solid (box, cylinder, …) → STEP | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.boolean_operation` | Union / cut / intersect two solids | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |

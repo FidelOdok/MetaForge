@@ -227,7 +227,7 @@ def make_run_starter() -> Any:
                 # between the agent waiting and the agent reporting a fault.
                 raise RuntimeError(
                     f"{exc.detail} This is the expected result until a person answers "
-                    "the approval — it is not a failure."
+                    "the approval -- it is not a failure."
                 ) from exc
             raise RuntimeError(str(exc.detail)) from exc
 

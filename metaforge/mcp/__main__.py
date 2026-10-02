@@ -1523,7 +1523,12 @@ async def _bootstrap(
 
     entity_recorder = make_engineering_entity_recorder(twin, project_backend)
 
+    # FORGE-462: flow.* and run.* registered in the gateway and never here, so
+    # no harness plugin could list, propose or start a design flow.
+    flow_bindings = _build_flow_bindings()
+
     server = await build_unified_server(
+        **flow_bindings,
         engineering_entity_recorder=entity_recorder,
         engineering_entity_approver=make_engineering_entity_approver(twin),
         document_recorder=make_document_recorder(twin, project_backend),
@@ -1553,6 +1558,70 @@ async def _bootstrap(
         component_recorder=component_recorder,
     )
     return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
+
+
+def _build_flow_bindings() -> dict[str, Any]:
+    """Bindings for the ``design_flow`` and ``run`` adapters (FORGE-462).
+
+    Both adapters register only when a binding is supplied, and until this
+    the sidecar supplied none: ``flow.list``, ``flow.propose``,
+    ``flow.start_run``, ``flow.status``, ``run.start_design_flow`` and
+    ``run.get_status`` were absent from every external client's tools/list.
+
+    Chosen the same way as the approval gate, for the same reason. The flow
+    versions, the approval ledger and the run store are process-level, so:
+
+    ``METAFORGE_GATEWAY_URL`` set
+        Call the gateway's own routes. A flow proposed from a plugin is the
+        one the dashboard shows, and a run started from one is in
+        ``/v1/runs``.
+
+    unset
+        Bind to this process's stores. Correct only inside the gateway; said
+        at start-up so a misconfigured sidecar is visible rather than quiet.
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_flows import build_remote_flow_bindings
+
+        remote = build_remote_flow_bindings(gateway_url)
+        logger.info("mcp_flow_bindings_remote", gateway=gateway_url)
+        return {
+            "design_flow_catalogue_reader": remote.catalogue_reader,
+            "design_flow_proposer": remote.proposer,
+            "design_flow_status_reader": remote.status_reader,
+            "design_flow_run_starter": remote.run_starter,
+            "run_launcher": remote.run_launcher,
+        }
+
+    try:
+        from api_gateway.design_flows.mcp_bindings import (
+            make_catalogue_reader,
+            make_proposer,
+            make_run_starter,
+            make_run_status_reader,
+        )
+        from api_gateway.runs.launcher import make_run_launcher
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_flow_bindings_missing", error=str(exc))
+        return {}
+
+    logger.warning(
+        "mcp_flow_bindings_in_process",
+        detail=(
+            "flow.* and run.* are bound to this process's own flow, approval and run "
+            "stores. Correct only if this MCP server runs inside the gateway; a separate "
+            "sidecar should set METAFORGE_GATEWAY_URL, or proposals and runs it creates "
+            "will never appear on the dashboard."
+        ),
+    )
+    return {
+        "design_flow_catalogue_reader": make_catalogue_reader(),
+        "design_flow_proposer": make_proposer(),
+        "design_flow_status_reader": make_run_status_reader(),
+        "design_flow_run_starter": make_run_starter(),
+        "run_launcher": make_run_launcher(),
+    }
 
 
 def _build_approval_gate() -> Any:
