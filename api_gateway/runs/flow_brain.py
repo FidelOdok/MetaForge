@@ -108,7 +108,11 @@ def deliverable_hints(pid: str) -> dict[str, str]:
             "run the analysis (calculix run-fea, then extract-results), then record the "
             "outcome with the record-document tool (document_type='simulation_result', "
             "name, content=the extract-results JSON summary, metadata=the same summary "
-            "fields, source_part_node_ids=[the analysed cad_model node id]), "
+            "fields, source_part_node_ids=[the analysed cad_model node id]); also record "
+            "the load basis (service_load_n, factored_load_n, and which load the run "
+            "applied) so the gate can scale it to a service-load limit, and, optionally, "
+            "metadata.modelling_assumptions (e.g. bonded vs contact joints, material "
+            "approximations), which the reviewer sees at the gate, "
             f"project_id={pid}"
         ),
         "load_case": (
