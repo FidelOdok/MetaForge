@@ -20,11 +20,21 @@ wizard needs to say what a flow will actually demand.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import structlog
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import AliasChoices, BaseModel, Field
 
 from observability.tracing import get_tracer
+from orchestrator.design_flow.context import (
+    ClarifyingQuestion,
+    FlowContext,
+    ManufacturingContext,
+    ManufacturingRoute,
+    TargetMaturity,
+    missing_inputs,
+)
 from orchestrator.design_flow.generator import FlowProposal
 from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
 from orchestrator.design_flow.spec import (
@@ -165,12 +175,114 @@ def get_design_flow(flow_id: str) -> DesignFlowView:
 # ── Tailoring a template to a project (FORGE-398) ────────────────────────
 
 
+def _alias(camel: str, snake: str) -> AliasChoices:
+    # The REST contract is camelCase; snake_case is accepted too because the
+    # MCP tool and most hand-written curl calls spell it that way.
+    return AliasChoices(camel, snake)
+
+
+class ManufacturingContextBody(BaseModel):
+    """What the project can actually be made with (FORGE-463)."""
+
+    route: ManufacturingRoute | None = None
+    processes: list[str] = Field(default_factory=list)
+    #: Free-form capability descriptions ("Prusa MK4, 250x210x220 mm").
+    machines: list[str] = Field(default_factory=list)
+    stockMaterials: list[str] = Field(  # noqa: N815
+        default_factory=list, validation_alias=_alias("stockMaterials", "stock_materials")
+    )
+    productionQuantity: int | None = Field(  # noqa: N815
+        default=None,
+        ge=1,
+        validation_alias=_alias("productionQuantity", "production_quantity"),
+    )
+
+
 class ProposeFlowRequest(BaseModel):
     intent: str
     projectId: str | None = None  # noqa: N815
     requirements: list[str] = Field(default_factory=list)
     provider: str | None = None
     model: str | None = None
+    #: The inputs a flow's shape depends on (FORGE-463). If the route, the
+    #: target maturity or the loads are missing, the proposal asks for them
+    #: (``status: "needs_input"``) instead of guessing.
+    manufacturingContext: ManufacturingContextBody | None = Field(  # noqa: N815
+        default=None,
+        validation_alias=_alias("manufacturingContext", "manufacturing_context"),
+    )
+    targetMaturity: TargetMaturity | None = Field(  # noqa: N815
+        default=None, validation_alias=_alias("targetMaturity", "target_maturity")
+    )
+    #: Free text. "unknown" is a valid answer -- it keeps verification in.
+    loadsAndUse: str | None = Field(  # noqa: N815
+        default=None, validation_alias=_alias("loadsAndUse", "loads_and_use")
+    )
+    budget: str | None = None
+
+    def flow_context(self) -> FlowContext:
+        m = self.manufacturingContext
+        return FlowContext(
+            manufacturing=(
+                None
+                if m is None
+                else ManufacturingContext(
+                    route=m.route,
+                    processes=tuple(x.strip() for x in m.processes if x.strip()),
+                    machines=tuple(x.strip() for x in m.machines if x.strip()),
+                    stock_materials=tuple(x.strip() for x in m.stockMaterials if x.strip()),
+                    production_quantity=m.productionQuantity,
+                )
+            ),
+            target_maturity=self.targetMaturity,
+            loads_and_use=self.loadsAndUse,
+            budget=self.budget,
+            requirements=tuple(r.strip() for r in self.requirements if r.strip()),
+        )
+
+
+class QuestionView(BaseModel):
+    id: str
+    question: str
+    #: Why the answer changes the flow.
+    why: str
+    #: ``choice`` | ``text`` | ``list`` | ``number``.
+    answerType: str  # noqa: N815
+    options: list[str] = Field(default_factory=list)
+    #: The request field the answer belongs in, for resubmitting.
+    field: str = ""
+    required: bool = True
+    #: ``metaforge`` (deterministic) or ``model`` (product-specific extra).
+    source: str = "metaforge"
+
+
+def _question_view(q: ClarifyingQuestion) -> QuestionView:
+    return QuestionView(
+        id=q.id,
+        question=q.question,
+        why=q.why,
+        answerType=q.answer_type,
+        options=list(q.options),
+        field=q.field,
+        required=q.required,
+        source=q.source,
+    )
+
+
+class FlowNeedsInputView(BaseModel):
+    """The proposal could not be made without guessing, so it asks instead.
+
+    Carries no flow and no ``approvalId``: nothing was generated, stored or
+    held. Answer the questions and resubmit the same request with them.
+    """
+
+    status: Literal["needs_input"] = "needs_input"
+    intent: str
+    #: One grouped list: MetaForge's required questions first, then at most a
+    #: few product-specific ones from the model.
+    questions: list[QuestionView]
+    notes: list[str] = Field(default_factory=list)
+    message: str
 
 
 class FlowChangeView(BaseModel):
@@ -178,6 +290,8 @@ class FlowChangeView(BaseModel):
     phase: str
     value: object | None = None
     rationale: str
+    #: The manufacturing capabilities this change was made under (FORGE-463).
+    basis: str = ""
 
 
 class FlowProposalView(BaseModel):
@@ -188,6 +302,7 @@ class FlowProposalView(BaseModel):
     approval there is nothing to run.
     """
 
+    status: Literal["proposed"] = "proposed"
     approvalId: str  # noqa: N815
     #: The stored, immutable flow this approval is about. Without it, an
     #: approved proposal is a decision about something nobody kept.
@@ -199,6 +314,13 @@ class FlowProposalView(BaseModel):
     changes: list[FlowChangeView] = Field(default_factory=list)
     valid: bool
     violations: list[str] = Field(default_factory=list)
+    #: No requirements were recorded when this was proposed (FORGE-463), so
+    #: "every requirement is verified" says nothing yet.
+    requirementsPending: bool = False  # noqa: N815
+    #: What the proposal took as given without being told.
+    assumptions: list[str] = Field(default_factory=list)
+    #: Product-specific questions that did not block the proposal.
+    openQuestions: list[QuestionView] = Field(default_factory=list)  # noqa: N815
 
 
 def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) -> FlowProposalView:
@@ -211,9 +333,16 @@ def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) ->
         intent=proposal.intent,
         valid=proposal.valid,
         violations=[str(v) for v in proposal.validation.violations],
+        requirementsPending=proposal.requirements_pending,
+        assumptions=list(proposal.assumptions),
+        openQuestions=[_question_view(q) for q in proposal.open_questions],
         changes=[
             FlowChangeView(
-                op=op.kind.value, phase=op.phase_id, value=op.value, rationale=op.rationale
+                op=op.kind.value,
+                phase=op.phase_id,
+                value=op.value,
+                rationale=op.rationale,
+                basis=op.basis,
             )
             for op in proposal.operations
         ],
@@ -231,13 +360,26 @@ def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) ->
     )
 
 
-@router.post("/propose", response_model=FlowProposalView, status_code=201)
-async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowProposalView:
+@router.post(
+    "/propose",
+    response_model=FlowProposalView | FlowNeedsInputView,
+    status_code=201,
+    responses={200: {"model": FlowNeedsInputView, "description": "Inputs missing; nothing held"}},
+)
+async def propose_flow(
+    body: ProposeFlowRequest, request: Request, response: Response
+) -> FlowProposalView | FlowNeedsInputView:
     """Tailor a template to a project's intent, and hold it for a human.
 
     The response carries an ``approvalId``, not a run. FORGE-398's rule is
     that nothing starts before approval, and the way to make that true is for
     the endpoint that generates a flow to have no ability to start one.
+
+    If the manufacturing route, target maturity or loads are missing, the
+    answer is ``200`` with ``status: "needs_input"`` and the questions to
+    answer -- no flow, no stored version, no held approval (FORGE-463). A
+    generator that guesses those produces a flow that reads as tailored and
+    is not.
     """
     from api_gateway.chat.tool_approvals import get_approval_store
     from api_gateway.design_flows.generate import (
@@ -249,6 +391,12 @@ async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowPropos
     if not body.intent.strip():
         raise HTTPException(status_code=400, detail="intent is required")
 
+    context = body.flow_context()
+    missing = missing_inputs(context)
+    if missing:
+        response.status_code = 200
+        return await _needs_input(body, missing)
+
     try:
         proposal = await generate_proposal(
             TailoringRequest(
@@ -257,6 +405,7 @@ async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowPropos
                 requirements=body.requirements,
                 provider=body.provider,
                 model=body.model,
+                context=context,
             )
         )
     except GeneratorUnavailableError as exc:
@@ -264,6 +413,14 @@ async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowPropos
         # tailored, and was not, is worse than being told it is down.
         logger.error("flow_proposal_unavailable", error=str(exc))
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if not proposal.valid:
+        # Checked here, with the context, before anything is stored: the
+        # version store re-validates without it and cannot see, for example,
+        # that the loads are unknown.
+        detail = str(FlowInvariantError(proposal.base_template_id, proposal.validation.violations))
+        logger.warning("flow_proposal_invalid", error=detail)
+        raise HTTPException(status_code=422, detail=detail)
 
     version_store = get_version_store()
     try:
@@ -292,6 +449,10 @@ async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowPropos
             "changes": proposal.diff(),
             "project_id": body.projectId,
             "flow_version_id": version.id,
+            "manufacturing_route": context.route.value if context.route else None,
+            "target_maturity": context.target_maturity.value if context.target_maturity else None,
+            "requirements_pending": proposal.requirements_pending,
+            "assumptions": proposal.assumptions,
         }
     )
     store.start(run.id)
@@ -311,6 +472,48 @@ async def propose_flow(body: ProposeFlowRequest, request: Request) -> FlowPropos
     )
     version.approval_id = run.id
     return _proposal_view(proposal, run.id, version.id)
+
+
+async def _needs_input(
+    body: ProposeFlowRequest, missing: list[ClarifyingQuestion]
+) -> FlowNeedsInputView:
+    """Ask instead of guessing. Creates nothing."""
+    from api_gateway.design_flows import generate as gen
+
+    notes: list[str] = []
+    extra: list[ClarifyingQuestion] = []
+    with tracer.start_as_current_span("design_flows.propose.needs_input") as span:
+        span.set_attribute("design_flows.missing", ",".join(q.id for q in missing))
+        try:
+            extra = await gen.suggest_extra_questions(
+                body.intent.strip(), missing, provider=body.provider, model=body.model
+            )
+        except gen.GeneratorUnavailableError as exc:
+            # Said, not swallowed: the required questions stand on their own,
+            # but the person should know the product-specific ones are absent
+            # rather than assume there were none.
+            span.record_exception(exc)
+            notes.append(
+                "product-specific questions could not be generated (no model reachable); "
+                "the questions above are MetaForge's required ones"
+            )
+    questions = [*missing, *extra]
+    logger.info(
+        "flow_proposal_needs_input",
+        missing=[q.id for q in missing],
+        extra=len(extra),
+        project_id=body.projectId,
+    )
+    return FlowNeedsInputView(
+        intent=body.intent.strip(),
+        questions=[_question_view(q) for q in questions],
+        notes=notes,
+        message=(
+            "No flow was proposed and nothing is held for approval: the flow depends on "
+            "answers that were not given. Answer the questions and resubmit the same "
+            "request with them filled in."
+        ),
+    )
 
 
 # ── Editing a flow (FORGE-399) ───────────────────────────────────────────

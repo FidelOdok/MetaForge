@@ -256,6 +256,56 @@ is no untailored fallback: a flow the human believes was tailored, and was
 not, is worse than being told the generator is down, because they would
 approve it on the strength of a tailoring that never happened.
 
+#### The generator asks before it tailors (FORGE-463)
+
+An intent alone is not enough to tailor a flow. `"A wall shelf I can make
+with what I have."` used to come back as `mech_v1` with simulation dropped
+("practical load testing will suffice"), no questions and `valid: true`,
+because nothing said what the shelf carries, what "what I have" is, or how
+far the person wanted to go. The request now carries that context:
+
+| Field (camelCase; snake_case also accepted) | Meaning |
+| --- | --- |
+| `manufacturingContext.route` | `in_house`, `vendor` or `undecided` |
+| `manufacturingContext.processes` / `machines` / `stockMaterials` | what the person can actually make it with; `machines` are free-form capability descriptions |
+| `manufacturingContext.productionQuantity` | how many |
+| `targetMaturity` | `concept`, `sim_validated`, `physically_validated` or `released` |
+| `loadsAndUse` | free text; `unknown` is a valid answer |
+| `budget` | optional |
+
+**Missing inputs are asked for, not guessed.** If the route, the target
+maturity or the loads are missing (or the route is `in_house` with no stated
+processes, machines or stock), the endpoint answers `200` with
+`status: "needs_input"` and one grouped list of questions, each with an `id`,
+the `question`, `why` it matters, an `answerType` (with `options` for
+choices) and the request `field` the answer goes in. It carries **no flow, no
+stored version and no held approval**. The required questions are
+MetaForge's own and deterministic (`orchestrator/design_flow/context.py`);
+the model may add at most three product-specific ones, marked
+`source: "model"`. If the model is unreachable the required questions are
+still returned, with a note saying the product-specific ones are absent.
+
+**The flow is manufacturing-led.** With the context present, the prompt
+carries it and tells the model to derive process and material choices from
+the stated capabilities. Every change also records a server-written `basis`
+(the route, processes, machines and stock it was made under), so a reviewer
+sees what the generator was told even if the model did not cite it. An
+`undecided` route adds a gated **Manufacturing Route Selection** phase ahead
+of the first geometry phase, rather than letting the generator pick a route.
+That operation (`add_route_selection`) is server-only: a model cannot add
+phases.
+
+A successful proposal (`201`, `status: "proposed"`) keeps every existing
+field and adds `requirementsPending` (true when no requirements were sent),
+`assumptions` (including an explicit "requirements pending" line) and
+`openQuestions`. The proposal is validated **with** its context before
+anything is stored, so a flow that drops simulation while the loads are
+unknown is refused with `422 physical-verification-kept`.
+
+`flow.propose` takes the same fields in snake_case. On `needs_input` it
+returns the questions and tells the agent to ask the user rather than answer
+them itself.
+
 ### The flow catalogue is served, not copied (FORGE-395)
 
 `GET /v1/design-flows` returns every launchable flow as the gateway will run
@@ -340,7 +390,8 @@ at once rather than the first:
 | `no-pass-without-data` | a gate with no required deliverables cannot tell an empty phase from a complete one, and neither can the human answering it |
 | `gates-enforce-what-they-require` | `enforce_deliverables: false` under a gate is a decorative gate — worse than none, because the approval then looks like evidence |
 | `deliverable-is-producible` | a gate requiring `simulation_result` before any simulation phase is not a strict flow, it is one that always fails — and it fails at the gate rather than where somebody could have seen it |
-| `requirements-are-verified` | a twin full of claims nothing checks reads, on every dashboard, exactly like a product that passed |
+| `requirements-are-verified` | a twin full of claims nothing checks reads, on every dashboard, exactly like a product that passed. A phase with id `requirements` counts as recording requirements whatever artifact it uses, so a flow cannot pass this vacuously (FORGE-463) |
+| `physical-verification-kept` | a flow that commits a `cad_model` must keep a phase producing `simulation_result` or `verification_report`, or require a `test_plan` at a gate as the recorded alternative. While the loads are unknown, not even a test plan may replace it (FORGE-463) |
 | `unique-phase-ids` | readiness, activity history and the live view all key on the phase id |
 | `has-phases` | — |
 

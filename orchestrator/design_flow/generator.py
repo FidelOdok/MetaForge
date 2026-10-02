@@ -30,18 +30,21 @@ stop checking its output.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
 import structlog
 
+from orchestrator.design_flow.context import ClarifyingQuestion, FlowContext, ManufacturingRoute
 from orchestrator.design_flow.invariants import ValidationResult, validate_flow
-from orchestrator.design_flow.spec import FlowDefinition, Phase
+from orchestrator.design_flow.spec import FlowDefinition, Gate, Phase
 
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "MODEL_OPERATIONS",
+    "ROUTE_SELECTION_PHASE_ID",
     "FlowProposal",
     "Operation",
     "OperationKind",
@@ -56,6 +59,45 @@ class OperationKind(StrEnum):
     DROP_PHASE = "drop_phase"
     ADD_DELIVERABLE = "add_deliverable"
     SET_DISCIPLINES = "set_disciplines"
+    #: Server-only (FORGE-463): inserted when the manufacturing route is
+    #: "undecided", so the route becomes a gated decision rather than a guess.
+    #: Not in :data:`MODEL_OPERATIONS` -- a model cannot add phases.
+    ADD_ROUTE_SELECTION = "add_route_selection"
+
+
+#: What a model may ask for. Everything else is the server's.
+MODEL_OPERATIONS: frozenset[OperationKind] = frozenset(
+    {OperationKind.DROP_PHASE, OperationKind.ADD_DELIVERABLE, OperationKind.SET_DISCIPLINES}
+)
+
+ROUTE_SELECTION_PHASE_ID = "route_selection"
+
+
+def _route_selection_phase() -> Phase:
+    # The gate name deliberately avoids the release markers ("sign-off" etc.):
+    # this decision must not be what satisfies release-gate-exists.
+    return Phase(
+        id=ROUTE_SELECTION_PHASE_ID,
+        title="Manufacturing Route Selection",
+        objective=(
+            "The manufacturing route is undecided. Before any detailed design, compare "
+            "making it in-house against having a vendor make it: what processes, machines "
+            "and stock each route offers, lead time, cost at the stated quantity, and what "
+            "each route constrains in the design. Record the selected route, the process "
+            "and the material as a decision (record-decision tool) with the alternatives "
+            "considered, scoped to the project."
+        ),
+        expected_artifacts=("design_decision",),
+        required_deliverables=("design_decision",),
+        gate=Gate(
+            name="Manufacturing route decision",
+            criteria=(
+                "In-house and vendor routes compared",
+                "Selected process and material follow from the chosen route's capabilities",
+                "Alternatives and rationale recorded",
+            ),
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -68,8 +110,17 @@ class Operation:
     #: For ``add_deliverable``: the artifact type. For ``set_disciplines``:
     #: the discipline list.
     value: Any = None
+    #: The stated manufacturing capabilities the change was made under
+    #: (FORGE-463). Server-recorded, so the review shows what the generator
+    #: was told whether or not the model cited it.
+    basis: str = ""
+
+    def full_rationale(self) -> str:
+        return f"{self.rationale} [given: {self.basis}]" if self.basis else self.rationale
 
     def describe(self) -> str:
+        if self.kind is OperationKind.ADD_ROUTE_SELECTION:
+            return f"add phase '{self.phase_id}' (manufacturing route decision)"
         if self.kind is OperationKind.DROP_PHASE:
             return f"drop phase '{self.phase_id}'"
         if self.kind is OperationKind.ADD_DELIVERABLE:
@@ -91,14 +142,25 @@ class FlowProposal:
     operations: list[Operation] = field(default_factory=list)
     validation: ValidationResult = field(default_factory=ValidationResult)
     intent: str = ""
+    context: FlowContext | None = None
+    #: What the proposal took as given without being told. Listed, because an
+    #: unstated assumption reads exactly like a stated fact in a flow.
+    assumptions: list[str] = field(default_factory=list)
+    #: Product-specific questions the model raised that did not block the
+    #: proposal. Answering them may change it.
+    open_questions: list[ClarifyingQuestion] = field(default_factory=list)
 
     @property
     def valid(self) -> bool:
         return self.validation.ok
 
+    @property
+    def requirements_pending(self) -> bool:
+        return self.context is None or self.context.requirements_pending
+
     def diff(self) -> list[str]:
         """What changed from the template, in one line each."""
-        return [f"{op.describe()} — {op.rationale}" for op in self.operations]
+        return [f"{op.describe()} — {op.full_rationale()}" for op in self.operations]
 
 
 def parse_operations(raw: Any) -> list[Operation]:
@@ -121,6 +183,9 @@ def parse_operations(raw: Any) -> list[Operation]:
         try:
             kind = OperationKind(kind_raw)
         except ValueError:
+            kind = None
+        if kind is None or kind not in MODEL_OPERATIONS:
+            # Server-only kinds disappear the same way invented ones do.
             logger.info("flow_generator_unknown_operation", op=kind_raw)
             continue
         phase_id = str(entry.get("phase") or entry.get("phase_id") or "").strip()
@@ -157,8 +222,14 @@ def apply_operations(
     extra_deliverables: dict[str, list[str]] = {}
     disciplines: dict[str, list[str]] = {}
     applied: list[Operation] = []
+    add_route_selection = False
 
     for op in operations:
+        if op.kind is OperationKind.ADD_ROUTE_SELECTION:
+            if ROUTE_SELECTION_PHASE_ID not in by_id and not add_route_selection:
+                add_route_selection = True
+                applied.append(op)
+            continue
         if op.phase_id not in by_id:
             logger.info("flow_generator_unknown_phase", phase=op.phase_id, flow=base.id)
             continue
@@ -187,6 +258,11 @@ def apply_operations(
     for phase in base.phases:
         if phase.id in dropped:
             continue
+        if add_route_selection and "cad_model" in phase.expected_artifacts:
+            # Before the first phase that commits geometry: the route decides
+            # what that geometry may assume.
+            phases.append(_route_selection_phase())
+            add_route_selection = False
         added = extra_deliverables.get(phase.id, [])
         assigned = disciplines.get(phase.id)
         if not added and assigned is None:
@@ -197,7 +273,16 @@ def apply_operations(
                 id=phase.id,
                 title=phase.title,
                 objective=phase.objective,
-                expected_artifacts=phase.expected_artifacts,
+                # A phase now required to deliver something is a phase asked to
+                # produce it; otherwise deliverable-is-producible rejects the
+                # very tightening the operation exists for (e.g. a test_plan
+                # standing in for a dropped simulation).
+                expected_artifacts=tuple(
+                    [
+                        *phase.expected_artifacts,
+                        *(a for a in added if a not in phase.expected_artifacts),
+                    ]
+                ),
                 required_deliverables=tuple([*phase.required_deliverables, *added]),
                 # Deliberately carried through untouched: there is no
                 # operation that can switch enforcement off, and copying the
@@ -209,6 +294,11 @@ def apply_operations(
             )
         )
 
+    if add_route_selection:
+        # No geometry phase to precede: the decision goes last but one, still
+        # ahead of whatever verifies and releases.
+        phases.insert(max(len(phases) - 1, 0), _route_selection_phase())
+
     tailored = FlowDefinition(id=base.id, name=base.name, phases=tuple(phases))
     return tailored, applied
 
@@ -219,10 +309,41 @@ def build_proposal(
     base_version: str,
     operations: list[Operation],
     intent: str = "",
+    context: FlowContext | None = None,
+    assumptions: list[str] | None = None,
+    open_questions: list[ClarifyingQuestion] | None = None,
 ) -> FlowProposal:
-    """Tailor ``base`` and report whether the result can be started."""
-    tailored, applied = apply_operations(base, operations)
-    validation = validate_flow(tailored)
+    """Tailor ``base`` and report whether the result can be started.
+
+    With a ``context`` (FORGE-463): an undecided manufacturing route adds the
+    route-selection phase, every change records the capabilities it was made
+    under, and the invariants that depend on the loads read them.
+    """
+    ops = list(operations)
+    if context is not None:
+        basis = context.capability_basis()
+        ops = [replace(op, basis=op.basis or basis) for op in ops]
+        if context.route is ManufacturingRoute.UNDECIDED:
+            ops.append(
+                Operation(
+                    OperationKind.ADD_ROUTE_SELECTION,
+                    ROUTE_SELECTION_PHASE_ID,
+                    "the manufacturing route is undecided, so choosing it is a gated "
+                    "decision in the flow rather than a guess made by the generator",
+                    basis=basis,
+                )
+            )
+    tailored, applied = apply_operations(base, ops)
+    validation = validate_flow(tailored, context=context)
+    notes = list(assumptions or [])
+    if context is None or context.requirements_pending:
+        notes.insert(
+            0,
+            "requirements pending: none were recorded when this flow was proposed, so its "
+            "verification phases are kept for the requirements phase to fill",
+        )
+    if context is not None and not (context.budget or "").strip():
+        notes.append("budget not stated: no cost ceiling was applied")
     proposal = FlowProposal(
         base_template_id=base.id,
         base_version=base_version,
@@ -230,6 +351,9 @@ def build_proposal(
         operations=applied,
         validation=validation,
         intent=intent,
+        context=context,
+        assumptions=notes,
+        open_questions=list(open_questions or []),
     )
     logger.info(
         "flow_proposal_built",

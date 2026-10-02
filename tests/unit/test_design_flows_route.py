@@ -207,6 +207,18 @@ class TestTheAcceptanceCriterion:
 
 # ── the proposal is a held write (FORGE-398) ─────────────────────────────
 
+#: Enough context that the proposal does not stop to ask (FORGE-463).
+_CONTEXT = {
+    "manufacturingContext": {
+        "route": "in_house",
+        "processes": ["woodworking"],
+        "machines": ["table saw, 600 mm rip capacity"],
+        "stockMaterials": ["18 mm birch plywood"],
+    },
+    "targetMaturity": "physically_validated",
+    "loadsAndUse": "40 kg of dishes per shelf, indoors",
+}
+
 
 class TestProposeHoldsForAHuman:
     def test_a_proposal_creates_an_approval_and_not_a_run(
@@ -240,7 +252,9 @@ class TestProposeHoldsForAHuman:
         monkeypatch.setattr(gen, "generate_proposal", fake_generate)
 
         runs_before = len(get_run_store().list())
-        response = client.post("/v1/design-flows/propose", json={"intent": "a kitchen cabinet"})
+        response = client.post(
+            "/v1/design-flows/propose", json={"intent": "a kitchen cabinet", **_CONTEXT}
+        )
         assert response.status_code == 201, response.text
         body = response.json()
 
@@ -270,7 +284,9 @@ class TestProposeHoldsForAHuman:
             )
 
         monkeypatch.setattr(gen, "generate_proposal", fake_generate)
-        body = client.post("/v1/design-flows/propose", json={"intent": "a kitchen cabinet"}).json()
+        body = client.post(
+            "/v1/design-flows/propose", json={"intent": "a kitchen cabinet", **_CONTEXT}
+        ).json()
 
         assert body["baseTemplateId"] == "hardware_v1"
         assert body["baseVersion"]
@@ -280,6 +296,7 @@ class TestProposeHoldsForAHuman:
                 "phase": "firmware",
                 "value": None,
                 "rationale": "no firmware in a cabinet",
+                "basis": "",
             }
         ]
         assert "firmware" not in {p["id"] for p in body["flow"]["phases"]}
@@ -300,7 +317,7 @@ class TestProposeHoldsForAHuman:
             raise gen.GeneratorUnavailableError("connection refused")
 
         monkeypatch.setattr(gen, "generate_proposal", unavailable)
-        response = client.post("/v1/design-flows/propose", json={"intent": "a drone"})
+        response = client.post("/v1/design-flows/propose", json={"intent": "a drone", **_CONTEXT})
         assert response.status_code == 503
         assert "no untailored fallback" in response.json()["detail"]
 
