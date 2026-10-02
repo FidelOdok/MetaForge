@@ -31,8 +31,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
+import structlog
+
 from mcp_core.annotations import annotations_for
 from mcp_core.cypher import is_read_only_cypher
+
+logger = structlog.get_logger(__name__)
 
 
 class Caller(StrEnum):
@@ -265,6 +269,11 @@ class ApprovalOutcome(StrEnum):
     #: "no one was looking" and "a person said no" call for different words
     #: to the agent, and conflating them teaches it to retry a refusal.
     TIMED_OUT = "timed_out"
+    #: The hold was closed before anyone answered, by something other than
+    #: its own window: the ledger entry was cancelled (FORGE-465). Not a
+    #: refusal either; the agent should say the hold ended, not that a
+    #: person said no.
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True)
@@ -385,6 +394,45 @@ class ApprovalAsk:
     #: ``twin.commit_geometry`` is told everything except which project it
     #: writes to.
     project: str | None = None
+    #: How long the server wants this hold to wait (FORGE-465). The server
+    #: picks it from whether the client is being sent progress, because
+    #: without progress the client's own tool timeout is the real limit.
+    #: ``None`` leaves the gate's own default. The gate records it on the
+    #: hold, so the ledger's deadline matches what the caller was told.
+    timeout_seconds: float | None = None
+    #: Called once with the ledger id as soon as the hold exists, so the
+    #: server can tell the client which approval it is waiting on rather
+    #: than staying silent until the window closes (FORGE-465). Best-effort:
+    #: a gate must not fail a hold because this raised.
+    on_held: Callable[[str], Awaitable[None]] | None = None
+
+
+def effective_hold_window(gate_timeout: float | None, ask: ApprovalAsk, default: float) -> float:
+    """The window a gate waits for (FORGE-465).
+
+    A gate built with an explicit timeout caps it (tests, and any deployment
+    that pins one). Otherwise the server's choice on the ask wins, and the
+    gate's default applies only when neither said.
+    """
+    asked = ask.timeout_seconds
+    if gate_timeout is None:
+        return asked if asked is not None else default
+    return min(gate_timeout, asked) if asked is not None else gate_timeout
+
+
+async def notify_held(ask: ApprovalAsk, approval_id: str) -> None:
+    """Run ``ask.on_held`` without letting it break the hold."""
+    if ask.on_held is None:
+        return
+    try:
+        await ask.on_held(approval_id)
+    except Exception as exc:  # noqa: BLE001 - a notice must not fail the hold
+        logger.warning(
+            "approval_hold_notice_failed",
+            tool_id=ask.tool_id,
+            approval_id=approval_id,
+            error=str(exc) or type(exc).__name__,
+        )
 
 
 class ApprovalGate(Protocol):
@@ -418,17 +466,58 @@ class ApprovalNotConfiguredError(RuntimeError):
 
 
 class ApprovalRejectedError(RuntimeError):
-    """A human said no."""
+    """A held call ended without approval.
 
-    def __init__(self, tool_id: str, outcome: ApprovalOutcome) -> None:
+    The message names the outcome, the approval id and where the call was
+    waiting (FORGE-465). A bare "was not run" let the agent tell the user
+    MetaForge never asked; this lets it say "held for approval <id>, nobody
+    approved within N s" instead.
+    """
+
+    def __init__(
+        self,
+        tool_id: str,
+        outcome: ApprovalOutcome,
+        *,
+        approval_id: str | None = None,
+        route: str | None = None,
+        where: str | None = None,
+        held_seconds: float | None = None,
+        window_seconds: float | None = None,
+    ) -> None:
         self.tool_id = tool_id
         self.outcome = outcome
-        detail = (
-            "no one answered before the approval window closed"
-            if outcome is ApprovalOutcome.TIMED_OUT
-            else "a reviewer rejected it"
-        )
-        super().__init__(f"{tool_id} was not run: {detail}.")
+        self.approval_id = approval_id
+        self.route = route
+        self.where = where
+        self.held_seconds = held_seconds
+        self.window_seconds = window_seconds
+        if outcome is ApprovalOutcome.TIMED_OUT:
+            within = f" ({window_seconds:.0f}s)" if window_seconds else ""
+            detail = f"no one answered before the approval window closed{within}"
+        elif outcome is ApprovalOutcome.CANCELLED:
+            detail = "the hold was cancelled before anyone answered"
+        else:
+            detail = "a reviewer rejected it"
+        ident = f" approval {approval_id}" if approval_id else ""
+        place = f" on {where}" if where else (f" via {route}" if route else "")
+        held = f"held for{ident}{place}, and " if (ident or place) else ""
+        super().__init__(f"{tool_id} was not run ({outcome.value}): {held}{detail}.")
+
+    def as_data(self) -> dict[str, Any]:
+        """The same facts, structured, for the JSON-RPC error's ``data``."""
+        out: dict[str, Any] = {"outcome": self.outcome.value}
+        if self.approval_id:
+            out["approval_id"] = self.approval_id
+        if self.route:
+            out["route"] = self.route
+        if self.where:
+            out["where"] = self.where
+        if self.held_seconds is not None:
+            out["held_seconds"] = round(self.held_seconds, 3)
+        if self.window_seconds is not None:
+            out["window_seconds"] = self.window_seconds
+        return out
 
 
 ApprovalGateFn = Callable[[ApprovalAsk], Awaitable[ApprovalOutcome | ApprovalResolution]]

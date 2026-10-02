@@ -184,6 +184,9 @@ def _app():
         def attach_elicitor(self, elicitor) -> None:
             pass
 
+        def attach_notifier(self, notifier) -> None:
+            pass
+
         async def handle_request(self, raw: str) -> str:
             message = json.loads(raw)
             return json.dumps({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})

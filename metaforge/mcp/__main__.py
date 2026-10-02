@@ -51,6 +51,7 @@ from mcp_core.protocol import AUTH_DENIED as AUTH_DENIED_CODE
 from metaforge.mcp.http_elicitation import (
     ElicitationHub,
     HttpElicitor,
+    HttpNotifier,
     is_jsonrpc_response,
     session_uuid,
 )
@@ -400,6 +401,7 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
 
     elicitor = StdioElicitor(write_soon)
     server.attach_elicitor(elicitor)
+    server.attach_notifier(_StdioNotifier(write_soon))
 
     in_flight: set[asyncio.Task[None]] = set()
 
@@ -493,6 +495,27 @@ def _session_for_request(headers: dict[str, str], raw_body: bytes) -> str | None
     if _is_initialize(raw_body):
         return str(uuid4())
     return None
+
+
+def _has_progress_token(payload: dict[str, Any]) -> bool:
+    """Whether a request asked for progress (``params._meta.progressToken``)."""
+    params = payload.get("params")
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    return isinstance(meta, dict) and meta.get("progressToken") is not None
+
+
+class _StdioNotifier:
+    """Notifications for the stdio client (FORGE-465). stdout always reaches it."""
+
+    def __init__(self, write: Callable[[str], None]) -> None:
+        self._write = write
+
+    def available(self) -> bool:
+        return True
+
+    def send(self, message: dict[str, Any]) -> bool:
+        self._write(json.dumps(message))
+        return True
 
 
 def _accepts_event_stream(accept: str | None) -> bool:
@@ -657,6 +680,7 @@ def build_http_app(
     # dashboard queue.
     hub = ElicitationHub()
     server.attach_elicitor(HttpElicitor(hub))
+    server.attach_notifier(HttpNotifier(hub))
 
     @app.get("/mcp")
     async def mcp_stream(
@@ -762,12 +786,16 @@ def build_http_app(
         # stream when the client can read one, so the approval question can
         # travel on the call it is about. Claude Code never opens GET /mcp,
         # so without this every held write it made went to the dashboard.
+        #
+        # FORGE-465: a call carrying a progressToken gets the stream too,
+        # whatever the client can elicit, so a write held for the dashboard
+        # can say so on it. Nothing switches to SSE unless something is sent.
         if (
             issued_session is not None
             and isinstance(inbound, dict)
             and inbound.get("method") == "tools/call"
             and _accepts_event_stream(request.headers.get("accept"))
-            and hub.call_stream_allowed(issued_session)
+            and (hub.call_stream_allowed(issued_session) or _has_progress_token(inbound))
         ):
             return await _call_with_stream(raw_body.decode("utf-8"), ctx, issued_session)
 

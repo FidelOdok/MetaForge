@@ -262,9 +262,12 @@ which happened:
 }
 ```
 
-`outcome` is `rejected`, `timed_out` (nobody answered within 180s) or
-`not_configured` (the server holds writes but has no approval gate wired
-— refused rather than run). None is worth retrying without a person
+`outcome` is `rejected`, `timed_out` (nobody answered within the window:
+180s when progress is sent, 100s when not; see
+[While a call waits on the dashboard](claude-code.md#while-a-call-waits-on-the-dashboard)),
+`cancelled` (the hold was closed before anyone answered) or
+`not_configured` (the server holds writes but has no approval gate wired,
+so it refused rather than ran). None is worth retrying without a person
 doing something first.
 
 Running over **stdio on your own machine**, writes are not held by

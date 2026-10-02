@@ -316,6 +316,9 @@ def client():
         def attach_elicitor(self, elicitor) -> None:
             self.elicitor = elicitor
 
+        def attach_notifier(self, notifier) -> None:
+            pass
+
         async def handle_request(self, raw: str) -> str:
             return '{"jsonrpc":"2.0","id":"health","result":{"status":"ok"}}'
 
@@ -347,6 +350,9 @@ def test_http_app_declares_oauth_posture() -> None:
         # inline approvals silently -- which was the bug.
         def attach_elicitor(self, elicitor) -> None:
             self.elicitor = elicitor
+
+        def attach_notifier(self, notifier) -> None:
+            pass
 
         async def handle_request(self, raw: str) -> str:
             return "{}"
