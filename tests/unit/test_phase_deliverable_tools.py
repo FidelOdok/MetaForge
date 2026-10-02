@@ -74,7 +74,7 @@ def test_set_disciplines_widens_but_never_drops_the_core_discipline() -> None:
 
 
 def test_deliverable_tools_are_never_dropped_and_discipline_tools_go_first() -> None:
-    deliverables = ("simulation_result", "cad_model")
+    deliverables = ("simulation_result", "bom")
     must = PHASE_COMMON | deliverable_tools(deliverables)
     tools = tools_for_phase(("mechanical", "simulation", "electronics", "robotics"), deliverables)
     assert must <= tools
@@ -121,3 +121,18 @@ async def test_search_tools_says_unavailable_when_phase_is_at_cap() -> None:
 
 async def _noop(arguments: dict[str, Any]) -> Any:
     return {}
+
+
+def test_must_keep_tools_over_budget_raise_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp_core import profiles
+
+    monkeypatch.setattr(profiles, "PHASE_MCP_BUDGET", 5)
+    with pytest.raises(profiles.PhaseToolBudgetError, match="phase budget"):
+        profiles.tools_for_phase((), ("cad_model",))
+
+
+def test_cad_model_plus_simulation_result_exceeds_the_budget_today() -> None:
+    from mcp_core import profiles
+
+    with pytest.raises(profiles.PhaseToolBudgetError):
+        profiles.tools_for_phase((), ("cad_model", "simulation_result"))

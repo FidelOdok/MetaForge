@@ -333,6 +333,16 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
 _LOW_PRIORITY_PREFIXES: tuple[str, ...] = ("gazebo.", "isaac_sim.", "omniverse_usd.", "cadquery.")
 
 
+class PhaseToolBudgetError(ValueError):
+    """The common tools plus the deliverable tools alone exceed the phase budget."""
+
+    def __init__(self, deliverables: list[str], size: int) -> None:
+        super().__init__(
+            f"phase deliverables {deliverables} need {size} always-kept tools, over the "
+            f"{PHASE_MCP_BUDGET}-tool phase budget; split the phase or trim DELIVERABLE_TOOLS"
+        )
+
+
 def _service_refused(tool_id: str) -> bool:
     """Is this tool one the design-flow service caller is always refused?"""
     from mcp_core.guardrails import ARGUMENT_CLASSIFIED, Caller, decide
@@ -362,6 +372,10 @@ def _phase_plan(
 ) -> tuple[frozenset[str], frozenset[str]]:
     """(tools kept, tools dropped) for a phase."""
     must = PHASE_COMMON | deliverable_tools(deliverables)
+    if len(must) > PHASE_MCP_BUDGET:
+        # Never dropped, so the array exceeds the budget: say so loudly rather
+        # than silently truncating a tool the gate needs.
+        raise PhaseToolBudgetError(sorted(deliverables), len(must))
     extra: set[str] = set()
     for d in disciplines:
         profile = DISCIPLINE_PROFILES.get(d.lower())
