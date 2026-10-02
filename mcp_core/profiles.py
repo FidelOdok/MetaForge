@@ -143,15 +143,16 @@ PROFILES: dict[str, frozenset[str]] = {
         "freecad.add_assembly_joint",
         "freecad.add_part_to_assembly",
         "freecad.boolean",
-        # FORGE-494: freecad.chamfer left to freecad.execute_code to make room for
-        # twin.record_document in PHASE_COMMON; a mechanical phase was exactly at
-        # PHASE_MCP_BUDGET.
+        "freecad.chamfer",
         "freecad.close_session",
         "freecad.create_body",
         "freecad.create_primitive",
         "freecad.create_sketch",
         "freecad.describe_session",
-        "freecad.execute_code",
+        # FORGE-494: freecad.execute_code is out of this profile. The design-flow
+        # service caller is refused it (FORGE-492, mcp_core/annotations.py keeps
+        # it destructive), so it was a dead slot, and the slot makes room for
+        # twin.record_document in PHASE_COMMON at PHASE_MCP_BUDGET.
         "freecad.export_model",
         "freecad.fillet",
         "freecad.measure",
