@@ -6,6 +6,7 @@ and lifecycle hooks.  Run with ``uvicorn api_gateway.server:app``.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -1861,6 +1862,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # refused until it does, and health.check reports it meanwhile.
         logger.warning("model_route_provider_unconfigured", problem=problem)
     await _init_orchestrator(app)
+    # FORGE-485: runs restored from the ledger read `queued` whatever their
+    # workflow is doing. Reconcile in the background so a slow or absent
+    # Temporal never delays start-up; reads reconcile on demand as well.
+    from api_gateway.runs.routes import run_reconcile_loop
+
+    reconcile_task = asyncio.create_task(run_reconcile_loop())
+    app.state.run_reconcile_task = reconcile_task
     from api_gateway.twin.file_watcher import file_watcher
 
     if hasattr(app.state, "twin"):
@@ -1868,6 +1876,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await file_watcher.start()
     yield
     logger.info("gateway_stopping")
+    reconcile_task.cancel()
     await file_watcher.stop()
     if hasattr(app.state, "tool_registry"):
         await app.state.tool_registry.close_all()

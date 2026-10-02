@@ -188,6 +188,102 @@ def init_run_ledger(ledger: SqliteRunLedger | None) -> None:
     logger.info("run_ledger_wired", restored=restored)
 
 
+#: How long a read waits for the workflow to answer a state query. A query is
+#: answered by a worker, so with none running it would otherwise hang the read.
+_RECONCILE_TIMEOUT_SECONDS = 5.0
+
+#: Workflow statuses that map one to one onto a run status.
+_ENGINE_STATUSES = {
+    RunStatus.RUNNING.value,
+    RunStatus.AWAITING_APPROVAL.value,
+    RunStatus.COMPLETED.value,
+    RunStatus.FAILED.value,
+    RunStatus.REJECTED.value,
+}
+
+
+def _gate_reason_text(state: dict[str, Any]) -> str:
+    gate = str(state.get("awaiting_gate") or "")
+    reason = str(state.get("gate_reason") or "")
+    if gate and reason:
+        return f"Gate '{gate}': {reason}"
+    return f"Gate '{gate}'" if gate else reason
+
+
+async def _reconcile_run(run: Run) -> Run:
+    """Align a live Temporal run's record with its workflow (FORGE-485).
+
+    The workflow is the authority on where a run is. The gateway's record is a
+    cache of it that a restart rebuilds from the ledger, which only remembers
+    ``queued``. Left alone, a run parked at a gate reads ``queued`` and its
+    approval is refused with a 409, so nobody can answer it.
+
+    Best effort and read-only toward Temporal: if the workflow cannot be asked
+    (no worker, engine down) the record is left exactly as it was. Guessing a
+    status from silence is how a record ends up confidently wrong.
+    """
+    if run.is_terminal or not _is_design_flow(run.request):
+        return run
+    if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+        return run
+    if resolve_flow_engine() is not FlowEngine.TEMPORAL:
+        return run
+    try:
+        launcher = await get_flow_launcher()
+        state = await asyncio.wait_for(launcher.state(run.id), _RECONCILE_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - a read must not fail because the engine is away
+        logger.info("run_reconcile_skipped", run_id=run.id, error=str(exc))
+        return run
+    status = str(state.get("status") or "")
+    if status not in _ENGINE_STATUSES:
+        return run
+    reason = _gate_reason_text(state) if status == RunStatus.AWAITING_APPROVAL.value else None
+    error = str(state["error"]) if status in {"failed", "rejected"} and state.get("error") else None
+    try:
+        return _store.reconcile(run.id, RunStatus(status), approval_reason=reason, error=error)
+    except RunNotFoundError:
+        return run
+
+
+async def reconcile_live_runs() -> int:
+    """Reconcile every non-terminal design-flow run; returns how many changed.
+
+    Run once at start-up so the list and the Approvals page are right before
+    anyone opens a single run. Reads reconcile too, so a run the workflow
+    reached after this pass is still caught.
+    """
+    changed = 0
+    for run in list(_store.list()):
+        if run.is_terminal:
+            continue
+        before = (run.status, run.approval_reason)
+        after = await _reconcile_run(run)
+        if (after.status, after.approval_reason) != before:
+            changed += 1
+    logger.info("runs_reconciled", changed=changed)
+    return changed
+
+
+#: Seconds between background reconcile passes over live Temporal runs.
+RECONCILE_INTERVAL_SECONDS = 5.0
+
+
+async def run_reconcile_loop(interval: float = RECONCILE_INTERVAL_SECONDS) -> None:
+    """Keep live runs' records in step with their workflows, indefinitely.
+
+    The workflow runs in another process and cannot call back into this
+    one, so the gateway polls. Reads and the approval route reconcile as
+    well; this loop is what keeps the record right when nobody is looking,
+    which is when a phase's own writes check it.
+    """
+    while True:
+        try:
+            await reconcile_live_runs()
+        except Exception as exc:  # noqa: BLE001 - the loop must outlive one bad pass
+            logger.warning("run_reconcile_pass_failed", error=str(exc))
+        await asyncio.sleep(interval)
+
+
 def reset_run_store() -> None:
     global _store, _stream_manager, _gate_coordinator, _ledger
     _stream_manager = RunStreamManager()
@@ -614,6 +710,10 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
         if engine is FlowEngine.TEMPORAL:
             try:
                 await _start_on_temporal(run.id)
+                # FORGE-485: the workflow is running from here on. Leaving the
+                # record `queued` made every write the run's phases attempted
+                # get refused ("run is queued, not running").
+                _store.start(run.id)
             except FlowVersionNotApprovedError as exc:
                 _store.delete(run.id)
                 logger.warning("design_flow_version_not_approved", run_id=run.id, error=str(exc))
@@ -682,7 +782,9 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
 
 
 @router.get("", response_model=RunListResponse)
-def list_runs() -> RunListResponse:
+async def list_runs() -> RunListResponse:
+    for run in list(_store.list()):
+        await _reconcile_run(run)
     return RunListResponse(runs=[RunResponse.from_run(r) for r in _store.list()])
 
 
@@ -693,9 +795,9 @@ def get_usage_summary(window_hours: float = 24.0) -> dict[str, Any]:
 
 
 @router.get("/{run_id}", response_model=RunResponse)
-def get_run(run_id: str) -> RunResponse:
+async def get_run(run_id: str) -> RunResponse:
     try:
-        response = RunResponse.from_run(_store.get(run_id))
+        response = RunResponse.from_run(await _reconcile_run(_store.get(run_id)))
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
     response.usage = run_usage(run_id)
@@ -941,6 +1043,13 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
     The deciding human comes from the request, never the body (FORGE-393).
     """
     approver = approver_from_request(request)
+    # FORGE-485: the workflow decides whether a gate is open, not the local
+    # record. After a restart that record says `queued` while the workflow
+    # waits, and refusing on it leaves a gate nobody can answer.
+    try:
+        await _reconcile_run(_store.get(run_id))
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
     try:
         run = _store.submit_approval(
             run_id,
