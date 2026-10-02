@@ -2031,7 +2031,10 @@ class UnifiedMcpServer:
         from orchestrator.harness.providers.routing import effective_routing
 
         try:
-            return {"available": True, **effective_routing()}
+            view = effective_routing()
+            # Routes whose provider has no credentials are named here, not
+            # dropped: a role the operator routed would otherwise look healthy.
+            return {"available": True, "status": "degraded" if view["problems"] else "ok", **view}
         except Exception as exc:  # noqa: BLE001 - health must never fail on routing
             return {"available": False, "reason": str(exc)}
 

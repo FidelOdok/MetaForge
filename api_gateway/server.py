@@ -1841,9 +1841,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("gateway_starting", version="0.1.0", otel_active=_otel_state.is_active)
     # FORGE-477: a bad model route refuses to boot, rather than failing on the
     # first call that happens to use it. Raises RoutingConfigError.
-    from orchestrator.harness.providers.routing import routing_table
+    from orchestrator.harness.providers.routing import routing_problems, routing_table
 
     routing_table()
+    for problem in routing_problems():
+        # Not fatal: a login can arrive after boot. Calls on that route are
+        # refused until it does, and health.check reports it meanwhile.
+        logger.warning("model_route_provider_unconfigured", problem=problem)
     await _init_orchestrator(app)
     from api_gateway.twin.file_watcher import file_watcher
 

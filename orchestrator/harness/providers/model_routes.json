@@ -1,12 +1,5 @@
 {
-  "_comment": "Per-role model routes (FORGE-477). Each value is {provider, model}. A role with no route here uses the durable harness selection (PUT /v1/harness/selection). Override per deployment with METAFORGE_MODEL_ROUTES_PATH (a file of the same shape) or METAFORGE_ROUTE_<ROLE>=provider:model (role upper-cased, ':' and '-' as '_', e.g. METAFORGE_ROUTE_PHASE_BRAIN_MECHANICAL). A project can carry its own routes under projects.<project_id>.roles. Every route is checked at load with the provider/model family rule (FORGE-468); a bad route refuses to load.",
-  "roles": {
-    "flow_generator": {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"},
-    "gate_check": {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"},
-    "classification": {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"},
-    "summarisation": {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"},
-    "phase_brain:mechanical": {"provider": "anthropic", "model": "claude-opus-4-8"},
-    "phase_brain:simulation": {"provider": "anthropic", "model": "claude-opus-4-8"}
-  },
+  "_comment": "Per-role model routes (FORGE-477). Empty by default: routing is opt-in per deployment, and every role uses the durable harness selection (PUT /v1/harness/selection). See model_routes.example.json and docs/architecture/robust-harness-design.md.",
+  "roles": {},
   "projects": {}
 }

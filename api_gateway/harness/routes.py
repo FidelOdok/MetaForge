@@ -117,6 +117,14 @@ def _is_configured(profile: registry.ProviderProfile) -> bool:
     return bool(key)
 
 
+def provider_is_configured(provider_id: str) -> bool:
+    """Whether ``provider_id`` has credentials here; the check behind /providers."""
+    try:
+        return _is_configured(registry.get_profile(provider_id))
+    except registry.UnknownProviderError:
+        return False
+
+
 @router.get("/providers", response_model=ProvidersResponse)
 async def list_providers() -> ProvidersResponse:
     """List registered providers (configured ones first) + the active selection."""
@@ -184,6 +192,9 @@ async def list_providers() -> ProvidersResponse:
 class RouteInfo(BaseModel):
     provider: str
     model: str
+    #: False when the route's provider has no credentials here. Such a route is
+    #: refused at call time, not used and not skipped.
+    configured: bool = True
 
 
 class RoutingResponse(BaseModel):
@@ -191,6 +202,8 @@ class RoutingResponse(BaseModel):
 
     roles: dict[str, RouteInfo] = Field(default_factory=dict)
     projects: dict[str, dict[str, RouteInfo]] = Field(default_factory=dict)
+    #: Routes that would be refused (unconfigured provider). Empty when healthy.
+    problems: list[str] = Field(default_factory=list)
     #: Only when ``project_id`` is given: the table with that project's routes applied.
     effective_for_project: dict[str, RouteInfo] | None = None
     #: What a role with no route runs on: the durable selection, else env.
@@ -217,6 +230,7 @@ async def get_routing(project_id: str | None = Query(default=None)) -> RoutingRe
     return RoutingResponse(
         roles=view["roles"],
         projects=view["projects"],
+        problems=view["problems"],
         effective_for_project=view.get("effective_for_project"),
         default_provider=default.active_provider,
         default_model=default.active_model,

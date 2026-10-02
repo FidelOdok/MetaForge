@@ -56,6 +56,8 @@ __all__ = [
     "current_routing",
     "effective_routing",
     "load_routing_table",
+    "provider_unconfigured",
+    "routing_problems",
     "parse_route_ref",
     "resolve_route",
     "routing_scope",
@@ -307,6 +309,51 @@ def _role_candidates(role: str, disciplines: tuple[str, ...]) -> list[str]:
     return [role]
 
 
+def provider_unconfigured(provider: str) -> str | None:
+    """Why ``provider`` has no credentials on this deployment, or ``None``.
+
+    Uses the check behind ``GET /v1/harness/providers`` (stored login, env key,
+    Codex auth, keyless local servers). Outside the gateway process (no
+    ``api_gateway`` importable) there is nothing to check against, so it passes.
+    """
+    try:
+        from api_gateway.harness.routes import provider_is_configured
+    except ImportError:  # pragma: no cover - orchestrator used on its own
+        return None
+    if provider_is_configured(provider):
+        return None
+    return f"provider '{provider}' has no credentials on this deployment"
+
+
+def _require_configured(resolved: ResolvedRoute) -> ResolvedRoute:
+    """Refuse a route to a provider with no credentials. Never use it quietly
+    (it would 4xx on every call behind the fallback chain) and never skip it
+    quietly (the operator asked for that model)."""
+    reason = provider_unconfigured(resolved.route.provider)
+    if reason is not None:
+        raise RoutingConfigError(
+            f"route for role '{resolved.role}' ({resolved.route.ref()}, from "
+            f"{resolved.source}): {reason}. Log in with `forge auth login`, set its key, "
+            "or remove the route."
+        )
+    return resolved
+
+
+def routing_problems(project_id: str | None = None) -> list[str]:
+    """Every route that would be refused at call time, for health and the routing view."""
+    table = routing_table()
+    entries: list[tuple[str, str, Route]] = [("table", r, v) for r, v in table.roles.items()]
+    for pid, roles in table.projects.items():
+        if project_id is None or pid == project_id:
+            entries += [(f"project {pid}", r, v) for r, v in roles.items()]
+    out = []
+    for source, role, route in entries:
+        reason = provider_unconfigured(route.provider)
+        if reason is not None:
+            out.append(f"{source} route '{role}' ({route.ref()}): {reason}")
+    return out
+
+
 def resolve_route(role: str | None = None) -> ResolvedRoute | None:
     """The route for the current call, or ``None`` to use the durable selection.
 
@@ -319,12 +366,14 @@ def resolve_route(role: str | None = None) -> ResolvedRoute | None:
     scope = _scope.get()
     if scope.phase_model and role == "phase_brain":
         route = validate_route_ref(parse_route_ref(scope.phase_model, "phase model"), "phase model")
-        return ResolvedRoute(route=route, role=role, source="phase")
+        return _require_configured(ResolvedRoute(route=route, role=role, source="phase"))
     table = routing_table()
     for candidate in _role_candidates(role, scope.disciplines):
         found = table.lookup(candidate, project_id=scope.project_id)
         if found is not None:
-            return ResolvedRoute(route=found[0], role=candidate, source=found[1])
+            return _require_configured(
+                ResolvedRoute(route=found[0], role=candidate, source=found[1])
+            )
     return None
 
 
@@ -332,9 +381,19 @@ def effective_routing(project_id: str | None = None) -> dict[str, Any]:
     """The routing as an operator sees it: the table plus the project's routes."""
     table = routing_table()
     out = table.to_dict()
+    out["problems"] = routing_problems(project_id)
+    for entry in out["roles"].values():
+        entry["configured"] = provider_unconfigured(entry["provider"]) is None
+    for roles in out["projects"].values():
+        for entry in roles.values():
+            entry["configured"] = provider_unconfigured(entry["provider"]) is None
     if project_id:
         out["effective_for_project"] = {
-            r: {"provider": v.provider, "model": v.model}
+            r: {
+                "provider": v.provider,
+                "model": v.model,
+                "configured": provider_unconfigured(v.provider) is None,
+            }
             for r, v in {**table.roles, **table.projects.get(project_id, {})}.items()
         }
     return out

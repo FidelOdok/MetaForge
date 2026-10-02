@@ -31,11 +31,17 @@ from orchestrator.harness.providers.routing import (
 )
 from orchestrator.harness.providers.usage import UsageStore, configure_usage_store, usage_scope
 
+EXAMPLE = (
+    Path(__file__).resolve().parents[2] / "orchestrator/harness/providers/model_routes.example.json"
+)
+
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[UsageStore]:
     monkeypatch.setenv("METAFORGE_HARNESS_AUTH_PATH", str(tmp_path / "auth.json"))
-    monkeypatch.delenv("METAFORGE_MODEL_ROUTES_PATH", raising=False)
+    # Routing is opt-in: the example file is what a deployment would copy.
+    monkeypatch.setenv("METAFORGE_MODEL_ROUTES_PATH", str(EXAMPLE))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic")
     for key in [k for k in __import__("os").environ if k.startswith("METAFORGE_ROUTE_")]:
         monkeypatch.delenv(key)
     monkeypatch.setenv("METAFORGE_LLM_PROVIDER", "openai")
@@ -200,8 +206,9 @@ def test_unset_phase_model_keeps_frozen_hash_stable() -> None:
 def test_routing_endpoint_and_health(_isolated: UsageStore) -> None:
     from api_gateway.server import create_app
 
-    with TestClient(create_app()) as client:
-        body = client.get("/v1/harness/routing", params={"project_id": "p1"}).json()
+    # No lifespan: it would install a global MCP bridge other tests see.
+    client = TestClient(create_app())
+    body = client.get("/v1/harness/routing", params={"project_id": "p1"}).json()
     assert body["roles"]["flow_generator"]["model"] == "claude-haiku-4-5-20251001"
     assert body["effective_for_project"]["phase_brain:mechanical"]["model"] == "claude-opus-4-8"
     assert "chat" not in body["roles"]
@@ -210,3 +217,37 @@ def test_routing_endpoint_and_health(_isolated: UsageStore) -> None:
 
     report = UnifiedMcpServer._model_routing_report()
     assert report["available"] is True and "flow_generator" in report["roles"]
+
+
+def test_shipped_default_has_no_routes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("METAFORGE_MODEL_ROUTES_PATH")
+    assert load_routing_table().roles == {}
+    assert resolve_route("flow_generator") is None
+
+
+async def test_unconfigured_provider_route_is_refused_not_used_or_skipped(
+    _isolated: UsageStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    with usage_scope(run_id="r5", role="flow_generator"):
+        with pytest.raises(RoutingConfigError, match="no credentials"):
+            await _turn()
+    assert _isolated.run_totals("r5") is None  # no call was made on any model
+
+    from api_gateway.server import create_app
+    from metaforge.mcp.server import UnifiedMcpServer
+
+    # No lifespan: it would install a global MCP bridge other tests see.
+    client = TestClient(create_app())
+    body = client.get("/v1/harness/routing").json()
+    assert body["roles"]["flow_generator"]["configured"] is False
+    assert any("flow_generator" in p for p in body["problems"])
+    report = UnifiedMcpServer._model_routing_report()
+    assert report["status"] == "degraded" and report["problems"]
+
+
+def test_configured_routes_report_healthy() -> None:
+    from metaforge.mcp.server import UnifiedMcpServer
+
+    report = UnifiedMcpServer._model_routing_report()
+    assert report["status"] == "ok" and report["problems"] == []

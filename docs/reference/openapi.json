@@ -7358,6 +7358,11 @@
       },
       "RouteInfo": {
         "properties": {
+          "configured": {
+            "default": true,
+            "title": "Configured",
+            "type": "boolean"
+          },
           "model": {
             "title": "Model",
             "type": "string"
@@ -7412,6 +7417,13 @@
               }
             ],
             "title": "Effective For Project"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
           },
           "projects": {
             "additionalProperties": {

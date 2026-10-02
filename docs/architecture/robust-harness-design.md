@@ -281,12 +281,15 @@ to a `provider:model` route. Roles are `flow_generator`, `phase_brain`,
 `phase_brain:<discipline>`, `gate_check`, `classification`, `summarisation` and
 `chat`; the role is the one FORGE-476's `usage_scope` already attributes.
 
-Defaults: the cheap, fast model (`claude-haiku-4-5-20251001`) for
-`flow_generator`, `gate_check`, `classification` and `summarisation`, and the
-strong model (`claude-opus-4-8`) for `phase_brain:mechanical` and
-`phase_brain:simulation`. A role with no route, including plain `phase_brain`
-and `chat`, runs on the durable harness selection (`PUT /v1/harness/selection`),
-then env, exactly as before. Today `gate_check` and `summarisation` make no
+Routing is opt-in per deployment. The shipped `model_routes.json` has no
+routes, so every role runs on the durable harness selection
+(`PUT /v1/harness/selection`), then env, exactly as before. A suggested split
+lives in `providers/model_routes.example.json` (it is not loaded): the cheap,
+fast model (`claude-haiku-4-5-20251001`) for `flow_generator`, `gate_check`,
+`classification` and `summarisation`, and the strong model (`claude-opus-4-8`)
+for `phase_brain:mechanical` and `phase_brain:simulation`. Copy it, edit it to
+providers the deployment has credentials for, and point
+`METAFORGE_MODEL_ROUTES_PATH` at it. Today `gate_check` and `summarisation` make no
 model call (gates and trajectory summaries are deterministic); the routes exist
 so the first model-backed check or summary lands on the cheap model.
 
@@ -315,6 +318,15 @@ model cannot work fails the `phase-model-routable` invariant (the generator
 drops that one operation instead), and the Temporal worker treats it as a
 non-retryable failure. A routed primary keeps the usual fallback chain behind
 it.
+
+Credentials: a route to a provider with no credentials on the deployment (the
+same check `GET /v1/harness/providers` reports as `configured`) is refused, not
+used and not skipped. At call time it raises `RoutingConfigError` naming the
+role, route and provider; at gateway start it is logged as
+`model_route_provider_unconfigured` without blocking boot, since a login can
+arrive later; `GET /v1/harness/routing` marks each route `configured` and lists
+`problems`, and `health.check` reports `model_routing.status: degraded` with
+the same list.
 
 Provenance: each resolution logs `llm_route_resolved` with role, source
 (`phase`, `project` or `table`), provider and model, and the usage event for the
