@@ -140,6 +140,37 @@ BOOKKEEPING: frozenset[str] = frozenset(
 )
 
 
+#: Tools that write, but whose write is itself held for a human, or is only
+#: allowed by an approval a human already gave (FORGE-471).
+#:
+#: Holding the *call* on these asked the same person the same question twice,
+#: and before anything useful could happen:
+#:
+#: * ``flow.propose`` writes a flow version in ``proposed`` and parks an
+#:   approval for it. That approval is the review: nothing runs until a person
+#:   answers it. Holding the call first meant a full proposal needed two
+#:   approvals, and an intent-only call, whose answer is ``needs_input``
+#:   questions and writes nothing at all (FORGE-463), timed out waiting for a
+#:   person before the user could even be asked.
+#: * ``flow.start_run`` starts a run on a flow version. ``POST /v1/runs``
+#:   refuses any version that is not approved with 409, on every engine, so
+#:   the version approval is the authorisation. A call-level hold added
+#:   nothing: approving the call cannot make an unapproved version start, and
+#:   for an approved one it only asked again.
+#:
+#: ``run.start_design_flow`` is deliberately not here. It starts a built-in
+#: template, which has no per-run version approval behind it, so the call hold
+#: is the only consent that run gets.
+#:
+#: Like ``BOOKKEEPING`` these keep ``readOnlyHint: false``: they do write.
+DOWNSTREAM_APPROVED: frozenset[str] = frozenset(
+    {
+        "flow.propose",
+        "flow.start_run",
+    }
+)
+
+
 #: Tools whose approval depends on the *call*, not the tool.
 #:
 #: `twin.query_cypher` is one tool that is either a read or a write depending
@@ -230,6 +261,13 @@ def decide(
             tool_id,
             False,
             "records the agent's own activity, not design state",
+        )
+
+    if tool_id in DOWNSTREAM_APPROVED:
+        return Decision(
+            tool_id,
+            False,
+            "its write is approved on the flow version it proposes or starts, not on the call",
         )
 
     if requires_human_authority(tool_id):

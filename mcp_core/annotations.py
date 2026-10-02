@@ -146,7 +146,9 @@ CONDITIONALLY_READ_ONLY: frozenset[str] = frozenset({"twin.query_cypher"})
 ADDITIVE: frozenset[str] = frozenset(
     {
         # FORGE-400. `flow.propose` writes a flow version and an approval
-        # entry; `flow.start_run` starts real work. Both are held.
+        # entry; `flow.start_run` starts real work. Both write, so neither is
+        # read-only. Neither is held at the call either (FORGE-471): the
+        # approval is on the flow version, see `guardrails.DOWNSTREAM_APPROVED`.
         #
         # Additive rather than destructive: neither overwrites anything, and
         # marking them destructive would tell a reviewer this might remove

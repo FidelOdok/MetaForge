@@ -122,9 +122,9 @@ that any of it existed. Four MCP tools and a run resource change that.
 | Tool | |
 | --- | --- |
 | `flow.list` | the catalogue, as the gateway will run it (read) |
-| `flow.propose` | tailor a template to an intent — **held write** |
+| `flow.propose` | tailor a template to an intent; the version it writes is **held** for a person, the call is not (FORGE-471) |
 | `flow.status` | phase state for one run (read) |
-| `flow.start_run` | start a run on an **approved** version — held write |
+| `flow.start_run` | start a run on an **approved** version; refused with 409 otherwise, so the call is not held (FORGE-471) |
 
 Plus `metaforge://flow/run/{id}`, the run as markdown for a client with no
 canvas, and a `/metaforge:flow` prompt.
