@@ -61,7 +61,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 provider fallback (FORGE-468) + 1 approval resolution (FORGE-466)
         # + 1 approval gate without runtime (FORGE-469)
         # + 1 iteration gate without approval workflow (FORGE-470)
-        assert len(all_metrics) == 62
+        # + 4 LLM token/cost accounting (FORGE-476)
+        assert len(all_metrics) == 66
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -75,9 +76,10 @@ class TestMetricsRegistryGroupedAccess:
     def test_kafka_metrics_returns_5(self) -> None:
         assert len(MetricsRegistry.kafka_metrics()) == 5
 
-    def test_harness_metrics_returns_7(self) -> None:
-        # +1 provider fallback (FORGE-468), +1 approval resolution (FORGE-466)
-        assert len(MetricsRegistry.harness_metrics()) == 7
+    def test_harness_metrics_returns_11(self) -> None:
+        # +1 provider fallback (FORGE-468), +1 approval resolution (FORGE-466),
+        # +4 LLM token/cost accounting (FORGE-476)
+        assert len(MetricsRegistry.harness_metrics()) == 11
 
     def test_all_metrics_equals_sum_of_groups(self) -> None:
         total = (

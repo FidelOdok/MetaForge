@@ -270,7 +270,7 @@ class TestAllMetricsCombined:
         # + 1 provider fallback (FORGE-468) + 1 approval resolution (FORGE-466)
         # + 1 approval gate without runtime (FORGE-469)
         # + 1 iteration gate without approval workflow (FORGE-470)
-        assert len(MetricsRegistry.all_metrics()) == 62
+        assert len(MetricsRegistry.all_metrics()) == 66
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

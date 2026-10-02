@@ -122,6 +122,20 @@ groups:
           summary: "Harness role {{ $labels.role }} is running on fallback {{ $labels.fallback }}, not primary {{ $labels.primary }}"
           description: "For 15m, {{ $labels.role }} calls have been served by {{ $labels.fallback }} because the primary {{ $labels.primary }} failed or was rejected. The configured model is not the one producing output. Check GET /v1/harness/providers (lastFallback) and the harness_provider_fallback log event."
 
+      # FORGE-476: a run whose accumulated LLM spend crossed the threshold
+      # (METAFORGE_RUN_SPEND_ALERT_USD, default 5). Per-run cost is not a
+      # metric label, so the gateway bumps this counter once per run at the
+      # crossing; the run id is in the llm_run_spend_exceeded log event.
+      - alert: LlmRunawaySpendPerRun
+        expr: |
+          sum(increase(metaforge_llm_run_spend_exceeded_total[15m])) by (role) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A run's LLM spend crossed the runaway threshold (role {{ $labels.role }})"
+          description: "At least one run spent more than the per-run LLM threshold in the last 15m. Find it with the llm_run_spend_exceeded log event, then read GET /v1/runs/{id} usage for the per-phase and per-role breakdown."
+
       # FORGE-466: a held approval whose waiter stopped waiting must be closed,
       # or the Approvals page offers a button for a call nobody is waiting
       # for. result="failed" means the sidecar cannot reach the ledger to

@@ -30,6 +30,7 @@ from orchestrator.design_flow.generator import (
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FLOWS, get_flow
 from orchestrator.design_flow.templates import load_templates
 from orchestrator.harness.providers.provenance import capture_served
+from orchestrator.harness.providers.usage import usage_scope
 
 logger = structlog.get_logger(__name__)
 
@@ -184,7 +185,7 @@ async def generate_proposal(request: TailoringRequest) -> FlowProposal:
         # FORGE-468: record which provider/model actually answered. The
         # configured one may not have: the pipeline falls back silently from
         # the caller's point of view, and run_chat_turn returns only text.
-        with capture_served() as served:
+        with capture_served() as served, usage_scope(role="flow_generator"):
             reply = await run_chat_turn(
                 prompt,
                 mcp_bridge=None,
@@ -269,15 +270,16 @@ async def suggest_extra_questions(
         max_questions=MAX_EXTRA_QUESTIONS,
     )
     try:
-        reply = await run_chat_turn(
-            prompt,
-            mcp_bridge=None,
-            session_id="flow-generator-questions",
-            max_steps=1,
-            provider=provider,
-            model=model,
-            metrics=get_metrics(),
-        )
+        with usage_scope(role="flow_generator"):
+            reply = await run_chat_turn(
+                prompt,
+                mcp_bridge=None,
+                session_id="flow-generator-questions",
+                max_steps=1,
+                provider=provider,
+                model=model,
+                metrics=get_metrics(),
+            )
     except Exception as exc:  # noqa: BLE001 -- reported, never swallowed
         logger.warning("flow_generator_questions_unreachable", error=str(exc))
         raise GeneratorUnavailableError(str(exc)) from exc

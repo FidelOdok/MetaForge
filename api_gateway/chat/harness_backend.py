@@ -12,6 +12,7 @@ network; production defaults to the real provider adapters.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -58,6 +59,7 @@ from orchestrator.harness.providers.registry import (
     model_family_mismatch,
     validate_model,
 )
+from orchestrator.harness.providers.usage import usage_scope
 from orchestrator.harness.react import ReActStep, run_react
 from orchestrator.harness.runtime import OnApprovalRequest
 from orchestrator.harness.tools import DuplicateToolError, Handler, ToolRegistry
@@ -1151,7 +1153,19 @@ def _flag_if_unfounded_completion_claim(answer: str, steps: list[ReActStep]) -> 
     )
 
 
-async def run_chat_turn(
+def _attributed_as_chat(fn: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
+    """FORGE-476: model calls in this turn are role ``chat`` unless a caller
+    already attributed them (a design-flow phase brain sets ``phase_brain``)."""
+
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> str:
+        with usage_scope(default_role="chat"):
+            return await fn(*args, **kwargs)
+
+    return wrapper
+
+
+async def _run_chat_turn(
     user_content: str,
     *,
     invoke: Invoke = default_invoke,
@@ -1299,6 +1313,8 @@ async def run_chat_turn(
     )
     return answer
 
+
+run_chat_turn = _attributed_as_chat(_run_chat_turn)
 
 _FALLBACK_ANSWER = "I couldn't converge on an answer within the step budget."
 _STREAM_CHUNK_CHARS = 48
@@ -1536,6 +1552,7 @@ def compute_context_stats(
     }
 
 
+@_attributed_as_chat
 async def run_chat_turn_streaming(
     user_content: str,
     *,

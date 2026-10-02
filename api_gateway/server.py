@@ -1495,6 +1495,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from orchestrator.harness.ledger import SqliteRunLedger, default_ledger_path
 
         init_run_ledger(SqliteRunLedger(str(default_ledger_path())))
+        # FORGE-476: token and cost accounting shares the ledger's directory.
+        from orchestrator.harness.providers.usage import ensure_usage_store
+
+        ensure_usage_store()
     # FORGE-89: same gap as above but for the chat tool-approval queue
     # (api_gateway/chat/tool_approvals.py), which had zero durability at
     # all — an in-flight approval record vanished on every gateway restart

@@ -90,16 +90,37 @@ def default_max_output_tokens() -> int:
 
 def _usage_from(
     obj: Any, in_key: str = "input_tokens", out_key: str = "output_tokens"
-) -> dict[str, int] | None:
-    """Best-effort {input_tokens, output_tokens} from a provider usage object (MET-596)."""
+) -> dict[str, int | bool] | None:
+    """Best-effort usage dict from a provider usage object (MET-596, FORGE-476).
+
+    Always carries ``input_tokens`` and ``output_tokens``. Cache fields appear
+    only when the provider reports them: Anthropic's ``cache_read_input_tokens``
+    and ``cache_creation_input_tokens`` (its ``input_tokens`` excludes both), and
+    OpenAI-compatible ``prompt_tokens_details.cached_tokens`` (already inside
+    ``prompt_tokens``, flagged with ``input_includes_cached``).
+    """
     u = getattr(obj, "usage", None)
     if u is None:
         return None
     try:
-        return {
+        out: dict[str, int | bool] = {
             "input_tokens": int(getattr(u, in_key, 0) or 0),
             "output_tokens": int(getattr(u, out_key, 0) or 0),
         }
+        read = getattr(u, "cache_read_input_tokens", None)
+        created = getattr(u, "cache_creation_input_tokens", None)
+        if isinstance(read, int):
+            out["cached_input_tokens"] = read
+        if isinstance(created, int):
+            out["cache_creation_input_tokens"] = created
+        details = getattr(u, "prompt_tokens_details", None) or getattr(
+            u, "input_tokens_details", None
+        )
+        cached = getattr(details, "cached_tokens", None)
+        if isinstance(cached, int):
+            out["cached_input_tokens"] = cached
+            out["input_includes_cached"] = True
+        return out
     except (TypeError, ValueError):
         return None
 
@@ -429,7 +450,22 @@ async def gemini_invoke(
         raise
     except Exception as exc:  # noqa: BLE001 - classify SDK errors into ProviderError
         raise _classify_error(exc) from exc
-    return {"text": getattr(resp, "text", "") or "", "model": spec.model}
+    out: dict[str, Any] = {"text": getattr(resp, "text", "") or "", "model": spec.model}
+    meta = getattr(resp, "usage_metadata", None)
+    if meta is not None:
+        try:
+            gem: dict[str, int | bool] = {
+                "input_tokens": int(getattr(meta, "prompt_token_count", 0) or 0),
+                "output_tokens": int(getattr(meta, "candidates_token_count", 0) or 0),
+                "input_includes_cached": True,
+            }
+            cached = getattr(meta, "cached_content_token_count", None)
+            if isinstance(cached, int):
+                gem["cached_input_tokens"] = cached
+            out["usage"] = gem
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 async def _codex_refresh_post(url: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -463,7 +499,11 @@ def _codex_client(credentials: Any) -> Any:
 
 
 async def _codex_stream_deltas(
-    client: Any, spec: ProviderSpec, system: str | None, input_text: str
+    client: Any,
+    spec: ProviderSpec,
+    system: str | None,
+    input_text: str,
+    usage_out: dict[str, int | bool] | None = None,
 ) -> AsyncIterator[str]:
     """Open the codex Responses stream and yield ``output_text.delta`` chunks.
 
@@ -483,6 +523,11 @@ async def _codex_stream_deltas(
         etype = getattr(event, "type", "")
         if etype == "response.output_text.delta":
             yield getattr(event, "delta", "") or ""
+        elif etype == "response.completed" and usage_out is not None:
+            # FORGE-476: the Responses API reports usage on the final event.
+            found = _usage_from(getattr(event, "response", None))
+            if found:
+                usage_out.update(found)
         elif etype in ("response.incomplete", "response.failed"):
             # MET-614: a length-capped or failed response used to return
             # silently truncated text, which downstream parses as a malformed
@@ -503,8 +548,12 @@ async def _codex_stream_deltas(
 async def _codex_call(
     client: Any, spec: ProviderSpec, system: str | None, input_text: str
 ) -> dict[str, Any]:
-    parts = [delta async for delta in _codex_stream_deltas(client, spec, system, input_text)]
-    return {"text": "".join(parts), "model": spec.model}
+    usage: dict[str, int | bool] = {}
+    parts = [delta async for delta in _codex_stream_deltas(client, spec, system, input_text, usage)]
+    result: dict[str, Any] = {"text": "".join(parts), "model": spec.model}
+    if usage:
+        result["usage"] = usage
+    return result
 
 
 async def codex_invoke(
@@ -643,7 +692,14 @@ async def bedrock_invoke(
     except Exception as exc:  # noqa: BLE001 - classify boto errors into ProviderError
         raise _classify_bedrock_error(exc) from exc
     text = resp["output"]["message"]["content"][0]["text"]
-    return {"text": text, "model": spec.model}
+    result: dict[str, Any] = {"text": text, "model": spec.model}
+    raw_usage = resp.get("usage") if isinstance(resp, dict) else None
+    if isinstance(raw_usage, dict):
+        result["usage"] = {
+            "input_tokens": int(raw_usage.get("inputTokens", 0) or 0),
+            "output_tokens": int(raw_usage.get("outputTokens", 0) or 0),
+        }
+    return result
 
 
 # Provider-family dispatch by ProviderSpec.name.
@@ -878,7 +934,7 @@ async def openai_stream_events(
     text_parts: list[str] = []
     acc: dict[int, dict[str, str]] = {}
     announced: set[int] = set()
-    usage: dict[str, int] | None = None
+    usage: dict[str, int | bool] | None = None
     try:
         stream = await client.chat.completions.create(**kwargs)
         async for chunk in stream:

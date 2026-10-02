@@ -49,6 +49,7 @@ from orchestrator.design_flow.spec import (
 )
 from orchestrator.design_flow.versions import VersionNotFoundError, get_version_store
 from orchestrator.harness.ledger import SqliteRunLedger
+from orchestrator.harness.providers.usage import ensure_usage_store, run_usage, usage_report
 from orchestrator.harness.runs import (
     ApprovalDecision,
     InMemoryRunStore,
@@ -274,6 +275,9 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
     from api_gateway.twin.geometry_recorder import make_geometry_recorder
     from api_gateway.twin.routes import get_twin
 
+    # FORGE-476: the Temporal worker is a separate process; opening the shared
+    # usage store here lets its phases record next to the gateway's.
+    ensure_usage_store()
     bridge = get_mcp_bridge()
     project_backend = get_project_backend()
     recorder = make_geometry_recorder(get_twin(), project_backend)
@@ -316,7 +320,7 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
         }
     else:
         handlers = {}
-    return HybridBrain(handlers=handlers, fallback=react)
+    return HybridBrain(handlers=handlers, fallback=react, run_id=run_id)
 
 
 class _GateCheckers:
@@ -671,12 +675,20 @@ def list_runs() -> RunListResponse:
     return RunListResponse(runs=[RunResponse.from_run(r) for r in _store.list()])
 
 
+@router.get("/usage/summary")
+def get_usage_summary(window_hours: float = 24.0) -> dict[str, Any]:
+    """LLM tokens and cost across all runs for the trailing window (FORGE-476)."""
+    return usage_report(window_hours * 3600.0)
+
+
 @router.get("/{run_id}", response_model=RunResponse)
 def get_run(run_id: str) -> RunResponse:
     try:
-        return RunResponse.from_run(_store.get(run_id))
+        response = RunResponse.from_run(_store.get(run_id))
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    response.usage = run_usage(run_id)
+    return response
 
 
 class FlowPhaseState(BaseModel):
@@ -689,6 +701,8 @@ class FlowPhaseState(BaseModel):
     artifacts: list[str] = Field(default_factory=list)
     gate: str | None = None
     disciplines: list[str] = Field(default_factory=list)
+    #: Tokens and cost this phase spent (FORGE-476); ``None`` if none recorded.
+    usage: dict[str, Any] | None = None
 
 
 class FlowRunState(BaseModel):
@@ -709,6 +723,9 @@ class FlowRunState(BaseModel):
     #: not be asked -- rendered as "unknown", never as "nothing is happening".
     live: bool = True
     detail: str = ""
+    #: Run-wide token and cost totals, with per-phase, per-role and per-model
+    #: breakdowns (FORGE-476).
+    usage: dict[str, Any] | None = None
 
 
 def _run_definition(run: Run) -> FlowDefinition:
@@ -747,6 +764,8 @@ async def get_flow_state(run_id: str) -> FlowRunState:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
 
     ordered = list(_run_definition(run).phases)
+    usage = run_usage(run_id)
+    by_phase: dict[str, Any] = (usage or {}).get("by_phase", {})
 
     if not _is_design_flow(run.request):
         return FlowRunState(
@@ -772,9 +791,11 @@ async def get_flow_state(run_id: str) -> FlowRunState:
                     status="unknown",
                     gate=p.gate.name if p.gate else None,
                     disciplines=list(p.disciplines),
+                    usage=by_phase.get(p.id),
                 )
                 for p in ordered
             ],
+            usage=usage,
             live=False,
             detail=(
                 f"the workflow could not be queried ({exc}). A query is answered by a "
@@ -807,6 +828,7 @@ async def get_flow_state(run_id: str) -> FlowRunState:
                 artifacts=list((finished or {}).get("artifacts") or []),
                 gate=phase.gate.name if phase.gate else None,
                 disciplines=list(phase.disciplines),
+                usage=by_phase.get(phase.id),
             )
         )
 
@@ -818,6 +840,7 @@ async def get_flow_state(run_id: str) -> FlowRunState:
         phases=phases,
         events=events,
         live=True,
+        usage=usage,
     )
 
 
