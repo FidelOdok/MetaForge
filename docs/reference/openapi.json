@@ -4115,6 +4115,19 @@
             "title": "Source",
             "type": "string"
           },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 3600.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
           "tool": {
             "title": "Tool",
             "type": "string"
@@ -7147,6 +7160,35 @@
         "title": "RequirementSetQualityReport",
         "type": "object"
       },
+      "ResolveHoldRequest": {
+        "description": "Close a hold nobody is waiting for any more (FORGE-466).",
+        "properties": {
+          "outcome": {
+            "enum": [
+              "timed_out",
+              "canceled"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "ResolveHoldRequest",
+        "type": "object"
+      },
       "RevisionDiff": {
         "description": "Metadata diff between two revisions.",
         "properties": {
@@ -7288,6 +7330,17 @@
       "RunResponse": {
         "description": "Serialized run state.",
         "properties": {
+          "approval_deadline": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Deadline"
+          },
           "approval_reason": {
             "anyOf": [
               {
@@ -11941,7 +11994,7 @@
     },
     "/v1/chat/tool_approvals": {
       "get": {
-        "description": "All tool-call approvals currently awaiting a decision.",
+        "description": "All tool-call approvals currently awaiting a decision.\n\nOverdue holds are expired first, so nothing listed here is a call whose\nwaiter has already given up (FORGE-466).",
         "operationId": "list_pending_approvals_v1_chat_tool_approvals_get",
         "responses": {
           "200": {
@@ -12089,6 +12142,59 @@
           }
         },
         "summary": "Submit Tool Approval",
+        "tags": [
+          "chat-tool-approvals"
+        ]
+      }
+    },
+    "/v1/chat/tool_approvals/{run_id}/resolve": {
+      "post": {
+        "description": "The waiting side stopped waiting: close the hold so nobody answers it.\n\nIdempotent. A hold already ``timed_out`` or ``canceled`` comes back as it\nis with 200, so a retry after a lost response is harmless. A hold a human\nalready decided is 409: the waiter must read the decision back rather\nthan overwrite it, because an approval that landed in the last instant is\nstill an approval.",
+        "operationId": "resolve_unanswered_hold_v1_chat_tool_approvals__run_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveHoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Unanswered Hold",
         "tags": [
           "chat-tool-approvals"
         ]

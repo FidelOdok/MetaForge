@@ -15,7 +15,7 @@ just without a frontend wired to it yet.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 from fastapi import APIRouter, HTTPException, Request
@@ -23,8 +23,10 @@ from pydantic import BaseModel, Field
 
 from api_gateway.auth.approver import approver_from_request
 from api_gateway.runs.schemas import ApprovalRequest, RunListResponse, RunResponse
+from observability.metrics import MetricsCollector, collector_for
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
+    UNANSWERED,
     ApprovalDecision,
     InMemoryRunStore,
     InvalidTransition,
@@ -48,6 +50,32 @@ _ledger: SqliteRunLedger | None = None
 # resume). Do not copy that precedent here.
 _ORPHANED_ERROR = "orphaned: gateway restarted while this approval was pending"
 
+#: How long a held call's waiter says it will wait, when it does not say
+#: (FORGE-466). Matches the sidecar's and the in-process gate's window.
+DEFAULT_HOLD_TIMEOUT_SECONDS = 180.0
+#: Slack past the waiter's own window before the gateway expires a hold on
+#: its behalf. The waiter is meant to close its hold itself; this only
+#: catches the one that died without saying so, and must not race it.
+HOLD_DEADLINE_GRACE_SECONDS = 30.0
+#: Upper bound on a requested window, so a client cannot park an approval
+#: that outlives every reviewer's attention.
+MAX_HOLD_TIMEOUT_SECONDS = 3600.0
+
+_metrics: MetricsCollector | None = None
+
+
+def _get_metrics() -> MetricsCollector:
+    global _metrics
+    if _metrics is None:
+        _metrics = collector_for("metaforge-gateway")
+    return _metrics
+
+
+def set_approval_metrics(metrics: MetricsCollector | None) -> None:
+    """Inject a collector (tests), or ``None`` to resolve it lazily again."""
+    global _metrics
+    _metrics = metrics
+
 
 def _on_transition(run: Run) -> None:
     if _ledger is not None:
@@ -67,11 +95,36 @@ def get_approval_store() -> InMemoryRunStore:
     return _approval_store
 
 
-def reset_approval_store() -> None:
+def reset_approval_store(*, clock: Any = None) -> None:
     """Rewire a fresh store — tests only, mirrors api_gateway.runs.routes."""
     global _approval_store, _ledger
-    _approval_store = InMemoryRunStore(on_transition=_on_transition)
+    _approval_store = (
+        InMemoryRunStore(on_transition=_on_transition)
+        if clock is None
+        else InMemoryRunStore(on_transition=_on_transition, clock=clock)
+    )
     _ledger = None
+
+
+def expire_overdue_holds() -> list[Run]:
+    """Time out every hold whose waiter is past its deadline (FORGE-466).
+
+    Called on every read of the ledger, so the Approvals page never offers a
+    call nobody is waiting for, even when the waiter crashed and could not
+    close its own hold. Reads are frequent enough (the dashboard polls) that
+    a separate sweeper would add a task to keep alive and nothing else.
+    """
+    expired = _approval_store.expire_overdue()
+    for run in expired:
+        logger.warning(
+            "tool_approval_hold_expired",
+            run_id=run.id,
+            tool=run.request.get("tool"),
+            source=run.request.get("source"),
+            deadline=run.approval_deadline,
+        )
+        _get_metrics().record_tool_approval_resolution("timed_out", "deadline", "resolved")
+    return expired
 
 
 def init_approval_ledger(ledger: SqliteRunLedger | None) -> None:
@@ -157,13 +210,19 @@ def _decide_flow_version(run: Run, *, approved: bool) -> None:
 
 @router.get("", response_model=RunListResponse)
 def list_pending_approvals() -> RunListResponse:
-    """All tool-call approvals currently awaiting a decision."""
+    """All tool-call approvals currently awaiting a decision.
+
+    Overdue holds are expired first, so nothing listed here is a call whose
+    waiter has already given up (FORGE-466).
+    """
+    expire_overdue_holds()
     pending = [r for r in _approval_store.list() if r.status is RunStatus.AWAITING_APPROVAL]
     return RunListResponse(runs=[RunResponse.from_run(r) for r in pending])
 
 
 @router.get("/{run_id}", response_model=RunResponse)
 def get_approval(run_id: str) -> RunResponse:
+    expire_overdue_holds()
     try:
         return RunResponse.from_run(_approval_store.get(run_id))
     except RunNotFoundError as exc:
@@ -180,6 +239,10 @@ class HoldToolCallRequest(BaseModel):
     source: str = "mcp"
     session_id: str | None = None
     project: str | None = None
+    #: How long the caller will wait for an answer (FORGE-466). The gateway
+    #: stores a deadline from it and expires the hold if the caller never
+    #: closes it, so a crashed waiter cannot leave it pending forever.
+    timeout_seconds: float | None = Field(default=None, gt=0, le=MAX_HOLD_TIMEOUT_SECONDS)
 
 
 @router.post("", response_model=RunResponse, status_code=201)
@@ -208,13 +271,72 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
         }
     )
     _approval_store.start(run.id)
-    run = _approval_store.request_approval(run.id, reason=body.reason)
+    window = body.timeout_seconds or DEFAULT_HOLD_TIMEOUT_SECONDS
+    run = _approval_store.request_approval(
+        run.id,
+        reason=body.reason,
+        deadline=_approval_store.now() + window + HOLD_DEADLINE_GRACE_SECONDS,
+    )
     logger.info(
         "tool_approval_held",
         run_id=run.id,
         tool=body.tool,
         caller=body.caller,
         source=body.source,
+        deadline=run.approval_deadline,
+    )
+    return RunResponse.from_run(run)
+
+
+class ResolveHoldRequest(BaseModel):
+    """Close a hold nobody is waiting for any more (FORGE-466)."""
+
+    outcome: Literal["timed_out", "canceled"]
+    reason: str | None = None
+
+
+@router.post("/{run_id}/resolve", response_model=RunResponse)
+def resolve_unanswered_hold(run_id: str, body: ResolveHoldRequest) -> RunResponse:
+    """The waiting side stopped waiting: close the hold so nobody answers it.
+
+    Idempotent. A hold already ``timed_out`` or ``canceled`` comes back as it
+    is with 200, so a retry after a lost response is harmless. A hold a human
+    already decided is 409: the waiter must read the decision back rather
+    than overwrite it, because an approval that landed in the last instant is
+    still an approval.
+    """
+    try:
+        run = _approval_store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"approval '{run_id}' not found") from exc
+    if run.status in UNANSWERED:
+        logger.info(
+            "tool_approval_hold_already_resolved",
+            run_id=run_id,
+            status=run.status.value,
+            requested=body.outcome,
+        )
+        return RunResponse.from_run(run)
+    if run.status is not RunStatus.AWAITING_APPROVAL:
+        raise HTTPException(
+            status_code=409,
+            detail=f"approval '{run_id}' was already decided ({run.status.value}); "
+            "read the decision instead of closing it",
+        )
+    if body.outcome == "timed_out":
+        run = _approval_store.time_out(
+            run_id, reason=body.reason or "the waiting call timed out before anyone answered"
+        )
+    else:
+        run = _approval_store.cancel(
+            run_id, reason=body.reason or "the waiting call was cancelled before anyone answered"
+        )
+    logger.info(
+        "tool_approval_hold_resolved",
+        run_id=run_id,
+        status=run.status.value,
+        tool=run.request.get("tool"),
+        source=run.request.get("source"),
     )
     return RunResponse.from_run(run)
 
@@ -228,6 +350,26 @@ def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -
     the approver's name down as their result.
     """
     approver = approver_from_request(request)
+    expire_overdue_holds()
+    try:
+        current = _approval_store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"approval '{run_id}' not found") from exc
+    if current.status in UNANSWERED:
+        # FORGE-466: a success here would record an approval for a call
+        # nobody is waiting for. Say why it cannot be answered instead.
+        logger.info(
+            "tool_approval_submit_refused",
+            run_id=run_id,
+            status=current.status.value,
+            decision=body.decision,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"approval '{run_id}' is {current.status.value}: "
+            f"{current.error or 'nobody is waiting for this call any more'}. "
+            "Nothing was recorded; ask for the call again if it is still wanted.",
+        )
     try:
         run = _approval_store.submit_approval(
             run_id,

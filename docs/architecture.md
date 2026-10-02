@@ -87,7 +87,21 @@ call held inside the sidecar would sit in a queue the dashboard cannot see.
 
 So the sidecar parks held calls in the gateway's ledger over HTTP
 (`POST /v1/chat/tool_approvals`), and polls for the decision. There is
-exactly **one** ledger. A second store per process would have been the more
+exactly **one** ledger.
+
+A hold is closed by whichever side stops waiting (FORGE-466). The sidecar
+calls `POST /v1/chat/tool_approvals/{id}/resolve` with `timed_out` when its
+window closes and `canceled` when the call is cancelled; the in-process wait
+(chat harness, in-gateway MCP gate) does the same on its own store. The
+route is idempotent and returns `409` for a hold a human already decided, so
+a decision landing as the window closes is read back and honoured, not
+overwritten. Closing is best-effort: a failure is logged and counted
+(`metaforge_tool_approval_resolution_total{result="failed"}`), never raised
+into the tool call. As a backstop for a waiter that dies silently, each hold
+stores an `approval_deadline` (the waiter's `timeout_seconds` plus 30s of
+grace), and every read of the ledger expires overdue holds as `timed_out`
+(`trigger="deadline"` on the same counter). Answering a `timed_out` or
+`canceled` hold is a `409` naming the state and reason. A second store per process would have been the more
 obvious fix and the wrong one: two queues means a reviewer clearing one while
 the other fills, and no page that shows both.
 
