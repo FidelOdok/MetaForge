@@ -538,7 +538,9 @@ def _resolve_in_process_flow(run: Run) -> FlowDefinition:
         except ValueError as exc:
             raise FlowVersionUnrunnableError(str(version_id), str(exc)) from exc
         definition = definition_from_frozen(frozen)
-        rebuilt = freeze_flow(definition, version=frozen.version).content_hash
+        rebuilt = freeze_flow(
+            definition, version=frozen.version, context=frozen.context
+        ).content_hash
         if rebuilt != frozen.content_hash:
             raise FlowVersionUnrunnableError(
                 str(version_id),
@@ -549,6 +551,7 @@ def _resolve_in_process_flow(run: Run) -> FlowDefinition:
         run.request["flow_template_id"] = version.base_template_id
         run.request["flow_version"] = frozen.version
         run.request["flow_content_hash"] = frozen.content_hash
+        run.request["flow_context"] = frozen.context
         return definition
 
     flow_id = str(run.request.get("flow") or DEFAULT_FLOW_ID)
@@ -621,7 +624,9 @@ async def _launch_flow(run_id: str) -> None:
         content_hash=str(run.request.get("flow_content_hash") or "")[:12],
         phases=[p.id for p in definition.phases],
     )
-    task = asyncio.create_task(executor.run(run_id, definition))
+    task = asyncio.create_task(
+        executor.run(run_id, definition, flow_context=str(run.request.get("flow_context") or ""))
+    )
     _flow_tasks.add(task)
     task.add_done_callback(_flow_tasks.discard)
 

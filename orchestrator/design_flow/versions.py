@@ -249,6 +249,12 @@ class FlowVersionStore:
                 )
                 """
             )
+            # FORGE-491: versions written before the flow context existed.
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(flow_versions)")}
+            if "flow_context" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE flow_versions ADD COLUMN flow_context TEXT NOT NULL DEFAULT ''"
+                )
             self._conn.commit()
             self._restore()
 
@@ -258,7 +264,9 @@ class FlowVersionStore:
         for row in self._conn.execute("SELECT * FROM flow_versions ORDER BY created_at"):
             try:
                 definition = _definition_from_dict(json.loads(row["definition"]))
-                frozen = freeze_flow(definition, version=row["frozen_version"])
+                frozen = freeze_flow(
+                    definition, version=row["frozen_version"], context=row["flow_context"] or ""
+                )
                 if frozen.content_hash != row["content_hash"]:
                     raise ValueError(
                         f"stored hash {row['content_hash'][:12]} != recomputed "
@@ -293,8 +301,8 @@ class FlowVersionStore:
             INSERT INTO flow_versions (
                 id, status, definition, frozen_version, content_hash, base_template_id,
                 base_version, changes, origin, intent, created_at, decided_by, decided_at,
-                approval_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                approval_id, flow_context
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 decided_by=excluded.decided_by,
@@ -317,6 +325,7 @@ class FlowVersionStore:
                 version.decided_by,
                 decided_at,
                 version.approval_id,
+                version.frozen.context,
             ),
         )
         self._conn.commit()
@@ -331,6 +340,7 @@ class FlowVersionStore:
         origin: str = "generated",
         intent: str = "",
         approval_id: str = "",
+        context: str = "",
     ) -> FlowVersion:
         """Write a new version. Refuses one that breaks an invariant."""
         result = validate_flow(definition)
@@ -341,7 +351,7 @@ class FlowVersionStore:
         version = FlowVersion(
             id=version_id,
             definition=definition,
-            frozen=freeze_flow(definition, version=f"{base_version}+{version_id}"),
+            frozen=freeze_flow(definition, version=f"{base_version}+{version_id}", context=context),
             base_template_id=base_template_id,
             base_version=base_version,
             changes=changes,

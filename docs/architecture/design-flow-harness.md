@@ -191,6 +191,31 @@ SSE and `/ws` surfaces, and pause/resume uses the existing approval endpoint. A
 `GateCoordinator` bridges the async gate wait to the synchronous store
 transition triggered by the approval route.
 
+### Flow context reaches every phase (FORGE-491)
+
+The context given to `flow.propose` (manufacturing route, processes, machines,
+stock, quantity, target maturity, loads and use, budget, requirements) is not
+only a generator input. `FlowContext.render_for_phases()` renders it once into a
+text block that is stored on the flow version and frozen with it:
+
+- `FrozenFlow.context` holds the block and is part of the content hash, so it
+  cannot change after approval. A flow with no context hashes exactly as before,
+  and versions saved before the field existed load with an empty context.
+- The version store persists it in a `flow_context` column, added in place to
+  existing databases.
+- Temporal: `DesignFlowInput.flow.context` is copied into
+  `PhaseRequest.flow_context`. Both fields are optional with an empty default,
+  so workflows already in flight still decode and replay.
+- In-process: the run record carries `flow_context` and `DesignFlowExecutor.run`
+  passes it into the executor's `FlowContext`.
+- Both engines call the same `ReActPhaseBrain`, which puts the block at the very
+  start of the prompt under "Flow context", ahead of the per-phase goal. The
+  block is identical for every phase of a run, so the prompt prefix stays stable
+  for prompt caching (FORGE-478). With no context the prompt is unchanged.
+
+The requirements phase is expected to turn the stated values (stock, loads,
+spacing) into typed constraints, and no phase should report them as unknown.
+
 ## Driving it from the CLI
 
 ```bash

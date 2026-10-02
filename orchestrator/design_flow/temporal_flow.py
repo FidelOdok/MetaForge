@@ -89,6 +89,8 @@ class PhaseRequest:
     flow_id: str = ""
     #: Summaries of phases already done, so the agent has the thread so far.
     prior: list[str] = field(default_factory=list)
+    #: FORGE-491: the frozen flow's context block, handed to the phase brain.
+    flow_context: str = ""
 
 
 @dataclass
@@ -249,6 +251,7 @@ class DesignFlowWorkflow:
                         session_id=inp.session_id,
                         flow_id=inp.flow.template_id,
                         prior=[c["summary"] for c in self._completed],
+                        flow_context=inp.flow.context,
                     ),
                     start_to_close_timeout=_PHASE_TIMEOUT,
                     heartbeat_timeout=_PHASE_HEARTBEAT,
