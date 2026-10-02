@@ -187,6 +187,13 @@ def _app():
         def attach_notifier(self, notifier) -> None:
             pass
 
+        # FORGE-487: build_http_app attaches service auth unconditionally.
+        def attach_service_auth(self, key, verifier) -> bool:
+            return False
+
+        async def authenticate_service_caller(self, ctx, presented_key, inbound):
+            return ctx
+
         async def handle_request(self, raw: str) -> str:
             message = json.loads(raw)
             return json.dumps({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})
