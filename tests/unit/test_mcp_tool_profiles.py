@@ -40,6 +40,10 @@ def declared_tool_ids() -> set[str]:
                     r'tool_id="([a-z0-9_.]+)"', path.read_text(encoding="utf-8", errors="replace")
                 )
             )
+    # FORGE-479: FreeCAD registers its tools from a spec table and builds the id
+    # as f"freecad.{name}", so the literal scan above cannot see them.
+    freecad = (REPO / "tool_registry/tools/freecad/adapter.py").read_text(encoding="utf-8")
+    ids |= {f"freecad.{n}" for n in re.findall(r'\n {12}\(\n {16}"([a-z_]+)",\n', freecad)}
     return ids
 
 
@@ -116,7 +120,14 @@ class TestProfileDefinitions:
             )
 
     def test_the_named_profiles_all_exist(self) -> None:
-        assert profile_names() == ["core", "electronics", "mechanical", "robotics", "simulation"]
+        assert profile_names() == [
+            "core",
+            "electronics",
+            "mechanical",
+            "mechanical_product",
+            "robotics",
+            "simulation",
+        ]
         assert DEFAULT_PROFILE in PROFILES
 
     def test_no_profile_names_a_tool_that_does_not_exist(self) -> None:

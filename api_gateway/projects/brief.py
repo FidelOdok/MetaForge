@@ -19,6 +19,7 @@ the direction of an agent confidently describing the wrong design.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -29,15 +30,60 @@ BRIEF_DOC_TYPES = {"prd", "constraint_set"}
 #: How many of those to inline, most-recently-updated first.
 BRIEF_DOC_LIMIT = 3
 
+#: Most characters of the project brief before the rest is replaced by a
+#: pointer (FORGE-479). About 2.5k tokens; every turn pays for the brief again.
+BRIEF_CHAR_LIMIT = 10_000
+#: Env var overriding :data:`BRIEF_CHAR_LIMIT`.
+BRIEF_CHAR_LIMIT_ENV = "METAFORGE_BRIEF_CHAR_LIMIT"
+#: Where the full, uncapped brief can be read.
+BRIEF_RESOURCE_TEMPLATE = "metaforge://twin/brief/{project_id}"
+
 DocExcerpt = Callable[[str], Awaitable[str | None]]
 
 
-async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt) -> str:
+def brief_char_limit() -> int:
+    raw = os.environ.get(BRIEF_CHAR_LIMIT_ENV, "").strip()
+    try:
+        value = int(raw) if raw else BRIEF_CHAR_LIMIT
+    except ValueError:
+        return BRIEF_CHAR_LIMIT
+    return value if value > 0 else BRIEF_CHAR_LIMIT
+
+
+def cap_brief(text: str, project_id: str, limit: int | None = None) -> str:
+    """Cap ``text`` at ``limit`` chars at a line boundary, pointing at the rest.
+
+    The work-product list is already newest first (FORGE-244), so what a cap
+    keeps is the most recent work. The closing directives sit at the end of the
+    brief, so they are re-appended rather than cut: a brief that lost its
+    ``project_id`` instructions would be worse than a shorter list.
+    """
+    cap = brief_char_limit() if limit is None else limit
+    if len(text) <= cap:
+        return text
+    marker_head = "\n\n(Project brief shortened"
+    tail_start = text.rfind("\nAny CAD model you generate")
+    tail = text[tail_start:] if tail_start != -1 else ""
+    link = BRIEF_RESOURCE_TEMPLATE.format(project_id=project_id)
+    note = f"{marker_head}: {len(text) - cap} chars omitted. Read the full brief at {link}.)"
+    room = max(0, cap - len(note) - len(tail))
+    head = text[: tail_start if tail_start != -1 else len(text)][:room]
+    cut = head.rfind("\n")
+    if cut > room // 2:
+        head = head[:cut]
+    return f"{head}{note}{tail}"
+
+
+async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt, full: bool = False) -> str:
     """Render ``project`` as the brief an agent is given before it works.
 
     ``doc_excerpt`` fetches the text of a work product by id. Injected so
     this module stays free of storage concerns and can be exercised without
     one.
+
+    The brief is capped at :func:`brief_char_limit` characters (FORGE-479)
+    with a pointer to the ``metaforge://twin/brief/<id>`` resource; the
+    resource itself passes ``full=True`` so the link leads to everything.
     """
     lines = [
         f"You are working inside the MetaForge project **{project.name}** "
@@ -66,8 +112,9 @@ async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt) -> str:
         if remaining > 0:
             lines.append(
                 f"- …and {remaining} more (older) work product(s) not shown here. "
-                "Call twin.find_by_property (or project.get) if you need to see "
-                "something not listed above."
+                "Read metaforge://twin/brief/"
+                f"{project.id} or call twin.find_by_property (or project.get) "
+                "if you need to see something not listed above."
             )
     else:
         lines.append("\nThis project has no work products yet.")
@@ -142,7 +189,8 @@ async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt) -> str:
         f"this project's gate checks (e.g. a waiver recorded with no project_id never "
         f"counts toward the G8 release gate, FORGE-78)."
     )
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    return text if full else cap_brief(text, str(project.id))
 
 
 # ---------------------------------------------------------------------------

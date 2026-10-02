@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
@@ -36,6 +36,7 @@ from orchestrator.harness.providers.pipeline import (
     StreamEvents,
     StreamInvoke,
 )
+from orchestrator.harness.result_handles import ResultStore
 from orchestrator.harness.runs import (
     ApprovalWait,
     InMemoryRunStore,
@@ -89,6 +90,8 @@ class HarnessRuntime:
     # Injectable so tests don't wait real wall-clock time (same seam as
     # ProviderPipeline's `sleep`).
     approval_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    # FORGE-479: tool results over the inline limit, addressable by handle.
+    results: ResultStore = field(default_factory=ResultStore)
 
     @classmethod
     def build(

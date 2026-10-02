@@ -16,6 +16,7 @@ import structlog
 
 from api_gateway.chat.harness_backend import design_flow_approval_timeout_seconds, run_chat_turn
 from api_gateway.chat.routes import get_metrics
+from mcp_core.profiles import tools_for_disciplines
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
 from skill_registry.mcp_bridge import McpBridge
@@ -142,6 +143,11 @@ class ReActPhaseBrain:
             # catalog keeps growing; search_tools is the mid-turn escape
             # hatch if a phase genuinely needs a tool outside its scope.
             domains=phase.disciplines,
+            # FORGE-479: an exact, profile-derived tool set (<= 40 with the
+            # harness's own tools) instead of every core adapter. An empty
+            # discipline tuple used to mean "all tools"; it now means the
+            # common set, which is what the intent/needs/requirements phases use.
+            tool_allowlist=tools_for_disciplines(phase.disciplines),
             # MET-707: this turn is unattended — nothing will ever resolve a
             # requires_approval tool call's /v1/chat/tool_approvals entry for
             # a design-flow-originated run, so chat's 30-minute default
