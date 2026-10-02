@@ -7372,6 +7372,17 @@
             "title": "Created At",
             "type": "number"
           },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
           "error": {
             "anyOf": [
               {
@@ -7382,6 +7393,28 @@
               }
             ],
             "title": "Error"
+          },
+          "flow_content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Content Hash"
+          },
+          "flow_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Version Id"
           },
           "history": {
             "items": {

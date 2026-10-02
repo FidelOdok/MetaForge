@@ -73,7 +73,13 @@ class RunLauncher:
             "status": run.status.value,
             "flow": run.request.get("flow"),
             "goal": run.request.get("goal"),
+            # Which engine drives it, and the exact flow it runs (FORGE-474).
+            "engine": run.request.get("flow_engine"),
+            "flow_version": run.request.get("flow_version"),
+            "flow_content_hash": run.request.get("flow_content_hash"),
         }
+        if run.request.get("flow_version_id"):
+            out["flow_version_id"] = run.request["flow_version_id"]
         if run.approval_reason:
             out["awaiting_approval_reason"] = run.approval_reason
         if run.error:
