@@ -507,7 +507,7 @@ async def propose_flow(
         valid=proposal.valid,
         generated_by=_generated_by(proposal),
     )
-    version.approval_id = run.id
+    version = version_store.attach_approval(version.id, run.id)
     return _proposal_view(proposal, run.id, version.id)
 
 
@@ -709,7 +709,7 @@ def save_edited_flow(body: EditFlowRequest) -> FlowVersionView:
         run.id,
         reason=f"Approve {len(changes)} change(s) to '{body.baseTemplateId}' before running it.",
     )
-    version.approval_id = run.id
+    version = version_store.attach_approval(version.id, run.id)
     logger.info(
         "flow_version_held", version_id=version.id, approval_id=run.id, changes=len(changes)
     )
