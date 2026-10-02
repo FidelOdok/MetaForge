@@ -1514,6 +1514,18 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from orchestrator.harness.ledger import SqliteRunLedger, default_tool_approvals_ledger_path
 
         init_approval_ledger(SqliteRunLedger(str(default_tool_approvals_ledger_path())))
+    # FORGE-482: flow versions (proposed, approved, rejected) were process
+    # memory, so a routine reload lost every human approval while the
+    # Temporal run using it survived. Same disable flag as the ledgers.
+    if (os.environ.get("METAFORGE_RUNS_LEDGER_DISABLE", "").strip().lower()) not in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    ):
+        from orchestrator.design_flow.versions import default_versions_path, init_version_store
+
+        init_version_store(str(default_versions_path()))
     # MET-566: chat-turn context assembly (knowledge fragments with
     # attribution/staleness/conflicts). No-op when LightRAG isn't configured.
     init_context_assembler(

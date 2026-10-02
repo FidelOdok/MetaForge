@@ -232,6 +232,18 @@ policy somebody has to observe.
 | `POST /v1/design-flows/versions` | save an edit as a new version, held for approval |
 | `GET /v1/design-flows/versions/{id}` | fetch a stored version |
 
+Versions are durable (FORGE-482). The store used to be process memory, so a
+gateway reload lost every proposal and every human approval while the Temporal
+run using the version survived, and `flow.start_run` then answered "no flow
+version". Each version is now written through to SQLite
+(`~/.metaforge/flow_versions.db`, override `METAFORGE_FLOW_VERSIONS_PATH`,
+skipped by `METAFORGE_RUNS_LEDGER_DISABLE` like the run and approval ledgers)
+with its status, frozen definition, content hash, template and version,
+approval id, approver and timestamps, and restored at startup. A restored row
+whose hash no longer matches its content is skipped and logged, never run.
+Approved and rejected versions are immutable; the approval ledger still
+drives the decision (FORGE-462). The in-memory store remains the test double.
+
 `POST /v1/runs` accepts a `flow_version_id`. An unapproved version is refused
 there with a 409 rather than at the gate: starting work on a flow nobody
 agreed to and asking afterwards is the shape this epic exists to prevent.

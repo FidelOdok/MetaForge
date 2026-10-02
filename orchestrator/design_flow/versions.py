@@ -23,16 +23,22 @@ the template and version it descends from rather than replacing it.
 
 from __future__ import annotations
 
+import json
+import os
+import sqlite3
+import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
+from typing import Any
 
 import structlog
 
 from orchestrator.design_flow.frozen import FrozenFlow, freeze_flow
 from orchestrator.design_flow.invariants import validate_flow
-from orchestrator.design_flow.spec import FlowDefinition
+from orchestrator.design_flow.spec import FlowDefinition, Gate, Phase
 
 logger = structlog.get_logger(__name__)
 
@@ -41,8 +47,10 @@ __all__ = [
     "FlowVersionStore",
     "VersionNotFoundError",
     "VersionStatus",
+    "default_versions_path",
     "diff_flows",
     "get_version_store",
+    "init_version_store",
     "reset_version_store",
 ]
 
@@ -155,16 +163,163 @@ def diff_flows(base: FlowDefinition, candidate: FlowDefinition) -> list[str]:
     return lines
 
 
-class FlowVersionStore:
-    """Process-level store of flow versions.
+def default_versions_path() -> Path:
+    """Where flow versions live by default (FORGE-482).
 
-    In-memory, mirroring ``InMemoryRunStore``. A version outliving a gateway
-    restart matters once flows are edited in anger; until then, saying so is
-    better than a half-durable store that looks persistent.
+    ``METAFORGE_FLOW_VERSIONS_PATH`` override, else
+    ``~/.metaforge/flow_versions.db`` -- same convention as the run and
+    tool-approval ledgers.
+    """
+    override = os.environ.get("METAFORGE_FLOW_VERSIONS_PATH", "").strip()
+    if override:
+        return Path(override)
+    return Path.home() / ".metaforge" / "flow_versions.db"
+
+
+def _definition_from_dict(data: dict[str, Any]) -> FlowDefinition:
+    phases: list[Phase] = []
+    for p in data.get("phases", []):
+        g = p.get("gate")
+        gate = (
+            None
+            if g is None
+            else Gate(
+                name=g["name"],
+                auto_approve=bool(g.get("auto_approve", False)),
+                criteria=tuple(g.get("criteria", ())),
+                enforce_constraints=bool(g.get("enforce_constraints", False)),
+                gate_id=g.get("gate_id"),
+            )
+        )
+        phases.append(
+            Phase(
+                id=p["id"],
+                title=p["title"],
+                objective=p["objective"],
+                expected_artifacts=tuple(p.get("expected_artifacts", ())),
+                required_deliverables=tuple(p.get("required_deliverables", ())),
+                enforce_deliverables=bool(p.get("enforce_deliverables", True)),
+                gate=gate,
+                disciplines=tuple(p.get("disciplines", ())),
+                model=p.get("model"),
+            )
+        )
+    return FlowDefinition(id=data["id"], name=data["name"], phases=tuple(phases))
+
+
+class FlowVersionStore:
+    """Store of flow versions, durable when given a SQLite ``path`` (FORGE-482).
+
+    With no ``path`` it is in memory: the test double. The gateway wires a
+    file-backed one at startup (``init_version_store``), because a version in
+    process memory meant every proposal and every human approval vanished on
+    a restart while the Temporal run using it survived.
+
+    Every write goes through to SQLite; the dict is a read cache restored at
+    construction. Approved and rejected versions are immutable: the SQL
+    guards refuse to touch a decided row.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, path: str | None = None) -> None:
         self._versions: dict[str, FlowVersion] = {}
+        self._lock = threading.RLock()
+        self._conn: sqlite3.Connection | None = None
+        if path is not None:
+            if path != ":memory:":
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(path, check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS flow_versions (
+                    id                 TEXT PRIMARY KEY,
+                    status             TEXT NOT NULL,
+                    definition         TEXT NOT NULL,
+                    frozen_version     TEXT NOT NULL,
+                    content_hash       TEXT NOT NULL,
+                    base_template_id   TEXT NOT NULL,
+                    base_version       TEXT NOT NULL,
+                    changes            TEXT NOT NULL,
+                    origin             TEXT NOT NULL,
+                    intent             TEXT NOT NULL,
+                    created_at         TEXT NOT NULL,
+                    decided_by         TEXT NOT NULL,
+                    decided_at         TEXT NOT NULL,
+                    approval_id        TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.commit()
+            self._restore()
+
+    def _restore(self) -> None:
+        assert self._conn is not None  # noqa: S101
+        restored = 0
+        for row in self._conn.execute("SELECT * FROM flow_versions ORDER BY created_at"):
+            try:
+                definition = _definition_from_dict(json.loads(row["definition"]))
+                frozen = freeze_flow(definition, version=row["frozen_version"])
+                if frozen.content_hash != row["content_hash"]:
+                    raise ValueError(
+                        f"stored hash {row['content_hash'][:12]} != recomputed "
+                        f"{frozen.content_hash[:12]}"
+                    )
+                self._versions[row["id"]] = FlowVersion(
+                    id=row["id"],
+                    definition=definition,
+                    frozen=frozen,
+                    base_template_id=row["base_template_id"],
+                    base_version=row["base_version"],
+                    changes=json.loads(row["changes"]),
+                    origin=row["origin"],
+                    intent=row["intent"],
+                    created_at=row["created_at"],
+                    status=VersionStatus(row["status"]),
+                    decided_by=row["decided_by"],
+                    approval_id=row["approval_id"],
+                )
+                restored += 1
+            except Exception as exc:  # noqa: BLE001
+                # One bad row must not take the store down, and must not be
+                # quietly run either: it is skipped and shouted about.
+                logger.error("flow_version_restore_failed", version_id=row["id"], error=str(exc))
+        logger.info("flow_versions_restored", count=restored)
+
+    def _persist(self, version: FlowVersion, *, decided_at: str = "") -> None:
+        if self._conn is None:
+            return
+        self._conn.execute(
+            """
+            INSERT INTO flow_versions (
+                id, status, definition, frozen_version, content_hash, base_template_id,
+                base_version, changes, origin, intent, created_at, decided_by, decided_at,
+                approval_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                status=excluded.status,
+                decided_by=excluded.decided_by,
+                decided_at=CASE WHEN excluded.decided_at != '' THEN excluded.decided_at
+                                ELSE flow_versions.decided_at END,
+                approval_id=excluded.approval_id
+            """,
+            (
+                version.id,
+                version.status.value,
+                json.dumps(asdict(version.definition), sort_keys=True),
+                version.frozen.version,
+                version.frozen.content_hash,
+                version.base_template_id,
+                version.base_version,
+                json.dumps(version.changes),
+                version.origin,
+                version.intent,
+                version.created_at,
+                version.decided_by,
+                decided_at,
+                version.approval_id,
+            ),
+        )
+        self._conn.commit()
 
     def save(
         self,
@@ -195,7 +350,9 @@ class FlowVersionStore:
             created_at=datetime.now(UTC).isoformat(),
             approval_id=approval_id,
         )
-        self._versions[version_id] = version
+        with self._lock:
+            self._persist(version)
+            self._versions[version_id] = version
         logger.info(
             "flow_version_saved",
             version_id=version_id,
@@ -215,20 +372,34 @@ class FlowVersionStore:
     def list(self) -> list[FlowVersion]:
         return list(self._versions.values())
 
+    def attach_approval(self, version_id: str, approval_id: str) -> FlowVersion:
+        """Record the approval-ledger entry holding a still-proposed version."""
+        with self._lock:
+            version = self.get(version_id)
+            if version.status is not VersionStatus.PROPOSED:
+                raise ValueError(
+                    f"flow version '{version_id}' is {version.status.value}; it is immutable"
+                )
+            version.approval_id = approval_id
+            self._persist(version)
+        return version
+
     def decide(self, version_id: str, *, approved: bool, decided_by: str) -> FlowVersion:
         """Record a human's decision on a version.
 
         ``decided_by`` comes from the approval record (FORGE-393), never from
         whoever is calling this.
         """
-        version = self.get(version_id)
-        if version.status is not VersionStatus.PROPOSED:
-            raise ValueError(
-                f"flow version '{version_id}' was already {version.status.value}; "
-                "a decision is made once"
-            )
-        version.status = VersionStatus.APPROVED if approved else VersionStatus.REJECTED
-        version.decided_by = decided_by
+        with self._lock:
+            version = self.get(version_id)
+            if version.status is not VersionStatus.PROPOSED:
+                raise ValueError(
+                    f"flow version '{version_id}' was already {version.status.value}; "
+                    "a decision is made once"
+                )
+            version.status = VersionStatus.APPROVED if approved else VersionStatus.REJECTED
+            version.decided_by = decided_by
+            self._persist(version, decided_at=datetime.now(UTC).isoformat())
         logger.info(
             "flow_version_decided",
             version_id=version_id,
@@ -245,7 +416,14 @@ def get_version_store() -> FlowVersionStore:
     return _store
 
 
+def init_version_store(path: str | None) -> FlowVersionStore:
+    """Wire the durable store (FORGE-482); ``None`` restores the in-memory double."""
+    global _store  # noqa: PLW0603
+    _store = FlowVersionStore(path)
+    return _store
+
+
 def reset_version_store() -> None:
-    """Fresh store — tests only, mirrors ``reset_run_store``."""
+    """Fresh in-memory store -- tests only, mirrors ``reset_run_store``."""
     global _store  # noqa: PLW0603
     _store = FlowVersionStore()
