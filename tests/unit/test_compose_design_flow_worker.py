@@ -89,3 +89,19 @@ def test_service_key_goes_to_the_worker_and_the_sidecar_only() -> None:
         )
     ]
     assert sorted(holders) == ["design-flow-worker", "mcp-http"]
+
+
+def test_every_temporal_client_sets_temporal_host() -> None:
+    """FORGE-488: unset, the client dials localhost:7233 inside its own container."""
+    base = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    override = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.override.yml").read_text(encoding="utf-8")
+    )["services"]
+    for name in ("gateway", "temporal-worker", "design-flow-worker", "mcp-http"):
+        entries = [
+            entry
+            for source in (base, override)
+            for entry in (source.get(name, {}).get("environment") or [])
+            if isinstance(entry, str)
+        ]
+        assert "TEMPORAL_HOST=temporal:7233" in entries, f"{name} does not set TEMPORAL_HOST"

@@ -94,6 +94,10 @@ services:
     environment:
       - METAFORGE_ENV=docker
       - NEO4J_URI=bolt://neo4j:7687
+      # FORGE-488: the design_flow adapter starts runs through Temporal. Unset,
+      # the client falls back to localhost:7233, which inside this container is
+      # the container itself (temporal_connect_failed, connection refused).
+      - TEMPORAL_HOST=temporal:7233
       # FORGE-406: where to park a held write. The approval store is
       # process-level, so without this the sidecar holds calls in its own
       # memory and the dashboard -- served by the gateway -- never sees them.
