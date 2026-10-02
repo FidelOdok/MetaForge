@@ -145,6 +145,49 @@ def test_warning_severity_goes_to_warnings() -> None:
     assert not out.violations and len(out.warnings) == 1
 
 
+def test_force_unit_constraint_named_safety_factor_is_not_a_result_check() -> None:
+    # FORGE-499: a requirement input in N must never be compared to a dimensionless SF.
+    c = _c("ultimate_design_load_with_safety_factor", 490.3, op=">=", unit="N")
+    out = check_analysis_constraints([c], MODELS, [_sim({**LIVE, "safety_factor": 2})])
+    assert not (out.violations or out.warnings or out.satisfied or out.not_evaluated)
+    assert out.evaluated == 0
+
+
+def test_unit_decides_the_kind_over_the_name() -> None:
+    from api_gateway.runs.analysis_constraints import classify
+
+    assert classify(_c("tip_deflection", 5, unit="mm")) == "deflection"
+    assert classify(_c("envelope_length", 5, unit="mm")) is None
+    assert classify(_c("displacement", 5, unit="m")) == "deflection"
+    assert classify(_c("x", 5, unit="MPa")) == "stress"
+    assert classify(_c("x", 5, unit="N/mm2")) == "stress"
+    assert classify(_c("x", 5, unit="")) is None
+    assert classify(_c("min_safety_factor", 2, unit="")) == "safety_factor"
+    assert classify(_c("sf", 2, unit="-")) == "safety_factor"
+    assert classify(_c("max_deflection", 5, unit="")) == "deflection"
+    assert classify(_c("x", 490, unit="kN")) is None
+
+
+def test_unit_contradicting_the_name_is_not_evaluated_with_reason() -> None:
+    out = check_analysis_constraints(
+        [_c("max_deflection", 5, unit="MPa"), _c("max_stress", 5, unit="N")],
+        MODELS,
+        [_sim(LIVE)],
+    )
+    assert not out.violations and not out.satisfied
+    assert len(out.not_evaluated) == 2
+    assert "pressure" in out.not_evaluated[0] or "stress" in out.not_evaluated[0]
+    assert "force" in out.not_evaluated[1]
+
+
+def test_deflection_by_unit_12mm_at_490n_service_245n_is_6_03_over_5() -> None:
+    meta = {"max_displacement_mm": 12.0654, "factored_load_n": 490, "service_load_n": 245}
+    out = check_analysis_constraints(
+        [_c("front_edge_service_deflection", 5, unit="mm")], MODELS, [_sim(meta)]
+    )
+    assert len(out.violations) == 1 and "6.03 mm" in out.violations[0]
+
+
 def test_non_analysis_constraints_are_ignored() -> None:
     out = check_analysis_constraints([_c("envelope_length", 5)], MODELS, [_sim(LIVE)])
     assert out.evaluated == 0 and not out.not_evaluated

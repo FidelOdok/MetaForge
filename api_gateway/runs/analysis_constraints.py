@@ -92,8 +92,19 @@ def _num(value: Any) -> float | None:
         return None
 
 
-def classify(constraint: Any) -> str | None:
-    """``deflection`` | ``stress`` | ``safety_factor`` | ``None`` (not an analysis metric)."""
+_FORCE_UNITS = frozenset({"n", "kn", "lbf"})
+_LENGTH_UNITS = frozenset({"mm", "cm", "m", "in", "inch"})
+_PRESSURE_UNITS = frozenset({"mpa", "pa", "kpa", "gpa", "psi", "ksi", "n/mm2"})
+_DIMENSIONLESS_UNITS = frozenset({"-", "1", "x", "ratio", "factor", "dimensionless"})
+_UNIT_KIND = {
+    **dict.fromkeys(_FORCE_UNITS, "load"),
+    **dict.fromkeys(_LENGTH_UNITS, "deflection"),
+    **dict.fromkeys(_PRESSURE_UNITS, "stress"),
+    **dict.fromkeys(_DIMENSIONLESS_UNITS, "safety_factor"),
+}
+
+
+def _name_kind(constraint: Any) -> str | None:
     text = f"{getattr(constraint, 'metric', '') or ''} {getattr(constraint, 'name', '') or ''}"
     text = text.lower()
     if "safety" in text or _SF_WORD.search(text):
@@ -103,6 +114,46 @@ def classify(constraint: Any) -> str | None:
     if "stress" in text or "von_mises" in text or "von mises" in text:
         return "stress"
     return None
+
+
+def _normalise_unit(constraint: Any) -> str:
+    unit = str(getattr(constraint, "unit", "") or "").strip().lower()
+    return unit.replace("\u00b2", "2").replace(" ", "")
+
+
+def classify_checked(constraint: Any) -> tuple[str | None, str | None]:
+    """``(kind, reason)``: the unit decides, the name only when the unit is absent.
+
+    ``kind`` is ``deflection`` | ``stress`` | ``safety_factor`` | ``None``.
+    ``None`` with a ``reason`` means the unit contradicts the name (not
+    evaluated); ``None`` without one means the constraint is not an analysis
+    result check (a force limit is a requirement input, not a result).
+    """
+    unit = _normalise_unit(constraint)
+    named = _name_kind(constraint)
+    if not unit:
+        return named, None
+    unit_kind = _UNIT_KIND.get(unit)
+    if unit_kind is None:
+        return named, None  # unrecognised unit: the caller reports it as unsupported
+    if unit_kind == "load":
+        if named in ("deflection", "stress"):
+            return None, f"unit '{unit}' is a force but the name reads as {named}"
+        return None, None
+    if unit_kind == "deflection" and named is None:
+        return None, None  # a bare length is a geometry limit (envelope, thickness)
+    if named is not None and named != unit_kind:
+        return (
+            None,
+            f"unit '{unit}' is a {unit_kind.replace('_', ' ')} unit "
+            f"but the name reads as {named.replace('_', ' ')}",
+        )
+    return unit_kind, None
+
+
+def classify(constraint: Any) -> str | None:
+    """``deflection`` | ``stress`` | ``safety_factor`` | ``None`` (not an analysis metric)."""
+    return classify_checked(constraint)[0]
 
 
 def _load_basis(constraint: Any) -> str | None:
@@ -209,12 +260,15 @@ def check_analysis_constraints(
     seen_assumptions: set[str] = set()
 
     for constraint in constraints:
-        kind = classify(constraint)
+        kind, mismatch = classify_checked(constraint)
         limit = _num(getattr(constraint, "limit", None))
         severity = str(getattr(getattr(constraint, "severity", ""), "value", "") or "error")
-        if kind is None or limit is None or severity == "info":
+        if (kind is None and mismatch is None) or limit is None or severity == "info":
             continue
         label = str(getattr(constraint, "name", "") or getattr(constraint, "metric", "constraint"))
+        if kind is None:
+            out.not_evaluated.append(f"{label}: {mismatch}")
+            continue
         op_name = str(getattr(constraint, "operator", "") or "<=")
         compare = _OPS.get(op_name)
         unit = str(getattr(constraint, "unit", "") or "").lower()
