@@ -1040,6 +1040,58 @@ async def stream_run_ws(websocket: WebSocket, run_id: str) -> None:
         logger.info("run_ws_disconnected", run_id=run_id)
 
 
+class GateOpenedRequest(BaseModel):
+    gate: str = Field(min_length=1)
+    reason: str = ""
+
+
+@router.post("/{run_id}/gate-opened", response_model=RunResponse)
+async def gate_opened(run_id: str, body: GateOpenedRequest, request: Request) -> RunResponse:
+    """Record that a run's workflow has opened a gate (FORGE-489).
+
+    Called by the design-flow worker's announcer. The workflow is the
+    authority on whether a gate is open, so this first re-reads it
+    (``_reconcile_run``). Only when the workflow cannot be asked does it fall
+    back to the worker's word. Either way it moves the *record* to
+    ``awaiting_approval``, which is what lists the run on the Approvals page
+    and publishes the change on its SSE stream. It never approves: a decision
+    still has to come through ``/approval``, and the workflow ignores one for
+    a gate that is not open.
+    """
+    try:
+        run = await _reconcile_run(_store.get(run_id))
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    if run.status is not RunStatus.AWAITING_APPROVAL and not run.is_terminal:
+        reason = f"Gate '{body.gate}': {body.reason}" if body.reason else f"Gate '{body.gate}'"
+        run = _store.reconcile(run_id, RunStatus.AWAITING_APPROVAL, approval_reason=reason)
+    await _note_gate_in_session(request, run, body.gate)
+    logger.info("design_flow_gate_recorded", run_id=run_id, gate=body.gate, status=run.status.value)
+    return RunResponse.from_run(run)
+
+
+async def _note_gate_in_session(request: Request, run: Run, gate: str) -> None:
+    """Tell the run's caller session that it is waiting, when it has one.
+
+    Best effort: the Approvals page is the primary channel. There is no MCP
+    ``resources/updated`` push channel in the plugin yet, so the session event
+    (and ``flow.status`` ``awaitingGate``) is what a caller can see.
+    """
+    session_id = run.request.get("session_id")
+    store = getattr(request.app.state, "agent_session_store", None)
+    if not session_id or store is None:
+        return
+    try:
+        await store.append_event(
+            str(session_id),
+            type="decision",
+            message=f"Run {run.id} is waiting at gate '{gate}' for approval",
+            data={"run_id": run.id, "gate": gate, "awaiting_approval": True},
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail the announcement over a session note
+        logger.info("design_flow_gate_session_note_skipped", run_id=run.id, error=str(exc))
+
+
 @router.post("/{run_id}/approval", response_model=RunResponse)
 async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) -> RunResponse:
     """Answer the gate this run is parked at.

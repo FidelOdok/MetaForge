@@ -74,6 +74,26 @@ So Temporal is **runnable and registered**, owns the consolidation pass when
 you hand it over, and as of FORGE-401 is the execution path for design-flow
 runs.
 
+### Gate announcements (FORGE-489)
+
+When a design-flow run reaches a gate, the workflow's `announce_gate` activity
+tells the gateway. The `design-flow-worker` binds a real announcer that calls
+`POST /v1/runs/{id}/gate-opened` (`METAFORGE_GATEWAY_URL`, plus
+`METAFORGE_GATEWAY_API_KEY` when the gateway needs one). The gateway re-reads
+the workflow, moves the run's record to `awaiting_approval` with the gate's
+reason, and so lists it on the Approvals page and publishes it on the run's
+SSE stream. If the run was started from an agent session, a `decision` event
+saying the run is waiting is appended to that session. There is no MCP
+`resources/updated` push channel in the plugin yet; callers see the gate through
+`flow.status` (`awaitingGate`) and the session event.
+
+Announcing never approves. A gate is answered only by `POST /v1/runs/{id}/approval`.
+
+`metaforge_design_flow_gate_announce_total{outcome}` counts `announced`,
+`unannounced` (no announcer wired, which also logs `design_flow_gate_unannounced`)
+and `failed` (the gateway could not be reached). The
+`DesignFlowGateUnannounced` alert fires on the last two.
+
 ### Where a held write actually waits (FORGE-406)
 
 FORGE-359 built an approval gate. Nothing outside the test suite ever

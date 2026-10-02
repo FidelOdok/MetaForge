@@ -550,6 +550,23 @@ groups:
             outcome="rejected", and confusing the two hides an unattended
             queue behind what looks like normal review.
 
+      # FORGE-489: a gate opened and nobody was told. The run waits silently
+      # until someone polls, so this is an alarm, not an info line.
+      - alert: DesignFlowGateUnannounced
+        expr: >-
+          increase(metaforge_design_flow_gate_announce_total{outcome=~"unannounced|failed"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A design-flow gate opened without being announced"
+          description: >-
+            outcome="unannounced" means the design-flow worker has no gate
+            announcer wired; outcome="failed" means the gateway could not be
+            reached. Either way a run is waiting at a gate that no approver
+            was told about. Check the design_flow_gate_unannounced and
+            design_flow_gate_announce_failed log events.
+
       # FORGE-470: an iteration loop converged but no approval workflow was
       # configured, so its gate could not be answered. It used to approve
       # and merge silently; it now stops at BLOCKED. Automatic approvals

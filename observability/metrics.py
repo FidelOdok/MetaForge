@@ -445,6 +445,12 @@ class MetricsRegistry:
         description="Design-flow gate outcomes",
         labels=["gate", "outcome"],
     )
+    DESIGN_FLOW_GATE_ANNOUNCE_TOTAL = MetricDefinition(
+        name="metaforge_design_flow_gate_announce_total",
+        type="counter",
+        description="Design-flow gates announced to approvers, by outcome (FORGE-489)",
+        labels=["outcome"],
+    )
 
     # ── Chat harness loop metrics (production-harness audit follow-up) ─
     HARNESS_TURN_DURATION = MetricDefinition(
@@ -643,6 +649,7 @@ class MetricsRegistry:
             cls.DESIGN_FLOW_ENGINE_UNAVAILABLE,
             cls.DESIGN_FLOW_RUN_STARTED,
             cls.DESIGN_FLOW_GATE_TOTAL,
+            cls.DESIGN_FLOW_GATE_ANNOUNCE_TOTAL,
             cls.APPROVAL_GATE_NO_RUNTIME_TOTAL,
             cls.ITERATION_GATE_UNATTENDED_TOTAL,
         ]
@@ -1262,6 +1269,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_GATE_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"gate": gate, "outcome": outcome})
+
+    def record_design_flow_gate_announce(self, outcome: str) -> None:
+        """One gate announcement: announced, unannounced or failed (FORGE-489)."""
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_GATE_ANNOUNCE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
 
     def record_mcp_error(self, tool_id: str, error_class: str, client: str = "unknown") -> None:
         """Record one MCP error, classified."""

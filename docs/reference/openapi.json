@@ -3578,6 +3578,25 @@
         "title": "FromTextResponse",
         "type": "object"
       },
+      "GateOpenedRequest": {
+        "properties": {
+          "gate": {
+            "minLength": 1,
+            "title": "Gate",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gate"
+        ],
+        "title": "GateOpenedRequest",
+        "type": "object"
+      },
       "GateView": {
         "properties": {
           "autoApprove": {
@@ -15836,6 +15855,59 @@
           }
         },
         "summary": "Get Flow State",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/gate-opened": {
+      "post": {
+        "description": "Record that a run's workflow has opened a gate (FORGE-489).\n\nCalled by the design-flow worker's announcer. The workflow is the\nauthority on whether a gate is open, so this first re-reads it\n(``_reconcile_run``). Only when the workflow cannot be asked does it fall\nback to the worker's word. Either way it moves the *record* to\n``awaiting_approval``, which is what lists the run on the Approvals page\nand publishes the change on its SSE stream. It never approves: a decision\nstill has to come through ``/approval``, and the workflow ignores one for\na gate that is not open.",
+        "operationId": "gate_opened_v1_runs__run_id__gate_opened_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GateOpenedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gate Opened",
         "tags": [
           "runs"
         ]

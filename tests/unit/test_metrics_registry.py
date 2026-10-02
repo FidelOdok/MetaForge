@@ -63,7 +63,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 iteration gate without approval workflow (FORGE-470)
         # + 4 LLM token/cost accounting (FORGE-476)
         # + 1 design-flow tool refusal (FORGE-492)
-        assert len(all_metrics) == 68
+        # + 1 design-flow gate announcement (FORGE-489)
+        assert len(all_metrics) == 69
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

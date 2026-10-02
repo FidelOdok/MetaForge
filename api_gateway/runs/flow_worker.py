@@ -364,7 +364,13 @@ async def _check_gate(payload: dict[str, Any]) -> GateCheck:
 
 
 def build_activities() -> DesignFlowActivities:
-    return DesignFlowActivities(phase_runner=_run_phase, gate_checker=_check_gate)
+    from api_gateway.runs.gate_announce import http_gate_announcer
+
+    return DesignFlowActivities(
+        phase_runner=_run_phase,
+        gate_checker=_check_gate,
+        gate_announcer=http_gate_announcer(),
+    )
 
 
 async def run_worker() -> None:

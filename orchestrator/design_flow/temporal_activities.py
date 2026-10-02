@@ -19,6 +19,7 @@ from typing import Any
 import structlog
 from temporalio import activity
 
+from observability.metrics import collector_for
 from orchestrator.design_flow.temporal_flow import GateCheck, PhaseRequest, PhaseResult
 
 logger = structlog.get_logger(__name__)
@@ -81,7 +82,9 @@ class DesignFlowActivities:
 
     @activity.defn(name="announce_gate")
     async def announce_gate(self, payload: dict[str, Any]) -> None:
+        metrics = collector_for("metaforge-design-flow-worker")
         if self.gate_announcer is None:
+            metrics.record_design_flow_gate_announce("unannounced")
             logger.warning(
                 "design_flow_gate_unannounced",
                 run_id=payload.get("run_id"),
@@ -89,11 +92,24 @@ class DesignFlowActivities:
                 detail="no announcer wired; nobody will be told this run is waiting",
             )
             return
-        await self.gate_announcer(
-            str(payload.get("run_id")),
-            str(payload.get("gate")),
-            str(payload.get("reason") or ""),
-        )
+        try:
+            await self.gate_announcer(
+                str(payload.get("run_id")),
+                str(payload.get("gate")),
+                str(payload.get("reason") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - announcing must never block or fail the gate
+            # The gate itself is already open and durable in the workflow, so
+            # a failed announcement is an alarm, not a reason to fail the run.
+            metrics.record_design_flow_gate_announce("failed")
+            logger.error(
+                "design_flow_gate_announce_failed",
+                run_id=payload.get("run_id"),
+                gate=payload.get("gate"),
+                error=str(exc),
+            )
+            return
+        metrics.record_design_flow_gate_announce("announced")
 
     def all(self) -> list[Any]:
         """The activity callables to register with a worker."""
