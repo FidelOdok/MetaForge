@@ -115,6 +115,7 @@ async def connect_http_bridge(
     api_key: str | None = None,
     fallback: McpBridge | None = None,
     require: bool = False,
+    service_key: str | None = None,
 ) -> McpBridge:
     """Connect to an MCP server over HTTP and wrap it as an ``McpBridge``.
 
@@ -124,7 +125,7 @@ async def connect_http_bridge(
     its server is by something other than that env pair (FORGE-475: the
     design-flow worker, which reaches the ``mcp-http`` sidecar).
     """
-    transport = HttpTransport(url, api_key=api_key)
+    transport = HttpTransport(url, api_key=api_key, service_key=service_key)
     return await _connect_and_wrap("http", url, transport, fallback or InMemoryMcpBridge(), require)
 
 

@@ -100,6 +100,12 @@ services:
       # Unset, the sidecar falls back to that in-process queue and says so on
       # every start-up rather than only when somebody tries to write.
       - METAFORGE_GATEWAY_URL=http://gateway:8000
+      # FORGE-487: matches `design-flow-worker`'s value and nothing else's.
+      # It is how this sidecar recognises the worker as a service caller (and
+      # then only for a run the gateway confirms is running an approved flow
+      # version in the call's project). No default: unset, the worker's writes
+      # are held like any untrusted caller's.
+      - METAFORGE_MCP_SERVICE_KEY=${METAFORGE_MCP_SERVICE_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       # Credentials sourced from .env — same vars the gateway service uses.
       # No literal fallbacks: secret scanners treat a hardcoded user/pass

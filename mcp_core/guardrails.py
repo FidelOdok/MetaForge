@@ -54,6 +54,10 @@ class Caller(StrEnum):
     REMOTE = "remote"
     #: Reached us over a tunnel or relay, or we could not establish identity.
     UNTRUSTED = "untrusted"
+    #: The design-flow worker, authenticated by a dedicated service key and
+    #: bound to a running, approved run and its project (FORGE-487). Assigned
+    #: per request by the HTTP transport, never as a server-wide default.
+    SERVICE = "service"
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,9 @@ class Decision:
     tool_id: str
     requires_approval: bool
     reason: str
+    #: The call may not run at all, held or not (FORGE-487). Only the service
+    #: caller gets this: a hold has no person waiting in a server-driven run.
+    refused: bool = False
 
 
 #: Callers a deployment may exempt from holding.
@@ -183,6 +190,24 @@ DOWNSTREAM_APPROVED: frozenset[str] = frozenset(
 ARGUMENT_CLASSIFIED: frozenset[str] = frozenset({"twin.query_cypher"})
 
 
+#: Tool families the design-flow service caller may never write through.
+#: ``project.*`` creates, renames or deletes projects, ``flow.*`` and ``run.*``
+#: propose flows and start runs. A phase works inside the project and run it
+#: was given; reshaping either is an administrator's call (FORGE-487).
+SERVICE_REFUSED_PREFIXES: tuple[str, ...] = ("project.", "flow.", "run.")
+
+
+def _service_refusal(tool_id: str, *, destructive: bool) -> str | None:
+    """Why the service caller may not make this write, or ``None``."""
+    if tool_id.startswith(SERVICE_REFUSED_PREFIXES):
+        return "administers projects, flows or runs"
+    if requires_human_authority(tool_id):
+        return "records a human decision, which a service cannot supply"
+    if destructive:
+        return "may overwrite or remove data"
+    return None
+
+
 def _call_is_read_only(tool_id: str, arguments: dict[str, Any] | None) -> bool:
     """Is *this call* a read, for a tool that can be either?"""
     if tool_id != "twin.query_cypher":
@@ -261,6 +286,24 @@ def decide(
             tool_id,
             False,
             "records the agent's own activity, not design state",
+        )
+
+    if caller is Caller.SERVICE:
+        # FORGE-487. The authorisation is the approved flow version and the
+        # gates, bound to a verified run before this is reached (see
+        # ``UnifiedMcpServer._service_scope``), so an in-scope write is not
+        # held call by call. What stays closed is the set a phase has no
+        # business calling. Checked before the human-authority branch so the
+        # refusal says "a service cannot", not "held for a human".
+        refusal = _service_refusal(tool_id, destructive=bool(annotations["destructiveHint"]))
+        if refusal is not None:
+            return Decision(
+                tool_id, False, f"refused for the service caller: {refusal}", refused=True
+            )
+        return Decision(
+            tool_id,
+            False,
+            "design-flow service caller inside a running, approved run and its project",
         )
 
     if tool_id in DOWNSTREAM_APPROVED:

@@ -180,7 +180,31 @@ class TestConnectHttpBridge:
         bridge = await connect_http_bridge("http://mcp-http:8765", api_key="k", require=True)
         assert isinstance(bridge, McpClientBridge)
         assert await bridge.is_available("twin.get_node")
-        assert seen == {"url": "http://mcp-http:8765", "api_key": "k"}
+        assert seen == {"url": "http://mcp-http:8765", "api_key": "k", "service_key": None}
+
+    @pytest.mark.asyncio
+    async def test_the_service_key_reaches_the_transport(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-487: the worker's credential rides beside the bearer key."""
+        from skill_registry.bridge_factory import connect_http_bridge
+
+        list_payload = (
+            '{"jsonrpc":"2.0","id":"discover","result":{"tools":['
+            '{"tool_id":"twin.get_node","adapter_id":"metaforge","name":"get_node",'
+            '"description":"","capability":"twin"}]}}'
+        )
+        seen: dict[str, Any] = {}
+
+        def make(url: str, **kw: Any) -> Any:
+            seen.update(kw)
+            return _stub_transport(list_payload)
+
+        monkeypatch.setattr("skill_registry.bridge_factory.HttpTransport", make)
+        await connect_http_bridge(
+            "http://mcp-http:8765", api_key="k", require=True, service_key="svc"
+        )
+        assert seen == {"api_key": "k", "service_key": "svc"}
 
     @pytest.mark.asyncio
     async def test_require_raises_instead_of_falling_back(

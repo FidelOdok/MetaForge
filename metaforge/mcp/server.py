@@ -27,6 +27,7 @@ import inspect
 import json
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -74,6 +75,11 @@ from mcp_core.protocol import (
     TOOL_EXECUTION_ERROR,
 )
 from mcp_core.resources import ResourceUriError, parse_resource_uri
+from mcp_core.service_auth import (
+    ServiceRunVerifier,
+    ServiceScopeError,
+    verify_service_key,
+)
 from mcp_core.workflows import WORKFLOWS, prompt_body, prompt_manifest
 from metaforge.mcp.capture import SessionCapture
 from observability.tracing import get_tracer
@@ -273,6 +279,12 @@ class UnifiedMcpServer:
         # quietly, so the default is now the most conservative one and the
         # transports declare what they actually are.
         self._caller = caller
+        # FORGE-487: the design-flow worker's credential and the authority
+        # that says whether the run it names is real. Both None = the feature
+        # is off and every caller keeps the classification the transport
+        # gave it.
+        self._service_key: str | None = None
+        self._service_verifier: ServiceRunVerifier | None = None
         self._approval_gate = approval_gate
         # FORGE-473: where an inline (elicitation) hold is written down, so it
         # has an approval id and an approver like a dashboard one. None keeps
@@ -393,6 +405,154 @@ class UnifiedMcpServer:
         """
         self._caller = caller
         logger.info("unified_mcp_caller", caller=caller.value)
+
+    def attach_service_auth(self, key: str | None, verifier: ServiceRunVerifier | None) -> bool:
+        """Enable the design-flow service caller (FORGE-487). Returns whether it is on.
+
+        On only when there is both a usable key and something to verify runs
+        with. Either missing leaves it off, which is the safe state: the
+        worker is then an ordinary untrusted caller and its writes are held.
+        """
+        from mcp_core.service_auth import service_key_is_usable
+
+        usable = service_key_is_usable(key)
+        if key and not usable:
+            logger.warning(
+                "mcp_service_key_too_short",
+                detail="METAFORGE_MCP_SERVICE_KEY is set but too short to use; the "
+                "design-flow service caller stays off",
+            )
+        if usable and verifier is None:
+            logger.error(
+                "mcp_service_caller_no_verifier",
+                detail="a service key is set but there is no gateway to verify runs "
+                "against (METAFORGE_GATEWAY_URL); the service caller stays off",
+            )
+        enabled = usable and verifier is not None
+        self._service_key = key if enabled else None
+        self._service_verifier = verifier if enabled else None
+        logger.info("mcp_service_caller", enabled=enabled)
+        return enabled
+
+    async def authenticate_service_caller(
+        self, ctx: Any, presented_key: str | None, inbound: Any
+    ) -> Any:
+        """Decide whether this HTTP call is the design-flow service (FORGE-487).
+
+        Returns the context to run the call under:
+
+        * no key, a wrong key, or the feature off: ``ctx`` unchanged, so the
+          call is exactly as untrusted as before and its writes are held;
+        * a right key but a run that is not running, or in another project,
+          or that the gateway could not be asked about: ``service_refusal``
+          set, and every tool call under it is refused. Demoting to a held
+          write would park it for a human who is not there;
+        * a right key and a verified run: ``service_verified``, which makes
+          the call's caller ``Caller.SERVICE``.
+
+        Only ``tools/call`` is examined, so listing tools costs no gateway
+        round trip and a stale run cannot block discovery.
+        """
+        if not presented_key or self._service_key is None:
+            return ctx
+        method = inbound.get("method") if isinstance(inbound, dict) else None
+        if method not in ("tools/call", "tool/call"):
+            return ctx
+        if not verify_service_key(presented_key, self._service_key):
+            # Wrong key: untrusted, not refused. Whoever sent it gets what an
+            # anonymous caller gets; refusing would tell them the key is close.
+            logger.warning("mcp_service_key_rejected", run_id=ctx.run_id)
+            return ctx
+        run_id, project_id = ctx.run_id, ctx.project_id
+        if not run_id or project_id is None:
+            return ctx.model_copy(
+                update={
+                    "service_refusal": "a service call must name its run and its project "
+                    "(X-MetaForge-Run and X-MetaForge-Project)"
+                }
+            )
+        assert self._service_verifier is not None  # enabled implies a verifier
+        try:
+            grant = await self._service_verifier.verify(run_id, str(project_id))
+        except ServiceScopeError as exc:
+            logger.warning("mcp_service_call_out_of_scope", run_id=run_id, reason=exc.reason)
+            return ctx.model_copy(update={"service_refusal": exc.reason})
+        except Exception as exc:  # noqa: BLE001 - fail closed, with the reason
+            logger.error("mcp_service_run_unverifiable", run_id=run_id, error=str(exc))
+            return ctx.model_copy(
+                update={
+                    "service_refusal": "the gateway could not confirm the run "
+                    f"({type(exc).__name__}); service writes fail closed"
+                }
+            )
+        if grant is None:
+            logger.info("mcp_service_call_no_approved_version", run_id=run_id)
+            return ctx
+        return ctx.model_copy(
+            update={
+                "service_verified": True,
+                "actor_id": f"service:design-flow:{grant.run_id}",
+                "actor_verified": False,
+            }
+        )
+
+    def _effective_caller(self) -> Caller:
+        """Who is calling *this* request: the transport's answer, or the service."""
+        try:
+            from mcp_core.context import current_context
+
+            if current_context().service_verified:
+                return Caller.SERVICE
+        except Exception:  # noqa: BLE001 - no context means the transport's answer
+            pass
+        return self._caller
+
+    @staticmethod
+    def _service_log_fields() -> dict[str, Any]:
+        """Run, phase, model and project of the current service call, for logs."""
+        from mcp_core.context import current_context
+
+        ctx = current_context()
+        return {
+            "run_id": ctx.run_id,
+            "phase": ctx.phase,
+            "model": ctx.model,
+            "project_id": str(ctx.project_id) if ctx.project_id else None,
+        }
+
+    def _enforce_service_scope(self, tool_id: str, arguments: dict[str, Any]) -> None:
+        """Refuse a service call that left its run or its project (FORGE-487).
+
+        Runs for every tool call, reads included, because the failure it
+        guards against is a verified key being used for something the run was
+        never given.
+        """
+        from mcp_core.context import current_context
+
+        ctx = current_context()
+        if ctx.service_refusal:
+            raise ServiceScopeError(tool_id, ctx.service_refusal)
+        if not ctx.service_verified:
+            return
+        explicit = arguments.get("project_id")
+        if explicit in (None, ""):
+            return
+        try:
+            same = uuid.UUID(str(explicit)) == ctx.project_id
+        except ValueError:
+            same = False
+        if not same:
+            logger.warning(
+                "mcp_service_call_other_project",
+                tool_id=tool_id,
+                run_id=ctx.run_id,
+                project_id=str(ctx.project_id),
+            )
+            raise ServiceScopeError(
+                tool_id,
+                f"it names project {explicit}, outside this run's project {ctx.project_id}",
+                code="service_other_project",
+            )
 
     def declare_auth_posture(self, posture: AuthPosture) -> None:
         """Record what the transport in front of this server enforces.
@@ -571,6 +731,25 @@ class UnifiedMcpServer:
                         {
                             "code": "unknown_profile",
                             "available": sorted(PROFILES),
+                            "retryable": False,
+                        },
+                    )
+                )
+            except ServiceScopeError as exc:
+                self._mark_failed(span, exc)
+                # FORGE-487. A refusal, not a hold: nobody is waiting on a
+                # server-driven run to click anything, so the worker is told
+                # plainly and, since retrying cannot change the answer, not to
+                # retry.
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": exc.code,
+                            "reason": exc.reason,
                             "retryable": False,
                         },
                     )
@@ -1278,6 +1457,23 @@ class UnifiedMcpServer:
                 client["version"] = version
             if client:
                 out["client"] = client
+        # FORGE-487: a verified service call says which run, phase and model it
+        # was made for. Stamped on every event, like the client, so a
+        # reviewer filtering /sessions by run does not have to infer it.
+        try:
+            if ctx.service_verified:
+                out["caller"] = Caller.SERVICE.value
+                out["service"] = {
+                    k: v
+                    for k, v in (
+                        ("run_id", ctx.run_id),
+                        ("phase", ctx.phase),
+                        ("model", ctx.model),
+                    )
+                    if v
+                }
+        except Exception:  # noqa: BLE001 - attribution must not break capture
+            pass
         meta = (params or {}).get("_meta")
         model = meta.get("model") if isinstance(meta, dict) else None
         if isinstance(model, str) and model:
@@ -1599,6 +1795,10 @@ class UnifiedMcpServer:
         """
         # Before anything else: the caller does not get to say who approved.
         reject_caller_supplied_approver(tool_id, arguments)
+        # FORGE-487: a design-flow service call stays inside its run's project,
+        # or does not run.
+        self._enforce_service_scope(tool_id, arguments)
+        caller = self._effective_caller()
         # FORGE-360: the local-write exemption exists only because a stdio
         # session had nowhere to answer an approval -- F1 says so in
         # ``guardrails._EXEMPTIBLE``. A client that can elicit *is* somewhere
@@ -1608,7 +1808,7 @@ class UnifiedMcpServer:
         can_elicit = self.can_elicit
         decision = decide(
             tool_id,
-            caller=self._caller,
+            caller=caller,
             twin_mutations_enabled=self._twin_mutations_enabled(),
             exempt_local_writes=self._exempt_local_writes and not can_elicit,
             # FORGE-407: `twin.query_cypher` is a read or a write depending on
@@ -1617,6 +1817,20 @@ class UnifiedMcpServer:
             # with twin mutations enabled.
             arguments=arguments,
         )
+        if decision.refused:
+            logger.warning(
+                "mcp_service_call_refused",
+                tool_id=tool_id,
+                reason=decision.reason,
+                **self._service_log_fields(),
+            )
+            raise ServiceScopeError(tool_id, decision.reason, code="service_refused")
+        if caller is Caller.SERVICE:
+            logger.info(
+                "mcp_service_call_authorised",
+                tool_id=tool_id,
+                **self._service_log_fields(),
+            )
         if not decision.requires_approval:
             return None
 
@@ -1637,7 +1851,7 @@ class UnifiedMcpServer:
             logger.error(
                 "mcp_approval_gate_missing",
                 tool_id=tool_id,
-                caller=self._caller.value,
+                caller=caller.value,
                 reason=decision.reason,
             )
             raise ApprovalNotConfiguredError(tool_id, decision.reason)
@@ -1666,7 +1880,7 @@ class UnifiedMcpServer:
         logger.info(
             "mcp_tool_call_held_for_approval",
             tool_id=tool_id,
-            caller=self._caller.value,
+            caller=caller.value,
             reason=decision.reason,
             route=route,
             window_seconds=window,
@@ -1704,7 +1918,7 @@ class UnifiedMcpServer:
                     ApprovalAsk(
                         tool_id=tool_id,
                         arguments=arguments,
-                        caller=self._caller,
+                        caller=caller,
                         reason=decision.reason,
                         project=_effective_project(arguments),
                         timeout_seconds=window,
@@ -1723,7 +1937,7 @@ class UnifiedMcpServer:
             logger.info(
                 "mcp_tool_call_not_approved",
                 tool_id=tool_id,
-                caller=self._caller.value,
+                caller=caller.value,
                 outcome=outcome.value,
                 approval_id=approval_id,
                 route=route,
@@ -1748,7 +1962,7 @@ class UnifiedMcpServer:
             logger.error(
                 "mcp_human_authority_missing",
                 tool_id=tool_id,
-                caller=self._caller.value,
+                caller=caller.value,
             )
             raise HumanAuthorityRequiredError(
                 tool_id,
@@ -2259,6 +2473,10 @@ _ERROR_CLASSES: tuple[tuple[str, str], ...] = (
     ("ApprovalNotConfiguredError", "approval_not_configured"),
     ("ApprovalRejectedError", "approval_refused"),
     ("ApprovalLedgerUnavailableError", "approval_ledger_unavailable"),
+    # FORGE-487: a design-flow service call outside its run, its project, or
+    # the tools a service may use. Its own label: a rise means a phase is
+    # reaching for something it was never given, not that approvals are slow.
+    ("ServiceScopeError", "service_scope_refused"),
     # FORGE-393. Separate labels on purpose: a rise in the first means a
     # client is still passing the old argument, a rise in the second means
     # approvals are landing without an identified human -- different faults

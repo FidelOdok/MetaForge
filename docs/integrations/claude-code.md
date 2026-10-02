@@ -388,6 +388,47 @@ creates. Starting a run on that version, once approved, takes none.
 `run.start_design_flow` is still held, because a built-in template has no
 version approval behind it.
 
+### The design-flow worker is not held per call (FORGE-487)
+
+A server-driven design-flow run makes its tool calls from the
+`design-flow-worker` process, not from your client. Without help the sidecar
+classifies that process as `untrusted`, holds every write for a dashboard click
+and times out after 100s, so no phase could record a deliverable unattended.
+You already authorised the run: you approved its flow version, and you answer
+each phase gate. The sidecar therefore recognises the worker as a distinct
+**service caller** (`caller=service`) and does not hold its in-scope writes.
+
+This is off unless you configure it, and a valid key alone is not enough:
+
+| Property | How it is enforced |
+| --- | --- |
+| Authenticated | a dedicated secret, `METAFORGE_MCP_SERVICE_KEY`, sent in `X-MetaForge-Service-Key` and compared in constant time. It is **not** the bearer key (`METAFORGE_MCP_API_KEY`), which every plugin client holds. Network position is never consulted. |
+| Off by default | no key, a key shorter than 16 characters, or no `METAFORGE_GATEWAY_URL` to verify runs against leaves the worker an ordinary untrusted caller, whose writes are held as above. An open-auth sidecar does not enable it either. |
+| Bound to a run | on each `tools/call` the sidecar asks the gateway: the run exists, is `running`, and its flow version is `approved` and valid. A run started from a built-in template has no approved version, so it stays untrusted and held. Grants are cached for 5 seconds, so cancelling a run stops its next write. |
+| Bound to a project | the call's project must be the run's project, and a `project_id` argument must match it. Anything else is refused. |
+| Narrow | `project.*`, `flow.*` and `run.*`, human-authority tools (`twin.approve_*`, `twin.attempt_promotion`) and anything destructive are refused outright, not held, because nobody is waiting to answer a hold in a server-driven run. |
+| Attributed | the actor is `service:design-flow:<run id>`, and session capture stamps each event with `caller: service` and `service: {run_id, phase, model}`. The sidecar also logs `mcp_service_call_authorised` and `mcp_service_call_refused`. |
+
+A refusal comes back as a JSON-RPC error with `code` `service_scope`,
+`service_other_project` or `service_refused`, and `retryable: false`.
+
+A wrong or missing key is not an error: the call is simply untrusted and held,
+exactly as a plugin client's would be.
+
+**Configuring the secret in compose.** Generate one value and give it to
+exactly two services, `design-flow-worker` and `mcp-http`. Do not give it to
+the gateway, the dashboard, or any plugin.
+
+```bash
+echo "METAFORGE_MCP_SERVICE_KEY=$(openssl rand -hex 32)" >> .env
+```
+
+`docker-compose.yml` passes `${METAFORGE_MCP_SERVICE_KEY:-}` to the worker and
+`docker-compose.override.yml` passes the same to `mcp-http`. There is
+deliberately no default: unset, the feature is off and the worker log says
+`design_flow_worker_no_service_key`. `mcp-http` also needs
+`METAFORGE_GATEWAY_URL` (already set there) to verify runs.
+
 ## Design flows from Claude Code
 
 The sidecar serves the design-flow tools, and they are in the `core`

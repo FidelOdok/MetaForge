@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp_core.client import Transport
 from mcp_core.context import context_to_headers, current_context
+from mcp_core.service_auth import HEADER_SERVICE_KEY
 
 if TYPE_CHECKING:
     from tool_registry.mcp_server.server import McpToolServer
@@ -71,9 +72,14 @@ class HttpTransport(Transport):
         timeout: float = 120.0,
         *,
         api_key: str | None = None,
+        service_key: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        # FORGE-487: the design-flow worker's credential, sent beside (not in
+        # place of) the bearer key. ``None`` sends nothing and the sidecar
+        # treats the caller as it always did.
+        self._service_key = service_key
         # MET-338: optional API key sent as ``Authorization: Bearer <key>``
         # on every request. ``None`` means open mode — no header sent.
         self._api_key = api_key
@@ -95,6 +101,8 @@ class HttpTransport(Transport):
         # Empty for the untouched sentinel context -- a call nobody ever
         # scoped sends no headers, same as before this existed.
         headers.update(context_to_headers(current_context()))
+        if self._service_key:
+            headers[HEADER_SERVICE_KEY] = self._service_key
         async with self._session.post(
             f"{self._base_url}/mcp",
             data=message,
