@@ -84,11 +84,7 @@ async def create_mcp_bridge(
                 fb,
                 require,
             )
-        # Annotated as the union because the stdio branch below binds a
-        # StdioTransport to this same name; without it the second assignment
-        # reads as a type error rather than the two-mode dispatch it is.
-        transport: HttpTransport | StdioTransport = HttpTransport(url, api_key=api_key)
-        return await _connect_and_wrap("http", url, transport, fb, require)
+        return await connect_http_bridge(url, api_key=api_key, fallback=fb, require=require)
 
     if mode == "stdio":
         cmd = os.environ.get("METAFORGE_MCP_SERVER_CMD")
@@ -111,6 +107,25 @@ async def create_mcp_bridge(
         fb,
         require,
     )
+
+
+async def connect_http_bridge(
+    url: str,
+    *,
+    api_key: str | None = None,
+    fallback: McpBridge | None = None,
+    require: bool = False,
+) -> McpBridge:
+    """Connect to an MCP server over HTTP and wrap it as an ``McpBridge``.
+
+    ``url`` is the server's base URL; the transport posts to ``<url>/mcp``.
+    The same connect + ``tool/list`` discovery ``create_mcp_bridge`` runs for
+    ``METAFORGE_MCP_BRIDGE=http``, exposed for a process that is told where
+    its server is by something other than that env pair (FORGE-475: the
+    design-flow worker, which reaches the ``mcp-http`` sidecar).
+    """
+    transport = HttpTransport(url, api_key=api_key)
+    return await _connect_and_wrap("http", url, transport, fallback or InMemoryMcpBridge(), require)
 
 
 # ---------------------------------------------------------------------------

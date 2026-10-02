@@ -14,14 +14,17 @@ CAVEAT: the backend is undocumented and can change without notice.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+import contextlib
 import datetime
 import json
 import os
 import stat
+import tempfile
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -190,12 +193,88 @@ def save_credentials(path: Path, creds: CodexCredentials) -> bool:
             tokens["account_id"] = creds.account_id
         data["tokens"] = tokens
         data["last_refresh"] = datetime.datetime.now(datetime.UTC).isoformat()
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        _write_atomic(path, json.dumps(data, indent=2))
         return True
     except OSError as exc:
         logger.warning("codex_credentials_persist_failed", path=str(path), error=str(exc))
         return False
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Replace ``path`` in one step, so a concurrent reader (another process
+    sharing ``~/.codex``, FORGE-475) never sees a half-written auth.json."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+@contextlib.asynccontextmanager
+async def _refresh_lock(path: Path) -> AsyncIterator[None]:
+    """Exclusive cross-process lock for refreshing the tokens at ``path``.
+
+    The lock file sits next to auth.json. ``flock`` locks belong to the open
+    file, so two opens conflict within one process as well as across
+    processes. Acquired in a thread so a waiting refresher does not block the
+    event loop. Where ``fcntl`` is unavailable (Windows) this is a no-op.
+    """
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - non-POSIX host
+        yield
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path.with_name(path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        await asyncio.to_thread(fcntl.flock, fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+async def refresh_and_persist(
+    path: Path,
+    stale: CodexCredentials,
+    *,
+    post: RefreshPost,
+    now: float | None = None,
+    force: bool = False,
+) -> CodexCredentials:
+    """Refresh ``stale`` and write the rotated tokens to ``path``, at most once
+    across every process sharing the file (FORGE-475).
+
+    Refresh tokens are single-use: when the gateway and the design-flow worker
+    both refreshed the same token, the loser's refresh failed and Codex auth
+    broke for both. Under the lock the stored credentials are re-read; if
+    another process already rotated them (the tokens differ from ``stale``)
+    or, unless ``force``, they are no longer expired, those are returned
+    without a refresh call. ``force`` is for a token the backend rejected
+    (401) while it still looked valid by its expiry.
+    """
+    async with _refresh_lock(path):
+        try:
+            current = load_credentials(path)
+        except (CodexAuthError, OSError, ValueError):
+            current = stale
+        rotated = (current.access_token, current.refresh_token) != (
+            stale.access_token,
+            stale.refresh_token,
+        )
+        if rotated or (not force and not current.is_expired(now=now)):
+            logger.info("codex_token_refresh_skipped", rotated_elsewhere=rotated)
+            return current
+        fresh = await refresh_credentials(current, post=post, now=now)
+        save_credentials(path, fresh)
+        return fresh
 
 
 async def get_valid_credentials(
@@ -213,7 +292,7 @@ async def get_valid_credentials(
     resolved = path or auth_json_path()
     creds = load_credentials(resolved)
     if creds.is_expired(now=now) and creds.refresh_token and post is not None:
-        creds = await refresh_credentials(creds, post=post, now=now)
         if persist and resolved is not None:
-            save_credentials(resolved, creds)
+            return await refresh_and_persist(resolved, creds, post=post, now=now)
+        creds = await refresh_credentials(creds, post=post, now=now)
     return creds

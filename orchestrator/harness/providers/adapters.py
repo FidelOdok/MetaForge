@@ -561,9 +561,14 @@ async def codex_invoke(
         # Refresh-and-retry once on auth failure (stored token invalidated).
         # Persist the rotated tokens so the next process doesn't reuse a dead one.
         if err.status_code == 401 and getattr(creds, "refresh_token", None):
-            fresh = await codex_auth.refresh_credentials(creds, post=_codex_refresh_post)
             if path is not None:
-                codex_auth.save_credentials(path, fresh)
+                # FORGE-475: locked, so a process sharing ~/.codex that already
+                # rotated this token hands us its result instead of a 2nd refresh.
+                fresh = await codex_auth.refresh_and_persist(
+                    path, creds, post=_codex_refresh_post, force=True
+                )
+            else:
+                fresh = await codex_auth.refresh_credentials(creds, post=_codex_refresh_post)
             return await _codex_call(_codex_client(fresh), spec, system, input_text)
         raise err from exc
 
