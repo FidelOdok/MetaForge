@@ -86,6 +86,9 @@ _TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
 class ApprovalDecision(StrEnum):
     APPROVE = "approve"
     REJECT = "reject"
+    #: FORGE-495: re-run the phase the gate belongs to. The run goes back to
+    #: ``running`` like an approval, but the engine re-runs instead of advancing.
+    RETRY = "retry"
 
 
 class RunNotFoundError(KeyError):
@@ -269,7 +272,7 @@ class InMemoryRunStore:
         run = self.get(run_id)
         if run.status is not RunStatus.AWAITING_APPROVAL:
             raise InvalidTransition(run_id, run.status, RunStatus.RUNNING)
-        target = RunStatus.RUNNING if decision is ApprovalDecision.APPROVE else RunStatus.REJECTED
+        target = RunStatus.REJECTED if decision is ApprovalDecision.REJECT else RunStatus.RUNNING
         run = self._transition(run_id, target)
         run.approval_reason = None
         run.approved_by = approved_by

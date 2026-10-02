@@ -754,7 +754,9 @@ runs reject <run_id>
 
 The lower-level surface over `/v1/runs`. `runs create --request-json '{...}'`
 takes a full run request (used by `design` under the hood); `watch` streams a
-run's SSE status; `approve`/`reject` resolve a run paused at a gate.
+run's SSE status; `approve`/`reject` resolve a run paused at a gate. A third
+decision, `retry`, re-runs the gate's phase (`POST /v1/runs/{id}/approval` with
+`{"decision": "retry", "reason": "..."}`); the CLI does not expose it yet.
 
 ## Output formats
 

@@ -44,6 +44,7 @@ from temporalio.exceptions import ActivityError
 with workflow.unsafe.imports_passed_through():
     from orchestrator.design_flow.frozen import FrozenFlow, FrozenPhase
     from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
+    from orchestrator.design_flow.retry import DEFAULT_MAX_PHASE_RETRIES, build_retry_feedback
 
 __all__ = [
     "DEFAULT_GATE_TIMEOUT",
@@ -56,6 +57,11 @@ __all__ = [
 ]
 
 TASK_QUEUE = "metaforge-design-flows"
+
+#: ``workflow.patched`` id for FORGE-495. A gate that is not ready used to fail
+#: the run; it now parks for a decision. Runs whose history already holds the
+#: old failure replay it unchanged.
+RETRY_PATCH_ID = "forge-495-gate-retry"
 
 #: How long a gate waits before it is treated as refused. Long, because the
 #: reviewer is a person who may be asleep; finite, because a run that waits
@@ -91,6 +97,11 @@ class PhaseRequest:
     prior: list[str] = field(default_factory=list)
     #: FORGE-491: the frozen flow's context block, handed to the phase brain.
     flow_context: str = ""
+    #: FORGE-495: on a retry, the gate's findings and the reviewer's reason,
+    #: which the phase brain reads first. Empty on a first attempt.
+    retry_feedback: str = ""
+    #: 1 for the first attempt, 2 for the first retry, and so on.
+    attempt: int = 1
 
 
 @dataclass
@@ -123,6 +134,9 @@ class GateAnswer:
     #: whatever asked for the gate.
     decided_by: str = ""
     comment: str = ""
+    #: FORGE-495: re-run the phase instead of ending the run. ``approved`` is
+    #: False for a retry; ``comment`` is the reviewer's reason.
+    retry: bool = False
 
 
 @dataclass
@@ -145,6 +159,8 @@ class DesignFlowInput:
     #: Phases already completed by an earlier incarnation, carried across a
     #: continue-as-new so a change request does not re-run finished work.
     completed: list[dict[str, Any]] = field(default_factory=list)
+    #: FORGE-495: how many times one phase may be re-run from its gate.
+    max_phase_retries: int = DEFAULT_MAX_PHASE_RETRIES
 
 
 @workflow.defn(name="DesignFlow")
@@ -179,6 +195,14 @@ class DesignFlowWorkflow:
         self._completed: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
         self._error: str | None = None
+        #: FORGE-495: attempt number of the phase in flight, and the cap.
+        self._attempt = 1
+        self._max_retries = DEFAULT_MAX_PHASE_RETRIES
+        #: False while parked at a gate that is not ready; approve is refused.
+        self._gate_ready = True
+        self._gate_findings: list[str] = []
+        #: Set by a retry decision; consumed by the phase loop.
+        self._retry_reason: str | None = None
 
     # ── signals ──────────────────────────────────────────────────────────
 
@@ -215,6 +239,11 @@ class DesignFlowWorkflow:
             "gate_reason": self._gate_reason if self._gate_open else "",
             "completed": list(self._completed),
             "error": self._error,
+            "attempt": self._attempt,
+            "max_retries": self._max_retries,
+            "retries_left": max(self._max_retries - (self._attempt - 1), 0),
+            "gate_ready": self._gate_ready,
+            "gate_findings": list(self._gate_findings) if self._gate_open else [],
         }
 
     @workflow.query
@@ -234,65 +263,91 @@ class DesignFlowWorkflow:
         self._status = "running"
         self._record("run_started", detail=inp.flow.template_id)
 
+        self._max_retries = inp.max_phase_retries
         phases = inp.flow.phases
         while self._phase_index < len(phases):
             phase = phases[self._phase_index]
             self._current_phase = phase.id
-            self._record("phase_started", phase=phase.id)
+            self._attempt = 1
+            retry_feedback = ""
 
-            try:
-                result: PhaseResult = await workflow.execute_activity(
-                    "run_phase",
-                    PhaseRequest(
-                        run_id=inp.run_id,
-                        goal=inp.goal,
-                        phase=phase,
-                        project_id=inp.project_id,
-                        session_id=inp.session_id,
-                        flow_id=inp.flow.template_id,
-                        prior=[c["summary"] for c in self._completed],
-                        flow_context=inp.flow.context,
-                    ),
-                    start_to_close_timeout=_PHASE_TIMEOUT,
-                    heartbeat_timeout=_PHASE_HEARTBEAT,
-                    # A configuration error (no key, unusable model) is marked
-                    # non-retryable by the activity (FORGE-475); anything else
-                    # gets three attempts.
-                    retry_policy=RetryPolicy(maximum_attempts=3),
-                    # Without result_type the payload arrives as a bare dict
-                    # and every attribute access below fails at run time --
-                    # inside a workflow, where the traceback surfaces as a
-                    # stuck run.
-                    result_type=PhaseResult,
+            while True:
+                self._record(
+                    "phase_started",
+                    phase=phase.id,
+                    detail=f"attempt {self._attempt}" if self._attempt > 1 else "",
                 )
-            except ActivityError as exc:
-                # The phase could not run. End the run as failed with the
-                # reason rather than failing the workflow with an opaque
-                # "Activity task failed" nobody can read from run status.
-                cause = exc.cause
-                reason = str(cause) if cause is not None else str(exc)
-                return self._fail(f"Phase '{phase.id}' failed: {reason}")
-            # An ungrounded reply is never "completed", whatever the worker said.
-            result.status = phase_status(result.summary, result.status)
-            entry = {
-                "phase": phase.id,
-                "summary": result.summary,
-                "artifacts": result.artifacts,
-                "status": result.status,
-            }
-            self._completed.append(entry)
-            self._record("phase_finished", phase=phase.id, detail=result.status)
+                try:
+                    result: PhaseResult = await workflow.execute_activity(
+                        "run_phase",
+                        PhaseRequest(
+                            run_id=inp.run_id,
+                            goal=inp.goal,
+                            phase=phase,
+                            project_id=inp.project_id,
+                            session_id=inp.session_id,
+                            flow_id=inp.flow.template_id,
+                            prior=[c["summary"] for c in self._completed],
+                            flow_context=inp.flow.context,
+                            retry_feedback=retry_feedback,
+                            attempt=self._attempt,
+                        ),
+                        start_to_close_timeout=_PHASE_TIMEOUT,
+                        heartbeat_timeout=_PHASE_HEARTBEAT,
+                        # A configuration error (no key, unusable model) is marked
+                        # non-retryable by the activity (FORGE-475); anything else
+                        # gets three attempts.
+                        retry_policy=RetryPolicy(maximum_attempts=3),
+                        # Without result_type the payload arrives as a bare dict
+                        # and every attribute access below fails at run time --
+                        # inside a workflow, where the traceback surfaces as a
+                        # stuck run.
+                        result_type=PhaseResult,
+                    )
+                except ActivityError as exc:
+                    # The phase could not run. End the run as failed with the
+                    # reason rather than failing the workflow with an opaque
+                    # "Activity task failed" nobody can read from run status.
+                    cause = exc.cause
+                    reason = str(cause) if cause is not None else str(exc)
+                    return self._fail(f"Phase '{phase.id}' failed: {reason}")
+                # An ungrounded reply is never "completed", whatever the worker said.
+                result.status = phase_status(result.summary, result.status)
+                entry = {
+                    "phase": phase.id,
+                    "summary": result.summary,
+                    "artifacts": result.artifacts,
+                    "status": result.status,
+                }
+                self._completed.append(entry)
+                self._record("phase_finished", phase=phase.id, detail=result.status)
 
-            gate = phase.gate
-            if gate is not None and not gate.auto_approve:
+                gate = phase.gate
+                if gate is None or gate.auto_approve:
+                    break
+
+                self._retry_reason = None
                 verdict = await self._run_gate(inp, phase, entry)
                 if verdict is not None:
                     return verdict
+
+                if self._retry_reason is not None:
+                    # FORGE-495: keep every earlier approved phase, drop only this
+                    # attempt's entry, and run the same phase again.
+                    self._completed.pop()
+                    retry_feedback = build_retry_feedback(
+                        findings=self._gate_findings,
+                        reason=self._retry_reason,
+                        attempt=self._attempt + 1,
+                    )
+                    self._attempt += 1
+                    continue
 
                 if self._change is not None:
                     # A gate boundary is the only safe place to swap the flow:
                     # no phase is in flight, so nothing half-done is orphaned.
                     return await self._apply_change(inp)
+                break
 
             self._phase_index += 1
 
@@ -332,14 +387,153 @@ class DesignFlowWorkflow:
             found = [d for d in phase.required_deliverables if d in check.present]
             entry["artifacts"] = sorted({*entry["artifacts"], *found})
 
-        # A gate whose own preconditions failed never reaches a human. Asking
-        # somebody to approve work the system already knows is incomplete
-        # trains them to click through.
+        findings, blocking = self._gate_findings_for(phase, gate, check, entry)
+        self._gate_findings = findings
+        self._gate_ready = not blocking
+        if blocking:
+            # A gate whose own preconditions failed never reaches an approver as
+            # an approvable gate: asking somebody to approve work the system
+            # already knows is incomplete trains them to click through.
+            if not workflow.patched(RETRY_PATCH_ID):
+                return self._legacy_not_ready(phase, gate, check, entry)
+            entry["status"] = "failed"
+            self._record("gate_not_ready", phase=phase.id, detail="; ".join(findings))
+
+        reason = check.reason
+        if blocking:
+            reason = f"NOT READY (retry the phase or reject): {'; '.join(findings)}" + (
+                f" | {check.reason}" if check.reason else ""
+            )
+        self._gate_open = gate.name
+        self._gate_reason = reason
+        self._status = "awaiting_approval"
+        self._answer = None
+        self._record("gate_opened", phase=phase.id, detail=reason)
+
+        await workflow.execute_activity(
+            "announce_gate",
+            {"run_id": inp.run_id, "gate": gate.name, "reason": reason},
+            start_to_close_timeout=_CHECK_TIMEOUT,
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+        # `wait_condition` raises rather than returning when the timeout
+        # expires. Letting that escape would fail the workflow, which reads as
+        # a crashed run rather than a gate nobody answered -- the two need
+        # different words to whoever is looking at the run list.
+        deadline = workflow.now() + timedelta(seconds=inp.gate_timeout_seconds)
+        while True:
+            remaining = max((deadline - workflow.now()).total_seconds(), 0.0)
+            try:
+                await workflow.wait_condition(
+                    # A parked, not-ready gate takes a decision only; a queued
+                    # flow change waits for a gate that is ready.
+                    lambda: (
+                        self._answer is not None or (self._gate_ready and self._change is not None)
+                    ),
+                    timeout=timedelta(seconds=remaining),
+                )
+            except TimeoutError:
+                break
+            answer = self._answer
+            if answer is not None and not answer.approved and not answer.retry:
+                break
+            if answer is not None and answer.approved and not self._gate_ready:
+                # Approving a gate the system knows is incomplete is refused.
+                self._answer = None
+                self._record(
+                    "gate_decision_ignored",
+                    phase=phase.id,
+                    detail="gate not ready: retry the phase or reject",
+                )
+                continue
+            break
+
+        if self._answer is None and self._change is None:
+            self._gate_open = None
+            self._gate_ready = True
+            return self._reject(
+                f"Gate '{gate.name}' was not answered within the approval window. "
+                "An unanswered gate is a refusal: nobody looked at this work."
+            )
+
+        self._gate_open = None
+        answer = self._answer
+        if answer is not None and answer.retry:
+            retries_used = self._attempt - 1
+            if retries_used >= self._max_retries:
+                self._gate_ready = True
+                return self._fail(
+                    f"Phase '{phase.id}' did not pass gate '{gate.name}' after "
+                    f"{retries_used} retr{'y' if retries_used == 1 else 'ies'} "
+                    "(the per-phase cap)."
+                )
+            self._retry_reason = answer.comment or "retry requested"
+            self._status = "running"
+            self._gate_ready = True
+            self._record(
+                "phase_retry_requested",
+                phase=phase.id,
+                detail=(
+                    f"attempt {self._attempt + 1} of {self._max_retries + 1} by "
+                    f"{answer.decided_by or 'a reviewer'}: {self._retry_reason}"
+                ),
+            )
+            return None
+
+        self._gate_ready = True
+        if answer is not None and not answer.approved:
+            return self._reject(
+                f"Gate '{gate.name}' rejected by {answer.decided_by or 'a reviewer'}"
+                + (f": {answer.comment}" if answer.comment else "")
+            )
+
+        if answer is not None:
+            self._status = "running"
+            self._record("gate_approved", phase=phase.id, detail=answer.decided_by or "approved")
+        return None
+
+    @staticmethod
+    def _gate_findings_for(
+        phase: FrozenPhase, gate: Any, check: GateCheck, entry: dict[str, Any]
+    ) -> tuple[list[str], bool]:
+        """What the gate found, and whether any of it blocks approval."""
+        findings: list[str] = []
+        blocking = False
+        if phase.enforce_deliverables and check.checked and not check.ready:
+            blocking = True
+            findings.append(
+                f"phase '{phase.id}' did not record required deliverables {check.missing} "
+                f"(present: {check.present or 'none'})"
+            )
+        if phase.enforce_deliverables and result_ungrounded(entry):
+            blocking = True
+            findings.append(
+                f"phase '{phase.id}' reply was flagged ungrounded (no tool calls were made), "
+                "so its claimed work is unverified"
+            )
+        if check.constraints_checked and not check.constraints_passed:
+            if gate.enforce_constraints:
+                blocking = True
+            findings.append(
+                f"{len(check.violations)} constraint violation(s): "
+                f"{'; '.join(check.violations[:10])}"
+            )
+        return findings, blocking
+
+    def _legacy_not_ready(
+        self, phase: FrozenPhase, gate: Any, check: GateCheck, entry: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The pre-FORGE-495 behaviour: a gate that is not ready fails the run.
+
+        Kept only so a run whose history already holds this failure replays
+        deterministically (``workflow.patched``).
+        """
         if phase.enforce_deliverables and check.checked and not check.ready:
             entry["status"] = "failed"
             self._record("phase_failed", phase=phase.id, detail=f"missing {check.missing}")
             return self._fail(
-                f"Gate '{gate.name}' not ready — phase '{phase.id}' did not record "
+                f"Gate '{gate.name}' not ready: phase '{phase.id}' did not record "
                 f"required deliverables {check.missing} (present: {check.present or 'none'})."
             )
         if phase.enforce_deliverables and result_ungrounded(entry):
@@ -349,57 +543,10 @@ class DesignFlowWorkflow:
                 f"Gate '{gate.name}' not ready: phase '{phase.id}' reply was flagged "
                 "ungrounded (no tool calls were made), so its claimed work is unverified."
             )
-        if gate.enforce_constraints and check.constraints_checked and not check.constraints_passed:
-            return self._fail(
-                f"Gate '{gate.name}' not ready — {len(check.violations)} constraint "
-                f"violation(s): {'; '.join(check.violations[:10])}"
-            )
-
-        self._gate_open = gate.name
-        self._gate_reason = check.reason
-        self._status = "awaiting_approval"
-        self._answer = None
-        self._record("gate_opened", phase=phase.id, detail=check.reason)
-
-        await workflow.execute_activity(
-            "announce_gate",
-            {"run_id": inp.run_id, "gate": gate.name, "reason": check.reason},
-            start_to_close_timeout=_CHECK_TIMEOUT,
-            retry_policy=RetryPolicy(maximum_attempts=3),
+        return self._fail(
+            f"Gate '{gate.name}' not ready: {len(check.violations)} constraint "
+            f"violation(s): {'; '.join(check.violations[:10])}"
         )
-
-        # `wait_condition` raises rather than returning when the timeout
-        # expires. Letting that escape would fail the workflow, which reads as
-        # a crashed run rather than a gate nobody answered -- the two need
-        # different words to whoever is looking at the run list.
-        try:
-            await workflow.wait_condition(
-                lambda: self._answer is not None or self._change is not None,
-                timeout=timedelta(seconds=inp.gate_timeout_seconds),
-            )
-        except TimeoutError:
-            pass
-
-        if self._answer is None and self._change is None:
-            self._gate_open = None
-            return self._reject(
-                f"Gate '{gate.name}' was not answered within the approval window. "
-                "An unanswered gate is a refusal: nobody looked at this work."
-            )
-
-        self._gate_open = None
-        if self._answer is not None and not self._answer.approved:
-            return self._reject(
-                f"Gate '{gate.name}' rejected by {self._answer.decided_by or 'a reviewer'}"
-                + (f": {self._answer.comment}" if self._answer.comment else "")
-            )
-
-        if self._answer is not None:
-            self._status = "running"
-            self._record(
-                "gate_approved", phase=phase.id, detail=self._answer.decided_by or "approved"
-            )
-        return None
 
     async def _apply_change(self, inp: DesignFlowInput) -> dict[str, Any]:
         """Restart as a new incarnation carrying the new flow.
@@ -421,6 +568,7 @@ class DesignFlowWorkflow:
                 session_id=inp.session_id,
                 gate_timeout_seconds=inp.gate_timeout_seconds,
                 completed=list(self._completed),
+                max_phase_retries=inp.max_phase_retries,
             )
         )
         raise AssertionError("unreachable: continue_as_new does not return")

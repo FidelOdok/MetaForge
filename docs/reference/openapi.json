@@ -91,9 +91,16 @@
           "decision": {
             "enum": [
               "approve",
-              "reject"
+              "reject",
+              "retry"
             ],
             "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Reason",
             "type": "string"
           }
         },
@@ -3272,6 +3279,11 @@
       "FlowRunState": {
         "description": "Live state of a design-flow run (FORGE-396).\n\nRead from the workflow itself rather than a cache of it. A projection that\ncan be stale is a live view that is sometimes wrong, and nothing on the\npage would say which.",
         "properties": {
+          "attempt": {
+            "default": 1,
+            "title": "Attempt",
+            "type": "integer"
+          },
           "awaitingGate": {
             "anyOf": [
               {
@@ -3362,6 +3374,18 @@
             ],
             "title": "Flowversionid"
           },
+          "gateFindings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gatefindings",
+            "type": "array"
+          },
+          "gateReady": {
+            "default": true,
+            "title": "Gateready",
+            "type": "boolean"
+          },
           "live": {
             "default": true,
             "title": "Live",
@@ -3373,6 +3397,17 @@
             },
             "title": "Phases",
             "type": "array"
+          },
+          "retriesLeft": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retriesleft"
           },
           "runId": {
             "title": "Runid",

@@ -22,6 +22,7 @@ import structlog
 
 from observability.tracing import get_tracer
 from orchestrator.design_flow.frozen import FrozenFlow
+from orchestrator.design_flow.retry import max_phase_retries as max_phase_retries_default
 from orchestrator.design_flow.temporal_flow import (
     TASK_QUEUE,
     ChangeRequest,
@@ -143,6 +144,7 @@ class DesignFlowLauncher:
         project_id: str | None = None,
         session_id: str | None = None,
         gate_timeout_seconds: float | None = None,
+        max_phase_retries: int | None = None,
     ) -> str:
         """Start a run. Returns the workflow id."""
         flow.verify()
@@ -155,6 +157,9 @@ class DesignFlowLauncher:
         )
         if gate_timeout_seconds is not None:
             payload.gate_timeout_seconds = gate_timeout_seconds
+        payload.max_phase_retries = (
+            max_phase_retries if max_phase_retries is not None else max_phase_retries_default()
+        )
         workflow_id = workflow_id_for(run_id)
         with tracer.start_as_current_span("design_flow.start") as span:
             span.set_attribute("run.id", run_id)
@@ -182,7 +187,13 @@ class DesignFlowLauncher:
         return workflow_id
 
     async def answer_gate(
-        self, run_id: str, *, approved: bool, decided_by: str, comment: str = ""
+        self,
+        run_id: str,
+        *,
+        approved: bool,
+        decided_by: str,
+        comment: str = "",
+        retry: bool = False,
     ) -> None:
         """Relay a human's gate decision into the waiting run.
 
@@ -192,12 +203,13 @@ class DesignFlowLauncher:
         handle = self.client.get_workflow_handle(workflow_id_for(run_id))
         await handle.signal(
             "submit_gate_decision",
-            GateAnswer(approved=approved, decided_by=decided_by, comment=comment),
+            GateAnswer(approved=approved, decided_by=decided_by, comment=comment, retry=retry),
         )
         logger.info(
             "design_flow_gate_answered",
             run_id=run_id,
             approved=approved,
+            retry=retry,
             decided_by=decided_by,
         )
 

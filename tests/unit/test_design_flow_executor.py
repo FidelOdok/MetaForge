@@ -217,12 +217,17 @@ async def test_gate_fails_when_required_deliverable_missing() -> None:
         coordinator=coord,
         gate_evaluator=FakeEvaluator({"design_decision"}),
     )
-    await asyncio.wait_for(executor.run(run.id), timeout=2.0)
+    task = asyncio.create_task(executor.run(run.id))
+    # FORGE-495: a gate that is not ready parks with its findings (retry or
+    # reject) rather than failing the run; reject still ends it.
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "NOT READY" in (store.get(run.id).approval_reason or "")
+    assert "cad_model" in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.REJECT)
+    await asyncio.wait_for(task, timeout=2.0)
 
-    run_ = store.get(run.id)
-    assert run_.status is RunStatus.FAILED
-    assert "cad_model" in (run_.error or "")
-    assert brain.seen == ["requirements"]  # failed at the first gate
+    assert store.get(run.id).status is RunStatus.REJECTED
+    assert brain.seen == ["requirements"]  # stopped at the first gate
 
 
 @pytest.mark.asyncio
@@ -330,11 +335,12 @@ async def test_enforced_gate_fails_on_error_violation() -> None:
     executor = DesignFlowExecutor(
         store=store, brain=ScriptedBrain(), coordinator=coord, constraint_checker=checker
     )
-    await asyncio.wait_for(executor.run(run.id), timeout=2.0)
-
-    run_ = store.get(run.id)
-    assert run_.status is RunStatus.FAILED
-    assert "sf_min" in (run_.error or "")
+    task = asyncio.create_task(executor.run(run.id))
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "sf_min" in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.REJECT)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.REJECTED
 
 
 @pytest.mark.asyncio
@@ -598,8 +604,9 @@ async def test_ungrounded_reply_is_never_passed() -> None:
         coordinator=coord,
         gate_evaluator=FakeEvaluator({"cad_model"}),
     )
-    await asyncio.wait_for(executor.run(run.id), timeout=2.0)
-
-    run_ = store.get(run.id)
-    assert run_.status is RunStatus.FAILED
-    assert "ungrounded" in (run_.error or "")
+    task = asyncio.create_task(executor.run(run.id))
+    await _wait_status(store, run.id, RunStatus.AWAITING_APPROVAL)
+    assert "ungrounded" in (store.get(run.id).approval_reason or "")
+    store.submit_approval(run.id, ApprovalDecision.REJECT)
+    await asyncio.wait_for(task, timeout=2.0)
+    assert store.get(run.id).status is RunStatus.REJECTED

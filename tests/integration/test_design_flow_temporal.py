@@ -402,9 +402,11 @@ class TestGateEvidence:
         assert check.checked is False
         assert "no gate checker" in check.reason
 
-    async def test_missing_deliverables_fail_before_a_human_is_asked(self, env) -> None:
+    async def test_missing_deliverables_park_and_cannot_be_approved(self, env) -> None:
         """Asking somebody to approve work the system already knows is
-        incomplete trains them to click through."""
+        incomplete trains them to click through. FORGE-495: the gate parks
+        with its findings (retry or reject) instead of failing the run, and an
+        approve is ignored."""
         run_id = str(uuid.uuid4())
         asked: list[str] = []
 
@@ -426,11 +428,18 @@ class TestGateEvidence:
         launcher = DesignFlowLauncher(client=env.client)
         async with _worker(env, acts):
             await launcher.start(run_id=run_id, goal="g", flow=flow)
+            await _wait_for_gate(env, launcher, run_id)
+            state = await launcher.state(run_id)
+            assert state["gate_ready"] is False
+            assert "cad_model" in state["gate_reason"]
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:reviewer")
+            await asyncio.sleep(0.3)
+            assert (await launcher.state(run_id))["awaiting_gate"], "approve must be ignored"
+            await launcher.answer_gate(run_id, approved=False, decided_by="user:reviewer")
             result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
 
-        assert result["status"] == "failed"
-        assert "cad_model" in result["error"]
-        assert asked == [], "a human was asked to approve a gate that was not ready"
+        assert result["status"] == "rejected"
+        assert asked == ["gate0"]
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -453,6 +462,7 @@ class TestDeliverableGateOnTemporal:
     """FORGE-484: same gate contract as the in-process executor."""
 
     async def _run(self, env, phases, checker):
+        """Run to the (not ready) gate, reject it, and return the result."""
         run_id = str(uuid.uuid4())
         asked: list[str] = []
 
@@ -469,18 +479,19 @@ class TestDeliverableGateOnTemporal:
         launcher = DesignFlowLauncher(client=env.client)
         async with _worker(env, acts):
             await launcher.start(run_id=run_id, goal="g", flow=flow)
+            await _wait_for_gate(env, launcher, run_id)
+            await launcher.answer_gate(run_id, approved=False, decided_by="user:reviewer")
             result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
         return result, asked
 
-    async def test_no_deliverable_fails_with_names_and_phase_failed(self, env) -> None:
+    async def test_no_deliverable_parks_with_names_and_phase_failed(self, env) -> None:
         async def none_recorded(payload: dict) -> GateCheck:
             return GateCheck(ready=False, checked=True, missing=["intent"], present=[])
 
         result, asked = await self._run(env, _Phases(), none_recorded)
-        assert result["status"] == "failed"
-        assert "intent" in result["error"]
+        assert result["status"] == "rejected"
         assert result["phases"][0]["status"] == "failed"
-        assert asked == []
+        assert asked == ["gate0"]
 
     async def test_ungrounded_phase_is_not_passed(self, env) -> None:
         from orchestrator.design_flow.grounding import UNGROUNDED_BANNER
@@ -490,10 +501,9 @@ class TestDeliverableGateOnTemporal:
                 return PhaseResult(summary=f"{UNGROUNDED_BANNER}\n\nbuilt it")
 
         result, asked = await self._run(env, _Ungrounded(), _ok_gate)
-        assert result["status"] == "failed"
-        assert "ungrounded" in result["error"]
+        assert result["status"] == "rejected"
         assert result["phases"][0]["status"] == "failed"
-        assert asked == []
+        assert asked == ["gate0"]
 
     async def test_recorded_deliverable_opens_a_ready_gate_and_lists_artifact(self, env) -> None:
         async def present(payload: dict) -> GateCheck:
@@ -515,3 +525,136 @@ class TestDeliverableGateOnTemporal:
             result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
         assert result["status"] == "completed"
         assert "intent" in result["phases"][0]["artifacts"]
+
+
+class TestRetryPhase:
+    """FORGE-495: a third gate decision re-runs the phase."""
+
+    @staticmethod
+    def _flow3() -> FrozenFlow:
+        built = [
+            FrozenPhase(
+                id=f"phase{i}",
+                title=f"Phase {i}",
+                objective=f"do step {i}",
+                enforce_deliverables=(i == 1),
+                required_deliverables=(["cad_model"] if i == 1 else []),
+                gate=FrozenGate(name=f"gate{i}"),
+            )
+            for i in range(3)
+        ]
+        flow = FrozenFlow(template_id="test_v1", name="Test", phases=built)
+        flow.content_hash = flow.compute_hash()
+        return flow
+
+    @staticmethod
+    async def _wait_gate_n(launcher, run_id: str, gate: str, tries: int = 400) -> dict:
+        for _ in range(tries):
+            state = await launcher.state(run_id)
+            if state["awaiting_gate"] == gate:
+                return state
+            await asyncio.sleep(0.05)
+        raise AssertionError(f"never reached {gate}: {await launcher.state(run_id)}")
+
+    async def test_retry_reruns_only_that_phase_with_findings_earlier_kept(self, env) -> None:
+        run_id = str(uuid.uuid4())
+        requests: list[PhaseRequest] = []
+        checks = {"n": 0}
+
+        class _Recording(_Phases):
+            async def __call__(self, request: PhaseRequest) -> PhaseResult:
+                requests.append(request)
+                return await super().__call__(request)
+
+        async def gate(payload: dict) -> GateCheck:
+            if payload["phase"]["id"] != "phase1":
+                return GateCheck(ready=True, checked=True, constraints_checked=True)
+            checks["n"] += 1
+            if checks["n"] == 1:
+                return GateCheck(ready=False, checked=True, missing=["cad_model"])
+            return GateCheck(ready=True, checked=True, present=["cad_model"])
+
+        acts = DesignFlowActivities(
+            phase_runner=_Recording(), gate_checker=gate, gate_announcer=_announced
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=self._flow3())
+            await self._wait_gate_n(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            state = await self._wait_gate_n(launcher, run_id, "gate1")
+            assert state["gate_ready"] is False and state["attempt"] == 1
+            assert state["retries_left"] == 3
+            await launcher.answer_gate(
+                run_id, approved=False, retry=True, decided_by="user:r", comment="record the model"
+            )
+            # Same gate again, second attempt, now ready.
+            for _ in range(400):
+                state = await launcher.state(run_id)
+                if state["attempt"] == 2 and state["awaiting_gate"] == "gate1":
+                    break
+                await asyncio.sleep(0.05)
+            assert state["gate_ready"] is True and state["retries_left"] == 2
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait_gate_n(launcher, run_id, "gate2")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+            events = await launcher.events(run_id)
+
+        assert result["status"] == "completed"
+        assert [r.phase.id for r in requests] == ["phase0", "phase1", "phase1", "phase2"]
+        assert requests[2].attempt == 2
+        assert requests[2].retry_feedback.startswith("RETRY")
+        assert "cad_model" in requests[2].retry_feedback
+        assert "record the model" in requests[2].retry_feedback
+        assert requests[1].retry_feedback == "" and requests[3].retry_feedback == ""
+        assert [p["phase"] for p in result["phases"]] == ["phase0", "phase1", "phase2"]
+        names = [e["event"] for e in events]
+        assert "gate_not_ready" in names and "phase_retry_requested" in names
+
+    async def test_retry_cap_is_enforced(self, env) -> None:
+        run_id = str(uuid.uuid4())
+
+        async def never_ready(payload: dict) -> GateCheck:
+            if payload["phase"]["id"] == "phase1":
+                return GateCheck(ready=False, checked=True, missing=["cad_model"])
+            return GateCheck(ready=True, checked=True, constraints_checked=True)
+
+        phases = _Phases()
+        acts = DesignFlowActivities(
+            phase_runner=phases, gate_checker=never_ready, gate_announcer=_announced
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=self._flow3(), max_phase_retries=1)
+            await self._wait_gate_n(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait_gate_n(launcher, run_id, "gate1")
+            await launcher.answer_gate(run_id, approved=False, retry=True, decided_by="user:r")
+            for _ in range(400):
+                state = await launcher.state(run_id)
+                if state["attempt"] == 2 and state["awaiting_gate"] == "gate1":
+                    break
+                await asyncio.sleep(0.05)
+            assert state["retries_left"] == 0
+            await launcher.answer_gate(run_id, approved=False, retry=True, decided_by="user:r")
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+
+        assert result["status"] == "failed"
+        assert "after 1 retry" in result["error"]
+        assert phases.ran.count("phase1") == 2
+
+    async def test_reject_still_ends_the_run(self, env) -> None:
+        run_id = str(uuid.uuid4())
+        phases = _Phases()
+        acts = DesignFlowActivities(
+            phase_runner=phases, gate_checker=_ok_gate, gate_announcer=_announced
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=self._flow3())
+            await self._wait_gate_n(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=False, decided_by="user:r")
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+        assert result["status"] == "rejected"
+        assert phases.ran == ["phase0"]

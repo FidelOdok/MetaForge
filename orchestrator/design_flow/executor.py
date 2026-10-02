@@ -24,6 +24,7 @@ import structlog
 
 from observability.tracing import get_tracer
 from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
+from orchestrator.design_flow.retry import build_retry_feedback, max_phase_retries
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FlowDefinition, Phase, get_flow
 from orchestrator.harness.runs import (
     ApprovalDecision,
@@ -64,6 +65,10 @@ class FlowContext:
     session_id: str | None = None
     #: FORGE-491: the approved flow's context block, shown to every phase.
     flow_context: str = ""
+    #: FORGE-495: on a retry, the gate's findings and the reviewer's reason.
+    #: The phase brain puts this first in its prompt. Empty on a first attempt.
+    retry_feedback: str = ""
+    attempt: int = 1
     completed: list[tuple[Phase, PhaseOutcome]] = field(default_factory=list)
 
 
@@ -168,6 +173,24 @@ class GateCoordinator:
 
     def __init__(self) -> None:
         self._waiters: dict[str, asyncio.Future[ApprovalDecision]] = {}
+        #: FORGE-495: a retry also moves the run back to ``running``, which the
+        #: transition observer cannot tell from an approval. The route notes
+        #: the retry here first, with the reviewer's reason.
+        self._retries: dict[str, str] = {}
+        self._gate_state: dict[str, dict[str, object]] = {}
+
+    def note_retry(self, run_id: str, reason: str) -> None:
+        self._retries[run_id] = reason
+
+    def take_retry_reason(self, run_id: str) -> str:
+        return self._retries.pop(run_id, "")
+
+    def set_gate_state(self, run_id: str, *, ready: bool, retries_left: int) -> None:
+        self._gate_state[run_id] = {"ready": ready, "retries_left": retries_left}
+
+    def gate_state(self, run_id: str) -> dict[str, object] | None:
+        """What the in-process executor reports about the gate ``run_id`` is at."""
+        return self._gate_state.get(run_id)
 
     def register(self, run_id: str) -> asyncio.Future[ApprovalDecision]:
         """Create (and store) a waiter future for ``run_id`` on the running loop."""
@@ -195,7 +218,8 @@ class GateCoordinator:
         if fut is None or fut.done():
             return
         if status is RunStatus.RUNNING:
-            fut.set_result(ApprovalDecision.APPROVE)
+            retry = run_id in self._retries
+            fut.set_result(ApprovalDecision.RETRY if retry else ApprovalDecision.APPROVE)
         elif status is RunStatus.REJECTED:
             fut.set_result(ApprovalDecision.REJECT)
         elif status is RunStatus.CANCELED:
@@ -323,86 +347,130 @@ class DesignFlowExecutor:
                     pass
 
     async def _walk(self, run_id: str, flow: FlowDefinition, ctx: FlowContext) -> None:
+        max_retries = max_phase_retries()
         for phase in flow.phases:
-            phase_start = time.time()
-            logger.info("design_flow_phase_start", run_id=run_id, phase=phase.id)
-            outcome = await self._brain.run_phase(goal=ctx.goal, phase=phase, context=ctx)
-            outcome.status = phase_status(outcome.summary, outcome.status)
-            ctx.completed.append((phase, outcome))
-            logger.info(
-                "design_flow_phase_done",
-                run_id=run_id,
-                phase=phase.id,
-                status=outcome.status,
-                artifacts=len(outcome.artifacts),
+            attempt = 1
+            ctx.retry_feedback = ""
+            ctx.attempt = 1
+            while True:
+                if await self._attempt_phase(run_id, phase, ctx, attempt, max_retries):
+                    break
+                # Retry: drop this attempt's outcome, keep every earlier phase.
+                attempt += 1
+                ctx.attempt = attempt
+            if self._store.get(run_id).is_terminal:
+                return
+        ctx.retry_feedback = ""
+        self._store.complete(run_id, result=self._summarize(flow, ctx))
+
+    async def _attempt_phase(
+        self, run_id: str, phase: Phase, ctx: FlowContext, attempt: int, max_retries: int
+    ) -> bool:
+        """Run one attempt of ``phase`` and its gate.
+
+        Returns True when the phase is done (approved, or ended the run), False
+        when a reviewer asked for a retry. Each attempt is logged.
+        """
+        phase_start = time.time()
+        logger.info("design_flow_phase_start", run_id=run_id, phase=phase.id, attempt=attempt)
+        outcome = await self._brain.run_phase(goal=ctx.goal, phase=phase, context=ctx)
+        outcome.status = phase_status(outcome.summary, outcome.status)
+        ctx.completed.append((phase, outcome))
+        logger.info(
+            "design_flow_phase_done",
+            run_id=run_id,
+            phase=phase.id,
+            attempt=attempt,
+            status=outcome.status,
+            artifacts=len(outcome.artifacts),
+        )
+
+        gate = phase.gate
+        if gate is None or gate.auto_approve:
+            return True
+
+        # Readiness: did the phase record its required deliverables?
+        readiness = await self._readiness(phase, ctx, since_ts=phase_start)
+        findings: list[str] = []
+        if phase.enforce_deliverables and readiness.checked and not readiness.ready:
+            findings.append(
+                f"phase '{phase.id}' did not record required deliverables "
+                f"{readiness.missing} into the twin (present: {readiness.present or 'none'})"
+            )
+        if phase.enforce_deliverables and outcome.status == UNGROUNDED_STATUS:
+            findings.append(
+                f"phase '{phase.id}' reply was flagged ungrounded (no tool calls were "
+                "made), so its claimed work is unverified"
             )
 
-            gate = phase.gate
-            if gate is None or gate.auto_approve:
-                continue
-
-            # Readiness: did the phase record its required deliverables?
-            readiness = await self._readiness(phase, ctx, since_ts=phase_start)
-            if phase.enforce_deliverables and readiness.checked and not readiness.ready:
-                msg = (
-                    f"Gate '{gate.name}' not ready — phase '{phase.id}' did not record "
-                    f"required deliverables {readiness.missing} into the twin "
-                    f"(present: {readiness.present or 'none'})."
-                )
-                logger.warning(
-                    "design_flow_gate_not_ready", run_id=run_id, missing=readiness.missing
-                )
-                self._store.fail(run_id, msg)
-                return
-
-            if phase.enforce_deliverables and outcome.status == UNGROUNDED_STATUS:
-                msg = (
-                    f"Gate '{gate.name}' not ready: phase '{phase.id}' reply was "
-                    "flagged ungrounded (no tool calls were made), so its claimed "
-                    "work is unverified."
-                )
-                logger.warning("design_flow_gate_ungrounded", run_id=run_id, phase=phase.id)
-                self._store.fail(run_id, msg)
-                return
-
-            # MET-583 constraint-as-gate-criteria: evaluate the project's
-            # recorded constraints. Surfaced in the gate reason at every gate;
-            # gates with enforce_constraints fail-fast on ERROR violations,
-            # same contract as missing deliverables.
-            constraints = await self._constraints(ctx)
-            if gate.enforce_constraints and constraints.checked and not constraints.passed:
-                msg = (
-                    f"Gate '{gate.name}' not ready — {len(constraints.violations)} "
-                    f"constraint violation(s): {'; '.join(constraints.violations[:10])}"
-                )
+        # MET-583 constraint-as-gate-criteria: evaluate the project's
+        # recorded constraints. Surfaced in the gate reason at every gate;
+        # gates with enforce_constraints block on ERROR violations, same
+        # contract as missing deliverables.
+        constraints = await self._constraints(ctx)
+        if constraints.checked and not constraints.passed:
+            findings_c = (
+                f"{len(constraints.violations)} constraint violation(s): "
+                f"{'; '.join(constraints.violations[:10])}"
+            )
+            if gate.enforce_constraints:
+                findings.append(findings_c)
                 logger.warning(
                     "design_flow_gate_constraints_failed",
                     run_id=run_id,
                     gate=gate.name,
                     violations=len(constraints.violations),
                 )
+        blocking = bool(findings)
+
+        # FORGE-73/91: real G-number status (G3-G8), purely informational
+        # (see Gate.gate_id's docstring for why this never fails a gate).
+        consistency = await self._consistency(gate.gate_id, ctx)
+
+        reason = _gate_reason(phase, outcome, readiness, constraints, consistency)
+        if blocking:
+            # FORGE-495: park with the findings instead of failing the run, so
+            # the reviewer can retry the phase (or reject). Approve is refused.
+            logger.warning("design_flow_gate_not_ready", run_id=run_id, findings=findings)
+            reason = f"[{gate.name}] NOT READY (retry the phase or reject): " + "; ".join(findings)
+        retries_left = max(max_retries - (attempt - 1), 0)
+        self._coordinator.set_gate_state(run_id, ready=not blocking, retries_left=retries_left)
+
+        # Register the waiter BEFORE moving to awaiting_approval so a fast
+        # approval can't race ahead of the future.
+        self._coordinator.register(run_id)
+        self._store.request_approval(run_id, reason=reason[:2000])
+        logger.info("design_flow_gate_wait", run_id=run_id, gate=gate.name, ready=not blocking)
+        decision = await self._coordinator.wait(run_id)
+        self._coordinator.set_gate_state(run_id, ready=True, retries_left=retries_left)
+        if decision is ApprovalDecision.REJECT:
+            # submit_approval already moved the run to REJECTED (terminal).
+            logger.info("design_flow_gate_rejected", run_id=run_id, gate=gate.name)
+            return True
+        if decision is ApprovalDecision.RETRY:
+            reviewer = self._coordinator.take_retry_reason(run_id)
+            if retries_left <= 0:
+                msg = (
+                    f"Phase '{phase.id}' did not pass gate '{gate.name}' after "
+                    f"{attempt - 1} retries (the per-phase cap)."
+                )
+                logger.warning("design_flow_retry_cap", run_id=run_id, phase=phase.id)
                 self._store.fail(run_id, msg)
-                return
-
-            # FORGE-73/91: real G-number status (G3-G8), purely informational
-            # (see Gate.gate_id's docstring for why this never fails a gate).
-            consistency = await self._consistency(gate.gate_id, ctx)
-
-            # Register the waiter BEFORE moving to awaiting_approval so a fast
-            # approval can't race ahead of the future.
-            self._coordinator.register(run_id)
-            self._store.request_approval(
-                run_id, reason=_gate_reason(phase, outcome, readiness, constraints, consistency)
+                return True
+            ctx.completed.pop()
+            ctx.retry_feedback = build_retry_feedback(
+                findings=findings, reason=reviewer, attempt=attempt + 1
             )
-            logger.info("design_flow_gate_wait", run_id=run_id, gate=gate.name)
-            decision = await self._coordinator.wait(run_id)
-            if decision is ApprovalDecision.REJECT:
-                # submit_approval already moved the run to REJECTED (terminal).
-                logger.info("design_flow_gate_rejected", run_id=run_id, gate=gate.name)
-                return
-            logger.info("design_flow_gate_approved", run_id=run_id, gate=gate.name)
-
-        self._store.complete(run_id, result=self._summarize(flow, ctx))
+            logger.info(
+                "design_flow_phase_retry",
+                run_id=run_id,
+                phase=phase.id,
+                attempt=attempt + 1,
+                reason=reviewer,
+            )
+            return False
+        logger.info("design_flow_gate_approved", run_id=run_id, gate=gate.name)
+        return True
 
     async def _readiness(
         self, phase: Phase, ctx: FlowContext, *, since_ts: float

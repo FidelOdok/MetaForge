@@ -488,6 +488,10 @@ Four things are worth knowing about the shape:
 - **The flow is frozen and hashed at approval.** The workflow verifies the
   hash before it starts. Editing `spec.py` cannot change what an in-flight
   run is doing, and a completed run stays replayable.
+- **A gate that is not ready parks; it does not end the run** (FORGE-495). The
+  reviewer can retry the phase, with the gate's findings and a reason given to
+  the phase brain first, or reject. Earlier approved phases are kept. See
+  [Retrying a phase](architecture/design-flow-harness.md#retrying-a-phase-from-its-gate-forge-495).
 - **A gate that expires is a rejection**, on a durable timer. Not "carry on",
   which would promote work nobody read; not "wait forever", which leaves a
   run that reads as live.
