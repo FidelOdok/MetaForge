@@ -27,8 +27,10 @@ from mcp_core.guardrails import (
     ApprovalOutcome,
     ApprovalResolution,
     Approver,
+    effective_hold_window,
+    notify_held,
 )
-from orchestrator.harness.runs import ApprovalWait, await_approval_decision
+from orchestrator.harness.runs import ApprovalWait, RunStatus, await_approval_decision
 
 logger = structlog.get_logger(__name__)
 
@@ -37,6 +39,9 @@ logger = structlog.get_logger(__name__)
 #: will give up on their own well before a generous server-side window
 #: expires — at which point the human's click lands on a call nobody is
 #: waiting for any more.
+#:
+#: Used only when the server did not choose a window on the ask (FORGE-465:
+#: it normally does, shorter when the client cannot be sent progress).
 DEFAULT_TIMEOUT_SECONDS = 180.0
 DEFAULT_POLL_INTERVAL = 0.5
 
@@ -49,7 +54,7 @@ _OUTCOMES: dict[ApprovalWait, ApprovalOutcome] = {
 
 def build_mcp_approval_gate(
     *,
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: float | None = None,
     poll_interval: float = DEFAULT_POLL_INTERVAL,
 ) -> ApprovalGateFn:
     """An approval gate the MCP server can be constructed with.
@@ -57,9 +62,13 @@ def build_mcp_approval_gate(
     Returns a callable, not a class, because that is the whole seam: the
     MCP server must not import this module, and anything it does import from
     the gateway layer is a layering violation waiting to be reintroduced.
+
+    ``timeout_seconds``, when given, caps the window the server asks for
+    (FORGE-465); left out, the ask's window applies.
     """
 
     async def gate(ask: ApprovalAsk) -> ApprovalResolution:
+        window = effective_hold_window(timeout_seconds, ask, DEFAULT_TIMEOUT_SECONDS)
         store = get_approval_store()
         run = store.create(
             {
@@ -79,19 +88,23 @@ def build_mcp_approval_gate(
         store.request_approval(
             run.id,
             reason=ask.reason,
-            deadline=store.now() + timeout_seconds + HOLD_DEADLINE_GRACE_SECONDS,
+            deadline=store.now() + window + HOLD_DEADLINE_GRACE_SECONDS,
         )
         logger.info(
             "mcp_approval_requested",
             run_id=run.id,
             tool_id=ask.tool_id,
             caller=ask.caller.value,
+            window_seconds=window,
         )
+        # FORGE-465: the client learns which approval it is waiting on now,
+        # not when the window closes.
+        await notify_held(ask, run.id)
 
         wait = await await_approval_decision(
             store,
             run.id,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=window,
             poll_interval=poll_interval,
             sleep=asyncio.sleep,
         )
@@ -101,6 +114,9 @@ def build_mcp_approval_gate(
         # because the ledger is what a reviewer and an auditor both look at.
         # A timeout has no approver by construction: nobody answered.
         decided = store.get(run.id)
+        if outcome is ApprovalOutcome.TIMED_OUT and decided.status is RunStatus.CANCELED:
+            # Closed by something other than this wait's own window.
+            outcome = ApprovalOutcome.CANCELLED
         approver: Approver | None = None
         if decided.approved_by:
             approver = Approver(
@@ -116,6 +132,6 @@ def build_mcp_approval_gate(
             approved_by=approver.actor_id if approver else None,
             approver_verified=approver.verified if approver else None,
         )
-        return ApprovalResolution(outcome=outcome, approver=approver)
+        return ApprovalResolution(outcome=outcome, approver=approver, approval_id=run.id)
 
     return gate

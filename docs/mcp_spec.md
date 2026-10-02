@@ -162,6 +162,37 @@ that is not held keeps its JSON response, so clients that never open
 rules and outcomes are in
 [Over HTTP: which stream carries the question](capability-matrix.md#over-http-which-stream-carries-the-question).
 
+#### Held calls report themselves (FORGE-465)
+
+A `tools/call` held for the **dashboard** (the client cannot be asked
+inline) is not silent until it ends:
+
+* **Early signal.** If the call carries `params._meta.progressToken` and the
+  transport can reach the client for that call, the server sends
+  `notifications/progress` as soon as the hold exists. `message` names the
+  approval id and the dashboard Approvals page (a link when
+  `METAFORGE_DASHBOARD_URL` is set); `total` is the hold window in seconds.
+  It repeats every `METAFORGE_APPROVAL_PROGRESS_INTERVAL_SECONDS` (default
+  10) with `progress` increasing, so a client that resets its timeout on
+  progress keeps waiting. Over HTTP, a call with a `progressToken` and
+  `text/event-stream` in `Accept` is eligible for its own SSE stream whether
+  or not the session declared `elicitation`; the response switches to SSE
+  only once something is sent. Over stdio the notification is written to
+  stdout like any other message.
+* **Window.** With a progress channel the hold waits
+  `METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` (default 180). Without one it
+  waits `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100), below common client
+  tool timeouts (Claude Code: 120), so the server answers before the client
+  gives up. The window travels on the approval ask and sets the hold's
+  ledger deadline (FORGE-466). A gate constructed with an explicit
+  `timeout_seconds` caps it.
+* **Outcome.** An unapproved call is a JSON-RPC error with
+  `data.code = "approval_required"` and `data.outcome` one of `rejected`,
+  `timed_out`, `cancelled` or `not_configured`, plus `approval_id`, `route`
+  (`dashboard` or `elicitation`), `where`, `held_seconds` and
+  `window_seconds` when known. `message` states the same facts, because it
+  is what a client shows the model.
+
 ### Message Format
 
 All messages follow the JSON-RPC 2.0 specification:

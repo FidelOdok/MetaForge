@@ -35,6 +35,13 @@ from uuid import uuid4
 import structlog
 
 from mcp_core.annotations import annotations_for
+from mcp_core.approval_hold import (
+    HoldNotifier,
+    hold_notice_text,
+    hold_window_seconds,
+    progress_interval_seconds,
+    progress_notification,
+)
 from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
 from mcp_core.deeplinks import DeepLinkBuilder, links_for
 from mcp_core.elicitation import ELICITATION_PROTOCOL_VERSION, Elicitor, elicitation_gate
@@ -277,6 +284,11 @@ class UnifiedMcpServer:
         # one. Held rather than used -- whether we may actually ask depends
         # on what the client said at initialize.
         self._elicitor = elicitor
+        # FORGE-465: the transport's way to send a notification for the call
+        # being handled (progress on a held write). None: nothing can be
+        # sent, so a held write gets the window that fits a client's own
+        # tool timeout.
+        self._notifier: HoldNotifier | None = None
         # FORGE-371: where the dashboard is served from, so a result can
         # carry a link to the view that shows it. None means no links at
         # all -- a guessed localhost URL is worse than none, because the
@@ -355,6 +367,15 @@ class UnifiedMcpServer:
         stays False -- which is the honest state, not a degraded one.
         """
         self._elicitor = elicitor
+
+    def attach_notifier(self, notifier: HoldNotifier) -> None:
+        """Give this server a way to notify the client of the current call.
+
+        FORGE-465. Set by the transport, like the elicitor, because only the
+        transport has a channel back. Used to tell a client its call is held
+        and to keep its timeout from expiring while a person decides.
+        """
+        self._notifier = notifier
 
     def declare_caller(self, caller: Caller) -> None:
         """Say who is on the other end of this transport (FORGE-387).
@@ -583,10 +604,10 @@ class UnifiedMcpServer:
                 # invites it to retry.
                 # Narrowed inline: a stored isinstance result does not
                 # narrow the union at the use site.
-                outcome = (
-                    exc.outcome.value
+                approval_data: dict[str, Any] = (
+                    exc.as_data()
                     if isinstance(exc, ApprovalRejectedError)
-                    else "not_configured"
+                    else {"outcome": "not_configured"}
                 )
                 return json.dumps(
                     make_error(
@@ -596,7 +617,10 @@ class UnifiedMcpServer:
                         {
                             "tool_id": exc.tool_id,
                             "code": "approval_required",
-                            "outcome": outcome,
+                            # FORGE-465: outcome, approval id, route and
+                            # window, so "held for approval <id>, nobody
+                            # approved within N s" can be said and checked.
+                            **approval_data,
                             # Nothing here is worth retrying without a human
                             # doing something first.
                             "retryable": False,
@@ -1531,7 +1555,11 @@ class UnifiedMcpServer:
         return [tid for tid in known if tid.lower().startswith(prefix)][:limit]
 
     async def _authorise(
-        self, tool_id: str, arguments: dict[str, Any], call_id: str = ""
+        self,
+        tool_id: str,
+        arguments: dict[str, Any],
+        call_id: str = "",
+        progress_token: str | int | None = None,
     ) -> Approver | None:
         """Hold a write until a human approves it, whoever asked (FORGE-359).
 
@@ -1589,36 +1617,86 @@ class UnifiedMcpServer:
             )
             raise ApprovalNotConfiguredError(tool_id, decision.reason)
 
+        route = "elicitation" if can_elicit else "dashboard"
+        # FORGE-465: a dashboard hold is invisible to the client until it
+        # ends, and the client's own tool timeout may end it first. With a
+        # progress channel the client is told at once and its timeout keeps
+        # being reset, so the long window stands; without one the window must
+        # end before the client gives up.
+        progress = route == "dashboard" and self._has_progress_channel(progress_token)
+        window = hold_window_seconds(progress=progress) if route == "dashboard" else None
+        approvals_url = self._deeplinks.build("approvals")
+        where = (
+            "the client's own approval prompt"
+            if route == "elicitation"
+            else f"the MetaForge dashboard Approvals page ({approvals_url})"
+            if approvals_url
+            else "the MetaForge dashboard Approvals page"
+        )
         logger.info(
             "mcp_tool_call_held_for_approval",
             tool_id=tool_id,
             caller=self._caller.value,
             reason=decision.reason,
-            route="elicitation" if can_elicit else "dashboard",
+            route=route,
+            window_seconds=window,
+            progress=progress,
         )
-        route = "elicitation" if can_elicit else "dashboard"
         held_from = time.monotonic()
-        resolution = resolve_approval(
-            await gate(
-                ApprovalAsk(
-                    tool_id=tool_id,
-                    arguments=arguments,
-                    caller=self._caller,
-                    reason=decision.reason,
-                    project=_effective_project(arguments),
+        approval_ids: list[str] = []
+        heartbeat: asyncio.Task[None] | None = None
+
+        async def on_held(approval_id: str) -> None:
+            nonlocal heartbeat
+            approval_ids.append(approval_id)
+            if not progress or progress_token is None or window is None:
+                return
+            text = hold_notice_text(tool_id, approval_id, approvals_url, window)
+            self._send_progress(progress_token, 0.0, window, text, approval_id)
+            heartbeat = asyncio.ensure_future(
+                self._hold_heartbeat(progress_token, window, text, approval_id, held_from)
+            )
+
+        try:
+            resolution = resolve_approval(
+                await gate(
+                    ApprovalAsk(
+                        tool_id=tool_id,
+                        arguments=arguments,
+                        caller=self._caller,
+                        reason=decision.reason,
+                        project=_effective_project(arguments),
+                        timeout_seconds=window,
+                        on_held=on_held if route == "dashboard" else None,
+                    )
                 )
             )
-        )
+        finally:
+            if heartbeat is not None:
+                heartbeat.cancel()
         held_seconds = time.monotonic() - held_from
         outcome = resolution.outcome
+        approval_id = resolution.approval_id or (approval_ids[0] if approval_ids else None)
         if outcome is not ApprovalOutcome.APPROVED:
             logger.info(
                 "mcp_tool_call_not_approved",
                 tool_id=tool_id,
                 caller=self._caller.value,
                 outcome=outcome.value,
+                approval_id=approval_id,
+                route=route,
+                window_seconds=window,
+                held_seconds=round(held_seconds, 3),
             )
-            raise ApprovalRejectedError(tool_id, outcome)
+            raise ApprovalRejectedError(
+                tool_id,
+                outcome,
+                approval_id=approval_id,
+                route=route,
+                where=where,
+                held_seconds=held_seconds,
+                window_seconds=window,
+            )
 
         if requires_human_authority(tool_id) and resolution.approver is None:
             # Approved, but by nobody we can name. For an ordinary write that
@@ -1642,7 +1720,7 @@ class UnifiedMcpServer:
                     outcome=outcome.value,
                     route=route,
                     held_seconds=held_seconds,
-                    approval_id=resolution.approval_id,
+                    approval_id=approval_id,
                     approver=(
                         resolution.approver.label if resolution.approver is not None else None
                     ),
@@ -1652,6 +1730,48 @@ class UnifiedMcpServer:
                 ),
             )
         return resolution.approver
+
+    def _has_progress_channel(self, progress_token: str | int | None) -> bool:
+        """A progress notification sent now would reach this call's client."""
+        if progress_token is None or self._notifier is None:
+            return False
+        try:
+            return bool(self._notifier.available())
+        except Exception as exc:  # noqa: BLE001 - asking must not fail the call
+            logger.warning("mcp_hold_notifier_unavailable", error=str(exc))
+            return False
+
+    def _send_progress(
+        self, token: str | int, progress: float, total: float, text: str, approval_id: str
+    ) -> None:
+        if self._notifier is None:
+            return
+        message = progress_notification(token, progress=progress, total=total, message=text)
+        try:
+            sent = self._notifier.send(message)
+        except Exception as exc:  # noqa: BLE001 - a notice must not fail the call
+            logger.warning("mcp_hold_progress_failed", approval_id=approval_id, error=str(exc))
+            return
+        logger.info(
+            "mcp_hold_progress_sent",
+            approval_id=approval_id,
+            progress=progress,
+            total=total,
+            delivered=sent,
+        )
+
+    async def _hold_heartbeat(
+        self, token: str | int, window: float, text: str, approval_id: str, held_from: float
+    ) -> None:
+        """Repeat the hold's progress so the client's timeout keeps resetting."""
+        interval = progress_interval_seconds()
+        last = 0.0
+        while True:
+            await asyncio.sleep(interval)
+            # Progress MUST increase with each notification.
+            elapsed = max(round(time.monotonic() - held_from, 1), last + 0.1)
+            last = elapsed
+            self._send_progress(token, min(elapsed, window), window, text, approval_id)
 
     def _remember_hold(self, call_id: str, record: ApprovalRecord) -> None:
         """Keep one hold until the envelope for that call reads it.
@@ -1685,7 +1805,11 @@ class UnifiedMcpServer:
         arguments = strip_reserved_arguments(params.get("arguments") or {})
         params["arguments"] = arguments
 
-        approver = await self._authorise(tool_id, arguments, call_id)
+        meta = params.get("_meta")
+        progress_token = meta.get("progressToken") if isinstance(meta, dict) else None
+        if not isinstance(progress_token, str | int) or isinstance(progress_token, bool):
+            progress_token = None
+        approver = await self._authorise(tool_id, arguments, call_id, progress_token)
         if approver is not None and requires_human_authority(tool_id):
             # The tool reads its deciding human from here and nowhere else.
             arguments[APPROVED_BY_ARG] = approver.label

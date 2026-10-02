@@ -22,7 +22,7 @@ the Streamable HTTP server-to-client direction:
 ``POST /mcp`` carrying a JSON-RPC *response*
     the client's answer, routed here by id rather than to ``handle_request``.
 
-``POST /mcp`` answered as an SSE stream (FORGE-464)
+``POST /mcp`` answered as an SSE stream (FORGE-464, FORGE-465)
     the call's own response stream. Claude Code 2.1.286 never opens
     ``GET /mcp``, so the stream above alone left every held write on the
     dashboard queue for the client most likely to answer inline. The spec
@@ -30,7 +30,10 @@ the Streamable HTTP server-to-client direction:
     *related to that call* before the result, which is exactly what an
     approval is. Used only when the session has no ``GET /mcp`` open: a
     client that opened one keeps receiving its questions there, so nothing
-    FORGE-423 shipped changes under it.
+    FORGE-423 shipped changes under it. A call that carries a
+    ``progressToken`` gets the stream too, whether or not its client can
+    elicit (FORGE-465): a write held for the dashboard sends progress on it,
+    naming the approval, so the client knows what it is waiting for.
 
 **Per session, not per server.** One sidecar serves many clients from one
 ``UnifiedMcpServer``, so "can this connection be asked" cannot be a property
@@ -61,7 +64,7 @@ from mcp_core.elicitation import (
 
 logger = structlog.get_logger(__name__)
 
-__all__ = ["CallStream", "ElicitationHub", "HttpElicitor", "SessionChannel"]
+__all__ = ["CallStream", "ElicitationHub", "HttpElicitor", "HttpNotifier", "SessionChannel"]
 
 #: How long a client has to answer before the call is treated as unanswered.
 #: Matches ``StdioElicitor``; a reviewer reading a diff is slower than a
@@ -290,6 +293,37 @@ class ElicitationHub:
             return None
         return stream
 
+    # -- notifications for the current call (FORGE-465) -----------------
+
+    def _notify_queue(self, session_id: str | None) -> asyncio.Queue[str] | None:
+        """Where a notification about the current call would be read.
+
+        The call's own stream first: a notification about a request belongs
+        on that request's response, and it is what reaches a client that
+        cannot elicit. An open ``GET /mcp`` otherwise.
+        """
+        if not session_id:
+            return None
+        call = self._current_call_stream(session_id)
+        if call is not None:
+            return call.queue
+        channel = self._channels.get(session_id)
+        if channel is not None and channel.stream_open:
+            return channel.queue
+        return None
+
+    def can_notify(self, session_id: str | None) -> bool:
+        """Whether a notification for the current call would be read now."""
+        return self._notify_queue(session_id) is not None
+
+    def notify(self, session_id: str | None, message: dict[str, Any]) -> bool:
+        """Put one notification on the current call's stream. False if none."""
+        queue = self._notify_queue(session_id)
+        if queue is None:
+            return False
+        queue.put_nowait(json.dumps(message))
+        return True
+
     def available(self, session_id: str | None) -> bool:
         """Whether this session can be asked right now.
 
@@ -414,6 +448,23 @@ class HttpElicitor:
             logger.warning("mcp_elicitation_no_session")
             return ElicitResult(ElicitAction.CANCEL)
         return await self._hub.elicit(session_id, message, requested_schema)
+
+
+class HttpNotifier:
+    """The :class:`mcp_core.approval_hold.HoldNotifier` the HTTP app attaches.
+
+    FORGE-465. Like :class:`HttpElicitor`, one instance for the whole app,
+    resolving the session from the active call context when it is used.
+    """
+
+    def __init__(self, hub: ElicitationHub) -> None:
+        self._hub = hub
+
+    def available(self) -> bool:
+        return self._hub.can_notify(HttpElicitor._session())
+
+    def send(self, message: dict[str, Any]) -> bool:
+        return self._hub.notify(HttpElicitor._session(), message)
 
 
 def is_jsonrpc_response(payload: Any) -> bool:

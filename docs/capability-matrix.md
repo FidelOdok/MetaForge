@@ -296,10 +296,11 @@ Every outcome other than an approval stops the call:
 |---|---|
 | `not_configured` | The server was told to hold writes and given no gate. Refused, never run. |
 | `rejected` | A reviewer said no. |
-| `timed_out` | Nobody answered inside the window (180s). |
+| `timed_out` | Nobody answered inside the window: 180s when the client is sent progress, 100s when it is not (FORGE-465, see [Writes wait for a human](integrations/claude-code.md#while-a-call-waits-on-the-dashboard)). |
+| `cancelled` | The hold was closed before anyone answered. |
 
 `rejected` and `timed_out` stay distinct because "a person said no" and
-"nobody was looking" need different words to an agent; all three carry
+"nobody was looking" need different words to an agent; all of them carry
 `retryable: false`.
 
 **Local stdio writes are exempt by default — unless the client can be

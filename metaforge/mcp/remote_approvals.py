@@ -44,6 +44,8 @@ from mcp_core.guardrails import (
     ApprovalOutcome,
     ApprovalResolution,
     Approver,
+    effective_hold_window,
+    notify_held,
 )
 from observability.metrics import MetricsCollector, collector_for
 
@@ -55,6 +57,9 @@ __all__ = ["DEFAULT_POLL_INTERVAL", "DEFAULT_TIMEOUT_SECONDS", "build_remote_app
 #: MCP client holds a request open, and most give up well before a generous
 #: server-side window expires — at which point the human's click lands on a
 #: call nobody is waiting for any more.
+#:
+#: Used only when the server did not choose a window on the ask (FORGE-465:
+#: it normally does, shorter when the client cannot be sent progress).
 DEFAULT_TIMEOUT_SECONDS = 180.0
 DEFAULT_POLL_INTERVAL = 1.0
 #: How long closing a hold may take before it is given up on. The tool call
@@ -73,12 +78,16 @@ _background: set[asyncio.Task[Any]] = set()
 def build_remote_approval_gate(
     gateway_url: str,
     *,
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: float | None = None,
     poll_interval: float = DEFAULT_POLL_INTERVAL,
     client: httpx.AsyncClient | None = None,
     metrics: MetricsCollector | None = None,
 ) -> ApprovalGateFn:
-    """An approval gate that parks calls in the gateway's ledger."""
+    """An approval gate that parks calls in the gateway's ledger.
+
+    ``timeout_seconds``, when given, caps the window the server asks for
+    (FORGE-465); left out, the ask's window applies.
+    """
     base = gateway_url.rstrip("/")
     endpoint = f"{base}/v1/chat/tool_approvals"
     collector: list[MetricsCollector] = [metrics] if metrics is not None else []
@@ -137,7 +146,9 @@ def build_remote_approval_gate(
             ApprovalOutcome.APPROVED
             if status in _APPROVED_STATES
             else ApprovalOutcome.TIMED_OUT
-            if status in ("timed_out", "canceled")
+            if status == "timed_out"
+            else ApprovalOutcome.CANCELLED
+            if status == "canceled"
             else ApprovalOutcome.REJECTED
         )
         # FORGE-417: the run id goes back with the answer, so the caller can
@@ -145,6 +156,7 @@ def build_remote_approval_gate(
         return ApprovalResolution(outcome=outcome, approver=approver, approval_id=run_id)
 
     async def gate(ask: ApprovalAsk) -> ApprovalResolution:
+        timeout = effective_hold_window(timeout_seconds, ask, DEFAULT_TIMEOUT_SECONDS)
         owned = client is None
         http = client or httpx.AsyncClient(timeout=30.0)
         handed_off = False
@@ -162,7 +174,7 @@ def build_remote_approval_gate(
                         "project": ask.project,
                         # FORGE-466: the gateway expires the hold past this
                         # window if this side never closes it.
-                        "timeout_seconds": timeout_seconds,
+                        "timeout_seconds": timeout,
                     },
                 )
                 created.raise_for_status()
@@ -185,10 +197,14 @@ def build_remote_approval_gate(
                 run_id=run_id,
                 tool_id=ask.tool_id,
                 caller=ask.caller.value,
+                window_seconds=timeout,
             )
+            # FORGE-465: the client learns which approval it is waiting on
+            # now, not when the window closes.
+            await notify_held(ask, run_id)
 
             try:
-                deadline = time.monotonic() + timeout_seconds
+                deadline = time.monotonic() + timeout
                 while time.monotonic() < deadline:
                     await asyncio.sleep(poll_interval)
                     try:

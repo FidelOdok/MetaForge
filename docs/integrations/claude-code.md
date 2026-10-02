@@ -239,25 +239,69 @@ The answer comes back as a POST and the tool result follows on the same
 stream. See
 [Over HTTP: which stream carries the question](../capability-matrix.md#over-http-which-stream-carries-the-question).
 
-If it is not approved, the call comes back as a JSON-RPC error naming
-which happened:
+### While a call waits on the dashboard
+
+A call held for the dashboard is not silent (FORGE-465). If the request
+carried a `progressToken` (`params._meta.progressToken`) and the server has
+a way to reach the client for that call, it sends
+`notifications/progress` as soon as the hold exists. The message names the
+approval id and where to answer it, with a link to the Approvals page when
+`METAFORGE_DASHBOARD_URL` is set:
+
+```json
+{"jsonrpc": "2.0", "method": "notifications/progress",
+ "params": {"progressToken": "t1", "progress": 0, "total": 180,
+            "message": "project.create is held for human approval (approval run_b42aa3ea023f46c0). A person must approve or reject it on the MetaForge dashboard Approvals page: http://localhost:3000/approvals. Waiting up to 180s."}}
+```
+
+The same notification repeats every 10s while the call waits, with
+`progress` increasing, so a client that resets its tool timeout on progress
+waits for the person rather than giving up on them. Over HTTP the
+notification travels on the call's own response stream, so the POST needs
+`Accept: application/json, text/event-stream`; this works whether or not the
+client can elicit. A call that is never held keeps its plain JSON response.
+
+How long a held call waits depends on that channel, because without
+progress nothing resets the client's own tool timeout (120s in Claude Code):
+
+| Situation | Window | Variable |
+|-----------|--------|----------|
+| progress is being sent | 180s | `METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` |
+| no progress channel (no `progressToken`, or no stream to carry it) | 100s | `METAFORGE_APPROVAL_HOLD_SECONDS` |
+
+`METAFORGE_APPROVAL_PROGRESS_INTERVAL_SECONDS` sets the repeat interval.
+The chosen window is what the hold's ledger deadline is computed from, and
+the server logs it with the route on `mcp_tool_call_held_for_approval`
+(`route`, `window_seconds`, `progress`). An invalid value is logged as
+`approval_hold_env_invalid` and the default is used.
+
+### When it is not approved
+
+The call comes back as a JSON-RPC error naming the outcome, the approval
+id and where it was waiting, so the agent can say "held for approval
+`run_...`, nobody approved within 100s" rather than report a bare timeout:
 
 ```json
 {
   "code": -32001,
-  "message": "twin.commit_geometry was not run: a reviewer rejected it.",
-  "data": {"tool_id": "twin.commit_geometry", "code": "approval_required",
-            "outcome": "rejected", "retryable": false}
+  "message": "project.create was not run (timed_out): held for approval run_b42aa3ea023f46c0 on the MetaForge dashboard Approvals page (http://localhost:3000/approvals), and no one answered before the approval window closed (100s).",
+  "data": {"tool_id": "project.create", "code": "approval_required",
+            "outcome": "timed_out", "approval_id": "run_b42aa3ea023f46c0",
+            "route": "dashboard", "where": "the MetaForge dashboard Approvals page (http://localhost:3000/approvals)",
+            "held_seconds": 100.02, "window_seconds": 100.0, "retryable": false}
 }
 ```
 
-`outcome` is `rejected`, `timed_out` (nobody answered within 180s) or
-`not_configured` (the server holds writes but has no approval gate wired
-— refused rather than run). None is worth retrying without a person
-doing something first.
+`outcome` is `rejected` (a reviewer said no), `timed_out` (nobody answered
+within the window), `cancelled` (the hold was closed before anyone
+answered) or `not_configured` (the server holds writes but has no approval
+gate wired, so it refused rather than ran). None is worth retrying without
+a person doing something first. An approved call carries the matching
+FORGE-417 note instead: `This write was held for human approval and was
+approved by ... (approval run_...) after 12.3s via dashboard.`
 
 A held call that stops waiting takes its entry off the **Approvals** page
-with it (FORGE-466). When the 180s window closes the entry is marked
+with it (FORGE-466). When its window closes the entry is marked
 `timed_out`; when the call is cancelled (your client disconnected, or the
 server shut down) it is marked `canceled`. If the server dies before it can
 say so, the gateway expires the entry itself 30s after the window it was
