@@ -239,6 +239,31 @@ The answer comes back as a POST and the tool result follows on the same
 stream. See
 [Over HTTP: which stream carries the question](../capability-matrix.md#over-http-which-stream-carries-the-question).
 
+### When an inline question expires
+
+The inline prompt follows the same window rule as a dashboard hold (see the
+table below, FORGE-472). Claude Code sends no `progressToken`, so the window
+is `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100s), which ends before
+Claude Code's own 120s tool timeout. The prompt says how long the person
+has ("Answer within 100 seconds. After that this request expires and
+project.create is not run.").
+
+When the server stops waiting on a question for any reason (the window
+ended, the call was cancelled, or its stream closed), it sends
+`notifications/cancelled` naming the `elicitation/create` request id, so the
+client can take the form down:
+
+```json
+{"jsonrpc": "2.0", "method": "notifications/cancelled",
+ "params": {"requestId": "elicit-<session>-1", "reason": "approval window ended"}}
+```
+
+It travels on the call's own stream while that stream is open, ahead of
+the call's `timed_out` result, or on an open `GET /mcp` stream otherwise.
+An answer that arrives after that is acknowledged `202`, logged as
+`mcp_elicitation_late_response_ignored`, and never applied: the call it
+would have approved has already ended without running.
+
 ### While a call waits on the dashboard
 
 A call held for the dashboard is not silent (FORGE-465). If the request
@@ -262,7 +287,8 @@ notification travels on the call's own response stream, so the POST needs
 client can elicit. A call that is never held keeps its plain JSON response.
 
 How long a held call waits depends on that channel, because without
-progress nothing resets the client's own tool timeout (120s in Claude Code):
+progress nothing resets the client's own tool timeout (120s in Claude Code).
+The rule is the same whether the question is on the dashboard or inline:
 
 | Situation | Window | Variable |
 |-----------|--------|----------|

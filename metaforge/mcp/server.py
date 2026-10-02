@@ -1623,8 +1623,13 @@ class UnifiedMcpServer:
         # progress channel the client is told at once and its timeout keeps
         # being reset, so the long window stands; without one the window must
         # end before the client gives up.
-        progress = route == "dashboard" and self._has_progress_channel(progress_token)
-        window = hold_window_seconds(progress=progress) if route == "dashboard" else None
+        #
+        # FORGE-472: the same rule for an inline prompt. It kept a fixed 180 s
+        # that outlived Claude Code's 120 s tool timeout, and Claude Code
+        # sends no progressToken, so the client gave up first and the prompt
+        # stayed on screen after both sides had stopped waiting.
+        progress = self._has_progress_channel(progress_token)
+        window = hold_window_seconds(progress=progress)
         approvals_url = self._deeplinks.build("approvals")
         where = (
             "the client's own approval prompt"
@@ -1645,11 +1650,22 @@ class UnifiedMcpServer:
         held_from = time.monotonic()
         approval_ids: list[str] = []
         heartbeat: asyncio.Task[None] | None = None
+        if route == "elicitation" and progress and progress_token is not None:
+            # The longer window only stands because the client's timeout
+            # keeps being reset, so an inline prompt sends progress too.
+            text = (
+                f"{tool_id} is waiting for your answer in this client's approval "
+                f"prompt. Waiting up to {window:.0f}s."
+            )
+            self._send_progress(progress_token, 0.0, window, text, "elicitation")
+            heartbeat = asyncio.ensure_future(
+                self._hold_heartbeat(progress_token, window, text, "elicitation", held_from)
+            )
 
         async def on_held(approval_id: str) -> None:
             nonlocal heartbeat
             approval_ids.append(approval_id)
-            if not progress or progress_token is None or window is None:
+            if not progress or progress_token is None:
                 return
             text = hold_notice_text(tool_id, approval_id, approvals_url, window)
             self._send_progress(progress_token, 0.0, window, text, approval_id)

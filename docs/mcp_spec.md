@@ -193,6 +193,26 @@ inline) is not silent until it ends:
   `window_seconds` when known. `message` states the same facts, because it
   is what a client shows the model.
 
+#### Expired inline questions are withdrawn (FORGE-472)
+
+An inline (`elicitation`) hold uses the same window rule as a dashboard
+hold: `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100) without a progress
+channel, `METAFORGE_APPROVAL_HOLD_PROGRESS_SECONDS` (default 180) with one,
+in which case progress is sent while the prompt is open. The window is
+logged as `window_seconds` on `mcp_tool_call_held_for_approval` and stated
+in the `elicitation/create` message.
+
+* **Withdrawal.** When the server stops waiting on an `elicitation/create`
+  for any reason (window ended, call cancelled, call stream closed), it
+  sends `notifications/cancelled` with `params.requestId` set to that
+  request's id and a `reason`. Over HTTP it goes on the call's own stream
+  while that is open, before the result, else on an open `GET /mcp`; over
+  stdio it is written to stdout. The server logs
+  `mcp_elicitation_withdrawn` with `delivered`.
+* **Late answers.** A response to a withdrawn request is acknowledged
+  (`202` over HTTP), logged as `mcp_elicitation_late_response_ignored`, and
+  never applied. The call already ended as `timed_out` without running.
+
 ### Message Format
 
 All messages follow the JSON-RPC 2.0 specification:
