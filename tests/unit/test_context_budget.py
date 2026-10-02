@@ -274,3 +274,47 @@ async def test_phase_prompt_tokens_before_and_after(
     assert all(len(m) <= inline_limit() for m in new_seen["tool_msgs"])
     assert any("result_handle" in m for m in new_seen["tool_msgs"])
     assert any(len(m) > inline_limit() for m in old_seen["tool_msgs"])
+
+
+class TestPhaseToolReporting:
+    def test_overflow_is_logged_as_a_warning_with_the_dropped_tools(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from structlog.testing import capture_logs
+
+        from api_gateway.runs import flow_brain
+        from orchestrator.design_flow.spec import Phase
+
+        monkeypatch.setattr(flow_brain, "phase_overflow", lambda _d: ["twin.x"])
+        with capture_logs() as logs:
+            flow_brain._report_phase_tools(Phase(id="p", title="t", objective="o"))
+        warn = [e for e in logs if e["event"] == "design_flow_phase_tools_dropped"]
+        assert warn and warn[0]["dropped_tools"] == ["twin.x"] and warn[0]["phase"] == "p"
+        assert warn[0]["log_level"] == "warning"
+
+    def test_no_warning_when_nothing_is_dropped(self) -> None:
+        from structlog.testing import capture_logs
+
+        from api_gateway.runs import flow_brain
+        from orchestrator.design_flow.spec import Phase
+
+        with capture_logs() as logs:
+            flow_brain._report_phase_tools(
+                Phase(id="p", title="t", objective="o", disciplines=("mechanical",))
+            )
+        assert not [e for e in logs if e["event"] == "design_flow_phase_tools_dropped"]
+
+    def test_an_unmapped_discipline_is_logged_once_at_debug(self) -> None:
+        from structlog.testing import capture_logs
+
+        from api_gateway.runs import flow_brain
+        from orchestrator.design_flow.spec import Phase
+
+        flow_brain._UNMAPPED_LOGGED.discard("systems")
+        phase = Phase(id="p", title="t", objective="o", disciplines=("systems", "mechanical"))
+        with capture_logs() as logs:
+            flow_brain._report_phase_tools(phase)
+            flow_brain._report_phase_tools(phase)
+        hits = [e for e in logs if e["event"] == "design_flow_discipline_has_no_tool_profile"]
+        assert len(hits) == 1
+        assert hits[0]["discipline"] == "systems" and hits[0]["log_level"] == "debug"

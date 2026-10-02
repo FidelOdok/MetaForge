@@ -302,3 +302,8 @@ def tools_for_profile(name: str) -> list[str]:
         return sorted(PROFILES[name])
     except KeyError:
         raise UnknownProfileError(name, profile_names()) from None
+
+
+def unmapped_disciplines(disciplines: tuple[str, ...] | list[str]) -> list[str]:
+    """Disciplines with no entry in :data:`DISCIPLINE_PROFILES` (common set only)."""
+    return [d for d in disciplines if d.lower() not in DISCIPLINE_PROFILES]
