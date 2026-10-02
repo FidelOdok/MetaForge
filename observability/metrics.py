@@ -462,6 +462,15 @@ class MetricsRegistry:
         unit="s",
         buckets=[0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
     )
+    # FORGE-468: a role served by something other than its primary provider.
+    # The pipeline's fallback used to be silent, so a primary that failed on
+    # every call looked like a healthy chain.
+    HARNESS_PROVIDER_FALLBACK_TOTAL = MetricDefinition(
+        name="metaforge_harness_provider_fallback_total",
+        type="counter",
+        description="Harness model calls served by a fallback instead of the primary provider",
+        labels=["primary", "fallback", "role", "reason"],
+    )
 
     # ── MCP surface (FORGE-379) ────────────────────────────────────────
     #
@@ -572,6 +581,7 @@ class MetricsRegistry:
             cls.HARNESS_TOOL_CALL_DURATION,
             cls.HARNESS_TOOL_CALL_TOTAL,
             cls.HARNESS_PROVIDER_CALL_DURATION,
+            cls.HARNESS_PROVIDER_FALLBACK_TOTAL,
         ]
 
     @classmethod
@@ -1195,6 +1205,22 @@ class MetricsCollector:
         hist = self._instruments.get(MetricsRegistry.HARNESS_PROVIDER_CALL_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes={"provider": provider, "model": model, "role": role})
+
+    def record_harness_provider_fallback(
+        self, primary: str, fallback: str, role: str, reason: str
+    ) -> None:
+        """Record one harness call served by a fallback provider (FORGE-468)."""
+        counter = self._instruments.get(MetricsRegistry.HARNESS_PROVIDER_FALLBACK_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "primary": primary,
+                    "fallback": fallback,
+                    "role": role,
+                    "reason": reason,
+                },
+            )
 
 
 def collector_for(component: str) -> MetricsCollector:

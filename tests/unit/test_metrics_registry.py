@@ -58,7 +58,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 twin (MET-439) + 6 consolidation (MET-454/455)
         # + 5 harness (production-harness audit follow-up)
         # + 5 MCP (FORGE-379, FORGE-411) + 3 design-flow (FORGE-401)
-        assert len(all_metrics) == 58
+        # + 1 provider fallback (FORGE-468)
+        assert len(all_metrics) == 59
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -72,8 +73,8 @@ class TestMetricsRegistryGroupedAccess:
     def test_kafka_metrics_returns_5(self) -> None:
         assert len(MetricsRegistry.kafka_metrics()) == 5
 
-    def test_harness_metrics_returns_5(self) -> None:
-        assert len(MetricsRegistry.harness_metrics()) == 5
+    def test_harness_metrics_returns_6(self) -> None:
+        assert len(MetricsRegistry.harness_metrics()) == 6  # +1 provider fallback (FORGE-468)
 
     def test_all_metrics_equals_sum_of_groups(self) -> None:
         total = (

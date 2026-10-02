@@ -106,8 +106,12 @@ def test_env_model_default_is_ignored_for_a_store_overridden_provider(
     store._save()
 
     cfg = provider_config_from_env()
-    spec = cfg.slots.candidates("generator")[0]
-    assert spec.model != "openai/gpt-4o"
+    candidates = cfg.slots.candidates("generator")
+    assert not any(c.name == "openai-codex" and c.model == "openai/gpt-4o" for c in candidates)
+    # FORGE-468: nor is it paired with the built-in claude-* default, which
+    # Codex cannot serve either. That primary is dropped, not sent.
+    assert all(c.name != "openai-codex" for c in candidates)
+    assert candidates[0].name == "openrouter"
 
 
 # --- FORGE-98: post-turn grounding guard ------------------------------------

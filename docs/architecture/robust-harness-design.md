@@ -184,6 +184,52 @@ This satisfies the success criteria "same loop runs against any provider with
 zero code change" and "automatic failover on 429: fall to next model, session
 preserved."
 
+### Provider/model pairs are checked before any call (FORGE-468)
+
+A pair the provider's API family cannot serve is caught when the
+configuration is resolved, not discovered as a 400 on every call.
+`registry.model_family_mismatch(provider, model)` is a conservative family
+check, not a model catalogue:
+
+- `openai-codex` rejects a `vendor/model` slug (FORGE-93).
+- A first-party family serves only its own vendor's models: `anthropic`
+  rejects `gpt-*` / `o1` / `o3` / `o4` slugs, `openai-codex` rejects
+  `claude-*` / `gemini*`, `gemini` rejects `claude-*` / `gpt-*`.
+- A slug whose vendor is not plain from its prefix passes, and multi-vendor
+  gateways (OpenRouter, vLLM, Bedrock and every other OpenAI-compatible
+  provider) are never judged.
+
+Where it applies: `load_provider_config` raises `ConfigError`;
+`PUT /v1/harness/selection` answers 400; a stored selection is ignored on
+read; and the chat harness's `provider_config_from_env` drops a mismatched
+candidate from the chain with a `harness_provider_model_mismatch` warning
+(and raises `InvalidModelError` if no candidate survives). Dropping the
+primary counts as a fallback, below.
+
+### Falling back is an alarm (FORGE-468)
+
+Whenever a role is served by anything other than its primary, the harness:
+
+- logs `harness_provider_fallback` at WARNING with `role`, `primary`,
+  `primary_model`, `fallback`, `fallback_model`, `reason` and the primary's
+  error (`primary_error`);
+- increments `metaforge_harness_provider_fallback_total{primary, fallback,
+  role, reason}`, where `reason` is `call_failed` (the primary was tried and
+  failed), `model_mismatch` (the primary was dropped at config time) or
+  `capability_unsupported` (the primary's family declined by design, e.g.
+  Codex has no event-streaming adapter; logged at INFO, not WARNING);
+- keeps the last occurrence, returned by `GET /v1/harness/providers` as
+  `last_fallback` with a process-lifetime `fallback_count`.
+
+The `HarnessProviderFallbackSustained` alert fires when any
+`(primary, fallback, role)` keeps falling back for 15 minutes (excluding
+`capability_unsupported`): at that point
+the configured model is not the one producing output.
+
+Callers that need to know which model answered wrap the call in
+`provenance.capture_served()`; the flow generator uses it to record
+`generatedBy` on every proposal.
+
 ## Success criteria (from MET-547)
 
 - Same agent loop runs against Anthropic, OpenAI, OpenRouter, and local

@@ -107,6 +107,21 @@ groups:
           summary: "High harness tool-call failure rate for {{ $labels.tool_name }}"
           description: "Tool {{ $labels.tool_name }} has >30% error rate over 10 minutes in the chat harness loop."
 
+      # FORGE-468: the primary provider pair (e.g. openai-codex + a claude-*
+      # model) failed on every call for weeks while the fallback answered,
+      # and nothing said so. Any sustained fallback means the configured
+      # primary is not the model doing the work. A by-design capability
+      # decline (e.g. Codex has no event-streaming adapter) is excluded.
+      - alert: HarnessProviderFallbackSustained
+        expr: |
+          sum(rate(metaforge_harness_provider_fallback_total{reason!="capability_unsupported"}[15m])) by (primary, fallback, role) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Harness role {{ $labels.role }} is running on fallback {{ $labels.fallback }}, not primary {{ $labels.primary }}"
+          description: "For 15m, {{ $labels.role }} calls have been served by {{ $labels.fallback }} because the primary {{ $labels.primary }} failed or was rejected. The configured model is not the one producing output. Check GET /v1/harness/providers (lastFallback) and the harness_provider_fallback log event."
+
   - name: metaforge_fleet_alerts
     rules:
       # Device has not sent telemetry for > N minutes (configurable per device type).

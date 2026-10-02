@@ -60,6 +60,7 @@ from orchestrator.harness.providers.registry import (
     UnknownProviderError,
     available_providers,
     get_profile,
+    model_family_mismatch,
     resolve_provider,
     validate_model,
 )
@@ -115,6 +116,7 @@ __all__ = [
     "available_providers",
     "get_profile",
     "load_provider_config",
+    "model_family_mismatch",
     "validate_model",
     "resolve_provider",
     "rotating_invoke",

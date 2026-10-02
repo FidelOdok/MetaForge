@@ -26,6 +26,7 @@ import structlog
 
 from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
+from orchestrator.harness.providers.provenance import ServedBy, note_served, record_fallback
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.harness.providers.pipeline")
@@ -50,6 +51,12 @@ class ProviderError(Exception):
     ``retryable`` lets a transport mark a failure retryable independent of
     status (e.g. a connection reset with no status).
     """
+
+    #: FORGE-468: True for a by-design decline (the provider family lacks the
+    #: capability, e.g. event streaming) rather than a fault. A later
+    #: candidate answering after one of these is still recorded, but is not
+    #: the alarm a failed primary is.
+    capability_decline: bool = False
 
     def __init__(
         self,
@@ -237,6 +244,7 @@ class ProviderPipeline:
                             attempt=attempt,
                         )
                         span.set_attribute("provider.chosen", spec.name)
+                        self._on_served(role, candidates, spec, attempts)
                         return result
 
                 assert last_exc is not None  # loop only exits the try via break/exhaust
@@ -246,6 +254,39 @@ class ProviderPipeline:
 
         logger.error("all_providers_failed", role=role, tried=len(attempts))
         raise AllProvidersFailedError(role, attempts)
+
+    def _on_served(
+        self,
+        role: Role,
+        candidates: list[ProviderSpec],
+        spec: ProviderSpec,
+        attempts: list[tuple[ProviderSpec, Exception]],
+    ) -> None:
+        """Note who answered, and raise the alarm if it was not the primary.
+
+        FORGE-468: falling through to the next candidate used to leave only
+        an INFO line naming whoever answered, so a primary that failed on
+        every call was indistinguishable from a healthy one.
+        """
+        primary = candidates[0]
+        fell_back_from: str | None = None
+        if spec is not primary:
+            fell_back_from = f"{primary.name}:{primary.model}"
+            primary_exc = next((err for tried, err in attempts if tried is primary), None)
+            declined = isinstance(primary_exc, ProviderError) and primary_exc.capability_decline
+            record_fallback(
+                role=role,
+                primary=primary.name,
+                primary_model=primary.model,
+                fallback=spec.name,
+                fallback_model=spec.model,
+                error=str(primary_exc) if primary_exc is not None else "primary was not tried",
+                reason="capability_unsupported" if declined else "call_failed",
+                metrics=self._metrics,
+            )
+        note_served(
+            ServedBy(provider=spec.name, model=spec.model, role=role, fell_back_from=fell_back_from)
+        )
 
     @staticmethod
     def _context_window_skip_reason(
@@ -328,6 +369,7 @@ class ProviderPipeline:
                     break
                 # First token obtained → commit to this provider, no more failover.
                 logger.info("provider_stream_ok", role=role, provider=spec.name, model=spec.model)
+                self._on_served(role, candidates, spec, attempts)
                 yield first
                 async for delta in agen:
                     yield delta
@@ -390,6 +432,7 @@ class ProviderPipeline:
                 logger.info(
                     "provider_stream_events_ok", role=role, provider=spec.name, model=spec.model
                 )
+                self._on_served(role, candidates, spec, attempts)
                 yield first
                 async for event in agen:
                     yield event

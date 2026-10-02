@@ -829,6 +829,8 @@ class StreamingUnsupported(ProviderError):
     """This provider family has no event-streaming adapter — fall back to
     the non-streaming invoke (never retried; not a provider fault)."""
 
+    capability_decline = True
+
     def __init__(self, family: str) -> None:
         super().__init__(
             f"event streaming unsupported for provider family '{family}'", retryable=False

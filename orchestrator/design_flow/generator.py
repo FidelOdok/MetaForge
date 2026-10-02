@@ -46,6 +46,7 @@ __all__ = [
     "MODEL_OPERATIONS",
     "ROUTE_SELECTION_PHASE_ID",
     "FlowProposal",
+    "ModelProvenance",
     "Operation",
     "OperationKind",
     "TailoringError",
@@ -132,6 +133,21 @@ class TailoringError(ValueError):
     """An operation could not be applied, and the flow was not changed."""
 
 
+@dataclass(frozen=True)
+class ModelProvenance:
+    """Which provider and model actually produced a proposal (FORGE-468).
+
+    Recorded because the configured model and the one that answered can
+    differ: a primary that cannot serve the request falls back to another
+    provider, and a reviewer approving a tailoring should know whose it was.
+    """
+
+    provider: str
+    model: str
+    #: ``"<provider>:<model>"`` of the primary when a fallback answered.
+    fell_back_from: str | None = None
+
+
 @dataclass
 class FlowProposal:
     """A tailored flow, its provenance, and whether it is startable."""
@@ -149,6 +165,8 @@ class FlowProposal:
     #: Product-specific questions the model raised that did not block the
     #: proposal. Answering them may change it.
     open_questions: list[ClarifyingQuestion] = field(default_factory=list)
+    #: The provider/model that produced the tailoring, when known.
+    generated_by: ModelProvenance | None = None
 
     @property
     def valid(self) -> bool:
@@ -312,6 +330,7 @@ def build_proposal(
     context: FlowContext | None = None,
     assumptions: list[str] | None = None,
     open_questions: list[ClarifyingQuestion] | None = None,
+    generated_by: ModelProvenance | None = None,
 ) -> FlowProposal:
     """Tailor ``base`` and report whether the result can be started.
 
@@ -354,6 +373,7 @@ def build_proposal(
         context=context,
         assumptions=notes,
         open_questions=list(open_questions or []),
+        generated_by=generated_by,
     )
     logger.info(
         "flow_proposal_built",

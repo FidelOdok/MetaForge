@@ -2690,6 +2690,55 @@
         "title": "ExportFile",
         "type": "object"
       },
+      "FallbackInfo": {
+        "description": "The most recent time a harness role ran on something other than its primary.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "fallback": {
+            "title": "Fallback",
+            "type": "string"
+          },
+          "fallback_model": {
+            "title": "Fallback Model",
+            "type": "string"
+          },
+          "primary": {
+            "title": "Primary",
+            "type": "string"
+          },
+          "primary_model": {
+            "title": "Primary Model",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "primary",
+          "primary_model",
+          "fallback",
+          "fallback_model",
+          "error",
+          "reason",
+          "at"
+        ],
+        "title": "FallbackInfo",
+        "type": "object"
+      },
       "FeatureDiffResponse": {
         "properties": {
           "added": {
@@ -3053,6 +3102,16 @@
           },
           "flow": {
             "$ref": "#/components/schemas/DesignFlowView"
+          },
+          "generatedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GeneratedByView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "intent": {
             "title": "Intent",
@@ -3475,6 +3534,36 @@
           "entries"
         ],
         "title": "GenerateTestPlanResponse",
+        "type": "object"
+      },
+      "GeneratedByView": {
+        "description": "The provider and model that actually produced a proposal (FORGE-468).",
+        "properties": {
+          "fellBackFrom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fellbackfrom"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "GeneratedByView",
         "type": "object"
       },
       "GeometryDiffResponse": {
@@ -6431,6 +6520,21 @@
               }
             ],
             "title": "Active Provider"
+          },
+          "fallback_count": {
+            "default": 0,
+            "title": "Fallback Count",
+            "type": "integer"
+          },
+          "last_fallback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "providers": {
             "items": {
