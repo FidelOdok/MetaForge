@@ -322,8 +322,17 @@ def render_run_markdown(state: dict[str, Any]) -> str:
     """
     lines: list[str] = [f"# Design run `{state.get('runId', '?')}`", ""]
     lines.append(f"**Status**: {state.get('status', 'unknown')}")
+    if state.get("flowVersionId") or state.get("flowContentHash"):
+        lines.append(
+            f"**Flow**: {state.get('flow') or '?'} "
+            f"{state.get('flowVersion') or ''} "
+            f"(version {state.get('flowVersionId') or 'n/a'}, "
+            f"hash {str(state.get('flowContentHash') or 'n/a')[:12]})"
+        )
     if state.get("awaitingGate"):
         lines.append(f"**Waiting on gate**: {state['awaitingGate']}")
+    if state.get("error"):
+        lines.append(f"**Error**: {state['error']}")
     if not state.get("live", True):
         lines.append("")
         lines.append(

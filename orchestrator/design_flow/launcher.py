@@ -15,7 +15,7 @@ run that quietly is not what it claims to be.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import structlog
@@ -38,6 +38,7 @@ __all__ = [
     "WorkflowHandleLike",
     "connect_temporal",
     "workflow_id_for",
+    "DesignFlowWorkerUnavailableError",
 ]
 
 
@@ -90,12 +91,48 @@ async def connect_temporal(target: str, namespace: str = "default") -> ClientLik
         raise TemporalUnavailableError(target, str(exc)) from exc
 
 
+class DesignFlowWorkerUnavailableError(RuntimeError):
+    """Temporal is up but nothing polls the design-flow queue (FORGE-475).
+
+    Distinct from :class:`TemporalUnavailableError`: the engine answers, so a
+    started run would be accepted and then sit queued with no one to run it.
+    """
+
+    def __init__(self, task_queue: str, reason: str) -> None:
+        self.task_queue = task_queue
+        self.reason = reason
+        super().__init__(
+            f"No design-flow worker is available: {reason}. A run started now would "
+            f"sit queued on '{task_queue}' and never advance, so no run was created. "
+            "Start the worker (`docker compose up design-flow-worker`) and try again."
+        )
+
+
 @dataclass
 class DesignFlowLauncher:
     """Starts runs and relays human decisions into them."""
 
     client: ClientLike
     task_queue: str = TASK_QUEUE
+    _presence: Any = field(default=None, init=False, repr=False)
+
+    async def worker_presence(self) -> tuple[bool, str, list[str]]:
+        """``(present, reason, identities)``, cached for a few seconds."""
+        from orchestrator.design_flow.worker_presence import WorkerPresence, describe_pollers
+
+        if self._presence is None:
+            self._presence = WorkerPresence(
+                probe=lambda: describe_pollers(self.client, self.task_queue),
+                task_queue=self.task_queue,
+            )
+        result: tuple[bool, str, list[str]] = await self._presence.check()
+        return result
+
+    async def require_worker(self) -> None:
+        """Raise :class:`DesignFlowWorkerUnavailableError` unless a worker polls."""
+        present, reason, _ = await self.worker_presence()
+        if not present:
+            raise DesignFlowWorkerUnavailableError(self.task_queue, reason)
 
     async def start(
         self,

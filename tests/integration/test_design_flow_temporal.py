@@ -187,6 +187,42 @@ class TestTheRunSurvives:
         # than the run being abandoned.
         assert phases.ran == ["phase0", "phase0", "phase0"]
 
+    async def test_a_provider_configuration_error_fails_the_run_once_with_the_error(
+        self, env
+    ) -> None:
+        """FORGE-475: a missing key is not a transient failure.
+
+        It used to retry and then fail the workflow with an opaque activity
+        error, so run status showed neither the cause nor an end.
+        """
+        from temporalio.exceptions import ApplicationError
+
+        run_id = str(uuid.uuid4())
+        attempts: list[str] = []
+
+        async def no_key(request: PhaseRequest) -> PhaseResult:
+            attempts.append(request.phase.id)
+            raise ApplicationError(
+                "no model provider could serve this phase: missing API key",
+                type="ProviderUnavailable",
+                non_retryable=True,
+            )
+
+        acts = DesignFlowActivities(phase_runner=no_key, gate_checker=_ok_gate)
+        launcher = DesignFlowLauncher(client=env.client)
+
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=_flow(gated=False, phases=2))
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+            state = await launcher.state(run_id)
+
+        assert attempts == ["phase0"], "a configuration error must not be retried"
+        assert result["status"] == "failed"
+        assert "phase0" in result["error"]
+        assert "missing API key" in result["error"]
+        assert state["status"] == "failed"
+        assert state["error"] == result["error"]
+
     async def test_an_unanswered_gate_ends_rejected(self, env) -> None:
         """Timeout means reject. Not "carry on" (which would promote work
         nobody looked at) and not "wait forever" (which leaves a run that

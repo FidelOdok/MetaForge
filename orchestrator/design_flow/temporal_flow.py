@@ -39,6 +39,7 @@ from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from orchestrator.design_flow.frozen import FrozenFlow, FrozenPhase
@@ -167,6 +168,7 @@ class DesignFlowWorkflow:
         self._change: ChangeRequest | None = None
         self._completed: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
+        self._error: str | None = None
 
     # ── signals ──────────────────────────────────────────────────────────
 
@@ -201,6 +203,7 @@ class DesignFlowWorkflow:
             "current_phase": self._current_phase,
             "awaiting_gate": self._gate_open,
             "completed": list(self._completed),
+            "error": self._error,
         }
 
     @workflow.query
@@ -226,25 +229,37 @@ class DesignFlowWorkflow:
             self._current_phase = phase.id
             self._record("phase_started", phase=phase.id)
 
-            result: PhaseResult = await workflow.execute_activity(
-                "run_phase",
-                PhaseRequest(
-                    run_id=inp.run_id,
-                    goal=inp.goal,
-                    phase=phase,
-                    project_id=inp.project_id,
-                    session_id=inp.session_id,
-                    flow_id=inp.flow.template_id,
-                    prior=[c["summary"] for c in self._completed],
-                ),
-                start_to_close_timeout=_PHASE_TIMEOUT,
-                heartbeat_timeout=_PHASE_HEARTBEAT,
-                retry_policy=RetryPolicy(maximum_attempts=3),
-                # Without result_type the payload arrives as a bare dict and
-                # every attribute access below fails at run time -- inside a
-                # workflow, where the traceback surfaces as a stuck run.
-                result_type=PhaseResult,
-            )
+            try:
+                result: PhaseResult = await workflow.execute_activity(
+                    "run_phase",
+                    PhaseRequest(
+                        run_id=inp.run_id,
+                        goal=inp.goal,
+                        phase=phase,
+                        project_id=inp.project_id,
+                        session_id=inp.session_id,
+                        flow_id=inp.flow.template_id,
+                        prior=[c["summary"] for c in self._completed],
+                    ),
+                    start_to_close_timeout=_PHASE_TIMEOUT,
+                    heartbeat_timeout=_PHASE_HEARTBEAT,
+                    # A configuration error (no key, unusable model) is marked
+                    # non-retryable by the activity (FORGE-475); anything else
+                    # gets three attempts.
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                    # Without result_type the payload arrives as a bare dict
+                    # and every attribute access below fails at run time --
+                    # inside a workflow, where the traceback surfaces as a
+                    # stuck run.
+                    result_type=PhaseResult,
+                )
+            except ActivityError as exc:
+                # The phase could not run. End the run as failed with the
+                # reason rather than failing the workflow with an opaque
+                # "Activity task failed" nobody can read from run status.
+                cause = exc.cause
+                reason = str(cause) if cause is not None else str(exc)
+                return self._fail(f"Phase '{phase.id}' failed: {reason}")
             self._completed.append(
                 {
                     "phase": phase.id,
@@ -383,6 +398,7 @@ class DesignFlowWorkflow:
 
     def _fail(self, message: str) -> dict[str, Any]:
         self._status = "failed"
+        self._error = message
         self._record("run_failed", detail=message)
         return {"status": "failed", "error": message, "phases": self._completed}
 

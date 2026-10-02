@@ -51,6 +51,9 @@ class _RecordingLauncher:
     def __init__(self) -> None:
         self.flows: list[Any] = []
 
+    async def require_worker(self) -> None:
+        return None
+
     async def start(self, *, flow: Any, **_: Any) -> str:
         self.flows.append(flow)
         return "wf"

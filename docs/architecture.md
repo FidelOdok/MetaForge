@@ -485,9 +485,25 @@ hash as top-level fields, and `/flow-state` lists the version's phases rather
 than the template's.
 
 Running it needs two services: `temporal` and `design-flow-worker`. Without
-the worker, runs are created durably and then sit forever, because nothing
-polls the queue — which is the quiet half of the same failure the 503 makes
-loud.
+the worker a run would be accepted and then sit queued forever, because nothing
+polls the queue. So `POST /v1/runs` (and `flow.start_run` /
+`run.start_design_flow` through it) checks `DescribeTaskQueue` for pollers on
+`metaforge-design-flows` first, cached for a few seconds, and answers `503`
+with the reason when there are none. No run record is created. `health.check`
+reports the same thing under `design_flow_worker` (`ok`, `absent`, `unknown`).
+
+When a run's live state cannot be read (the workflow query times out because no
+worker answers), `GET /v1/runs/{id}/flow-state` and `flow.status` list the run's
+own frozen version: the phases of the stored version it was started on, with
+status `unknown`, plus `flowVersionId`, `flowVersion` and `flowContentHash`
+from the run record. They never fall back to the base template. A run whose
+version cannot be read back lists no phases and says so.
+
+A phase that cannot run because of provider configuration (a missing key, an
+unusable model) is marked non-retryable by the worker. The workflow then ends
+the run as `failed` with `Phase '<id>' failed: <reason>` instead of failing
+opaquely; the flow state carries it as `error`, the failing phase shows
+`failed`, and the error is repeated in the phase summary.
 
 The worker is a separate process from the gateway, so it wires the two things
 a phase brain needs itself (FORGE-475):
