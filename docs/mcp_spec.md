@@ -139,6 +139,29 @@ MCP uses **JSON-RPC 2.0** as the wire protocol. Messages are exchanged over **st
 | **stdio** | Local Docker containers (default) | Client spawns container process, communicates via stdin/stdout |
 | **HTTP** | Remote tool servers, shared instances | Client sends POST requests to `http://<host>:<port>/rpc` |
 
+#### Streamable HTTP on the unified sidecar
+
+The unified server (`python -m metaforge.mcp --transport http`) speaks MCP
+Streamable HTTP at `/mcp`:
+
+| Request | What it does |
+|---|---|
+| `POST /mcp` with a JSON-RPC request | dispatches it; the answer is `application/json`, or `204` for a notification. `initialize` issues an `Mcp-Session-Id` the client echoes afterwards |
+| `POST /mcp` with a JSON-RPC response | the client answering a request the server sent (`elicitation/create`), routed by id and acknowledged `202` |
+| `GET /mcp` with `Mcp-Session-Id` | a long-lived SSE stream the server pushes requests down (FORGE-423) |
+| `DELETE /mcp` with `Mcp-Session-Id` | ends the session |
+
+A `tools/call` that is held for approval can also be answered as
+`text/event-stream` on its own POST (FORGE-464). This happens only when
+the session declared `elicitation` at `initialize` on revision
+`2025-06-18` or later, has no `GET /mcp` stream open, and sent the call
+with `text/event-stream` in `Accept`. The stream carries the
+`elicitation/create` request, then the tool result, then closes. A call
+that is not held keeps its JSON response, so clients that never open
+`GET /mcp` (Claude Code among them) can still be asked inline. Routing
+rules and outcomes are in
+[Over HTTP: which stream carries the question](capability-matrix.md#over-http-which-stream-carries-the-question).
+
 ### Message Format
 
 All messages follow the JSON-RPC 2.0 specification:

@@ -790,6 +790,12 @@ class UnifiedMcpServer:
             "mcp_initialize",
             client=(self._client_info or {}).get("name"),
             protocol=self._negotiated_protocol,
+            # FORGE-464: names only, so "why is this client not asked inline"
+            # is answerable from the log. ``can_elicit`` here is a snapshot
+            # with no call in flight: over HTTP it is false until a GET /mcp
+            # stream opens, and a declared client is still asked on the
+            # stream of each held call.
+            capabilities=sorted(self._client_capabilities),
             can_elicit=self.can_elicit,
         )
         return {

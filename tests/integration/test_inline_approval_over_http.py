@@ -234,3 +234,56 @@ class TestWhatInlineApprovalCannotDo:
         assert listener.asked is not None, "it should still ask"
         assert "error" in body, body
         assert "did not identify who granted it" in json.dumps(body["error"])
+
+
+class TestWithoutTheStandaloneStream:
+    """FORGE-464: Claude Code never opens GET /mcp, so the question rides
+    on the tools/call POST's own SSE response, over a real connection."""
+
+    async def _call_on_its_own_stream(
+        self, url: str, answer: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=30) as client:
+            session = await _initialize(client, url)
+            headers = {**_HEADERS, "Mcp-Session-Id": session}
+            asked: dict[str, Any] = {}
+            async with client.stream(
+                "POST",
+                f"{url}/mcp",
+                headers=headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {"name": "twin.record_decision", "arguments": {"title": "x"}},
+                },
+            ) as stream:
+                assert stream.headers["content-type"].startswith("text/event-stream")
+                async for line in stream.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    message = json.loads(line[6:])
+                    if message.get("method") == "elicitation/create":
+                        asked = message
+                        reply = await client.post(
+                            f"{url}/mcp",
+                            headers=headers,
+                            json={"jsonrpc": "2.0", "id": message["id"], "result": answer},
+                        )
+                        assert reply.status_code == 202
+                        continue
+                    return asked, message
+        raise AssertionError("the stream closed without a result")
+
+    async def test_approved_on_the_call_stream(self, base_url: str) -> None:
+        asked, body = await self._call_on_its_own_stream(
+            base_url, {"action": "accept", "content": {"approve": True}}
+        )
+        assert "twin.record_decision" in asked["params"]["message"]
+        assert body["id"] == 7
+        assert body["result"]["_meta"]["approval"]["route"] == "elicitation"
+
+    async def test_declined_on_the_call_stream(self, base_url: str) -> None:
+        asked, body = await self._call_on_its_own_stream(base_url, {"action": "decline"})
+        assert asked
+        assert "rejected" in json.dumps(body["error"])

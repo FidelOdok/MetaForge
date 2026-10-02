@@ -948,7 +948,8 @@ Three conditions all have to hold, and `health/check` reports the result
 as `client.can_elicit`:
 
 1. the transport has a channel back to the client (stdio does; a plain
-   HTTP POST with no SSE does not),
+   HTTP POST with no SSE does not; over HTTP see
+   [Over HTTP: which stream carries the question](#over-http-which-stream-carries-the-question)),
 2. the client declared the `elicitation` capability at `initialize`, and
 3. the negotiated protocol revision is `2025-06-18` or later, which is
    where `elicitation/create` was introduced. A client that declares the
@@ -986,6 +987,38 @@ The three-action response maps onto the outcomes above:
 An `accept` whose content does not carry a boolean `approve` is treated
 as a refusal. The failure mode of guessing the other way is an unreviewed
 write.
+
+#### Over HTTP: which stream carries the question
+
+Over Streamable HTTP the question needs a server-to-client direction, and
+there are two (FORGE-423, FORGE-464). Both are per session: the session is
+the `Mcp-Session-Id` the server issued at `initialize`, and conditions 2 and
+3 above are read from that session's own handshake.
+
+| The client... | The question goes |
+|---|---|
+| opened `GET /mcp` with its `Mcp-Session-Id` | down that standalone stream (FORGE-423) |
+| did not, but sent the `tools/call` with `Accept: application/json, text/event-stream` | on that POST's own response, which the server switches to `text/event-stream` (FORGE-464) |
+| neither | to the dashboard queue |
+
+The second row is the one Claude Code uses: it never opens `GET /mcp`. A
+`tools/call` from an eligible session runs as usual, and only if the call
+is held does its response become a stream: the `elicitation/create`
+request first, then (once the client POSTs its answer as a JSON-RPC
+response, routed by id and acknowledged `202`) the tool result, and the
+stream closes. A call that is never held still gets its plain JSON
+response. `Accept: */*` is not taken as consent to a stream.
+
+If the client hangs up while a question is open, the question is cancelled
+at once, so the call ends `timed_out` and nothing is written.
+
+`client.can_elicit` in `health/check` is a snapshot taken inside that
+call. Over HTTP it is true when `GET /mcp` is open, or when the
+`health.check` call itself was sent with `text/event-stream` in `Accept`
+from an eligible session. The `mcp_initialize` log line names the
+capabilities the client declared, so a client that is never asked inline
+can be diagnosed from the log: no `elicitation` in that list is the usual
+reason.
 
 ### The result says it was held (FORGE-417)
 

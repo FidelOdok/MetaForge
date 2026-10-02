@@ -22,6 +22,16 @@ the Streamable HTTP server-to-client direction:
 ``POST /mcp`` carrying a JSON-RPC *response*
     the client's answer, routed here by id rather than to ``handle_request``.
 
+``POST /mcp`` answered as an SSE stream (FORGE-464)
+    the call's own response stream. Claude Code 2.1.286 never opens
+    ``GET /mcp``, so the stream above alone left every held write on the
+    dashboard queue for the client most likely to answer inline. The spec
+    lets a server answer a POST with ``text/event-stream`` and send requests
+    *related to that call* before the result, which is exactly what an
+    approval is. Used only when the session has no ``GET /mcp`` open: a
+    client that opened one keeps receiving its questions there, so nothing
+    FORGE-423 shipped changes under it.
+
 **Per session, not per server.** One sidecar serves many clients from one
 ``UnifiedMcpServer``, so "can this connection be asked" cannot be a property
 of the server. A stream is registered under the session id the transport
@@ -33,7 +43,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -49,7 +61,7 @@ from mcp_core.elicitation import (
 
 logger = structlog.get_logger(__name__)
 
-__all__ = ["ElicitationHub", "HttpElicitor", "SessionChannel"]
+__all__ = ["CallStream", "ElicitationHub", "HttpElicitor", "SessionChannel"]
 
 #: How long a client has to answer before the call is treated as unanswered.
 #: Matches ``StdioElicitor``; a reviewer reading a diff is slower than a
@@ -88,19 +100,50 @@ class SessionChannel:
     stream_open: bool = False
 
     @property
+    def declared(self) -> bool:
+        """This session's own handshake says it can be asked.
+
+        Two of the three conditions. The third, a channel someone is reading,
+        is either this stream or the call's own (FORGE-464), so it is checked
+        by the caller that knows which.
+        """
+        return self.declared_elicitation and self.protocol >= ELICITATION_PROTOCOL_VERSION
+
+    @property
     def eligible(self) -> bool:
-        """All three conditions, per connection.
+        """All three conditions on the standalone ``GET /mcp`` stream.
 
         The same three ``UnifiedMcpServer.can_elicit`` checks, except they
         are facts about *this* session: someone is reading this stream, the
         capability came from this session's ``initialize``, and so did the
         revision.
         """
-        return (
-            self.stream_open
-            and self.declared_elicitation
-            and self.protocol >= ELICITATION_PROTOCOL_VERSION
-        )
+        return self.stream_open and self.declared
+
+
+@dataclass
+class CallStream:
+    """One ``tools/call`` POST answered as SSE, while it is still open.
+
+    FORGE-464. Exists only while the transport is still holding that POST's
+    response, which is the one window in which a question sent on it can be
+    read. ``pending`` is kept so a client that hangs up mid-question is
+    answered ``cancel`` at once, rather than leaving the call to wait out
+    the whole elicitation timeout for a reply that cannot come.
+    """
+
+    session_id: str
+    queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
+    pending: set[str] = field(default_factory=set)
+    open: bool = True
+
+
+#: The call stream for the request being handled, if its POST can carry one.
+#: A context variable rather than a registry keyed by session, because one
+#: session can have several calls in flight and each question belongs on the
+#: stream of the call that raised it. Tasks copy it at creation, so the
+#: handler task the transport starts sees the stream its POST opened.
+_CALL_STREAM: ContextVar[CallStream | None] = ContextVar("mcp_call_stream", default=None)
 
 
 class ElicitationHub:
@@ -135,6 +178,12 @@ class ElicitationHub:
             "elicitation" in capabilities
         )
         channel.protocol = negotiated_protocol
+        logger.info(
+            "mcp_elicitation_session_noted",
+            session_id=session_id,
+            declared_elicitation=channel.declared_elicitation,
+            protocol=negotiated_protocol,
+        )
         self._evict_oldest()
 
     def _evict_oldest(self) -> None:
@@ -169,29 +218,112 @@ class ElicitationHub:
                     continue
                 yield f"event: message\ndata: {message}\n\n".encode()
         finally:
+            # The channel itself stays: it carries what this session declared
+            # at initialize, and FORGE-464's call streams still need that
+            # after a standalone stream closes. Dropping it here made a
+            # session that once opened GET /mcp and then closed it look like
+            # one that never declared elicitation at all. Eviction bounds the
+            # registry instead.
             channel.stream_open = False
-            # Only drop the channel if it is still ours: a reconnect may
-            # already have replaced it, and removing the new one would leave
-            # the live client unreachable.
-            if self._channels.get(session_id) is channel:
-                self._channels.pop(session_id, None)
             logger.info("mcp_elicitation_stream_closed", session_id=session_id)
 
-    def available(self, session_id: str | None) -> bool:
-        """Whether this session can be asked right now."""
+    # -- the call's own stream (FORGE-464) -----------------------------
+
+    def call_stream_allowed(self, session_id: str | None) -> bool:
+        """Whether a POST from this session may be answered as SSE.
+
+        Only for a session whose handshake declared elicitation on a revision
+        that has it, and that has no ``GET /mcp`` open (its questions go
+        there). Anything else keeps its plain JSON response: switching a
+        client's content type for a question it never said it could answer
+        changes its transport and gains nothing.
+        """
         if not session_id:
             return False
         channel = self._channels.get(session_id)
-        return channel is not None and channel.eligible
+        return channel is not None and channel.declared and not channel.stream_open
+
+    @contextmanager
+    def call_stream(self, session_id: str) -> Iterator[CallStream]:
+        """Bind a call stream to the current context for the block's length.
+
+        The transport starts the handler task inside this block, so the task
+        carries the stream; leaving the block resets the variable for the
+        transport itself and nothing else.
+        """
+        stream = CallStream(session_id=session_id)
+        token = _CALL_STREAM.set(stream)
+        try:
+            yield stream
+        finally:
+            _CALL_STREAM.reset(token)
+
+    def close_call_stream(self, stream: CallStream) -> None:
+        """The POST's response is finished, or its client has gone.
+
+        Any question still waiting on it is answered ``cancel`` now: nobody
+        can read it any more, and the gate maps cancel to TIMED_OUT, which
+        is the truth.
+        """
+        stream.open = False
+        for message_id in list(stream.pending):
+            future = self._pending.pop(message_id, None)
+            if future is not None and not future.done():
+                future.set_result(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": message_id,
+                        "error": {"code": -32000, "message": "call stream closed"},
+                    }
+                )
+                logger.warning(
+                    "mcp_elicitation_call_stream_closed_unanswered",
+                    session_id=stream.session_id,
+                    message_id=message_id,
+                )
+        stream.pending.clear()
+
+    @staticmethod
+    def _current_call_stream(session_id: str) -> CallStream | None:
+        stream = _CALL_STREAM.get()
+        if stream is None or not stream.open or stream.session_id != session_id:
+            return None
+        return stream
+
+    def available(self, session_id: str | None) -> bool:
+        """Whether this session can be asked right now.
+
+        Declared at initialize, and something to ask on: this call's own
+        stream (FORGE-464) or an open ``GET /mcp``.
+        """
+        if not session_id:
+            return False
+        channel = self._channels.get(session_id)
+        if channel is None or not channel.declared:
+            return False
+        return channel.stream_open or self._current_call_stream(session_id) is not None
 
     # -- asking and answering ------------------------------------------
 
     async def elicit(
         self, session_id: str, message: str, requested_schema: dict[str, Any]
     ) -> ElicitResult:
-        """Push one ``elicitation/create`` and wait for that session's answer."""
+        """Push one ``elicitation/create`` and wait for that session's answer.
+
+        On the session's ``GET /mcp`` stream when one is open, else on the
+        call's own stream (FORGE-464).
+        """
         channel = self._channels.get(session_id)
-        if channel is None:
+        call: CallStream | None = None
+        queue: asyncio.Queue[str]
+        if channel is not None and channel.stream_open:
+            # A client that opened GET /mcp keeps getting its questions
+            # there, as FORGE-423 shipped: it is already listening, and
+            # moving the question would change what it reads mid-call.
+            queue, via = channel.queue, "session_stream"
+        elif (call := self._current_call_stream(session_id)) is not None:
+            queue, via = call.queue, "call_stream"
+        else:
             # The stream went away between the eligibility check and here.
             # Cancel rather than raise: the gate maps it to TIMED_OUT, which
             # is the truth -- nobody was asked, and nobody said no.
@@ -202,7 +334,10 @@ class ElicitationHub:
         message_id = f"elicit-{session_id}-{self._next}"
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[message_id] = future
-        await channel.queue.put(
+        if call is not None:
+            call.pending.add(message_id)
+        logger.info("mcp_elicitation_sent", session_id=session_id, message_id=message_id, via=via)
+        await queue.put(
             json.dumps(
                 {
                     "jsonrpc": "2.0",
@@ -220,6 +355,8 @@ class ElicitationHub:
             return ElicitResult(ElicitAction.CANCEL)
         finally:
             self._pending.pop(message_id, None)
+            if call is not None:
+                call.pending.discard(message_id)
         return result_from_payload(payload)
 
     def resolve(self, payload: dict[str, Any]) -> bool:
