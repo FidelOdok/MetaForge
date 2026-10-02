@@ -253,6 +253,16 @@ never recorded as zero, and a model missing from
 `calls_without_usage` and `calls_unpriced`, so a cost with either non-zero is a
 lower bound.
 
+A total's `cost_usd` follows the same rule (FORGE-486): it is `null`, never
+`0.0`, when no call in the total was priced, because a zero reads as "free" in
+a live view and slips under any budget check. When only some calls were priced
+it covers those, with `calls_unpriced` beside it. Subscription-billed
+providers (`openai-codex`, Codex via ChatGPT) have no per-call price, so they
+are not priced at zero either: their calls count in `calls_subscription` and
+each total carries `billing` (`metered`, `subscription` or `mixed`). The
+runaway-spend alert sums priced cost only and treats an unknown total as
+neither zero nor over the threshold.
+
 Events are stored in a SQLite file (`llm_usage.db` beside the run ledger, or
 `METAFORGE_LLM_USAGE_DB_PATH`) that the gateway and the design-flow worker both
 write. Where they read it:

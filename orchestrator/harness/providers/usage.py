@@ -10,7 +10,15 @@ provider and model, attributed to a run, a phase, a role and a caller.
 - **Unknown is not zero.** A provider that reports no usage records ``None``
   tokens; a model missing from ``model_prices.json`` records ``None`` cost.
   Totals carry ``calls_without_usage`` and ``calls_unpriced`` so a reader can
-  tell "nothing was spent" from "nothing was measured".
+  tell "nothing was spent" from "nothing was measured". A total's
+  ``cost_usd`` is ``None`` when no call in it was priced (FORGE-486), never
+  ``0.0``: a zero reads as "free" in a live view and slips under any budget
+  check. When only some calls were priced it covers those and
+  ``calls_unpriced`` says how many it leaves out.
+- **Subscription billing is not zero.** A provider billed by flat
+  subscription (Codex via ChatGPT) has no per-call price, so its calls are
+  counted in ``calls_subscription`` and the total's ``billing`` says
+  ``subscription`` (or ``mixed``), instead of pricing them at 0.
 - **Persistence** is a small SQLite file shared by every process that opens
   it, so the gateway and the Temporal design-flow worker write to one place
   and ``GET /v1/runs/{id}`` can read what the worker spent.
@@ -61,6 +69,14 @@ __all__ = [
 
 #: Role recorded when a call carries no attribution at all.
 UNATTRIBUTED = "unattributed"
+
+#: Providers billed by flat subscription rather than per token (FORGE-486).
+SUBSCRIPTION_PROVIDERS = frozenset({"openai-codex", "codex"})
+
+
+def is_subscription_provider(provider: str) -> bool:
+    """True when ``provider`` is billed by subscription, so has no per-call cost."""
+    return provider in SUBSCRIPTION_PROVIDERS
 
 
 # --------------------------------------------------------------------- prices
@@ -146,7 +162,7 @@ class TokenUsage:
 
 def price_cost_usd(provider: str, model: str, tokens: TokenUsage | None) -> float | None:
     """USD cost of ``tokens``, or ``None`` when it cannot be known."""
-    if tokens is None:
+    if tokens is None or is_subscription_provider(provider):
         return None
     price = load_prices().get((provider, model))
     if price is None:
@@ -240,9 +256,12 @@ class _Bucket:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cached_input_tokens: int = 0
+    #: Sum over priced calls only; reported as ``None`` while none were priced.
     cost_usd: float = 0.0
+    calls_priced: int = 0
     calls_without_usage: int = 0
     calls_unpriced: int = 0
+    calls_subscription: int = 0
 
     def add(self, e: UsageEvent) -> None:
         self.calls += 1
@@ -251,10 +270,20 @@ class _Bucket:
         self.prompt_tokens += e.prompt_tokens or 0
         self.completion_tokens += e.completion_tokens or 0
         self.cached_input_tokens += e.cached_input_tokens or 0
-        if e.cost_usd is None:
-            self.calls_unpriced += 1
-        else:
+        if e.cost_usd is not None:
+            self.calls_priced += 1
             self.cost_usd += e.cost_usd
+        elif is_subscription_provider(e.provider):
+            self.calls_subscription += 1
+        else:
+            self.calls_unpriced += 1
+
+    @property
+    def billing(self) -> str:
+        """``subscription``, ``metered`` or ``mixed`` across the calls in this bucket."""
+        if self.calls_subscription == 0:
+            return "metered"
+        return "subscription" if self.calls_subscription == self.calls else "mixed"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -262,9 +291,12 @@ class _Bucket:
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "cached_input_tokens": self.cached_input_tokens,
-            "cost_usd": round(self.cost_usd, 6),
-            # Cost is a lower bound while any call was unpriced.
+            # None, not 0.0, when no call was priced; a lower bound while any
+            # call was unpriced.
+            "cost_usd": round(self.cost_usd, 6) if self.calls_priced else None,
             "calls_unpriced": self.calls_unpriced,
+            "calls_subscription": self.calls_subscription,
+            "billing": self.billing,
             "calls_without_usage": self.calls_without_usage,
         }
 
@@ -337,7 +369,11 @@ class UsageStore:
         self._alerted: set[str] = set()
 
     def add(self, e: UsageEvent) -> float | None:
-        """Persist ``e``; returns the run's accumulated cost when it has a run."""
+        """Persist ``e``; returns the run's accumulated priced cost.
+
+        ``None`` when the event has no run or no call of the run is priced, so
+        the spend alert never reads unknown as zero.
+        """
         with self._lock:
             self._conn.execute(
                 "INSERT INTO llm_usage (ts, run_id, phase, role, caller, provider, model,"
@@ -361,9 +397,9 @@ class UsageStore:
             if e.run_id is None:
                 return None
             row = self._conn.execute(
-                "SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE run_id = ?", (e.run_id,)
+                "SELECT SUM(cost_usd) FROM llm_usage WHERE run_id = ?", (e.run_id,)
             ).fetchone()
-        return float(row[0])
+        return float(row[0]) if row[0] is not None else None
 
     def _events(self, where: str, args: tuple[Any, ...]) -> list[UsageEvent]:
         with self._lock:
@@ -387,9 +423,13 @@ class UsageStore:
         out["window_seconds"] = seconds
         return out
 
-    def should_alert(self, run_id: str, total: float) -> bool:
-        """True once per run, at the moment its spend crosses the threshold."""
-        if total < _spend_alert_threshold():
+    def should_alert(self, run_id: str, total: float | None) -> bool:
+        """True once per run, at the moment its spend crosses the threshold.
+
+        An unknown total (``None``: nothing priced) never alerts and is not
+        treated as 0 in either direction; ``calls_unpriced`` is the signal.
+        """
+        if total is None or total < _spend_alert_threshold():
             return False
         with self._lock:
             if run_id in self._alerted:

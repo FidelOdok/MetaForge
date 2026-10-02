@@ -345,3 +345,71 @@ def test_run_status_and_flow_state_show_totals_per_phase(store: UsageStore) -> N
 
     summary = client.get("/v1/runs/usage/summary").json()
     assert summary["available"] is True and summary["calls"] == 2
+
+
+# ── unpriced cost is null, never 0 (FORGE-486) ────────────────────────────
+
+
+def _call(provider: str, model: str) -> None:
+    record_call(
+        provider=provider,
+        model=model,
+        pipeline_role="generator",
+        usage={"input_tokens": 1000, "output_tokens": 100},
+    )
+
+
+def test_cost_is_null_when_no_call_is_priced(store: UsageStore) -> None:
+    with usage_scope(run_id="u", phase="intent", role="phase_brain"):
+        for _ in range(3):
+            _call("anthropic", "no-such-model")
+    totals = store.run_totals("u")
+    assert totals is not None
+    assert totals["cost_usd"] is None
+    assert totals["calls_unpriced"] == 3
+    assert totals["billing"] == "metered"
+    assert totals["by_phase"]["intent"]["cost_usd"] is None
+
+
+def test_cost_covers_priced_calls_when_some_are_unpriced(store: UsageStore) -> None:
+    with usage_scope(run_id="m", phase="p", role="phase_brain"):
+        _call("anthropic", "claude-sonnet-5")
+        _call("anthropic", "no-such-model")
+    totals = store.run_totals("m")
+    assert totals is not None
+    assert totals["cost_usd"] is not None and totals["cost_usd"] > 0
+    assert totals["calls_unpriced"] == 1
+    assert totals["by_model"]["anthropic:no-such-model"]["cost_usd"] is None
+
+
+def test_subscription_provider_is_marked_not_priced_at_zero(store: UsageStore) -> None:
+    with usage_scope(run_id="s", phase="p", role="phase_brain"):
+        _call("openai-codex", "gpt-5.5")
+        _call("openai-codex", "gpt-5.5")
+    totals = store.run_totals("s")
+    assert totals is not None
+    assert totals["cost_usd"] is None
+    assert totals["billing"] == "subscription"
+    assert totals["calls_subscription"] == 2
+    assert totals["calls_unpriced"] == 0
+    with usage_scope(run_id="s", phase="q", role="phase_brain"):
+        _call("anthropic", "claude-sonnet-5")
+    mixed = store.run_totals("s")
+    assert mixed is not None and mixed["billing"] == "mixed" and mixed["cost_usd"] is not None
+
+
+def test_spend_alert_ignores_unknown_cost(
+    store: UsageStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("METAFORGE_RUN_SPEND_ALERT_USD", "0")
+    assert store.should_alert("none", None) is False
+    metrics = _Metrics()
+    with usage_scope(run_id="n", role="phase_brain"):
+        record_call(
+            provider="openai-codex",
+            model="gpt-5.5",
+            pipeline_role="generator",
+            usage={"input_tokens": 10**6, "output_tokens": 10**6},
+            metrics=metrics,  # type: ignore[arg-type]
+        )
+    assert metrics.exceeded == []
