@@ -28,7 +28,7 @@ const RAW = {
 describe('listRuns', () => {
   it('maps snake_case to camelCase', async () => {
     mockGet.mockResolvedValueOnce({ data: { runs: [RAW] } });
-    const runs = await listRuns();
+    const { runs } = await listRuns();
     expect(runs[0]?.id).toBe('run_1');
     expect(runs[0]?.createdAt).toBe(1);
     expect(runs[0]?.approvalReason).toBeUndefined();

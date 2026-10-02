@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowUpRight, Play, RefreshCw, Search } from 'lucide-react';
 
 import { StatusBadge } from '../components/shared/StatusBadge';
+import { useActiveProject } from '../hooks/use-active-project';
 import { useRuns } from '../hooks/use-runs';
 import type { RunStatus } from '../types/run';
 
@@ -25,11 +26,19 @@ function toLocal(epochSeconds: number): string {
 }
 
 export function RunsPage() {
-  const runs = useRuns();
+  // Scoped to the active project. This page listed every project's runs in
+  // one table, and a run's project lived only inside its request blob, so
+  // there was nothing on a row to tell them apart.
+  const { activeProjectId } = useActiveProject();
+  const runs = useRuns(activeProjectId ?? undefined);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'all' | RunStatus>('all');
 
-  const filtered = (runs.data ?? [])
+  // Runs with no project are left out server-side when one is selected.
+  // Reported rather than silently missing: a shorter list reads as "there
+  // are none", which is how things go unnoticed here.
+  const unscoped = runs.data?.unscopedCount ?? 0;
+  const filtered = (runs.data?.runs ?? [])
     .filter(
       (r) =>
         (status === 'all' || r.status === status) &&
@@ -66,6 +75,13 @@ export function RunsPage() {
           </button>
         </div>
       </div>
+
+      {unscoped > 0 && (
+        <p className="review-queue-message" role="status" data-testid="runs-unscoped">
+          {unscoped} run{unscoped === 1 ? '' : 's'} not shown: no project recorded.
+          Clear the active project to see every run.
+        </p>
+      )}
 
       <div className="project-toolbar">
         <label className="project-search">

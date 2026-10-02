@@ -22,7 +22,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api_gateway.auth.approver import approver_from_request
-from api_gateway.runs.schemas import ApprovalRequest, RunListResponse, RunResponse
+from api_gateway.runs.schemas import (
+    ApprovalRequest,
+    RunListResponse,
+    RunResponse,
+    filter_by_project,
+)
 from observability.metrics import MetricsCollector, collector_for
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
@@ -209,19 +214,30 @@ def _decide_flow_version(run: Run, *, approved: bool) -> None:
 
 
 @router.get("", response_model=RunListResponse)
-def list_pending_approvals(status: Literal["pending", "all"] = "pending") -> RunListResponse:
+def list_pending_approvals(
+    status: Literal["pending", "all"] = "pending",
+    project_id: str | None = None,
+) -> RunListResponse:
     """Tool-call approvals: the ones awaiting a decision, or every one.
 
     Overdue holds are expired first, so nothing listed as pending is a call
     whose waiter has already given up (FORGE-466). ``status=all`` is the audit
     view (FORGE-473): every entry whichever route answered it, each carrying
     its ``route``, outcome and approver.
+
+    ``project_id`` scopes the queue. Unscoped before, so a reviewer working
+    on one project saw every project's held writes in one list -- and a held
+    write names a tool and a caller, not a product, so there was no way to
+    tell from the row which one it belonged to. Approvals whose tool call
+    carried no project are counted rather than dropped: an approval that
+    quietly disappears is the one nobody answers.
     """
     expire_overdue_holds()
     runs = _approval_store.list()
     if status == "pending":
         runs = [r for r in runs if r.status is RunStatus.AWAITING_APPROVAL]
-    return RunListResponse(runs=[RunResponse.from_run(r) for r in runs])
+    runs, unscoped = filter_by_project(list(runs), project_id)
+    return RunListResponse(runs=[RunResponse.from_run(r) for r in runs], unscoped_count=unscoped)
 
 
 @router.get("/{run_id}", response_model=RunResponse)

@@ -26,8 +26,12 @@ export interface ToolApprovalListResponse {
 
 /** Every tool call currently awaiting a decision (`GET /v1/chat/tool_approvals`
  * already filters to `awaiting_approval` server-side). */
-export async function getPendingToolApprovals(): Promise<ToolApprovalListResponse> {
-  const { data } = await apiClient.get<ToolApprovalListResponse>('/chat/tool_approvals');
+export async function getPendingToolApprovals(
+  projectId?: string
+): Promise<ToolApprovalListResponse> {
+  const { data } = await apiClient.get<ToolApprovalListResponse>('/chat/tool_approvals', {
+    params: projectId ? { project_id: projectId } : undefined,
+  });
   return data;
 }
 

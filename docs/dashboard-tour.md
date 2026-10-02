@@ -149,10 +149,18 @@ Per-session timeline of thoughts, actions and decisions (see
 
 ## `/runs`: design runs
 
-Every design-flow run, with search and a status filter, and a **New
-design run** action.
+Every design-flow run **for the active project**, with search and a
+status filter, and a **New design run** action.
 
-- **Backed by:** `GET /v1/runs`.
+- **Backed by:** `GET /v1/runs?project_id=…`.
+- **Scoped since** the page listed every project's runs in one table —
+  seven projects' work at once on the dev gateway — and a run's project
+  existed only inside its untyped `request` blob, so nothing on a row
+  told them apart. Each run now carries `project_id` as a real field.
+- **Runs with no project are reported, not hidden.** Five of seventeen
+  on the dev gateway carry none; with a project selected the page says
+  "N runs not shown: no project recorded" rather than just getting
+  shorter. Clear the active project to see them.
 
 ## `/runs/new`: start a design run
 
@@ -192,8 +200,16 @@ The human-in-the-loop gate, in three parts: **run approval gates**
 waiting for a yes/no), and **change proposals** submitted against the
 Twin, each with a diff against the current state.
 
-- **Backed by:** `GET /v1/runs`, `GET /v1/chat/tool_approvals`,
+- **Backed by:** `GET /v1/runs?project_id=…`,
+  `GET /v1/chat/tool_approvals?project_id=…`,
   `GET /v1/assistant/proposals`.
+- **All three are scoped to the active project.** Proposals always were;
+  the run gates and the tool approvals were not, so a reviewer saw every
+  project's held writes in one queue — and a held write names a tool and
+  a caller, not a product, so there was no way to tell from the row which
+  project it belonged to. Held calls with no project are counted and
+  reported for the same reason as on `/runs`: an approval that quietly
+  disappears is the one nobody answers.
 - **Use it to:** approve or reject. Same outcome as
   `python -m cli.forge_cli approve <id> --reason …`, but with a
   side-by-side diff view.

@@ -3,7 +3,11 @@ import { getPendingToolApprovals, decideToolApproval } from '../api/endpoints/to
 
 export const toolApprovalKeys = {
   all: ['tool-approvals'] as const,
-  pending: () => [...toolApprovalKeys.all, 'pending'] as const,
+  // Keyed on the project for the same reason the runs list is: without it
+  // two projects share one cache entry and switching shows the other's
+  // held writes until the next poll.
+  pending: (projectId?: string) =>
+    [...toolApprovalKeys.all, 'pending', projectId ?? 'all'] as const,
 };
 
 // A paused tool call can auto-deny in as little as 10s (design-flow) or as
@@ -13,10 +17,10 @@ export const toolApprovalKeys = {
 // page reload.
 const POLL_INTERVAL_MS = 5_000;
 
-export function usePendingToolApprovals() {
+export function usePendingToolApprovals(projectId?: string) {
   return useQuery({
-    queryKey: toolApprovalKeys.pending(),
-    queryFn: getPendingToolApprovals,
+    queryKey: toolApprovalKeys.pending(projectId),
+    queryFn: () => getPendingToolApprovals(projectId),
     refetchInterval: POLL_INTERVAL_MS,
   });
 }
@@ -29,7 +33,9 @@ export function useDecideToolApproval() {
     // Decided runs drop out of the pending list server-side; refetch now
     // instead of waiting up to POLL_INTERVAL_MS for it to disappear.
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: toolApprovalKeys.pending() });
+      // The prefix, not `pending()`: that is now project-keyed, so invalidating
+      // one key would leave the scoped list showing an approval already decided.
+      void queryClient.invalidateQueries({ queryKey: toolApprovalKeys.all });
     },
   });
 }

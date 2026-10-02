@@ -72,7 +72,7 @@ function cardNames(): string[] {
 describe('ProjectsPage', () => {
   beforeEach(() => {
     mockUseHealth.mockReturnValue({ data: undefined, isLoading: false, refetch: vi.fn() });
-    mockUseRuns.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() });
+    mockUseRuns.mockReturnValue({ data: { runs: [], unscopedCount: 0 }, isLoading: false, isError: false, refetch: vi.fn() });
     mockCreateMutate.mockClear();
   });
 
@@ -100,11 +100,17 @@ describe('ProjectsPage', () => {
   it('computes workspace metrics from real data', () => {
     setProjects(sampleProjects);
     mockUseRuns.mockReturnValue({
-      data: [
-        { id: 'r1', status: 'running', request: {}, history: [] },
-        { id: 'r2', status: 'queued', request: {}, history: [] },
-        { id: 'r3', status: 'awaiting_approval', request: { goal: 'Size the motor' }, approvalReason: 'Gate: mechanical', history: [] },
-      ] as unknown as HarnessRun[],
+      // `useRuns` returns `{ runs, unscopedCount }` now. This page stays
+      // deliberately unscoped -- it counts runs *across* projects -- so only
+      // the shape changes here, not the intent.
+      data: {
+        runs: [
+          { id: 'r1', status: 'running', request: {}, history: [] },
+          { id: 'r2', status: 'queued', request: {}, history: [] },
+          { id: 'r3', status: 'awaiting_approval', request: { goal: 'Size the motor' }, approvalReason: 'Gate: mechanical', history: [] },
+        ] as unknown as HarnessRun[],
+        unscopedCount: 0,
+      },
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
