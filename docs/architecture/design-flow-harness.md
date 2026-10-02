@@ -393,9 +393,29 @@ and a `material` metric against the recorded `material` (a shared material
 family word is a match, a missing material is a violation). Not covered, and
 reported as not evaluated rather than passing: assembly parts without recorded
 dimensions, per-part printed-size limits (metrics containing `print`), mass,
-deflection and safety factor (these need analysis evidence), and any metric
-outside the lists above. The `mech_v1` design gate (G6) now sets
+deflection and safety factor (these need analysis evidence, see below), and any
+metric outside the lists above. The `mech_v1` design gate (G6) now sets
 `enforce_constraints` (template version 1.1.0), so a violation fails it.
+
+**Analysis constraints (FORGE-498).** Deflection / displacement, stress and
+safety-factor limits are compared to the latest `simulation_result` linked to
+each current `cad_model` (`metadata.source_cad_model_id` or a `derives_from`
+edge), by `api_gateway/runs/analysis_constraints.py`. Values are read from
+`max_displacement_mm`, `max_von_mises_mpa` and `safety_factor` (or any
+`*_sf_*` key). Every constraint ends as passed, violated (with the numbers) or
+not evaluated (with the reason), all shown in the gate reason; a violation on
+an enforcing gate marks it not ready. Load-case scaling: a limit that names its
+basis (`service` or `factored`) is compared after scaling the result linearly
+by target load over analysed load (inverse for safety factor), using
+`service_load_n`, `factored_load_n` and the analysed load; the finding states
+the scaling (for example 12.07 mm at 490 N becomes 6.03 mm at the 245 N
+service load, which breaks a 5 mm limit). When the result records two
+different loads and the limit names neither, or a service limit has no
+recorded loads to scale with, the constraint is not evaluated, never passed.
+A result linked only to a superseded `cad_model` is not used. The
+`simulation_result` hint also asks for an optional
+`metadata.modelling_assumptions` (for example bonded versus contact joints,
+material approximations), which is shown to the reviewer at the gate.
 
 The gate skeleton stays hardcoded (versioned code); the criteria come from
 the project's own constraint data. The structured constraint-creation tool

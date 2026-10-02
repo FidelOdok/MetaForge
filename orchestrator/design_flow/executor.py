@@ -119,6 +119,12 @@ class ConstraintReport:
     evaluated_count: int = 0
     violations: list[str] = field(default_factory=list)  # ERROR severity
     warnings: list[str] = field(default_factory=list)
+    # FORGE-498: what the gate could and could not compare. ``satisfied`` and
+    # ``not_evaluated`` are shown to the reviewer, never counted as violations;
+    # ``assumptions`` are the analysis modelling assumptions to review.
+    satisfied: list[str] = field(default_factory=list)
+    not_evaluated: list[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
 
 
 @runtime_checkable
@@ -234,6 +240,20 @@ def _consistency_summary(evaluation: GateEvaluation) -> str:
     return f"{evaluation.gate_id}: {evaluation.status.value} ({parts})"
 
 
+def _constraint_details(constraints: ConstraintReport) -> str:
+    """Passed / not-evaluated findings and modelling assumptions for the reviewer (FORGE-498)."""
+    out = ""
+    if constraints.satisfied:
+        out += f" | Passed ({len(constraints.satisfied)}): " + "; ".join(constraints.satisfied[:5])
+    if constraints.not_evaluated:
+        out += f" | Not evaluated ({len(constraints.not_evaluated)}): " + "; ".join(
+            constraints.not_evaluated[:5]
+        )
+    if constraints.assumptions:
+        out += " | Modelling assumptions: " + "; ".join(constraints.assumptions[:3])
+    return out
+
+
 def _gate_reason(
     phase: Phase,
     outcome: PhaseOutcome,
@@ -267,6 +287,7 @@ def _gate_reason(
             head += " | Constraints: " + " — ".join(parts)
         else:
             head += f" | Constraints: OK ({constraints.evaluated_count} evaluated)"
+        head += _constraint_details(constraints)
     # FORGE-73: real G-number status, purely informational -- never changes
     # whether this gate blocks (see Gate.gate_id's own docstring).
     if consistency is not None and consistency.checked and consistency.evaluation is not None:
@@ -433,6 +454,8 @@ class DesignFlowExecutor:
             # the reviewer can retry the phase (or reject). Approve is refused.
             logger.warning("design_flow_gate_not_ready", run_id=run_id, findings=findings)
             reason = f"[{gate.name}] NOT READY (retry the phase or reject): " + "; ".join(findings)
+            if constraints.checked:
+                reason += _constraint_details(constraints)
         retries_left = max(max_retries - (attempt - 1), 0)
         self._coordinator.set_gate_state(run_id, ready=not blocking, retries_left=retries_left)
 

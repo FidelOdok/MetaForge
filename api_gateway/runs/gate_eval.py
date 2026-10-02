@@ -17,6 +17,11 @@ from uuid import UUID
 import structlog
 
 from api_gateway.projects.backend import ProjectBackend
+from api_gateway.runs.analysis_constraints import (
+    AnalysisCheck,
+    SimResult,
+    check_analysis_constraints,
+)
 from api_gateway.runs.geometry_constraints import GeometryCheck, check_geometry_constraints
 from orchestrator.design_flow.executor import ConsistencyGateReport, ConstraintReport
 from twin_core.consistency import (
@@ -27,6 +32,7 @@ from twin_core.consistency import (
     evaluate_g7_verification_readiness,
     evaluate_g8_release,
 )
+from twin_core.models.enums import EdgeType
 
 logger = structlog.get_logger(__name__)
 
@@ -218,6 +224,74 @@ class TwinConstraintChecker:
         )
         return outcome
 
+    async def _analysis_check(self, project_id: str | None) -> AnalysisCheck:
+        """FORGE-498: analysis constraints vs the latest simulation_result per cad_model."""
+        lister = getattr(self._twin, "list_constraints", None)
+        getter = getattr(self._twin, "get_work_product", None)
+        if lister is None or getter is None or self._backend is None or not project_id:
+            return AnalysisCheck()
+        try:
+            constraints = await lister(project_id=UUID(project_id))
+            project = await self._backend.get_project(project_id)
+            if project is None:
+                return AnalysisCheck()
+            latest: dict[str, tuple[float, str]] = {}
+            sim_wps: list[Any] = []
+            for wp in project.work_products:
+                wp_type = getattr(wp, "type", None)
+                type_str = str(getattr(wp_type, "value", wp_type))
+                if type_str == "simulation_result":
+                    sim_wps.append(wp)
+                elif type_str == "cad_model":
+                    ts = _to_epoch(getattr(wp, "updated_at", None)) or 0.0
+                    name = str(getattr(wp, "name", "") or getattr(wp, "id", ""))
+                    if name not in latest or ts >= latest[name][0]:
+                        latest[name] = (ts, str(getattr(wp, "id", "")))
+            sims = [await self._read_sim(wp, getter) for wp in sim_wps]
+        except Exception as exc:  # noqa: BLE001 - analysis comparison is best-effort
+            logger.warning(
+                "gate_eval_analysis_constraints_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="analysis constraints not compared at this gate",
+            )
+            return AnalysisCheck()
+        models = [(cad_id, name) for name, (_, cad_id) in latest.items()]
+        outcome = check_analysis_constraints(constraints, models, [s for s in sims if s])
+        logger.info(
+            "gate_eval_analysis_constraints",
+            project_id=project_id,
+            evaluated=outcome.evaluated,
+            violations=len(outcome.violations),
+            not_evaluated=outcome.not_evaluated,
+        )
+        return outcome
+
+    async def _read_sim(self, wp: Any, getter: Any) -> SimResult | None:
+        """A simulation_result with the cad_models it derives from, or None if unreadable."""
+        sim_id = str(getattr(wp, "id", ""))
+        try:
+            node = await getter(UUID(sim_id))
+        except Exception as exc:  # noqa: BLE001 - one unreadable result must not crash the gate
+            logger.warning("gate_eval_sim_read_failed", sim_id=sim_id, error=str(exc))
+            return None
+        if node is None:
+            return None
+        meta = dict(getattr(node, "metadata", None) or {})
+        cad_ids: set[str] = set()
+        if meta.get("source_cad_model_id"):
+            cad_ids.add(str(meta["source_cad_model_id"]))
+        edges = getattr(self._twin, "get_edges", None)
+        if edges is not None:
+            try:
+                for edge in await edges(UUID(sim_id), "outgoing", EdgeType.DERIVES_FROM):
+                    cad_ids.add(str(edge.target_id))
+            except Exception as exc:  # noqa: BLE001 - metadata link may still resolve
+                logger.warning("gate_eval_sim_edges_failed", sim_id=sim_id, error=str(exc))
+        ts = _to_epoch(getattr(wp, "updated_at", None)) or 0.0
+        name = str(getattr(wp, "name", "") or sim_id)
+        return SimResult(id=sim_id, name=name, updated_at=ts, metadata=meta, cad_ids=cad_ids)
+
     async def check(self, project_id: str | None) -> ConstraintReport:
         evaluate = getattr(self._twin, "evaluate_constraints", None)
         if evaluate is None:
@@ -244,12 +318,20 @@ class TwinConstraintChecker:
         geometry = await self._geometry_check(project_id)
         violations += geometry.violations
         warnings += geometry.warnings
+        analysis = await self._analysis_check(project_id)
+        violations += analysis.violations
+        warnings += analysis.warnings
         report = ConstraintReport(
             checked=True,
             passed=not violations,
-            evaluated_count=int(getattr(result, "evaluated_count", 0)) + geometry.evaluated,
+            evaluated_count=int(getattr(result, "evaluated_count", 0))
+            + geometry.evaluated
+            + analysis.evaluated,
             violations=violations,
             warnings=warnings,
+            satisfied=analysis.satisfied,
+            not_evaluated=geometry.not_evaluated + analysis.not_evaluated,
+            assumptions=analysis.assumptions,
         )
         logger.info(
             "gate_eval_constraints",

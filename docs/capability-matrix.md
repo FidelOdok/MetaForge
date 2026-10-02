@@ -622,8 +622,9 @@ exists.
 ### A requirement something can check
 
 Design-flow gates compare structured envelope, thickness and material
-constraints to the committed `cad_model` (FORGE-496); the covered metrics and
-the gaps are listed in
+constraints to the committed `cad_model` (FORGE-496), and deflection, stress and
+safety-factor constraints to the latest linked `simulation_result` with
+load-case scaling (FORGE-498); the covered metrics and the gaps are listed in
 [design-flow-harness](architecture/design-flow-harness.md#constraint-as-gate-criteria-met-583).
 
 `twin.record_constraint_set` takes a `metric`, `operator`, `limit` and
