@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -59,6 +60,7 @@ from mcp_core.elicitation import (
     ELICITATION_PROTOCOL_VERSION,
     ElicitAction,
     ElicitResult,
+    cancelled_notification,
     result_from_payload,
 )
 
@@ -75,6 +77,10 @@ DEFAULT_ELICITATION_TIMEOUT = 180.0
 #: closing cannot grow the registry without limit. Evicts oldest-first, like
 #: the session-project registry it sits beside.
 _MAX_STREAMS = 256
+
+#: How many withdrawn questions are remembered, so a late answer to one is
+#: recognised and ignored (FORGE-472) rather than dispatched as a request.
+_MAX_ENDED = 256
 
 
 @dataclass
@@ -160,6 +166,8 @@ class ElicitationHub:
         self._timeout = timeout_seconds
         self._channels: dict[str, SessionChannel] = {}
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        #: Questions the server stopped waiting on, oldest first, with why.
+        self._ended: OrderedDict[str, str] = OrderedDict()
         self._next = 0
 
     # -- what a session declared ---------------------------------------
@@ -284,6 +292,7 @@ class ElicitationHub:
                     session_id=stream.session_id,
                     message_id=message_id,
                 )
+                self._withdraw(stream.session_id, message_id, None, "call stream closed")
         stream.pending.clear()
 
     @staticmethod
@@ -386,26 +395,84 @@ class ElicitationHub:
         except TimeoutError:
             self._pending.pop(message_id, None)
             logger.warning("mcp_elicitation_timeout", message_id=message_id)
+            self._withdraw(session_id, message_id, call, "approval request timed out")
             return ElicitResult(ElicitAction.CANCEL)
+        except asyncio.CancelledError:
+            # The gate's window ended (FORGE-472), or the call itself was
+            # cancelled. Either way the server is no longer waiting, so the
+            # form the client is showing has to come down.
+            self._pending.pop(message_id, None)
+            self._withdraw(session_id, message_id, call, "approval window ended")
+            raise
         finally:
             self._pending.pop(message_id, None)
             if call is not None:
                 call.pending.discard(message_id)
         return result_from_payload(payload)
 
+    def _withdraw(
+        self, session_id: str, message_id: str, call: CallStream | None, reason: str
+    ) -> None:
+        """Tell the client a question it was asked is no longer wanted.
+
+        FORGE-472. Without this a form stayed on the client long after the
+        server had stopped waiting: Claude Code still showed Accept/Decline
+        ten minutes after the hold timed out. Sent on the call's own stream
+        while it is open, else on an open ``GET /mcp``. The id is remembered
+        either way, so an answer that arrives later is recognised as late.
+        """
+        self._ended[message_id] = reason
+        while len(self._ended) > _MAX_ENDED:
+            self._ended.popitem(last=False)
+        notice = json.dumps(cancelled_notification(message_id, reason))
+        channel = self._channels.get(session_id)
+        if call is not None and call.open:
+            call.queue.put_nowait(notice)
+            via = "call_stream"
+        elif channel is not None and channel.stream_open:
+            channel.queue.put_nowait(notice)
+            via = "session_stream"
+        else:
+            via = None
+        logger.info(
+            "mcp_elicitation_withdrawn",
+            session_id=session_id,
+            message_id=message_id,
+            reason=reason,
+            delivered=via is not None,
+            via=via,
+        )
+
     def resolve(self, payload: dict[str, Any]) -> bool:
         """Hand an inbound JSON-RPC response to whoever is waiting for it.
 
-        Returns False when nothing is waiting, so the transport can treat the
-        body as an ordinary request rather than dropping it -- the same
-        contract ``StdioElicitor.resolve`` keeps, for the same reason.
+        Returns False when nothing is waiting and the id is not one this hub
+        asked, so the transport can treat the body as an ordinary request
+        rather than dropping it -- the same contract ``StdioElicitor.resolve``
+        keeps, for the same reason.
+
+        An answer to a question already withdrawn (FORGE-472) returns True
+        but is never applied: the call it would have approved has already
+        ended, and running a write on an answer nobody was waiting for is
+        exactly the unreviewed write the gate exists to prevent.
         """
         raw_id = payload.get("id")
         if not isinstance(raw_id, str):
             return False
         future = self._pending.pop(raw_id, None)
         if future is None or future.done():
-            return False
+            reason = self._ended.get(raw_id)
+            if reason is None:
+                return False
+            logger.warning(
+                "mcp_elicitation_late_response_ignored",
+                message_id=raw_id,
+                ended_because=reason,
+                action=(payload.get("result") or {}).get("action")
+                if isinstance(payload.get("result"), dict)
+                else None,
+            )
+            return True
         future.set_result(payload)
         return True
 

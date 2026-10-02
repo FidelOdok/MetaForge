@@ -45,7 +45,12 @@ from fastapi.responses import (
 
 from mcp_core.auth import AUTH_DENIED, AuthPosture, redact, verify_api_key
 from mcp_core.context import HEADER_SESSION
-from mcp_core.elicitation import ElicitAction, ElicitResult, result_from_payload
+from mcp_core.elicitation import (
+    ElicitAction,
+    ElicitResult,
+    cancelled_notification,
+    result_from_payload,
+)
 from mcp_core.guardrails import Caller
 from mcp_core.protocol import AUTH_DENIED as AUTH_DENIED_CODE
 from metaforge.mcp.http_elicitation import (
@@ -252,16 +257,22 @@ class StdioElicitor:
         self._write = write
         self._timeout = timeout_seconds
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        #: Questions withdrawn (FORGE-472), so a late answer is ignored.
+        self._ended: set[str] = set()
         self._next = 0
 
     def resolve(self, message_id: str, payload: dict[str, Any]) -> bool:
         """Hand an inbound response to whoever is waiting for it.
 
         Returns False when nothing is waiting, so the caller can treat the
-        line as an ordinary request rather than dropping it silently.
+        line as an ordinary request rather than dropping it silently. A late
+        answer to a withdrawn question (FORGE-472) is consumed and ignored.
         """
         future = self._pending.pop(message_id, None)
         if future is None or future.done():
+            if message_id in self._ended:
+                logger.warning("mcp_elicitation_late_response_ignored", message_id=message_id)
+                return True
             return False
         future.set_result(payload)
         return True
@@ -286,13 +297,26 @@ class StdioElicitor:
         except TimeoutError:
             self._pending.pop(message_id, None)
             logger.warning("mcp_elicitation_timeout", message_id=message_id)
+            self._withdraw(message_id, "approval request timed out")
             return ElicitResult(ElicitAction.CANCEL)
+        except asyncio.CancelledError:
+            self._pending.pop(message_id, None)
+            self._withdraw(message_id, "approval window ended")
+            raise
 
         # FORGE-423: shared with the HTTP elicitor. The three defaults here
         # are the easy part to get wrong, and getting them wrong on one
         # transport and not the other is worse than getting them wrong on
         # both.
         return result_from_payload(payload)
+
+    def _withdraw(self, message_id: str, reason: str) -> None:
+        """Take the question down on the client (FORGE-472)."""
+        if len(self._ended) > 256:
+            self._ended.clear()
+        self._ended.add(message_id)
+        self._write(json.dumps(cancelled_notification(message_id, reason)))
+        logger.info("mcp_elicitation_withdrawn", message_id=message_id, reason=reason)
 
 
 def _is_response(raw: str) -> tuple[bool, str, dict[str, Any]]:

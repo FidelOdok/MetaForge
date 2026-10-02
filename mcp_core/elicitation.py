@@ -28,6 +28,7 @@ Layer-1 module: stdlib only.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -47,6 +48,7 @@ __all__ = [
     "Elicitor",
     "ElicitationUnavailableError",
     "approval_request",
+    "cancelled_notification",
     "elicitation_gate",
     "result_from_payload",
 ]
@@ -149,6 +151,15 @@ def approval_request(ask: ApprovalAsk) -> tuple[str, dict[str, Any]]:
     if ask.arguments:
         lines += ["", "Arguments:", *_summarise_arguments(ask.arguments)]
     lines += ["", f"Requested by: {ask.caller.value}"]
+    if ask.timeout_seconds is not None:
+        # FORGE-472: the person is told the deadline the server will keep.
+        # Without it a form that quietly stopped mattering looked exactly like
+        # one still waiting for an answer.
+        lines += [
+            "",
+            f"Answer within {ask.timeout_seconds:.0f} seconds. After that this "
+            f"request expires and {ask.tool_id} is not run.",
+        ]
     message = "\n".join(lines)
 
     schema: dict[str, Any] = {
@@ -202,6 +213,20 @@ def result_from_payload(payload: dict[str, Any]) -> ElicitResult:
     return ElicitResult(action, content if isinstance(content, dict) else {})
 
 
+def cancelled_notification(request_id: str | int, reason: str) -> dict[str, Any]:
+    """A ``notifications/cancelled`` withdrawing one ``elicitation/create``.
+
+    FORGE-472. Sent by the server when it stops waiting on a question it
+    asked, so the client can take the form down instead of leaving a prompt
+    on screen whose answer will be thrown away.
+    """
+    return {
+        "jsonrpc": "2.0",
+        "method": "notifications/cancelled",
+        "params": {"requestId": request_id, "reason": reason},
+    }
+
+
 def elicitation_gate(elicitor: Elicitor) -> ApprovalGateFn:
     """An :data:`ApprovalGateFn` that asks through the connected client.
 
@@ -217,11 +242,21 @@ def elicitation_gate(elicitor: Elicitor) -> ApprovalGateFn:
     * ``cancel`` -- dismissed. Nobody decided, so this is ``TIMED_OUT``, the
       outcome F1 created precisely so an agent is not told "a reviewer
       rejected it" when no reviewer looked.
+
+    ``ask.timeout_seconds`` bounds the wait (FORGE-472), so the server
+    resolves inside the client's own tool timeout. The elicitor sees the
+    deadline as a cancellation, which is where it withdraws the question.
     """
 
     async def gate(ask: ApprovalAsk) -> ApprovalOutcome:
         message, schema = approval_request(ask)
-        result = await elicitor(message, schema)
+        try:
+            result = await asyncio.wait_for(elicitor(message, schema), timeout=ask.timeout_seconds)
+        except TimeoutError:
+            logger.info(
+                "elicitation_window_ended", tool_id=ask.tool_id, window_seconds=ask.timeout_seconds
+            )
+            return ApprovalOutcome.TIMED_OUT
         if result.action is ElicitAction.CANCEL:
             return ApprovalOutcome.TIMED_OUT
         if result.action is ElicitAction.DECLINE:
