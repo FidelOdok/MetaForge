@@ -40,6 +40,7 @@ class FakeLauncher:
         self.current = dict(state or GATE_STATE)
         self.down = down
         self.answers: list[tuple[str, bool, str]] = []
+        self.retries: list[tuple[bool, str]] = []
 
     async def state(self, run_id: str) -> dict[str, Any]:
         if self.down:
@@ -47,10 +48,20 @@ class FakeLauncher:
         return dict(self.current)
 
     async def answer_gate(
-        self, run_id: str, *, approved: bool, decided_by: str, comment: str = ""
+        self,
+        run_id: str,
+        *,
+        approved: bool,
+        decided_by: str,
+        comment: str = "",
+        retry: bool = False,
     ) -> None:
         self.answers.append((run_id, approved, decided_by))
-        self.current = {**self.current, "status": "running" if approved else "rejected"}
+        self.retries.append((retry, comment))
+        self.current = {
+            **self.current,
+            "status": "running" if (approved or retry) else "rejected",
+        }
         self.current["awaiting_gate"] = None
 
 
@@ -136,3 +147,49 @@ def test_in_process_runs_are_not_reconciled(monkeypatch: pytest.MonkeyPatch) -> 
     set_flow_launcher(None)
     reset_run_store()
     assert routes._launcher is None
+
+
+# ── FORGE-495: retry decision ────────────────────────────────────────────
+
+
+def test_retry_is_signalled_with_the_reviewers_reason(restarted) -> None:
+    run_id, client = restarted
+    launcher = FakeLauncher({**GATE_STATE, "gate_ready": True, "retries_left": 3})
+    set_flow_launcher(launcher)  # type: ignore[arg-type]
+    resp = client.post(
+        f"/v1/runs/{run_id}/approval", json={"decision": "retry", "reason": "add the cad model"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert launcher.retries == [(True, "add the cad model")]
+
+
+def test_approving_a_gate_that_is_not_ready_is_refused(restarted) -> None:
+    run_id, client = restarted
+    launcher = FakeLauncher({**GATE_STATE, "gate_ready": False, "retries_left": 3})
+    set_flow_launcher(launcher)  # type: ignore[arg-type]
+    resp = client.post(f"/v1/runs/{run_id}/approval", json={"decision": "approve"})
+    assert resp.status_code == 409
+    assert "not ready" in resp.json()["detail"]
+    assert launcher.answers == []
+    # The run is still parked and answerable: retry goes through.
+    assert client.post(f"/v1/runs/{run_id}/approval", json={"decision": "retry"}).status_code == 200
+
+
+def test_retry_past_the_cap_is_refused(restarted) -> None:
+    run_id, client = restarted
+    launcher = FakeLauncher({**GATE_STATE, "gate_ready": True, "retries_left": 0})
+    set_flow_launcher(launcher)  # type: ignore[arg-type]
+    resp = client.post(f"/v1/runs/{run_id}/approval", json={"decision": "retry"})
+    assert resp.status_code == 409
+    assert launcher.answers == []
+
+
+def test_retry_on_a_plain_run_is_refused() -> None:
+    reset_run_store()
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    run = get_run_store().create({"goal": "g"})
+    resp = client.post(f"/v1/runs/{run.id}/approval", json={"decision": "retry"})
+    assert resp.status_code == 422
+    reset_run_store()

@@ -5,7 +5,7 @@ The OpenAI-compatible Runs API surface over the harness run lifecycle:
 * ``POST   /v1/runs``               create a run (optionally start it)
 * ``GET    /v1/runs``               list runs
 * ``GET    /v1/runs/{id}``          fetch one run
-* ``POST   /v1/runs/{id}/approval`` approve or reject a paused run
+* ``POST   /v1/runs/{id}/approval`` approve, reject or (design flows) retry a paused run
 
 The run store is process-local for now (mirrors the chat backend pattern);
 persistence lands in Phase 4. Domain errors map to clean HTTP status:
@@ -899,6 +899,13 @@ class FlowRunState(BaseModel):
     flowContentHash: str | None = None  # noqa: N815
     #: Why the run failed, when the engine reports it did.
     error: str | None = None
+    #: FORGE-495: which attempt of the current phase is running (1 = first), how
+    #: many retries it has left, and whether the open gate can be approved. A
+    #: gate that is not ready (``gateReady`` false) takes retry or reject only.
+    attempt: int = 1
+    retriesLeft: int | None = None  # noqa: N815
+    gateReady: bool = True  # noqa: N815
+    gateFindings: list[str] = Field(default_factory=list)  # noqa: N815
 
 
 def _frozen_identity(run: Run) -> dict[str, Any]:
@@ -1047,6 +1054,10 @@ async def get_flow_state(run_id: str) -> FlowRunState:
         live=True,
         usage=usage,
         error=str(run_error) if run_error else None,
+        attempt=int(state.get("attempt") or 1),
+        retriesLeft=state.get("retries_left"),
+        gateReady=bool(state.get("gate_ready", True)),
+        gateFindings=[str(f) for f in state.get("gate_findings") or []],
         **identity,
     )
 
@@ -1132,6 +1143,50 @@ async def _note_gate_in_session(request: Request, run: Run, gate: str) -> None:
         logger.info("design_flow_gate_session_note_skipped", run_id=run.id, error=str(exc))
 
 
+async def _refuse_undeliverable_decision(run: Run, decision: ApprovalDecision) -> None:
+    """409 a decision the open gate cannot take (FORGE-495).
+
+    A gate that is not ready (missing deliverables, an ungrounded reply,
+    constraint violations) takes retry or reject, never approve; and a retry
+    past the per-phase cap would only end the run. Refusing here, before the
+    record moves, keeps the run parked and answerable. Best effort: when the
+    gate's state cannot be read, the workflow's own guard still holds.
+    """
+    if decision is ApprovalDecision.RETRY and not _is_design_flow(run.request):
+        raise HTTPException(
+            status_code=422, detail="'retry' re-runs a design-flow phase; this run is not one"
+        )
+    if decision is ApprovalDecision.REJECT or not _is_design_flow(run.request):
+        return
+    gate: dict[str, Any] | None = None
+    if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+        gate = _gate_coordinator.gate_state(run.id)  # type: ignore[assignment]
+    elif resolve_flow_engine() is FlowEngine.TEMPORAL:
+        try:
+            launcher = await get_flow_launcher()
+            state = await asyncio.wait_for(launcher.state(run.id), _RECONCILE_TIMEOUT_SECONDS)
+            gate = {
+                "ready": state.get("gate_ready", True),
+                "retries_left": state.get("retries_left"),
+            }
+        except Exception as exc:  # noqa: BLE001 - the workflow's own guard still applies
+            logger.info("approval_gate_state_unavailable", run_id=run.id, error=str(exc))
+    if gate is None:
+        return
+    if decision is ApprovalDecision.APPROVE and gate.get("ready") is False:
+        raise HTTPException(
+            status_code=409,
+            detail="This gate is not ready (see the findings on the run). "
+            "Retry the phase or reject; it cannot be approved.",
+        )
+    left = gate.get("retries_left")
+    if decision is ApprovalDecision.RETRY and isinstance(left, int) and left <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="This phase has used all its retries. Approve (if the gate is ready) or reject.",
+        )
+
+
 @router.post("/{run_id}/approval", response_model=RunResponse)
 async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) -> RunResponse:
     """Answer the gate this run is parked at.
@@ -1147,30 +1202,42 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
     The deciding human comes from the request, never the body (FORGE-393).
     """
     approver = approver_from_request(request)
+    decision = ApprovalDecision(body.decision)
     # FORGE-485: the workflow decides whether a gate is open, not the local
     # record. After a restart that record says `queued` while the workflow
     # waits, and refusing on it leaves a gate nobody can answer.
     try:
-        await _reconcile_run(_store.get(run_id))
+        reconciled = await _reconcile_run(_store.get(run_id))
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    await _refuse_undeliverable_decision(reconciled, decision)
+    if decision is ApprovalDecision.RETRY:
+        _gate_coordinator.note_retry(run_id, body.reason)
     try:
         run = _store.submit_approval(
             run_id,
-            ApprovalDecision(body.decision),
+            decision,
             approved_by=approver.label,
             approver_verified=approver.verified,
         )
     except RunNotFoundError as exc:
+        _gate_coordinator.take_retry_reason(run_id)
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
     except InvalidTransition as exc:
+        _gate_coordinator.take_retry_reason(run_id)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    approved = ApprovalDecision(body.decision) is ApprovalDecision.APPROVE
+    approved = decision is ApprovalDecision.APPROVE
     if _is_design_flow(run.request) and resolve_flow_engine() is FlowEngine.TEMPORAL:
         try:
             launcher = await get_flow_launcher()
-            await launcher.answer_gate(run_id, approved=approved, decided_by=approver.label)
+            await launcher.answer_gate(
+                run_id,
+                approved=approved,
+                decided_by=approver.label,
+                comment=body.reason,
+                retry=decision is ApprovalDecision.RETRY,
+            )
         except TemporalUnavailableError as exc:
             # The store already moved, but the run itself did not hear the
             # decision. Saying so is the only honest answer: reporting 200
@@ -1188,7 +1255,7 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
 
     _metrics().record_design_flow_gate(
         str(run.request.get("flow") or DEFAULT_FLOW_ID),
-        "approved" if approved else "rejected",
+        {"approve": "approved", "reject": "rejected", "retry": "retried"}[decision.value],
     )
     logger.info(
         "run_api_approval",

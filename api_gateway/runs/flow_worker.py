@@ -319,6 +319,8 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
         project_id=request.project_id,
         session_id=request.session_id,
         flow_context=request.flow_context,
+        retry_feedback=request.retry_feedback,
+        attempt=request.attempt,
     )
     with tracer.start_as_current_span("design_flow_worker.run_phase") as span:
         span.set_attribute("run.id", request.run_id)

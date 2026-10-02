@@ -190,6 +190,7 @@ DesignFlowExecutor.run(run_id)          # orchestrator/design_flow/executor.py
           store.request_approval(...)   # run → awaiting_approval  (SSE emits it)
           decision = await gate         # resolved by POST /v1/runs/{id}/approval
           approve → next phase
+          retry   → re-run THIS phase (see "Retrying a phase"), same gate again
           reject  → run ends (rejected)
   store.complete(run_id, result)
 ```
@@ -296,6 +297,56 @@ no longer fall back to the generic "record it into the twin" line (FORGE-494).
 This makes completeness machine-enforced and quality human-judged: the machine
 guarantees the deliverable exists in the twin; the human reviews whether it's
 right.
+
+## Retrying a phase from its gate (FORGE-495)
+
+A gate answers one of three decisions through
+`POST /v1/runs/{id}/approval`:
+
+| Decision | Body | Effect |
+|---|---|---|
+| approve | `{"decision": "approve"}` | the run moves to the next phase |
+| reject | `{"decision": "reject"}` | the run ends `rejected` |
+| retry | `{"decision": "retry", "reason": "..."}` | the same phase runs again and the same gate opens again |
+
+On a retry the phase brain gets the gate's findings (missing deliverables, an
+ungrounded reply, constraint violations) and the reviewer's `reason` as the
+**first** block of its prompt, ahead of the flow context. Every earlier approved
+phase is kept; only the retried phase's previous attempt is dropped from the
+run's `completed` list. Nothing before it re-runs and no earlier gate is asked
+again.
+
+**A gate that is not ready parks instead of failing the run.** When an enforcing
+phase is missing required deliverables, has an ungrounded reply, or the gate
+enforces constraints that are violated, the run moves to `awaiting_approval`
+with a reason that starts `NOT READY (retry the phase or reject)` and lists the
+findings. Such a gate takes **retry or reject only**: an approve is answered
+`409` by the route and is ignored by the workflow, because approving work the
+system already knows is incomplete is the click-through habit gates exist to
+prevent. Reject still ends the run.
+
+**Cap.** One phase may be retried `METAFORGE_DESIGN_FLOW_MAX_PHASE_RETRIES`
+times (default `3`). The cap is read when the run starts and carried into the
+workflow as `DesignFlowInput.max_phase_retries`, so it cannot change mid-run.
+A retry past the cap is refused with `409`; if one reaches the engine anyway the
+run ends `failed` with the reason.
+
+**Visibility.** Each attempt is recorded in the run's events
+(`phase_started` with `attempt N`, `gate_not_ready`, `phase_retry_requested`
+with the reviewer and reason). `GET /v1/runs/{id}/flow-state` adds `attempt`,
+`retriesLeft`, `gateReady` and `gateFindings`.
+
+**Temporal.** The retry travels as an optional `retry` flag on the
+`submit_gate_decision` signal (`GateAnswer.retry`, default `False`), and
+`PhaseRequest` gains optional `retry_feedback` and `attempt`, so inputs from
+before the change still deserialize. Parking a not-ready gate replaces a
+`_fail`, which changes the workflow's command sequence, so it is guarded by
+`workflow.patched("forge-495-gate-retry")`: a run whose history already holds the
+old failure replays it unchanged. The in-process executor behaves the same way
+(`GateCoordinator.note_retry`), so the two engines stay at parity.
+
+There is no MCP run-approval tool: a gate is answered by a human on the
+dashboard or the approval endpoint, never by the agent.
 
 ## Constraint-as-gate-criteria (MET-583)
 

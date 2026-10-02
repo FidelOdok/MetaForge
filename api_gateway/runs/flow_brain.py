@@ -197,7 +197,11 @@ class ReActPhaseBrain:
             if context.flow_context
             else ""
         )
+        # FORGE-495: on a retry the gate's findings and the reviewer's reason
+        # come before everything else, so they cannot be read past.
+        retry_block = f"{context.retry_feedback}\n\n" if context.retry_feedback else ""
         return (
+            f"{retry_block}"
             f"{flow_block}"
             f"You are MetaForge's autonomous design engineer executing the "
             f"**{phase.title}** phase of a gated design flow.\n\n"
