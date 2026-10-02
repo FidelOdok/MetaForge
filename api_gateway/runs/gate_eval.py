@@ -17,6 +17,7 @@ from uuid import UUID
 import structlog
 
 from api_gateway.projects.backend import ProjectBackend
+from api_gateway.runs.geometry_constraints import GeometryCheck, check_geometry_constraints
 from orchestrator.design_flow.executor import ConsistencyGateReport, ConstraintReport
 from twin_core.consistency import (
     evaluate_g3_feasibility,
@@ -164,6 +165,59 @@ class TwinConstraintChecker:
             return None
         return {str(getattr(wp, "id", "")) for wp in project.work_products}
 
+    async def _current_cad_models(self, project_id: str) -> list[tuple[str, dict[str, Any]]]:
+        """The latest cad_model per name for the project, as ``(name, metadata)``."""
+        getter = getattr(self._twin, "get_work_product", None)
+        if self._backend is None or getter is None:
+            return []
+        project = await self._backend.get_project(project_id)
+        if project is None:
+            return []
+        latest: dict[str, tuple[float, Any]] = {}
+        for wp in project.work_products:
+            wp_type = getattr(wp, "type", None)
+            if str(getattr(wp_type, "value", wp_type)) != "cad_model":
+                continue
+            ts = _to_epoch(getattr(wp, "updated_at", None)) or 0.0
+            name = str(getattr(wp, "name", "") or getattr(wp, "id", ""))
+            if name not in latest or ts >= latest[name][0]:
+                latest[name] = (ts, wp)
+        models: list[tuple[str, dict[str, Any]]] = []
+        for name, (_, wp) in latest.items():
+            try:
+                node = await getter(UUID(str(getattr(wp, "id", ""))))
+            except Exception as exc:  # noqa: BLE001 - one unreadable model must not crash the gate
+                logger.warning("gate_eval_cad_read_failed", name=name, error=str(exc))
+                continue
+            if node is not None:
+                models.append((name, dict(getattr(node, "metadata", None) or {})))
+        return models
+
+    async def _geometry_check(self, project_id: str | None) -> GeometryCheck:
+        lister = getattr(self._twin, "list_constraints", None)
+        if lister is None or not project_id:
+            return GeometryCheck()
+        try:
+            constraints = await lister(project_id=UUID(project_id))
+            models = await self._current_cad_models(project_id)
+        except Exception as exc:  # noqa: BLE001 - geometry comparison is best-effort
+            logger.warning(
+                "gate_eval_geometry_constraints_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="geometry constraints not compared at this gate",
+            )
+            return GeometryCheck()
+        outcome = check_geometry_constraints(constraints, models)
+        logger.info(
+            "gate_eval_geometry_constraints",
+            project_id=project_id,
+            evaluated=outcome.evaluated,
+            violations=len(outcome.violations),
+            not_evaluated=outcome.not_evaluated,
+        )
+        return outcome
+
     async def check(self, project_id: str | None) -> ConstraintReport:
         evaluate = getattr(self._twin, "evaluate_constraints", None)
         if evaluate is None:
@@ -184,10 +238,16 @@ class TwinConstraintChecker:
 
         violations = [_fmt(v) for v in result.violations if _in_scope(v)]
         warnings = [_fmt(v) for v in result.warnings if _in_scope(v)]
+        # FORGE-496: structured metric/limit constraints carry a placeholder
+        # expression the engine can never fail, so compare them to the
+        # committed cad_model here.
+        geometry = await self._geometry_check(project_id)
+        violations += geometry.violations
+        warnings += geometry.warnings
         report = ConstraintReport(
             checked=True,
             passed=not violations,
-            evaluated_count=int(getattr(result, "evaluated_count", 0)),
+            evaluated_count=int(getattr(result, "evaluated_count", 0)) + geometry.evaluated,
             violations=violations,
             warnings=warnings,
         )

@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
 
+from api_gateway.runs.geometry_constraints import check_geometry_constraints
 from mcp_core.service_auth import is_service_refusal
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
@@ -62,6 +65,43 @@ def _normalize_spec(spec: dict[str, Any], goal: str) -> dict[str, Any]:
     name = str(spec.get("name") or "").strip() or _slug_name(goal)
     material = str(spec.get("material") or "").strip() or "Al6061-T6"
     return {"name": name[:60], "kind": kind, "parameters": clean, "material": material}
+
+
+def _spec_extents(spec: dict[str, Any]) -> list[float]:
+    """Bounding extents (mm) of a primitive spec, in x, y, z order."""
+    p = spec["parameters"]
+    kind = spec["kind"]
+    if kind == "box":
+        return [p.get("length", 0.0), p.get("width", 0.0), p.get("height", 0.0)]
+    if kind == "cylinder":
+        return [2 * p.get("radius", 0.0), 2 * p.get("radius", 0.0), p.get("height", 0.0)]
+    if kind == "cone":
+        r = max(p.get("radius1", 0.0), p.get("radius2", 0.0))
+        return [2 * r, 2 * r, p.get("height", 0.0)]
+    return [2 * p.get("radius", 0.0)] * 3
+
+
+def _spec_violations(spec: dict[str, Any], constraints: list[Any]) -> list[str]:
+    """Stated limits the extracted spec breaks, using the gate's own comparison."""
+    x, y, z = _spec_extents(spec)
+    meta = {"dimensions_mm": {"x": x, "y": y, "z": z}, "material": spec["material"]}
+    outcome = check_geometry_constraints(constraints, [(spec["name"], meta)])
+    return outcome.violations + outcome.warnings
+
+
+def _constraints_block(constraints: list[Any]) -> str:
+    lines = []
+    for c in constraints:
+        metric = getattr(c, "metric", "")
+        if not metric:
+            continue
+        limit = getattr(c, "limit", None)
+        bound = (
+            f" {getattr(c, 'operator', '<=')} {limit:g}{getattr(c, 'unit', '')}" if limit else ""
+        )
+        note = getattr(c, "acceptance_criteria", "") or getattr(c, "message", "")
+        lines.append(f"  - {getattr(c, 'name', metric)} ({metric}{bound}) {note}".rstrip())
+    return "\n".join(lines)
 
 
 async def _extract_part_spec(
@@ -293,16 +333,45 @@ class GoalDrivenMechanicalHandler(_BridgeHandler):
         provider: str | None = None,
         model: str | None = None,
         extract: Any = _extract_part_spec,
+        constraints_loader: Callable[[str | None], Awaitable[list[Any]]] | None = None,
     ) -> None:
         super().__init__(bridge)
         self._recorder = recorder
         self._provider = provider
         self._model = model
         self._extract = extract
+        self._constraints_loader = constraints_loader
+
+    async def _load_constraints(self, project_id: str | None) -> list[Any]:
+        if self._constraints_loader is None or not project_id:
+            return []
+        try:
+            return list(await self._constraints_loader(project_id))
+        except Exception as exc:  # noqa: BLE001 - the spec still gets the flow context
+            logger.warning("mech_constraints_load_failed", error=str(exc))
+            return []
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
         prior = "\n".join(f"  - {p.title}: {o.summary}" for p, o in context.completed) or "(none)"
+        # FORGE-496: the stated stock, envelope and material reach the spec.
+        constraints = await self._load_constraints(context.project_id)
+        if context.flow_context:
+            prior = (
+                f"Flow context (stated by the requester, binding):\n{context.flow_context}\n{prior}"
+            )
+        block = _constraints_block(constraints)
+        if block:
+            prior += f"\nRequirement constraints the part must satisfy:\n{block}"
         spec = await self._extract(goal, prior, provider=self._provider, model=self._model)
+        broken = _spec_violations(spec, constraints)
+        if broken:
+            retry = f"{prior}\nYour previous spec broke these limits, fix them: " + "; ".join(
+                broken
+            )
+            spec = await self._extract(goal, retry, provider=self._provider, model=self._model)
+            broken = _spec_violations(spec, constraints)
+            if broken:
+                logger.warning("mech_spec_breaks_constraints", violations=broken)
 
         session = await self._invoke("freecad.open_session", {"name": "mech-design"})
         sid = session.get("session_id")
@@ -334,7 +403,11 @@ class GoalDrivenMechanicalHandler(_BridgeHandler):
             name=spec["name"],
             project_id=context.project_id,
             session_id=context.session_id,
-            extra_metadata={"material": spec["material"], "kind": spec["kind"]},
+            extra_metadata={
+                "material": spec["material"],
+                "kind": spec["kind"],
+                "dimensions_mm": dict(zip("xyz", _spec_extents(spec), strict=True)),
+            },
         )
         node_id = rec.get("node_id") if isinstance(rec, dict) else None
         dims = ", ".join(f"{k}={v:g}mm" for k, v in spec["parameters"].items())
@@ -404,3 +477,62 @@ class HybridBrain:
                         goal=f"{goal}\n\nNOTE: {refusal}", phase=phase, context=context
                     )
             return await self._fallback.run_phase(goal=goal, phase=phase, context=context)
+
+
+_NATIVE_DESIGN_NOTE = (
+    "DESIGN RULES (FORGE-496): design from the stated flow context and the recorded "
+    "requirement constraints, not from the goal text alone. Use the stated stock sizes, "
+    "envelope, materials and fixings as given. Build a multi-part design with the FreeCAD "
+    "session tools, give every part a meaningful name (a plate is 'Shelf Board', not "
+    "'Part_1'), and persist it with the commit-geometry tool. Pass extra_metadata on that "
+    'call with the real material and key dimensions, e.g. {"material": "18 mm birch '
+    'plywood", "dimensions_mm": {"x": 800, "y": 300, "z": 18}}. The gate compares these to '
+    "the requirement constraints, so a dimension or material that breaks them fails it."
+)
+
+
+class NativeMechanicalDesignHandler:
+    """mech_v1 design phase: the native ReAct brain designs, a scripted spec backstops it.
+
+    The brain gets the flow context (FORGE-491) and the FreeCAD authoring tools and
+    produces a named multi-part design. If the phase ends with no committed
+    cad_model, the goal-driven single-primitive handler runs instead, given the
+    same flow context and constraint set, and the phase summary says so.
+    """
+
+    def __init__(
+        self,
+        native: Any,
+        fallback: GoalDrivenMechanicalHandler,
+        has_cad_model: Callable[[str | None, float], Awaitable[bool]],
+    ) -> None:
+        self._native = native
+        self._fallback = fallback
+        self._has_cad_model = has_cad_model
+
+    async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
+        started = time.time()
+        reason = ""
+        try:
+            outcome = await self._native.run_phase(
+                goal=f"{goal}\n\n{_NATIVE_DESIGN_NOTE}", phase=phase, context=context
+            )
+            if await self._has_cad_model(context.project_id, started):
+                return outcome
+            reason = "the native design phase ended without a committed cad_model"
+        except McpToolError as exc:
+            if is_service_refusal(exc):
+                raise
+            reason = f"the native design phase failed: {exc}"
+        except Exception as exc:  # noqa: BLE001 - the backstop exists for exactly this
+            reason = f"the native design phase failed: {exc}"
+        logger.warning("mech_native_design_fallback", reason=reason)
+        fallback = await self._fallback.run_phase(goal=goal, phase=phase, context=context)
+        return PhaseOutcome(
+            summary=(
+                f"FALLBACK: {reason}; a single-primitive design was authored from the "
+                f"goal, flow context and constraints instead. {fallback.summary}"
+            ),
+            artifacts=fallback.artifacts,
+            status=fallback.status,
+        )
