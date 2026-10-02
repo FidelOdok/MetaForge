@@ -96,7 +96,8 @@ class TestTelemetryMetricsGroupAccess:
         # +3 design-flow engine in FORGE-401; +1 code staleness in FORGE-411;
         # +1 provider fallback in FORGE-468; +1 approval resolution in FORGE-466;
         # +1 approval gate without runtime in FORGE-469.
-        assert len(MetricsRegistry.all_metrics()) == 61
+        # +1 iteration gate without approval workflow in FORGE-470.
+        assert len(MetricsRegistry.all_metrics()) == 62
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

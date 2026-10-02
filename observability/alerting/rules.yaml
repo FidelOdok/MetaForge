@@ -512,6 +512,26 @@ groups:
             outcome="rejected", and confusing the two hides an unattended
             queue behind what looks like normal review.
 
+      # FORGE-470: an iteration loop converged but no approval workflow was
+      # configured, so its gate could not be answered. It used to approve
+      # and merge silently; it now stops at BLOCKED. Automatic approvals
+      # (outcome="auto_approved") are informational and do not alert.
+      - alert: IterationGateNoApprovalWorkflow
+        expr: >-
+          rate(metaforge_iteration_gate_unattended_total{outcome="blocked"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Iteration gates blocked: no approval workflow (agent {{ $labels.agent_code }})"
+          description: >-
+            An IterationController converged with auto_approve off and no
+            approval workflow to ask a human, so the loop ended BLOCKED and
+            nothing was merged. Wire an approval workflow into that
+            controller, or set auto_approve explicitly if unreviewed merges
+            are intended. The iteration_gate_no_approval_workflow log event
+            carries the loop id and branch.
+
       # ── Code staleness (FORGE-411) ───────────────────────────────────
       - alert: McpRunningStaleCode
         expr: >-

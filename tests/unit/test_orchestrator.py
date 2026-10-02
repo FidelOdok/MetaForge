@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+import structlog.testing
 
 from orchestrator.dependency_engine import CyclicDependencyError, DependencyGraph
 from orchestrator.event_bus.events import Event, EventType
@@ -28,9 +29,11 @@ from orchestrator.event_bus.subscribers import (
     create_default_bus,
 )
 from orchestrator.iteration_controller import (
+    AUTO_APPROVER_ID,
     IterationConfig,
     IterationController,
     IterationStatus,
+    set_iteration_controller_metrics,
 )
 from orchestrator.scheduler import (
     InMemoryScheduler,
@@ -859,6 +862,13 @@ class TestScheduler:
 class TestIterationController:
     """Tests for IterationController."""
 
+    @pytest.fixture(autouse=True)
+    def metrics(self) -> Any:
+        collector = MagicMock()
+        set_iteration_controller_metrics(collector)
+        yield collector
+        set_iteration_controller_metrics(None)
+
     def _mock_twin(
         self,
         constraints_pass: bool = True,
@@ -1013,21 +1023,74 @@ class TestIterationController:
         twin.commit.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_auto_approve_without_workflow(self) -> None:
+    async def test_no_approval_workflow_blocks_instead_of_approving(self, metrics: Any) -> None:
+        """FORGE-470: a missing approval workflow must never count as approval."""
         twin = self._mock_twin(constraints_pass=True)
         agent = self._mock_agent()
         ctrl = IterationController(twin, IterationConfig(auto_approve=False))
 
+        with structlog.testing.capture_logs() as logs:
+            result = await ctrl.run_iteration_loop(
+                agent=agent,
+                agent_code="MECH",
+                task_type="validate",
+                work_product_id=str(uuid4()),
+                parameters={},
+            )
+
+        assert result.status == IterationStatus.BLOCKED
+        assert result.approver_id is None
+        assert "no approval workflow" in (result.error or "")
+        twin.commit.assert_not_called()
+        twin.merge.assert_not_called()
+        metrics.record_iteration_gate_unattended.assert_called_once_with("blocked", "MECH")
+        blocked = [e for e in logs if e["event"] == "iteration_gate_no_approval_workflow"]
+        assert len(blocked) == 1
+        assert blocked[0]["log_level"] == "warning"
+
+    @pytest.mark.asyncio
+    async def test_auto_approve_is_visible(self, metrics: Any) -> None:
+        """FORGE-470: auto_approve still merges, but as a non-human approver,
+        logged at warning and counted."""
+        twin = self._mock_twin(constraints_pass=True)
+        agent = self._mock_agent()
+        ctrl = IterationController(twin, IterationConfig(auto_approve=True))
+
+        with structlog.testing.capture_logs() as logs:
+            result = await ctrl.run_iteration_loop(
+                agent=agent,
+                agent_code="MECH",
+                task_type="validate",
+                work_product_id=str(uuid4()),
+                parameters={},
+            )
+
+        assert result.status == IterationStatus.APPROVED
+        assert result.approver_id == AUTO_APPROVER_ID == "auto:iteration_controller"
+        twin.merge.assert_called_once()
+        metrics.record_iteration_gate_unattended.assert_called_once_with("auto_approved", "MECH")
+        auto = [e for e in logs if e["event"] == "iteration_gate_auto_approved"]
+        assert len(auto) == 1
+        assert auto[0]["log_level"] == "warning"
+        assert auto[0]["approver_id"] == AUTO_APPROVER_ID
+
+    @pytest.mark.asyncio
+    async def test_approval_workflow_gate_is_not_counted_as_unattended(self, metrics: Any) -> None:
+        twin = self._mock_twin(constraints_pass=True)
+        ctrl = IterationController(
+            twin, IterationConfig(auto_approve=False), approval_workflow=MagicMock()
+        )
+
         result = await ctrl.run_iteration_loop(
-            agent=agent,
+            agent=self._mock_agent(),
             agent_code="MECH",
             task_type="validate",
             work_product_id=str(uuid4()),
             parameters={},
         )
 
-        # No approval workflow → auto-approved even with auto_approve=False
-        assert result.status == IterationStatus.APPROVED
+        assert result.status == IterationStatus.CONVERGED
+        metrics.record_iteration_gate_unattended.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_branch_isolation(self) -> None:

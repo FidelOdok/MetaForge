@@ -95,10 +95,11 @@ class TestAlertingRules:
         # + 2 code staleness (FORGE-411)
         # + 1 provider fallback sustained (FORGE-468)
         # + 2 held approvals not closed / expiring by deadline (FORGE-466)
-        # + 1 approval gate refused with no Temporal runtime (FORGE-469).
+        # + 1 approval gate refused with no Temporal runtime (FORGE-469)
+        # + 1 iteration gate with no approval workflow (FORGE-470).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 35
+        assert len(rules) == 36
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -139,10 +140,11 @@ class TestAlertingRules:
         # + 1 harness provider fallback sustained (FORGE-468).
         # + 1 held approvals not being closed (FORGE-466; the
         #   expiring-by-deadline rule beside it is severity: info)
+        # + 1 iteration gate with no approval workflow (FORGE-470)
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 24
+        assert len(warnings) == 25
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -207,6 +209,9 @@ class TestAlertingRules:
                 # FORGE-466: the sidecar cannot close holds it opened, so
                 # stale entries sit on the Approvals page until expired.
                 "ToolApprovalHoldCloseFailing",
+                # FORGE-470: an iteration loop converged with no approval
+                # workflow, so it stopped BLOCKED instead of merging.
+                "IterationGateNoApprovalWorkflow",
             ]
         )
 
