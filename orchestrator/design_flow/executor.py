@@ -23,6 +23,7 @@ from typing import Protocol, runtime_checkable
 import structlog
 
 from observability.tracing import get_tracer
+from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FlowDefinition, Phase, get_flow
 from orchestrator.harness.runs import (
     ApprovalDecision,
@@ -321,6 +322,7 @@ class DesignFlowExecutor:
             phase_start = time.time()
             logger.info("design_flow_phase_start", run_id=run_id, phase=phase.id)
             outcome = await self._brain.run_phase(goal=ctx.goal, phase=phase, context=ctx)
+            outcome.status = phase_status(outcome.summary, outcome.status)
             ctx.completed.append((phase, outcome))
             logger.info(
                 "design_flow_phase_done",
@@ -345,6 +347,16 @@ class DesignFlowExecutor:
                 logger.warning(
                     "design_flow_gate_not_ready", run_id=run_id, missing=readiness.missing
                 )
+                self._store.fail(run_id, msg)
+                return
+
+            if phase.enforce_deliverables and outcome.status == UNGROUNDED_STATUS:
+                msg = (
+                    f"Gate '{gate.name}' not ready: phase '{phase.id}' reply was "
+                    "flagged ungrounded (no tool calls were made), so its claimed "
+                    "work is unverified."
+                )
+                logger.warning("design_flow_gate_ungrounded", run_id=run_id, phase=phase.id)
                 self._store.fail(run_id, msg)
                 return
 

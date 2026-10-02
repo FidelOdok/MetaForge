@@ -19,6 +19,7 @@ from orchestrator.design_flow.executor import (
     GateCoordinator,
     PhaseOutcome,
 )
+from orchestrator.design_flow.grounding import UNGROUNDED_BANNER
 from orchestrator.design_flow.spec import FLOWS, FlowDefinition, Gate, Phase
 from orchestrator.harness.runs import ApprovalDecision, InMemoryRunStore, RunStatus
 
@@ -573,3 +574,32 @@ async def test_consistency_checker_failure_is_best_effort() -> None:
     store.submit_approval(run.id, ApprovalDecision.APPROVE)
     await asyncio.wait_for(task, timeout=2.0)
     assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+class _UngroundedBrain(ScriptedBrain):
+    async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
+        out = await super().run_phase(goal=goal, phase=phase, context=context)
+        out.summary = f"{UNGROUNDED_BANNER}\n\n{out.summary}"
+        return out
+
+
+@pytest.mark.asyncio
+async def test_ungrounded_reply_is_never_passed() -> None:
+    """FORGE-484: a reply flagged ungrounded fails an enforcing gate even when
+    the deliverable happens to exist, and the status is not 'completed'."""
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    brain = _UngroundedBrain()
+    flow_id = _register_flow("test_ungrounded", required=("cad_model",))
+    run = store.create({"goal": "g", "flow": flow_id, "project_id": "p1"})
+    executor = DesignFlowExecutor(
+        store=store,
+        brain=brain,
+        coordinator=coord,
+        gate_evaluator=FakeEvaluator({"cad_model"}),
+    )
+    await asyncio.wait_for(executor.run(run.id), timeout=2.0)
+
+    run_ = store.get(run.id)
+    assert run_.status is RunStatus.FAILED
+    assert "ungrounded" in (run_.error or "")

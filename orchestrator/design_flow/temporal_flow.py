@@ -43,6 +43,7 @@ from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from orchestrator.design_flow.frozen import FrozenFlow, FrozenPhase
+    from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
 
 __all__ = [
     "DEFAULT_GATE_TIMEOUT",
@@ -67,6 +68,10 @@ DEFAULT_GATE_TIMEOUT = timedelta(hours=24)
 _PHASE_TIMEOUT = timedelta(hours=6)
 _PHASE_HEARTBEAT = timedelta(minutes=2)
 _CHECK_TIMEOUT = timedelta(minutes=5)
+
+
+def result_ungrounded(entry: dict[str, Any]) -> bool:
+    return entry.get("status") == UNGROUNDED_STATUS
 
 
 @dataclass
@@ -264,19 +269,20 @@ class DesignFlowWorkflow:
                 cause = exc.cause
                 reason = str(cause) if cause is not None else str(exc)
                 return self._fail(f"Phase '{phase.id}' failed: {reason}")
-            self._completed.append(
-                {
-                    "phase": phase.id,
-                    "summary": result.summary,
-                    "artifacts": result.artifacts,
-                    "status": result.status,
-                }
-            )
+            # An ungrounded reply is never "completed", whatever the worker said.
+            result.status = phase_status(result.summary, result.status)
+            entry = {
+                "phase": phase.id,
+                "summary": result.summary,
+                "artifacts": result.artifacts,
+                "status": result.status,
+            }
+            self._completed.append(entry)
             self._record("phase_finished", phase=phase.id, detail=result.status)
 
             gate = phase.gate
             if gate is not None and not gate.auto_approve:
-                verdict = await self._run_gate(inp, phase)
+                verdict = await self._run_gate(inp, phase, entry)
                 if verdict is not None:
                     return verdict
 
@@ -297,7 +303,9 @@ class DesignFlowWorkflow:
             "phases": self._completed,
         }
 
-    async def _run_gate(self, inp: DesignFlowInput, phase: FrozenPhase) -> dict[str, Any] | None:
+    async def _run_gate(
+        self, inp: DesignFlowInput, phase: FrozenPhase, entry: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """Hold at ``phase``'s gate. Returns a terminal result, or ``None`` to go on."""
         gate = phase.gate
         assert gate is not None  # only called when there is one
@@ -315,13 +323,28 @@ class DesignFlowWorkflow:
             result_type=GateCheck,
         )
 
+        # List the required deliverables the twin holds as the phase's artifacts,
+        # so the run shows what the phase produced (FORGE-484).
+        if check.checked:
+            found = [d for d in phase.required_deliverables if d in check.present]
+            entry["artifacts"] = sorted({*entry["artifacts"], *found})
+
         # A gate whose own preconditions failed never reaches a human. Asking
         # somebody to approve work the system already knows is incomplete
         # trains them to click through.
         if phase.enforce_deliverables and check.checked and not check.ready:
+            entry["status"] = "failed"
+            self._record("phase_failed", phase=phase.id, detail=f"missing {check.missing}")
             return self._fail(
                 f"Gate '{gate.name}' not ready — phase '{phase.id}' did not record "
                 f"required deliverables {check.missing} (present: {check.present or 'none'})."
+            )
+        if phase.enforce_deliverables and result_ungrounded(entry):
+            entry["status"] = "failed"
+            self._record("phase_failed", phase=phase.id, detail="ungrounded reply")
+            return self._fail(
+                f"Gate '{gate.name}' not ready: phase '{phase.id}' reply was flagged "
+                "ungrounded (no tool calls were made), so its claimed work is unverified."
             )
         if gate.enforce_constraints and check.constraints_checked and not check.constraints_passed:
             return self._fail(
