@@ -105,3 +105,29 @@ def test_every_temporal_client_sets_temporal_host() -> None:
             if isinstance(entry, str)
         ]
         assert "TEMPORAL_HOST=temporal:7233" in entries, f"{name} does not set TEMPORAL_HOST"
+
+
+OVERRIDE = REPO_ROOT / "docker-compose.override.yml"
+
+
+def _source_mounts(service: dict) -> set[str]:
+    """Host source paths (``./x``) a service mounts, ignoring named volumes."""
+    out = set()
+    for entry in service.get("volumes", []):
+        host = str(entry).split(":", 1)[0]
+        if host.startswith("./"):
+            out.add(host)
+    return out
+
+
+def test_dev_worker_mounts_the_same_source_as_the_gateway() -> None:
+    """FORGE-493: in dev a worker fix applies on restart, not on an image pull.
+
+    The worker runs the gateway's own modules (harness, runs, design flows), so
+    any source dir the dev gateway mounts and the worker does not would run
+    stale image code next to fresh gateway code.
+    """
+    data = yaml.safe_load(OVERRIDE.read_text(encoding="utf-8"))["services"]
+    assert "design-flow-worker" in data, "dev override has no design-flow-worker block"
+    missing = _source_mounts(data["gateway"]) - _source_mounts(data["design-flow-worker"])
+    assert not missing, f"design-flow-worker does not mount {sorted(missing)}"
