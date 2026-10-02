@@ -28,7 +28,7 @@ from api_gateway.chat.backend import ChatBackend
 from api_gateway.chat.experience_adapter import record_chat_experience
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
 from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_registry
-from api_gateway.chat.tool_approvals import get_approval_store
+from api_gateway.chat.tool_approvals import approver_reachable, get_approval_store
 from mcp_core.profiles import MAX_TOOLS as PHASE_TOOL_CAP
 from observability.metrics import MetricsCollector
 from orchestrator.design_flow.grounding import UNGROUNDED_BANNER
@@ -1090,6 +1090,7 @@ async def _build_context(
     approval_timeout_seconds: float | None = None,
     domains: tuple[str, ...] | None = None,
     tool_allowlist: frozenset[str] | None = None,
+    approval_mode: str = "hold",
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -1161,6 +1162,11 @@ async def _build_context(
             if approval_timeout_seconds is not None
             else chat_approval_timeout_seconds()
         ),
+        # FORGE-490: "forward" (design-flow phase turns) makes no in-process
+        # hold; the sidecar's service-caller policy decides. "hold" (chat)
+        # is unchanged, and alarms if this process has no approver.
+        approval_mode=approval_mode,
+        approver_reachable=approver_reachable(),
     )
     runtime_cell["runtime"] = ctx.runtime
     return ctx
@@ -1289,6 +1295,7 @@ async def _run_chat_turn(
     project_id: str | None = None,
     domains: tuple[str, ...] | None = None,
     tool_allowlist: frozenset[str] | None = None,
+    approval_mode: str = "hold",
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -1312,6 +1319,9 @@ async def _run_chat_turn(
     chat, not just from the orchestrator's Temporal path. ``domains``
     (MET-747 follow-up) scopes the registered MCP tools to those disciplines
     plus the always-visible core adapters -- see ``_build_context``.
+    ``approval_mode`` (FORGE-490) is ``"hold"`` for chat (park a
+    `requires_approval` call for a human) or ``"forward"`` for an unattended
+    design-flow phase turn (no in-process hold; the sidecar decides).
     """
     steps = max_steps if max_steps is not None else chat_max_steps()
     store = credentials if credentials is not None else CredentialStore()
@@ -1331,6 +1341,7 @@ async def _run_chat_turn(
         approval_timeout_seconds=approval_timeout_seconds,
         domains=domains,
         tool_allowlist=tool_allowlist,
+        approval_mode=approval_mode,
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.

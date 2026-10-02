@@ -185,6 +185,8 @@ class ReActPhaseBrain:
             # just stalls every phase that records a decision. Design-flow's
             # own phase-level gate is the real HITL checkpoint here.
             approval_timeout_seconds=design_flow_approval_timeout_seconds(),
+            # FORGE-490: no in-process hold; the sidecar's service-caller policy decides.
+            approval_mode="forward",
         )
         # run_chat_turn returns a fallback sentence when the loop doesn't converge.
         status = "exhausted" if summary.startswith("I couldn't converge") else "completed"

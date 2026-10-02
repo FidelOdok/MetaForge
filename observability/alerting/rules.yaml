@@ -163,6 +163,17 @@ groups:
         annotations:
           summary: "Held tool approvals are not being closed when their waiter stops waiting"
           description: "The MCP sidecar failed to close a held approval in the gateway ledger in the last 15m. Stale entries stay on the Approvals page until the gateway deadline expires them. Check the mcp_remote_approval_resolve_failed log event and gateway reachability from the sidecar."
+      # FORGE-490: a hold created in a process nobody can answer (the design-
+      # flow worker's in-process store) can only time out and deny.
+      - alert: ApprovalHoldWithNoApprover
+        expr: |
+          sum(increase(metaforge_unreachable_approval_hold_total[15m])) by (tool) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "An approval hold was created with no reachable approver (tool {{ $labels.tool }})"
+          description: "A requires_approval tool call was parked in an in-process store that no dashboard or person can see, so it was always going to be denied. Find it with the approval_hold_unreachable log event; design-flow phase turns should use approval_mode=forward."
       - alert: ToolApprovalHoldsExpiringByDeadline
         expr: |
           sum(increase(metaforge_tool_approval_resolution_total{trigger="deadline"}[30m])) > 3

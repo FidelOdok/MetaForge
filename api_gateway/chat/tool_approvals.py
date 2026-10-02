@@ -95,6 +95,21 @@ def get_approval_store() -> InMemoryRunStore:
     return _approval_store
 
 
+# FORGE-490: only the gateway serves the routes that answer a hold in this
+# store. A worker process imports the same module but never mounts them, so its
+# store has no approver. The gateway lifespan flips this on.
+_approver_reachable = False
+
+
+def mark_approver_reachable() -> None:
+    global _approver_reachable
+    _approver_reachable = True
+
+
+def approver_reachable() -> bool:
+    return _approver_reachable
+
+
 def reset_approval_store(*, clock: Any = None) -> None:
     """Rewire a fresh store — tests only, mirrors api_gateway.runs.routes."""
     global _approval_store, _ledger

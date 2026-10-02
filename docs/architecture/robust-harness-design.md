@@ -667,6 +667,35 @@ Two clients now do:
 Neither client changed the backend — the SSE event and REST endpoint were
 already complete; the gap was entirely "no consumer."
 
+### Approval tier in design-flow phase turns (FORGE-490)
+
+The in-process hold above only works where something can answer it: the gateway,
+which serves `/v1/chat/tool_approvals`. A design-flow phase turn runs on the
+design-flow worker, a separate process whose `InMemoryRunStore` no dashboard,
+plugin or person can see, so every `requires_approval` call it made used to time
+out and be denied.
+
+`run_chat_turn` and `HarnessRuntime` now take an explicit `approval_mode`:
+
+- `"hold"` (default, dashboard chat and the TUI): unchanged. The call is parked
+  and waits for a human.
+- `"forward"` (set by `ReActPhaseBrain.run_phase`): no in-process hold. The call
+  goes straight to the tool, which for an MCP tool is the sidecar, where the
+  service-caller policy decides: in-scope writes run, refused ones come back
+  refused, and human-authority tools go to the shared approval ledger. The run is
+  already authorised by the flow-version approval and the phase gates.
+  Only MCP tools are forwarded. A `requires_approval` tool that runs in-process
+  (a native harness tool) would get no policy check at all, so in this mode it is
+  refused: not run, not held. The model sees a tool error saying it is not
+  available in an unattended design-flow turn, and
+  `approval_tool_refused_unattended` is logged.
+
+Any hold created in a process with no reachable approver (the gateway marks
+itself reachable at startup; a worker never does) logs
+`approval_hold_unreachable` at error level and increments
+`metaforge_unreachable_approval_hold_total`; the `ApprovalHoldWithNoApprover`
+alert fires on any increase.
+
 ### Tool-approval durability (FORGE-89)
 
 `api_gateway/chat/tool_approvals.py`'s `InMemoryRunStore` was process-local

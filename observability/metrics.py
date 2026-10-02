@@ -546,6 +546,16 @@ class MetricsRegistry:
         labels=["outcome", "trigger", "result"],
     )
 
+    # FORGE-490: an approval hold created where nothing can answer it (an
+    # in-process store in a non-gateway process). It can only time out and
+    # deny, so any non-zero count is a wiring bug.
+    UNREACHABLE_APPROVAL_HOLD_TOTAL = MetricDefinition(
+        name="metaforge_unreachable_approval_hold_total",
+        type="counter",
+        description="Approval holds created with no reachable approver, by tool",
+        labels=["tool"],
+    )
+
     # ── MCP surface (FORGE-379) ────────────────────────────────────────
     #
     # The MCP server is where every external harness meets MetaForge, and it
@@ -664,6 +674,7 @@ class MetricsRegistry:
             cls.LLM_CALLS_TOTAL,
             cls.LLM_RUN_SPEND_EXCEEDED_TOTAL,
             cls.TOOL_APPROVAL_RESOLUTION_TOTAL,
+            cls.UNREACHABLE_APPROVAL_HOLD_TOTAL,
         ]
 
     @classmethod
@@ -1359,6 +1370,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.TOOL_APPROVAL_RESOLUTION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome, "trigger": trigger, "result": result})
+
+    def record_unreachable_approval_hold(self, tool: str) -> None:
+        """Record one approval hold with no reachable approver (FORGE-490)."""
+        counter = self._instruments.get(MetricsRegistry.UNREACHABLE_APPROVAL_HOLD_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool": tool})
 
     def record_approval_gate_no_runtime(self, required_role: str) -> None:
         """Record one approval gate refused for lack of a Temporal runtime (FORGE-469)."""
