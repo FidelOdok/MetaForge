@@ -621,6 +621,11 @@ exists.
 
 ### A requirement something can check
 
+Design-flow gates compare structured envelope, thickness and material
+constraints to the committed `cad_model` (FORGE-496); the covered metrics and
+the gaps are listed in
+[design-flow-harness](architecture/design-flow-harness.md#constraint-as-gate-criteria-met-583).
+
 `twin.record_constraint_set` takes a `metric`, `operator`, `limit` and
 `unit` so a gate can evaluate the requirement, plus `verification_method`
 (how it will be shown to hold) and `acceptance_criteria` (what counts as

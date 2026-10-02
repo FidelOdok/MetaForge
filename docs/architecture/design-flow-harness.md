@@ -125,7 +125,17 @@ Handlers share the pattern in `api_gateway/runs/*_handlers.py` and persist via
 the recorders in `api_gateway/twin/` (`geometry_recorder`, `bom_recorder`,
 `document_recorder`). A `HybridBrain` routes each phase to its handler and falls
 back to the `ReActPhaseBrain` for any phase without one (`mech_v1` and the older
-`design_v1` use different handler sets). Where a real analysis needs a
+`design_v1` use different handler sets).
+
+**`mech_v1` design phase (FORGE-496).** The design phase is driven by the native
+`ReActPhaseBrain` (flow context first in the prompt, FreeCAD session tools,
+`twin.commit_geometry`) through `NativeMechanicalDesignHandler`. It is told to
+build a named multi-part design and to pass the real material and key
+dimensions in `extra_metadata` on the commit. If the phase ends with no loadable
+`cad_model` (or the native turn fails), `GoalDrivenMechanicalHandler` runs as a
+backstop. It is given the flow context and the project's constraint set,
+re-asks once if its spec breaks a stated limit, and the phase summary starts
+with `FALLBACK:`. `design_v1` and `hardware_v1` routing is unchanged. Where a real analysis needs a
 capability MetaForge doesn't have in Phase 1 (ERC/DRC on an authored schematic,
 Gerber export), the handler records the result **honestly as deferred** rather
 than asserting a compliance the tools never established.
@@ -306,6 +316,24 @@ through the twin's constraint engine (`TwinConstraintChecker` in
 - **Scoping**: the engine evaluates the branch, not the project — violations
   citing `work_product_ids` are filtered to the run's project; violations
   citing none are treated as global and always count.
+
+**Geometry constraints (FORGE-496).** A structured requirement (`metric` +
+`limit`) carries the placeholder expression `True`, so the engine alone can
+never fail it. `TwinConstraintChecker` therefore also compares those
+constraints to the project's current `cad_model` (latest per name) through
+`api_gateway/runs/geometry_constraints.py`, and adds the result to the same
+violation list. Covered: envelope and size metrics (`envelope`, `length`,
+`width`, `height`, `depth`, `size`, `dimension`) against the sorted bounding-box
+extents read from `metadata.dimensions_mm`, `bbox_mm` or
+`geometry_features.properties.bounding_box`; thickness or stock metrics against
+the smallest extent (per part for an assembly whose parts record dimensions);
+and a `material` metric against the recorded `material` (a shared material
+family word is a match, a missing material is a violation). Not covered, and
+reported as not evaluated rather than passing: assembly parts without recorded
+dimensions, per-part printed-size limits (metrics containing `print`), mass,
+deflection and safety factor (these need analysis evidence), and any metric
+outside the lists above. The `mech_v1` design gate (G6) now sets
+`enforce_constraints` (template version 1.1.0), so a violation fails it.
 
 The gate skeleton stays hardcoded (versioned code); the criteria come from
 the project's own constraint data. The structured constraint-creation tool

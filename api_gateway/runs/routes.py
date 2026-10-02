@@ -337,6 +337,32 @@ async def _ensure_run_project(run: Any, project_backend: Any) -> None:
     logger.info("design_flow_project_autocreated", run_id=run.id, project_id=project.id)
 
 
+def _make_constraints_loader(twin: Any) -> Any:
+    """Loader for a project's Constraint nodes (``[]`` when the twin cannot list them)."""
+
+    async def load(project_id: str | None) -> list[Any]:
+        lister = getattr(twin, "list_constraints", None)
+        if lister is None or not project_id:
+            return []
+        from uuid import UUID
+
+        return list(await lister(project_id=UUID(project_id)))
+
+    return load
+
+
+def _make_cad_model_probe(project_backend: Any, twin: Any) -> Any:
+    """Whether the project holds a loadable cad_model recorded since ``since_ts``."""
+    from api_gateway.runs.gate_eval import ProjectGateEvaluator
+
+    evaluator = ProjectGateEvaluator(project_backend, twin=twin)
+
+    async def probe(project_id: str | None, since_ts: float) -> bool:
+        return "cad_model" in await evaluator.present_types(project_id, since_ts)
+
+    return probe
+
+
 async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) -> Any:
     """The brain a phase runs on, for whichever engine is driving it.
 
@@ -361,6 +387,7 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
         GoalDrivenMechanicalHandler,
         HybridBrain,
         MechanicalDesignHandler,
+        NativeMechanicalDesignHandler,
         RequirementsHandler,
         SimulationHandler,
     )
@@ -396,7 +423,20 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
             "simulation": SimulationHandler(bridge),
         }
     elif flow_id == "mech_v1":
-        handlers = {"design": GoalDrivenMechanicalHandler(bridge, recorder)}
+        # FORGE-496: the native brain designs (flow context + FreeCAD tools);
+        # the goal-driven single-primitive handler is only the backstop.
+        twin = get_twin()
+        handlers = {
+            "design": NativeMechanicalDesignHandler(
+                react,
+                GoalDrivenMechanicalHandler(
+                    bridge,
+                    recorder,
+                    constraints_loader=_make_constraints_loader(twin),
+                ),
+                _make_cad_model_probe(project_backend, twin),
+            )
+        }
     elif flow_id == "hardware_v1":
         # Deterministic handlers where the native brain is flaky or dishonest:
         # mechanical design (loadable cad_model), electronics (BOM + closed power

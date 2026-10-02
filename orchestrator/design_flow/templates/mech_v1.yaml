@@ -9,7 +9,7 @@
 # when the phases or gates change, so a completed run can still say what
 # it actually ran.
 id: mech_v1
-version: 1.0.0
+version: 1.1.0
 name: Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven
 label: Mechanical design
 description: A focused flow for a load-bearing part or mechanical subsystem.
@@ -120,6 +120,7 @@ phases:
     - The committed geometry is the part the goal asked for
     - Sized to the requirements; material chosen with rationale
     - Committed as a viewable cad_model
+    enforce_constraints: true
     gate_id: G6
 - id: simulation
   title: Simulation & V&V
