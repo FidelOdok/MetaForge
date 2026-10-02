@@ -66,8 +66,12 @@ async def test_forward_mode_forwards_mcp_tool() -> None:
         return {"done": True}
 
     tools.register_mcp(
-        "metaforge", "twin_record_decision", description="d", input_schema={},
-        handler=_h, requires_approval=True,
+        "metaforge",
+        "twin_record_decision",
+        description="d",
+        input_schema={},
+        handler=_h,
+        requires_approval=True,
     )
     rt = HarnessRuntime.build(tools=tools, approval_mode="forward")
     assert await rt.call_tool("mcp_metaforge_twin_record_decision", {"x": 1}) == {"done": True}

@@ -684,6 +684,11 @@ out and be denied.
   service-caller policy decides: in-scope writes run, refused ones come back
   refused, and human-authority tools go to the shared approval ledger. The run is
   already authorised by the flow-version approval and the phase gates.
+  Only MCP tools are forwarded. A `requires_approval` tool that runs in-process
+  (a native harness tool) would get no policy check at all, so in this mode it is
+  refused: not run, not held. The model sees a tool error saying it is not
+  available in an unattended design-flow turn, and
+  `approval_tool_refused_unattended` is logged.
 
 Any hold created in a process with no reachable approver (the gateway marks
 itself reachable at startup; a worker never does) logs
