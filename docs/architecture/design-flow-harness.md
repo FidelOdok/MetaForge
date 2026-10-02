@@ -278,9 +278,8 @@ is `twin.record_document(document_type='prd')`, `constraint_set` is
 `twin.record_document` with that `document_type`. A type no MCP tool can record
 (`schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `manufacturing_file`,
 `test_plan`, `test_result`, `verification_report`) says so and tells the model
-not to substitute another type. `twin.record_document` is only in the `core` tool profile, not in any phase's
-allowlist, so those hints tell the model to load it with `search_tools` if it is
-not listed. A unit test fails when a type a template requires
+not to substitute another type. `twin.record_document` is in `PHASE_COMMON` (`mcp_core/profiles.py`), so every
+phase carries it. A unit test fails when a type a template requires
 or expects, or that tailoring can add, has no hint, so a tailored deliverable can
 no longer fall back to the generic "record it into the twin" line (FORGE-494).
 

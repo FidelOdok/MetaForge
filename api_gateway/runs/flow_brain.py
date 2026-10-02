@@ -61,9 +61,6 @@ def deliverable_hints(pid: str) -> dict[str, str]:
     ``add_deliverable`` is likely to add, has an entry; a type with no
     model-callable recorder says so instead of inviting a wrong-typed record.
     """
-    # twin.record_document is in the core profile only, not in any phase's
-    # allowlist (FORGE-494), so point the model at the escape hatch.
-    find_doc = " (if the record-document tool is not listed, load it with search_tools)"
     no_tool = (
         "no MCP tool records this type, the platform's own phase handler produces it; "
         "do NOT record a different type (decision, entity, documentation) in its place"
@@ -93,7 +90,7 @@ def deliverable_hints(pid: str) -> dict[str, str]:
         "prd": (
             "record the product requirements document with the record-document tool "
             "(document_type='prd', name=its title, content=the markdown body), "
-            f"project_id={pid}{find_doc}; recording it as an engineering entity or a "
+            f"project_id={pid}; recording it as an engineering entity or a "
             "decision does NOT count"
         ),
         "constraint_set": (
@@ -106,22 +103,22 @@ def deliverable_hints(pid: str) -> dict[str, str]:
             "outcome with the record-document tool (document_type='simulation_result', "
             "name, content=the extract-results JSON summary, metadata=the same summary "
             "fields, source_part_node_ids=[the analysed cad_model node id]), "
-            f"project_id={pid}{find_doc}"
+            f"project_id={pid}"
         ),
         "load_case": (
             "record it with the record-document tool (document_type='load_case', name, "
             "content=JSON of the boundary conditions, metadata={material, fixed_node_set, "
-            f"load_node_set, load_force_n=[x, y, z]}}), project_id={pid}{find_doc}"
+            f"load_node_set, load_force_n=[x, y, z]}}), project_id={pid}"
         ),
         "documentation": (
             "record it with the record-document tool "
-            f"(document_type='documentation', name, content=markdown), project_id={pid}{find_doc}"
+            f"(document_type='documentation', name, content=markdown), project_id={pid}"
         ),
         "robot_description": (
             "record the URDF/SDF export with the record-document tool "
             "(document_type='robot_description', name, content=the export text, "
             "format='urdf', source_part_node_ids=[the cad_model node ids]), "
-            f"project_id={pid}{find_doc}"
+            f"project_id={pid}"
         ),
         "bom": (
             "record each chosen part with the record-component-selection tool "

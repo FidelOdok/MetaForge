@@ -143,7 +143,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "freecad.add_assembly_joint",
         "freecad.add_part_to_assembly",
         "freecad.boolean",
-        "freecad.chamfer",
+        # FORGE-494: freecad.chamfer left to freecad.execute_code to make room for
+        # twin.record_document in PHASE_COMMON; a mechanical phase was exactly at
+        # PHASE_MCP_BUDGET.
         "freecad.close_session",
         "freecad.create_body",
         "freecad.create_primitive",
@@ -236,6 +238,9 @@ DEFAULT_PROFILE = "core"
 PHASE_COMMON: frozenset[str] = _BASE | {
     "twin.query_cypher",
     "twin.record_constraint_set",
+    # FORGE-494: records prd, simulation_result and load_case, which gates
+    # require in phases whose profile otherwise lacks a document recorder.
+    "twin.record_document",
     "twin.record_engineering_entity",
 }
 

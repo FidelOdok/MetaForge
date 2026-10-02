@@ -146,6 +146,8 @@ class TestPhaseTools:
                 tools = tools_for_disciplines(phase.disciplines)
                 assert len(tools) <= PHASE_MCP_BUDGET, (flow.id, phase.id, len(tools))
                 assert phase_overflow(phase.disciplines) == [], (flow.id, phase.id)
+                # FORGE-494: prd / simulation_result / load_case need it in any phase.
+                assert "twin.record_document" in tools, (flow.id, phase.id)
 
     def test_mechanical_product_profile_covers_the_shelf_run_gaps(self) -> None:
         p = PROFILES["mechanical_product"]
