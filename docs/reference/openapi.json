@@ -4084,6 +4084,17 @@
             "title": "Caller",
             "type": "string"
           },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
           "project": {
             "anyOf": [
               {
@@ -4097,6 +4108,15 @@
           },
           "reason": {
             "title": "Reason",
+            "type": "string"
+          },
+          "route": {
+            "default": "dashboard",
+            "enum": [
+              "dashboard",
+              "elicitation"
+            ],
+            "title": "Route",
             "type": "string"
           },
           "session_id": {
@@ -7163,10 +7183,28 @@
       "ResolveHoldRequest": {
         "description": "Close a hold nobody is waiting for any more (FORGE-466).",
         "properties": {
+          "approver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approver"
+          },
+          "approver_verified": {
+            "default": false,
+            "title": "Approver Verified",
+            "type": "boolean"
+          },
           "outcome": {
             "enum": [
               "timed_out",
-              "canceled"
+              "canceled",
+              "approved",
+              "rejected"
             ],
             "title": "Outcome",
             "type": "string"
@@ -12027,8 +12065,24 @@
     },
     "/v1/chat/tool_approvals": {
       "get": {
-        "description": "All tool-call approvals currently awaiting a decision.\n\nOverdue holds are expired first, so nothing listed here is a call whose\nwaiter has already given up (FORGE-466).",
+        "description": "Tool-call approvals: the ones awaiting a decision, or every one.\n\nOverdue holds are expired first, so nothing listed as pending is a call\nwhose waiter has already given up (FORGE-466). ``status=all`` is the audit\nview (FORGE-473): every entry whichever route answered it, each carrying\nits ``route``, outcome and approver.",
         "operationId": "list_pending_approvals_v1_chat_tool_approvals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "pending",
+              "enum": [
+                "pending",
+                "all"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -12039,6 +12093,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Pending Approvals",

@@ -49,6 +49,8 @@ from mcp_core.guardrails import (
     APPROVED_BY_ARG,
     ApprovalAsk,
     ApprovalGateFn,
+    ApprovalLedger,
+    ApprovalLedgerUnavailableError,
     ApprovalNotConfiguredError,
     ApprovalOutcome,
     ApprovalRejectedError,
@@ -244,6 +246,7 @@ class UnifiedMcpServer:
         reloads: bool = False,
         caller: Caller = Caller.UNTRUSTED,
         approval_gate: ApprovalGateFn | None = None,
+        approval_ledger: ApprovalLedger | None = None,
         exempt_local_writes: bool = True,
         auth_posture: AuthPosture | None = None,
         elicitor: Elicitor | None = None,
@@ -271,6 +274,10 @@ class UnifiedMcpServer:
         # transports declare what they actually are.
         self._caller = caller
         self._approval_gate = approval_gate
+        # FORGE-473: where an inline (elicitation) hold is written down, so it
+        # has an approval id and an approver like a dashboard one. None keeps
+        # the old behaviour: inline answers leave no ledger entry.
+        self._approval_ledger = approval_ledger
         # FORGE-417: call id -> how its approval ended, read once by the
         # MCP envelope and popped. Bounded by that pop; see _remember_hold.
         self._approval_records: dict[str, ApprovalRecord] = {}
@@ -592,6 +599,24 @@ class UnifiedMcpServer:
                             # Retrying changes nothing until the argument is
                             # dropped or a human answers.
                             "retryable": False,
+                        },
+                    )
+                )
+            except ApprovalLedgerUnavailableError as exc:
+                # FORGE-473: the approval could not be recorded, so the write
+                # was not run. Say why, in words the agent can relay.
+                self._mark_failed(span, exc)
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        _TOOL_EXECUTION_ERROR,
+                        str(exc),
+                        {
+                            "tool_id": exc.tool_id,
+                            "code": "approval_ledger_unavailable",
+                            "outcome": "ledger_unavailable",
+                            # Worth retrying once the gateway is back.
+                            "retryable": True,
                         },
                     )
                 )
@@ -1600,7 +1625,7 @@ class UnifiedMcpServer:
         # on to the dashboard would put the same question to a second person
         # and discard the first answer.
         gate = (
-            elicitation_gate(self._elicitor)
+            elicitation_gate(self._elicitor, self._approval_ledger)
             if can_elicit and self._elicitor is not None
             else self._approval_gate
         )
@@ -1684,6 +1709,7 @@ class UnifiedMcpServer:
                         project=_effective_project(arguments),
                         timeout_seconds=window,
                         on_held=on_held if route == "dashboard" else None,
+                        client=self._client_label(),
                     )
                 )
             )
@@ -1746,6 +1772,15 @@ class UnifiedMcpServer:
                 ),
             )
         return resolution.approver
+
+    def _client_label(self) -> str | None:
+        """``name version`` of the connected MCP client, for the ledger."""
+        info = self._client_info or {}
+        name = info.get("name")
+        if not name:
+            return None
+        version = info.get("version")
+        return f"{name} {version}" if version else str(name)
 
     def _has_progress_channel(self, progress_token: str | int | None) -> bool:
         """A progress notification sent now would reach this call's client."""
@@ -2160,6 +2195,7 @@ _ERROR_CLASSES: tuple[tuple[str, str], ...] = (
     ("ResourceReadError", "resource_read_failed"),
     ("ApprovalNotConfiguredError", "approval_not_configured"),
     ("ApprovalRejectedError", "approval_refused"),
+    ("ApprovalLedgerUnavailableError", "approval_ledger_unavailable"),
     # FORGE-393. Separate labels on purpose: a rise in the first means a
     # client is still passing the old argument, a rise in the second means
     # approvals are landing without an identified human -- different faults
@@ -2244,6 +2280,7 @@ async def build_unified_server(
     metrics: Any = None,
     caller: Caller = Caller.UNTRUSTED,
     approval_gate: Any = None,
+    approval_ledger: Any = None,
     **collaborators: Any,
 ) -> UnifiedMcpServer:
     """Discover and instantiate every enabled adapter, then wrap.
@@ -2347,4 +2384,5 @@ async def build_unified_server(
         # Where a held write goes. The gateway builds one from its own
         # approval store; an embedding host supplies its own.
         approval_gate=approval_gate,
+        approval_ledger=approval_ledger,
     )

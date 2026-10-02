@@ -443,6 +443,11 @@ class ApprovalAsk:
     #: than staying silent until the window closes (FORGE-465). Best-effort:
     #: a gate must not fail a hold because this raised.
     on_held: Callable[[str], Awaitable[None]] | None = None
+    #: The MCP client that made the call, e.g. ``claude-code 2.1.287``
+    #: (FORGE-473). Recorded on the ledger entry so a reviewer and an auditor
+    #: can tell which harness asked. The model behind that client is not
+    #: visible over MCP, so it is not recorded.
+    client: str | None = None
 
 
 def effective_hold_window(gate_timeout: float | None, ask: ApprovalAsk, default: float) -> float:
@@ -556,6 +561,57 @@ class ApprovalRejectedError(RuntimeError):
         if self.window_seconds is not None:
             out["window_seconds"] = self.window_seconds
         return out
+
+
+class ApprovalLedgerUnavailableError(RuntimeError):
+    """A held call could not be written to the approval ledger (FORGE-473).
+
+    Raised, not turned into an outcome, so the write is refused with the real
+    reason. An inline answer with no ledger entry is the bug this exists to
+    prevent: the call would run with no approval id, no recorded approver and
+    nothing for an auditor to find.
+    """
+
+    def __init__(self, tool_id: str, detail: str) -> None:
+        self.tool_id = tool_id
+        super().__init__(
+            f"{tool_id} was not run: the approval could not be recorded in the "
+            f"MetaForge approval ledger ({detail}). Writes are refused while the "
+            "ledger is unreachable. Check the gateway and ask for the call again."
+        )
+
+
+class ApprovalLedger(Protocol):
+    """Where an inline (elicitation) hold is written down (FORGE-473).
+
+    One ledger, two ways to answer: a call answered in the client's own
+    prompt gets the same entry, id and approver record as one answered on the
+    dashboard.
+    """
+
+    async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
+        """Create the entry before the question is asked. Returns its id.
+
+        Raises :class:`ApprovalLedgerUnavailableError` when it cannot.
+        """
+        ...
+
+    async def close_hold(
+        self,
+        approval_id: str,
+        outcome: ApprovalOutcome,
+        *,
+        route: str,
+        approver: Approver | None,
+        reason: str | None = None,
+    ) -> ApprovalOutcome:
+        """Resolve the entry with how the question ended.
+
+        Returns the outcome the ledger holds, which differs from ``outcome``
+        only when the entry was already decided elsewhere (a dashboard click
+        that landed first), so the caller acts on what is on record.
+        """
+        ...
 
 
 ApprovalGateFn = Callable[[ApprovalAsk], Awaitable[ApprovalOutcome | ApprovalResolution]]

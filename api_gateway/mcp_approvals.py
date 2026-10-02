@@ -20,10 +20,15 @@ import asyncio
 
 import structlog
 
-from api_gateway.chat.tool_approvals import HOLD_DEADLINE_GRACE_SECONDS, get_approval_store
+from api_gateway.chat.tool_approvals import (
+    HOLD_DEADLINE_GRACE_SECONDS,
+    get_approval_store,
+    record_inline_answer,
+)
 from mcp_core.guardrails import (
     ApprovalAsk,
     ApprovalGateFn,
+    ApprovalLedgerUnavailableError,
     ApprovalOutcome,
     ApprovalResolution,
     Approver,
@@ -80,6 +85,8 @@ def build_mcp_approval_gate(
                 "caller": ask.caller.value,
                 "source": "mcp",
                 "session_id": ask.session_id,
+                "route": "dashboard",
+                "client": ask.client,
             }
         )
         store.start(run.id)
@@ -135,3 +142,73 @@ def build_mcp_approval_gate(
         return ApprovalResolution(outcome=outcome, approver=approver, approval_id=run.id)
 
     return gate
+
+
+class InProcessApprovalLedger:
+    """Inline (elicitation) holds written to this process's own ledger (FORGE-473).
+
+    For an MCP server running inside the gateway, where the approval store is
+    reachable directly. A sidecar uses
+    :class:`metaforge.mcp.remote_approvals.RemoteApprovalLedger` instead.
+    """
+
+    async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
+        store = get_approval_store()
+        try:
+            run = store.create(
+                {
+                    "tool": ask.tool_id,
+                    "arguments": ask.arguments,
+                    "caller": ask.caller.value,
+                    "source": "mcp",
+                    "session_id": ask.session_id,
+                    "project": ask.project,
+                    "route": route,
+                    "client": ask.client,
+                }
+            )
+            store.start(run.id)
+            window = ask.timeout_seconds or DEFAULT_TIMEOUT_SECONDS
+            store.request_approval(
+                run.id,
+                reason=ask.reason,
+                deadline=store.now() + window + HOLD_DEADLINE_GRACE_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 - reported as a refusal
+            raise ApprovalLedgerUnavailableError(
+                ask.tool_id, str(exc) or type(exc).__name__
+            ) from exc
+        return run.id
+
+    async def close_hold(
+        self,
+        approval_id: str,
+        outcome: ApprovalOutcome,
+        *,
+        route: str,
+        approver: Approver | None,
+        reason: str | None = None,
+    ) -> ApprovalOutcome:
+        store = get_approval_store()
+        run = store.get(approval_id)
+        if run.status is RunStatus.AWAITING_APPROVAL:
+            if outcome in (ApprovalOutcome.APPROVED, ApprovalOutcome.REJECTED):
+                run = record_inline_answer(
+                    approval_id,
+                    approved=outcome is ApprovalOutcome.APPROVED,
+                    approver=approver.actor_id if approver else None,
+                    verified=approver.verified if approver else False,
+                )
+            elif outcome is ApprovalOutcome.TIMED_OUT:
+                run = store.time_out(approval_id, reason=reason or "the prompt went unanswered")
+            else:
+                run = store.cancel(approval_id, reason=reason or "the prompt was dismissed")
+        # Whatever is on record wins: a hold already closed elsewhere is read
+        # back rather than overwritten.
+        if run.status in (RunStatus.RUNNING, RunStatus.COMPLETED):
+            return ApprovalOutcome.APPROVED
+        if run.status is RunStatus.TIMED_OUT:
+            return ApprovalOutcome.TIMED_OUT
+        if run.status is RunStatus.CANCELED:
+            return ApprovalOutcome.CANCELLED
+        return ApprovalOutcome.REJECTED

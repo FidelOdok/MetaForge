@@ -239,6 +239,38 @@ The answer comes back as a POST and the tool result follows on the same
 stream. See
 [Over HTTP: which stream carries the question](../capability-matrix.md#over-http-which-stream-carries-the-question).
 
+### Inline answers are in the ledger too
+
+Answering in Claude Code does not bypass the approval ledger (FORGE-473).
+Before the question is put to you, the server writes a ledger entry for the
+held call, the same entry a dashboard hold gets, with `route: "elicitation"`,
+the requesting client (name and version), the session and the hold window.
+Your answer then resolves that entry: `approved`, `rejected`, or `timed_out`
+if you dismissed the prompt or it expired. The approval id in the result note
+(`This write was held for human approval and was approved by ... (approval
+run_...) after 12.3s via elicitation.`) is the entry's id, so it can be looked
+up:
+
+```bash
+curl "$GATEWAY/v1/chat/tool_approvals?status=all"   # every entry, any route
+curl "$GATEWAY/v1/chat/tool_approvals/run_b42aa3ea023f46c0"
+```
+
+The default listing (no `status`) stays pending-only, which is what the
+Approvals page reads. An inline hold shows there while it is waiting; answering
+it from the dashboard returns `409` telling you to answer in the client's
+prompt, because that is the prompt on screen.
+
+The approver is taken from the authenticated MCP session, never from the
+form. A session with no identity (`METAFORGE_AUTH_MODE=off`, local stdio) is
+recorded as `local:elicitation` with `approver_verified: false`, the same
+honest record an unauthenticated dashboard click gets. The model behind the
+client is not visible over MCP, so only the client is recorded.
+
+If the ledger cannot be reached, the write is refused before you are asked,
+with `code: "approval_ledger_unavailable"` and a message saying the approval
+could not be recorded. Nothing runs without an entry on record.
+
 ### When an inline question expires
 
 The inline prompt follows the same window rule as a dashboard hold (see the
