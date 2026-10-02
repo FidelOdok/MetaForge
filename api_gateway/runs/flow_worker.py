@@ -15,22 +15,209 @@ policy is small (3 attempts) rather than generous — the twin tolerates a
 duplicate proposal far better than a run tolerates being abandoned halfway,
 but neither is free, so retries are bounded and heartbeats are what
 distinguish a slow phase from a dead worker.
+
+FORGE-475: this process is not the gateway, so nothing it imports wires the
+two things a phase brain needs from the gateway's lifespan. Tools come from an
+MCP client to the ``mcp-http`` sidecar (``METAFORGE_MCP_URL``), installed with
+the same ``init_mcp_bridge`` seam the gateway uses so ``build_phase_brain`` is
+reused unchanged. The model comes from the same ``METAFORGE_LLM_*`` env and
+durable ``~/.metaforge`` selection the gateway reads (compose gives this
+service both). Without either, a phase used to "run" with zero tools against
+a provider it had no key for, and the run only showed the symptom.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import structlog
+from temporalio.exceptions import ApplicationError
 
+from mcp_core.context import McpCallContext, with_context
+from observability.tracing import get_tracer
 from orchestrator.design_flow.temporal_activities import DesignFlowActivities
 from orchestrator.design_flow.temporal_flow import GateCheck, PhaseRequest, PhaseResult
 from orchestrator.design_flow.worker import build_design_flow_worker
 
 logger = structlog.get_logger(__name__)
+tracer = get_tracer("api_gateway.runs.flow_worker")
 
-__all__ = ["build_activities", "main", "run_worker"]
+__all__ = [
+    "DEFAULT_MCP_URL",
+    "build_activities",
+    "ensure_mcp_bridge",
+    "main",
+    "mcp_server_url",
+    "run_worker",
+]
+
+#: Where the sidecar lives inside compose. Overridden by ``METAFORGE_MCP_URL``.
+DEFAULT_MCP_URL = "http://mcp-http:8765/mcp"
+
+#: The actor every phase's tool calls are attributed to on the sidecar.
+_ACTOR = "agent:design-flow"
+
+_bridge: Any = None
+_bridge_lock: asyncio.Lock | None = None
+
+
+def mcp_server_url() -> str:
+    """The sidecar's base URL, as ``HttpTransport`` wants it.
+
+    ``METAFORGE_MCP_URL`` is written the way clients see it (``.../mcp``);
+    the transport appends ``/mcp`` itself, so a trailing one is dropped
+    rather than doubled into ``/mcp/mcp``.
+    """
+    url = (os.environ.get("METAFORGE_MCP_URL") or DEFAULT_MCP_URL).strip().rstrip("/")
+    if url.endswith("/mcp"):
+        url = url[: -len("/mcp")]
+    return url
+
+
+async def ensure_mcp_bridge() -> Any:
+    """Connect to the sidecar once and install it as the phase brain's bridge.
+
+    Lazy, so a worker started before the sidecar is up still comes up, and a
+    failed connect is retried on the next phase instead of being cached. A
+    failure raises a *retryable* activity error carrying the reason: the
+    alternative, the empty in-memory bridge, is the silent zero-tools state
+    this exists to end.
+    """
+    global _bridge, _bridge_lock  # noqa: PLW0603
+    if _bridge is not None:
+        return _bridge
+    if _bridge_lock is None:
+        _bridge_lock = asyncio.Lock()
+    async with _bridge_lock:
+        if _bridge is not None:
+            return _bridge
+        from api_gateway.chat.routes import init_mcp_bridge
+        from skill_registry.bridge_factory import connect_http_bridge
+
+        url = mcp_server_url()
+        api_key = (
+            os.environ.get("METAFORGE_MCP_CLIENT_KEY")
+            or os.environ.get("METAFORGE_MCP_API_KEY")
+            or None
+        )
+        with tracer.start_as_current_span("design_flow_worker.connect_mcp") as span:
+            span.set_attribute("mcp.url", url)
+            try:
+                bridge = await connect_http_bridge(url, api_key=api_key, require=True)
+                tools = await bridge.list_tools()
+            except Exception as exc:
+                span.record_exception(exc)
+                logger.error("design_flow_worker_mcp_unreachable", url=url, error=str(exc))
+                raise ApplicationError(
+                    f"design-flow worker cannot reach the MCP sidecar at {url}: {exc}",
+                    type="McpUnavailable",
+                ) from exc
+            span.set_attribute("mcp.tool_count", len(tools))
+        if not tools:
+            logger.error("design_flow_worker_mcp_no_tools", url=url)
+            raise ApplicationError(
+                f"MCP sidecar at {url} lists no tools; a phase would run with none",
+                type="McpUnavailable",
+            )
+        init_mcp_bridge(bridge)
+        _bridge = bridge
+        logger.info("design_flow_worker_mcp_connected", url=url, tool_count=len(tools))
+        return bridge
+
+
+def _reset_mcp_bridge() -> None:
+    """Forget the cached bridge (tests)."""
+    global _bridge, _bridge_lock  # noqa: PLW0603
+    _bridge = None
+    _bridge_lock = None
+
+
+def _project_uuid(project_id: str | None) -> uuid.UUID | None:
+    if not project_id:
+        return None
+    try:
+        return uuid.UUID(str(project_id))
+    except ValueError:
+        logger.warning("design_flow_phase_project_id_not_uuid", project_id=project_id)
+        return None
+
+
+@contextmanager
+def _phase_scope(request: PhaseRequest) -> Iterator[McpCallContext]:
+    """Scope every MCP call the phase makes to the run's project.
+
+    ``HttpTransport`` forwards the active context as ``X-MetaForge-*``
+    headers, which the sidecar turns back into the same context, so twin and
+    project tools see the run's project and its session capture groups the
+    phase's calls under one session per run.
+    """
+    ctx = McpCallContext(
+        project_id=_project_uuid(request.project_id),
+        session_id=uuid.uuid5(uuid.NAMESPACE_URL, f"metaforge:design-flow:{request.run_id}"),
+        actor_id=_ACTOR,
+    )
+    with with_context(ctx):
+        yield ctx
+
+
+def _log_phase_skills(request: PhaseRequest) -> None:
+    """Say which discipline skills the phase's brain will load.
+
+    The brain loads them itself (``ReActPhaseBrain`` for the procedural
+    overlay, ``mcp_tools_from_bridge`` for tool scoping); this only makes an
+    empty set visible, since it reads like a working phase otherwise.
+    """
+    from skill_registry.skill_context import cards_for_domains, load_skill_cards
+
+    disciplines = tuple(request.phase.disciplines)
+    cards = cards_for_domains(load_skill_cards(), disciplines) if disciplines else []
+    log = logger.warning if disciplines and not cards else logger.info
+    log(
+        "design_flow_phase_skills",
+        phase=request.phase.id,
+        disciplines=list(disciplines),
+        skills=[c.name for c in cards],
+    )
+
+
+def _model_failure(exc: BaseException) -> ApplicationError | None:
+    """Turn a phase that could not reach any model into a visible run failure.
+
+    Without this the activity error was generic and retried as if the next
+    attempt might find a key that is not there. A chain whose every attempt
+    failed for a non-retryable reason (a missing key, a model the provider
+    cannot serve) is non-retryable here too, so the run fails once, with the
+    reason, instead of three times.
+    """
+    from orchestrator.harness.providers.pipeline import AllProvidersFailedError, ProviderError
+    from orchestrator.harness.providers.registry import InvalidModelError
+
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, AllProvidersFailedError):
+            permanent = all(
+                isinstance(err, ProviderError) and not err.retryable for _, err in cur.attempts
+            )
+            return ApplicationError(
+                f"no model provider could serve this phase: {cur}",
+                type="ProviderUnavailable",
+                non_retryable=permanent,
+            )
+        if isinstance(cur, InvalidModelError):
+            return ApplicationError(
+                f"no usable model provider for this phase: {cur}",
+                type="ProviderUnavailable",
+                non_retryable=True,
+            )
+        cur = cur.__cause__ or cur.__context__
+    return None
 
 
 async def _run_phase(request: PhaseRequest) -> PhaseResult:
@@ -44,6 +231,8 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
     from orchestrator.design_flow.executor import FlowContext
     from orchestrator.design_flow.spec import Phase
 
+    await ensure_mcp_bridge()
+    _log_phase_skills(request)
     brain = await build_phase_brain(request.run_id, request.flow_id)
     phase = Phase(
         id=request.phase.id,
@@ -59,7 +248,25 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
         project_id=request.project_id,
         session_id=request.session_id,
     )
-    outcome = await brain.run_phase(goal=request.goal, phase=phase, context=ctx)
+    with tracer.start_as_current_span("design_flow_worker.run_phase") as span:
+        span.set_attribute("run.id", request.run_id)
+        span.set_attribute("phase.id", request.phase.id)
+        try:
+            with _phase_scope(request):
+                outcome = await brain.run_phase(goal=request.goal, phase=phase, context=ctx)
+        except Exception as exc:
+            span.record_exception(exc)
+            failure = _model_failure(exc)
+            if failure is None:
+                raise
+            logger.error(
+                "design_flow_phase_no_model",
+                run_id=request.run_id,
+                phase=request.phase.id,
+                non_retryable=failure.non_retryable,
+                error=str(failure),
+            )
+            raise failure from exc
     return PhaseResult(
         summary=outcome.summary,
         artifacts=list(outcome.artifacts),

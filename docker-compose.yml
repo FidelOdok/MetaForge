@@ -448,10 +448,38 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://metaforge:metaforge@postgres:5432/metaforge}
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      # FORGE-475: a phase runs the same chat harness the gateway does, so it
+      # needs the same model config. This service had none, and every phase
+      # failed with "missing API key in env 'METAFORGE_LLM_API_KEY'" against
+      # whatever the in-code default happened to be. Keep this block in step
+      # with the gateway's (tests/unit/test_compose_design_flow_worker.py).
+      - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
+      - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
+      - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
+      - METAFORGE_LLM_API_KEY=${METAFORGE_LLM_API_KEY:-}
+      - METAFORGE_CHAT_SKILLS=${METAFORGE_CHAT_SKILLS:-off}
+      - METAFORGE_CHAT_MAX_STEPS=${METAFORGE_CHAT_MAX_STEPS:-}
+      - METAFORGE_CHAT_WALL_CLOCK_SECONDS=${METAFORGE_CHAT_WALL_CLOCK_SECONDS:-}
+      - METAFORGE_CHAT_MAX_COST_USD=${METAFORGE_CHAT_MAX_COST_USD:-}
+      - METAFORGE_ROTATION_STRATEGY=${METAFORGE_ROTATION_STRATEGY:-round_robin}
+      # FORGE-475: where a phase gets its tools. This process has no tool
+      # registry of its own, so without the sidecar a phase ran with only
+      # search_tools (mcp_tools=0). The worker fails the phase with this URL
+      # in the reason when it cannot connect, rather than running toolless.
+      - METAFORGE_MCP_URL=${METAFORGE_MCP_URL:-http://mcp-http:8765/mcp}
+      - METAFORGE_MCP_CLIENT_KEY=${METAFORGE_MCP_API_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
+    # FORGE-475: the durable provider selection and stored keys (`forge auth
+    # use`/`login`) live in ~/.metaforge/harness-auth.json, and the Codex
+    # OAuth token in ~/.codex. Sharing the gateway's volumes is what makes a
+    # phase resolve the same provider/model as a chat turn; without them the
+    # worker only ever saw the env defaults.
+    volumes:
+      - metaforge-home:/root/.metaforge
+      - codex-home:/root/.codex
     # Inherits the gateway image's HEALTHCHECK, which curls :8000 -- this
     # serves no HTTP, so it would report unhealthy while running perfectly.
     # Same fix and same reasoning as temporal-worker above (MET-726).

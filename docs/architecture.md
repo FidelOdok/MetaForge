@@ -462,6 +462,23 @@ the worker, runs are created durably and then sit forever, because nothing
 polls the queue — which is the quiet half of the same failure the 503 makes
 loud.
 
+The worker is a separate process from the gateway, so it wires the two things
+a phase brain needs itself (FORGE-475):
+
+- **Tools.** It has no tool registry of its own. On the first phase it connects
+  an MCP client to the `mcp-http` sidecar at `METAFORGE_MCP_URL` (default
+  `http://mcp-http:8765/mcp`) and installs it where `build_phase_brain` reads
+  the bridge, so both engines build the same brain. Every phase's MCP calls
+  carry the run's project, actor `agent:design-flow` and one session per run.
+  An unreachable sidecar, or one listing no tools, fails the phase with that
+  reason rather than running it toolless.
+- **Model.** It reads the same `METAFORGE_LLM_*` env and mounts the same
+  `metaforge-home` and `codex-home` volumes as the gateway, so a phase resolves
+  the provider and model a chat turn would. A phase whose every provider failed
+  fails the run with the per-provider reason; when no retry could help (a
+  missing key, a model the provider cannot serve) it fails once instead of
+  being retried.
+
 Both cadence drivers build the tier through one factory,
 `digital_twin.memory.consolidation.bootstrap.build_consolidation_stack()`
 (MET-723). Before that existed the wiring lived inside the gateway's lifespan,

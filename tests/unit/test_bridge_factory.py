@@ -153,3 +153,46 @@ class TestHttpMode:
         )
         with pytest.raises(RuntimeError, match="failed to connect"):
             await create_mcp_bridge(fallback=InMemoryMcpBridge())
+
+
+class TestConnectHttpBridge:
+    """FORGE-475: the design-flow worker connects to the sidecar directly."""
+
+    @pytest.mark.asyncio
+    async def test_connects_and_discovers_without_the_env_pair(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from skill_registry.bridge_factory import connect_http_bridge
+
+        list_payload = (
+            '{"jsonrpc":"2.0","id":"discover","result":{"tools":['
+            '{"tool_id":"twin.get_node","adapter_id":"metaforge","name":"get_node",'
+            '"description":"","capability":"twin"}]}}'
+        )
+        transport = _stub_transport(list_payload)
+        seen: dict[str, Any] = {}
+
+        def make(url: str, **kw: Any) -> Any:
+            seen.update(url=url, **kw)
+            return transport
+
+        monkeypatch.setattr("skill_registry.bridge_factory.HttpTransport", make)
+        bridge = await connect_http_bridge("http://mcp-http:8765", api_key="k", require=True)
+        assert isinstance(bridge, McpClientBridge)
+        assert await bridge.is_available("twin.get_node")
+        assert seen == {"url": "http://mcp-http:8765", "api_key": "k"}
+
+    @pytest.mark.asyncio
+    async def test_require_raises_instead_of_falling_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from skill_registry.bridge_factory import connect_http_bridge
+
+        transport = MagicMock()
+        transport.connect = AsyncMock(side_effect=ConnectionRefusedError())
+        transport.disconnect = AsyncMock()
+        monkeypatch.setattr(
+            "skill_registry.bridge_factory.HttpTransport", lambda url, **_kw: transport
+        )
+        with pytest.raises(RuntimeError, match="failed to connect"):
+            await connect_http_bridge("http://mcp-http:8765", require=True)
