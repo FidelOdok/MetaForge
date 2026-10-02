@@ -196,6 +196,7 @@ def _model_failure(exc: BaseException) -> ApplicationError | None:
     """
     from orchestrator.harness.providers.pipeline import AllProvidersFailedError, ProviderError
     from orchestrator.harness.providers.registry import InvalidModelError
+    from orchestrator.harness.providers.routing import RoutingConfigError
 
     seen: set[int] = set()
     cur: BaseException | None = exc
@@ -210,7 +211,7 @@ def _model_failure(exc: BaseException) -> ApplicationError | None:
                 type="ProviderUnavailable",
                 non_retryable=permanent,
             )
-        if isinstance(cur, InvalidModelError):
+        if isinstance(cur, (InvalidModelError, RoutingConfigError)):
             return ApplicationError(
                 f"no usable model provider for this phase: {cur}",
                 type="ProviderUnavailable",
@@ -242,6 +243,7 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
         required_deliverables=tuple(request.phase.required_deliverables),
         enforce_deliverables=request.phase.enforce_deliverables,
         disciplines=tuple(request.phase.disciplines),
+        model=request.phase.model,
     )
     ctx = FlowContext(
         goal=request.goal,

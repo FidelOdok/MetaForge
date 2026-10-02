@@ -54,6 +54,8 @@ class FrozenPhase:
     enforce_deliverables: bool = True
     gate: FrozenGate | None = None
     disciplines: list[str] = field(default_factory=list)
+    #: FORGE-477: ``"provider:model"`` override for this phase, or ``None``.
+    model: str | None = None
 
 
 @dataclass
@@ -74,9 +76,15 @@ class FrozenFlow:
     content_hash: str = ""
 
     def compute_hash(self) -> str:
-        payload = json.dumps(
-            [asdict(p) for p in self.phases], sort_keys=True, separators=(",", ":")
-        )
+        rows = []
+        for p in self.phases:
+            row = asdict(p)
+            # Absent when unset, so flows frozen before FORGE-477 keep the
+            # hash they were approved with.
+            if row.get("model") is None:
+                row.pop("model", None)
+            rows.append(row)
+        payload = json.dumps(rows, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def verify(self) -> None:
@@ -114,6 +122,7 @@ def freeze_flow(definition: object, *, version: str = "builtin") -> FrozenFlow:
                 required_deliverables=list(getattr(phase, "required_deliverables", ()) or ()),
                 enforce_deliverables=bool(getattr(phase, "enforce_deliverables", True)),
                 disciplines=list(getattr(phase, "disciplines", ()) or ()),
+                model=getattr(phase, "model", None) or None,
                 gate=(
                     None
                     if gate is None

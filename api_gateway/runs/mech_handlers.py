@@ -20,6 +20,7 @@ import structlog
 
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
+from orchestrator.harness.providers.routing import routing_scope
 from orchestrator.harness.providers.usage import usage_scope
 from skill_registry.mcp_bridge import McpBridge
 
@@ -368,7 +369,14 @@ class HybridBrain:
         # FORGE-476: every model call a phase makes, deterministic handler or
         # ReAct brain, is attributed to this run and phase. Both engines
         # (in-process and the Temporal worker) build their brain through here.
-        with usage_scope(run_id=self._run_id, phase=phase.id, role="phase_brain"):
+        with (
+            usage_scope(run_id=self._run_id, phase=phase.id, role="phase_brain"),
+            routing_scope(
+                project_id=context.project_id,
+                phase_model=phase.model or "",
+                disciplines=tuple(phase.disciplines),
+            ),
+        ):
             handler = self._handlers.get(phase.id)
             if handler is not None:
                 logger.info("design_flow_deterministic_phase", phase=phase.id)

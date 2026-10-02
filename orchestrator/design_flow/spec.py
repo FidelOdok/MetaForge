@@ -79,6 +79,10 @@ class Phase:
     # Skill ``domain``s whose SKILL.md procedures + tool scope the phase brain
     # loads into context (the "select" pillar). Empty = no discipline skills yet.
     disciplines: tuple[str, ...] = ()
+    # FORGE-477 (flow-generator input I5): ``"provider:model"`` this phase's
+    # brain runs on, overriding the project and table routes. ``None`` = route
+    # by role. Validated with the family rule wherever a flow is accepted.
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +190,7 @@ def definition_from_frozen(frozen: FrozenFlow) -> FlowDefinition:
                 required_deliverables=tuple(p.required_deliverables),
                 enforce_deliverables=p.enforce_deliverables,
                 disciplines=tuple(p.disciplines),
+                model=p.model,
                 gate=(
                     None
                     if p.gate is None

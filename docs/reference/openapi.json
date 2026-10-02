@@ -2455,6 +2455,17 @@
             "title": "Id",
             "type": "string"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
           "objective": {
             "title": "Objective",
             "type": "string"
@@ -6236,6 +6247,17 @@
             "title": "Id",
             "type": "string"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
           "objective": {
             "title": "Objective",
             "type": "string"
@@ -7332,6 +7354,84 @@
           "angle_deg"
         ],
         "title": "RotationDelta",
+        "type": "object"
+      },
+      "RouteInfo": {
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "RouteInfo",
+        "type": "object"
+      },
+      "RoutingResponse": {
+        "description": "The effective per-role routing and what roles without a route fall back to.",
+        "properties": {
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
+          },
+          "default_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Provider"
+          },
+          "effective_for_project": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/RouteInfo"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective For Project"
+          },
+          "projects": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/RouteInfo"
+              },
+              "type": "object"
+            },
+            "title": "Projects",
+            "type": "object"
+          },
+          "roles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RouteInfo"
+            },
+            "title": "Roles",
+            "type": "object"
+          }
+        },
+        "title": "RoutingResponse",
         "type": "object"
       },
       "RunListResponse": {
@@ -13653,6 +13753,56 @@
           }
         },
         "summary": "List Providers",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
+    "/v1/harness/routing": {
+      "get": {
+        "description": "Which provider and model each role is routed to.\n\nA role absent from ``roles`` is served by the durable harness selection\n(``default_provider`` / ``default_model``).",
+        "operationId": "get_routing_v1_harness_routing_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Routing",
         "tags": [
           "harness"
         ]

@@ -273,6 +273,57 @@ run's accumulated spend crosses `METAFORGE_RUN_SPEND_ALERT_USD` (default 5) and
 logs `llm_run_spend_exceeded` with the run id. The `LlmRunawaySpendPerRun`
 alert fires on it.
 
+### Per-role model routing (FORGE-477)
+
+One provider and model used to serve every role. A routing table
+(`providers/routing.py`, data in `providers/model_routes.json`) now maps a role
+to a `provider:model` route. Roles are `flow_generator`, `phase_brain`,
+`phase_brain:<discipline>`, `gate_check`, `classification`, `summarisation` and
+`chat`; the role is the one FORGE-476's `usage_scope` already attributes.
+
+Defaults: the cheap, fast model (`claude-haiku-4-5-20251001`) for
+`flow_generator`, `gate_check`, `classification` and `summarisation`, and the
+strong model (`claude-opus-4-8`) for `phase_brain:mechanical` and
+`phase_brain:simulation`. A role with no route, including plain `phase_brain`
+and `chat`, runs on the durable harness selection (`PUT /v1/harness/selection`),
+then env, exactly as before. Today `gate_check` and `summarisation` make no
+model call (gates and trajectory summaries are deterministic); the routes exist
+so the first model-backed check or summary lands on the cheap model.
+
+Precedence, highest first: an explicit per-call provider/model, the running
+phase's own `model` (flow-generator input I5), the project's routes, the table
+(file, then env), then the durable selection. For `phase_brain` the phase's
+disciplines are tried first (`phase_brain:mechanical`), then `phase_brain`.
+
+Configuration:
+
+- `METAFORGE_MODEL_ROUTES_PATH` points at a replacement file of the same shape;
+  `METAFORGE_ROUTE_<ROLE>=provider:model` overrides one role (role upper-cased,
+  `:` and `-` as `_`, for example `METAFORGE_ROUTE_PHASE_BRAIN_MECHANICAL`).
+- A project carries its own routes under `projects.<project_id>.roles` in the
+  file. Chat turns and design-flow phases scoped to that project use them.
+- A phase's `model` is a `provider:model` string on the flow phase. The
+  generator can propose it with the `set_model` operation; it is part of the
+  frozen flow (its hash is unchanged when unset, so older frozen flows still
+  verify) and shows in the version diff.
+
+Validation: every route, env override, project route and phase model is checked
+with `model_family_mismatch` (FORGE-468) plus provider and role names. A bad
+route raises `RoutingConfigError` and is never dropped quietly: the gateway
+refuses to start on a bad table, a hand-edited or generated flow whose phase
+model cannot work fails the `phase-model-routable` invariant (the generator
+drops that one operation instead), and the Temporal worker treats it as a
+non-retryable failure. A routed primary keeps the usual fallback chain behind
+it.
+
+Provenance: each resolution logs `llm_route_resolved` with role, source
+(`phase`, `project` or `table`), provider and model, and the usage event for the
+call carries the role and the provider/model that served it, so
+`by_role` and `by_model` in FORGE-476's totals show the cheap and strong models
+side by side. `GET /v1/harness/routing[?project_id=]` and `health.check`
+(`model_routing`) show the effective routes; roles absent from the response run
+on `default_provider` / `default_model`.
+
 ## Success criteria (from MET-547)
 
 - Same agent loop runs against Anthropic, OpenAI, OpenRouter, and local

@@ -59,6 +59,7 @@ from orchestrator.harness.providers.registry import (
     model_family_mismatch,
     validate_model,
 )
+from orchestrator.harness.providers.routing import resolve_route, routing_scope
 from orchestrator.harness.providers.usage import usage_scope
 from orchestrator.harness.react import ReActStep, run_react
 from orchestrator.harness.runtime import OnApprovalRequest
@@ -694,7 +695,15 @@ def resolve_active_provider(provider: str | None = None) -> str:
     selection = store.get_selection()
     sel_provider = selection.provider.strip().lower() if selection else ""
     env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
-    return ((provider or "").strip().lower()) or sel_provider or env_provider or "anthropic"
+    explicit = (provider or "").strip().lower()
+    if not explicit:
+        # FORGE-477: the role's route (phase, project, table) sits between an
+        # explicit per-turn choice and the durable selection, and the
+        # native-vs-ReAct decision must see it for the same MET-575 reason.
+        routed = resolve_route()
+        if routed is not None:
+            explicit = routed.route.provider
+    return explicit or sel_provider or env_provider or "anthropic"
 
 
 def provider_config_from_env(
@@ -728,6 +737,19 @@ def provider_config_from_env(
     ``model_mismatch``) so it is never silent. If nothing usable is left,
     :class:`InvalidModelError` is raised.
     """
+    if not provider and not model:
+        # FORGE-477: route by role. An explicit per-turn provider/model wins;
+        # no route at all falls through to the durable selection below.
+        routed = resolve_route()
+        if routed is not None:
+            provider, model = routed.route.provider, routed.route.model
+            logger.info(
+                "llm_route_resolved",
+                role=routed.role,
+                source=routed.source,
+                provider=provider,
+                model=model,
+            )
     store = AuthStore()
     selection = store.get_selection()
     env_provider = (os.environ.get("METAFORGE_LLM_PROVIDER") or "").strip().lower()
@@ -1159,7 +1181,8 @@ def _attributed_as_chat(fn: Callable[..., Awaitable[str]]) -> Callable[..., Awai
 
     @functools.wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> str:
-        with usage_scope(default_role="chat"):
+        # FORGE-477: a turn scoped to a project routes with that project's routes.
+        with usage_scope(default_role="chat"), routing_scope(project_id=kwargs.get("project_id")):
             return await fn(*args, **kwargs)
 
     return wrapper
