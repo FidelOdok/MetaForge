@@ -35,7 +35,7 @@ from orchestrator.design_flow.context import (
     TargetMaturity,
     missing_inputs,
 )
-from orchestrator.design_flow.generator import FlowProposal
+from orchestrator.design_flow.generator import FlowProposal, TailoringError
 from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
 from orchestrator.design_flow.spec import (
     DEFAULT_FLOW_ID,
@@ -201,6 +201,23 @@ class ManufacturingContextBody(BaseModel):
     )
 
 
+class CallerOperation(BaseModel):
+    """One tailoring operation from the caller's model (FORGE-481)."""
+
+    op: str
+    phase: str
+    #: Empty is refused by the generator with a named reason, not a schema error.
+    rationale: str = ""
+    value: object | None = None
+
+
+class CallerBody(BaseModel):
+    """Who is proposing: the client and, if known, its model."""
+
+    client: str | None = None
+    model: str | None = None
+
+
 class ProposeFlowRequest(BaseModel):
     intent: str
     projectId: str | None = None  # noqa: N815
@@ -222,6 +239,18 @@ class ProposeFlowRequest(BaseModel):
         default=None, validation_alias=_alias("loadsAndUse", "loads_and_use")
     )
     budget: str | None = None
+    #: Caller-proposed tailoring (FORGE-481). When ``operations`` or
+    #: ``template`` is given the server makes no generator model call: it
+    #: applies these with the deterministic generator, runs the same
+    #: invariants and holds the same single approval.
+    template: str | None = None
+    operations: list[CallerOperation] | None = None
+    #: Who wrote ``operations``, recorded as provenance.
+    caller: CallerBody | None = None
+
+    @property
+    def caller_proposed(self) -> bool:
+        return self.operations is not None or self.template is not None
 
     def flow_context(self) -> FlowContext:
         m = self.manufacturingContext
@@ -336,6 +365,8 @@ class FlowProposalView(BaseModel):
     openQuestions: list[QuestionView] = Field(default_factory=list)  # noqa: N815
     #: Which provider/model produced this tailoring. ``None`` when unknown.
     generatedBy: GeneratedByView | None = None  # noqa: N815
+    #: Set instead of ``generatedBy`` when the caller supplied the operations.
+    proposedBy: dict[str, str | None] | None = None  # noqa: N815
 
 
 def _generated_by(proposal: FlowProposal) -> dict[str, str | None] | None:
@@ -361,6 +392,7 @@ def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) ->
         requirementsPending=proposal.requirements_pending,
         assumptions=list(proposal.assumptions),
         openQuestions=[_question_view(q) for q in proposal.open_questions],
+        proposedBy=proposal.proposed_by.as_dict() if proposal.proposed_by else None,
         generatedBy=(
             GeneratedByView(
                 provider=proposal.generated_by.provider,
@@ -417,8 +449,10 @@ async def propose_flow(
     """
     from api_gateway.chat.tool_approvals import get_approval_store
     from api_gateway.design_flows.generate import (
+        CallerTailoringRequest,
         GeneratorUnavailableError,
         TailoringRequest,
+        build_caller_proposal,
         generate_proposal,
     )
 
@@ -431,22 +465,41 @@ async def propose_flow(
         response.status_code = 200
         return await _needs_input(body, missing)
 
-    try:
-        proposal = await generate_proposal(
-            TailoringRequest(
-                intent=body.intent.strip(),
-                project_id=body.projectId,
-                requirements=body.requirements,
-                provider=body.provider,
-                model=body.model,
-                context=context,
+    if body.caller_proposed:
+        # FORGE-481: the caller's model already did the tailoring. No
+        # generator call; the required questions above still came from us.
+        try:
+            proposal = build_caller_proposal(
+                CallerTailoringRequest(
+                    intent=body.intent.strip(),
+                    operations=[o.model_dump(exclude_none=True) for o in body.operations or []],
+                    template=body.template,
+                    requirements=body.requirements,
+                    context=context,
+                    client=body.caller.client if body.caller else None,
+                    model=body.caller.model if body.caller else None,
+                )
             )
-        )
-    except GeneratorUnavailableError as exc:
-        # 503 rather than a default template: a flow the human believes was
-        # tailored, and was not, is worse than being told it is down.
-        logger.error("flow_proposal_unavailable", error=str(exc))
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except TailoringError as exc:
+            logger.warning("flow_caller_proposal_refused", error=str(exc))
+            raise HTTPException(status_code=422, detail=f"flow.propose refused: {exc}") from exc
+    else:
+        try:
+            proposal = await generate_proposal(
+                TailoringRequest(
+                    intent=body.intent.strip(),
+                    project_id=body.projectId,
+                    requirements=body.requirements,
+                    provider=body.provider,
+                    model=body.model,
+                    context=context,
+                )
+            )
+        except GeneratorUnavailableError as exc:
+            # 503 rather than a default template: a flow the human believes was
+            # tailored, and was not, is worse than being told it is down.
+            logger.error("flow_proposal_unavailable", error=str(exc))
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if not proposal.valid:
         # Checked here, with the context, before anything is stored: the
@@ -463,7 +516,7 @@ async def propose_flow(
             base_template_id=proposal.base_template_id,
             base_version=proposal.base_version,
             changes=proposal.diff(),
-            origin="generated",
+            origin="caller" if proposal.proposed_by else "generated",
             intent=proposal.intent,
         )
     except FlowInvariantError as exc:
@@ -489,6 +542,8 @@ async def propose_flow(
             "assumptions": proposal.assumptions,
             # FORGE-468: who produced the tailoring the approver is judging.
             "generated_by": _generated_by(proposal),
+            # FORGE-481: set when the caller's model wrote the operations.
+            "proposed_by": proposal.proposed_by.as_dict() if proposal.proposed_by else None,
         }
     )
     store.start(run.id)
@@ -522,8 +577,14 @@ async def _needs_input(
     with tracer.start_as_current_span("design_flows.propose.needs_input") as span:
         span.set_attribute("design_flows.missing", ",".join(q.id for q in missing))
         try:
-            extra = await gen.suggest_extra_questions(
-                body.intent.strip(), missing, provider=body.provider, model=body.model
+            # A caller-proposed tailoring (FORGE-481) makes no server model
+            # call, not even for the optional product-specific questions.
+            extra = (
+                []
+                if body.caller_proposed
+                else await gen.suggest_extra_questions(
+                    body.intent.strip(), missing, provider=body.provider, model=body.model
+                )
             )
         except gen.GeneratorUnavailableError as exc:
             # Said, not swallowed: the required questions stand on their own,

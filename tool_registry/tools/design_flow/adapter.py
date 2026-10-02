@@ -110,7 +110,18 @@ class DesignFlowServer(McpToolServer):
                     "'needs_input' and a list of questions. Ask the USER those "
                     "questions -- never answer them yourself -- and call again with "
                     "the answers. 'undecided' (route) and 'unknown' (loads) are "
-                    "valid answers."
+                    "valid answers.\n\n"
+                    "Optional caller-proposed tailoring: if you supply 'operations' "
+                    "(and optionally 'template'), the server makes NO model call. It "
+                    "applies your operations with the deterministic generator, runs the "
+                    "same invariants and holds the same single approval. Operations are "
+                    "drop_phase, add_deliverable (value: artifact type), set_disciplines "
+                    "(value: list) and set_model (value: provider:model), each on a "
+                    "phase of the template with a rationale. Read flow.list for template "
+                    "and phase ids. An unknown operation, template or phase, or an "
+                    "invariant violation (for example dropping verification with unknown "
+                    "loads), is refused with the reason. The required questions still "
+                    "come from the server."
                 ),
                 capability="design_flow_write",
                 input_schema={
@@ -167,6 +178,43 @@ class DesignFlowServer(McpToolServer):
                             ),
                         },
                         "budget": {"type": "string"},
+                        "template": {
+                            "type": "string",
+                            "description": "Template id to tailor (see flow.list). Optional.",
+                        },
+                        "operations": {
+                            "type": "array",
+                            "description": (
+                                "Caller-proposed tailoring. Supplying it skips the "
+                                "server-side generator model."
+                            ),
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "op": {
+                                        "type": "string",
+                                        "enum": [
+                                            "drop_phase",
+                                            "add_deliverable",
+                                            "set_disciplines",
+                                            "set_model",
+                                        ],
+                                    },
+                                    "phase": {"type": "string"},
+                                    "value": {},
+                                    "rationale": {"type": "string"},
+                                },
+                                "required": ["op", "phase", "rationale"],
+                            },
+                        },
+                        "caller": {
+                            "type": "object",
+                            "description": "Provenance of the operations.",
+                            "properties": {
+                                "client": {"type": "string"},
+                                "model": {"type": "string"},
+                            },
+                        },
                     },
                     "required": ["intent"],
                 },
@@ -242,6 +290,9 @@ class DesignFlowServer(McpToolServer):
                 target_maturity=arguments.get("target_maturity"),
                 loads_and_use=arguments.get("loads_and_use"),
                 budget=arguments.get("budget"),
+                template=arguments.get("template"),
+                operations=arguments.get("operations"),
+                caller=arguments.get("caller"),
             )
             span.set_attribute("flow.status", str(result.get("status", "proposed")))
         logger.info(
