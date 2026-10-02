@@ -287,7 +287,7 @@ class TestPhaseToolReporting:
         from api_gateway.runs import flow_brain
         from orchestrator.design_flow.spec import Phase
 
-        monkeypatch.setattr(flow_brain, "phase_overflow", lambda _d: ["twin.x"])
+        monkeypatch.setattr(flow_brain, "phase_overflow", lambda _d, _x=(): ["twin.x"])
         with capture_logs() as logs:
             flow_brain._report_phase_tools(Phase(id="p", title="t", objective="o"))
         warn = [e for e in logs if e["event"] == "design_flow_phase_tools_dropped"]

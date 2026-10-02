@@ -82,6 +82,39 @@ MODEL_OPERATIONS: frozenset[OperationKind] = frozenset(
 
 ROUTE_SELECTION_PHASE_ID = "route_selection"
 
+#: Template disciplines a deliverable depends on (FORGE-497). ``set_disciplines``
+#: names the disciplines a phase fans out into; it must widen or retarget the
+#: phase, never strip the one its own deliverables need (a simulation phase
+#: tailored to ``['mechanical']`` lost the FEA tools and could not pass its
+#: gate). The generator merges rather than replaces: these template
+#: disciplines are kept and the model's list is added to them.
+DELIVERABLE_CORE_DISCIPLINES: dict[str, str] = {
+    "simulation_result": "simulation",
+    "load_case": "simulation",
+    "verification_report": "simulation",
+    "cad_model": "mechanical",
+    "robot_description": "robotics",
+}
+
+
+def merge_disciplines(phase: Phase, assigned: list[str]) -> tuple[str, ...]:
+    """``assigned`` plus the template disciplines the phase's deliverables need."""
+    wanted = {
+        DELIVERABLE_CORE_DISCIPLINES[a]
+        for a in (*phase.required_deliverables, *phase.expected_artifacts)
+        if a in DELIVERABLE_CORE_DISCIPLINES
+    }
+    kept = [d for d in phase.disciplines if d.lower() in wanted]
+    merged = list(dict.fromkeys([*kept, *assigned]))
+    if len(merged) != len(dict.fromkeys(assigned)):
+        logger.info(
+            "flow_generator_core_disciplines_kept",
+            phase=phase.id,
+            kept=kept,
+            assigned=assigned,
+        )
+    return tuple(merged)
+
 
 def _route_selection_phase() -> Phase:
     # The gate name deliberately avoids the release markers ("sign-off" etc.):
@@ -414,7 +447,11 @@ def apply_operations(
                 # somebody has to remember.
                 enforce_deliverables=phase.enforce_deliverables,
                 gate=phase.gate,
-                disciplines=tuple(assigned) if assigned is not None else phase.disciplines,
+                disciplines=(
+                    merge_disciplines(phase, assigned)
+                    if assigned is not None
+                    else phase.disciplines
+                ),
                 model=phase.model,
             )
         )

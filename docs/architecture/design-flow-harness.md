@@ -97,6 +97,17 @@ A full `hardware_v1` run now commits **nine real, typed work products** —
 Adding or extending a phase is a data change in
 `orchestrator/design_flow/spec.py`, not new control flow.
 
+### Phase tools follow deliverables (FORGE-497)
+
+A phase's MCP tool set is derived from what it must produce
+(`mcp_core.profiles.DELIVERABLE_TOOLS`), not only from its disciplines. The
+live failure: tailoring replaced the simulation phase's disciplines with
+`['mechanical']`, so it had no `freecad.generate_mesh` or `calculix.run_fea`
+and recorded `fail_blocked_no_fea`. Now every required and expected
+deliverable contributes its tools, always kept, and `set_disciplines` merges
+with (rather than replaces) the template discipline a deliverable depends on.
+See [context engineering](context-engineering.md) for budget and drop rules.
+
 ## Goal-driven deterministic handlers
 
 The native ReAct brain reasons well but is unreliable at *reliably* producing a

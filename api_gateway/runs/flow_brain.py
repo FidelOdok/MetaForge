@@ -16,7 +16,7 @@ import structlog
 
 from api_gateway.chat.harness_backend import design_flow_approval_timeout_seconds, run_chat_turn
 from api_gateway.chat.routes import get_metrics
-from mcp_core.profiles import phase_overflow, tools_for_disciplines, unmapped_disciplines
+from mcp_core.profiles import phase_overflow, tools_for_phase, unmapped_disciplines
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
 from skill_registry.mcp_bridge import McpBridge
@@ -34,9 +34,15 @@ logger = structlog.get_logger(__name__)
 _UNMAPPED_LOGGED: set[str] = set()
 
 
+def _phase_deliverables(phase: Phase) -> tuple[str, ...]:
+    """Every deliverable type the phase must or is expected to produce (FORGE-497)."""
+    return tuple(dict.fromkeys([*phase.required_deliverables, *phase.expected_artifacts]))
+
+
 def _report_phase_tools(phase: Phase) -> frozenset[str]:
     """The phase's tool allowlist, with anything dropped or unmapped made visible."""
-    dropped = phase_overflow(phase.disciplines)
+    deliverables = _phase_deliverables(phase)
+    dropped = phase_overflow(phase.disciplines, deliverables)
     if dropped:
         logger.warning(
             "design_flow_phase_tools_dropped",
@@ -48,7 +54,7 @@ def _report_phase_tools(phase: Phase) -> frozenset[str]:
         if d.lower() not in _UNMAPPED_LOGGED:
             _UNMAPPED_LOGGED.add(d.lower())
             logger.debug("design_flow_discipline_has_no_tool_profile", discipline=d, phase=phase.id)
-    return tools_for_disciplines(phase.disciplines)
+    return tools_for_phase(phase.disciplines, deliverables)
 
 
 #: The twin work-product type each hint produces is the key, spelled exactly as

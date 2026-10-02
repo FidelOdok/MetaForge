@@ -487,8 +487,10 @@ def make_search_tools_tool(
                 "already_available": [],
                 "not_registered": over_budget[:_MAX_TOOL_SEARCH_RESULTS],
                 "instruction": (
-                    f"This phase is capped at {max_total_tools} tools and they are all in "
-                    "use, so these were NOT registered. Work with the tools you have."
+                    "These tools EXIST in the catalog but are NOT available to this phase: "
+                    f"it is capped at {max_total_tools} tools and they are all in use, so "
+                    "they were NOT registered and calling them will fail. Work with the "
+                    "tools you have, and say in your summary which capability was missing."
                 ),
             }
         if not registered and not already:
