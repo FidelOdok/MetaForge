@@ -590,15 +590,17 @@ async def run_native_tools(
             # truncated) tells it the omission is provider-cap noise, not a
             # real gap, and to reach for ``search_tools`` instead of quietly
             # working around it or telling the user something isn't possible.
-            turn_system = system
+            # FORGE-478: the note rides as ``system_suffix`` so it never
+            # mutates the cached system prefix on a truncating round.
+            request: dict[str, Any] = {"system": system, "messages": messages, "tools": tools}
             if dropped_this_round:
-                turn_system = (
-                    f"{system}\n\nNOTE: {len(dropped_this_round)} tool(s) were omitted from "
+                request["system_suffix"] = (
+                    f"NOTE: {len(dropped_this_round)} tool(s) were omitted from "
                     "your tool list this turn because the provider's tools-array cap was "
                     "exceeded. If a capability you need isn't in your list, call "
                     "search_tools with a relevant keyword before assuming it doesn't exist."
                 )
-            resp = await _model_call({"system": turn_system, "messages": messages, "tools": tools})
+            resp = await _model_call(request)
             _tally(resp)
             text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
             calls = resp.get("tool_calls") if isinstance(resp, dict) else None
