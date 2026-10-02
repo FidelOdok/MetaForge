@@ -13,7 +13,7 @@ make about what to drop, not something this module should quietly do on their
 behalf. Silent truncation is the failure this whole feature exists to prevent
 — doing it here would be the joke writing itself.
 
-Layer-1 module: stdlib only.
+Layer-1 module: stdlib only (plus ``mcp_core.guardrails``, a sibling).
 """
 
 from __future__ import annotations
@@ -262,40 +262,165 @@ DISCIPLINE_PROFILES: dict[str, str] = {
 PHASE_NATIVE_RESERVE = 2
 PHASE_MCP_BUDGET = MAX_TOOLS - PHASE_NATIVE_RESERVE
 
+#: The stateful FreeCAD session surface that authors a cad_model.
+_CAD_AUTHORING: frozenset[str] = frozenset(
+    {
+        "freecad.open_session",
+        "freecad.create_body",
+        "freecad.create_sketch",
+        "freecad.create_primitive",
+        "freecad.pad_sketch",
+        "freecad.pocket_sketch",
+        "freecad.boolean",
+        "freecad.fillet",
+        "freecad.transform_object",
+        "freecad.add_part_to_assembly",
+        "freecad.add_assembly_joint",
+        "freecad.describe_session",
+        "freecad.measure",
+        "freecad.export_model",
+        "freecad.close_session",
+        "twin.commit_geometry",
+        "twin.stage_work_product_file",
+    }
+)
+
+_RECORD_DOCUMENT: frozenset[str] = frozenset({"twin.record_document"})
+
+#: Work-product type -> the MCP tools that produce it (FORGE-497).
+#:
+#: A phase's tool set follows from what it must deliver, not only from the
+#: disciplines it names: tailoring can replace a phase's disciplines, and a
+#: simulation phase that lost ``simulation`` also lost the only tools that can
+#: produce a ``simulation_result``. Keys are spelled as ``WorkProductType``
+#: values (what ``deliverable_hints`` and the gate evaluator use). A type with
+#: no entry has no model-callable recorder (the platform handler produces it).
+DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
+    "design_decision": frozenset({"twin.record_decision"}),
+    "intent": frozenset({"twin.record_engineering_entity"}),
+    "stakeholder_need": frozenset({"twin.record_engineering_entity"}),
+    "prd": _RECORD_DOCUMENT,
+    "load_case": _RECORD_DOCUMENT,
+    "documentation": _RECORD_DOCUMENT,
+    "constraint_set": frozenset({"twin.record_constraint_set"}),
+    "cad_model": _CAD_AUTHORING,
+    "simulation_result": frozenset(
+        {
+            "freecad.generate_mesh",
+            "calculix.run_fea",
+            "calculix.extract_results",
+            "calculix.check_mesh_convergence",
+            "calculix.validate_mesh",
+            "twin.record_document",
+        }
+    ),
+    "robot_description": frozenset(
+        {"cadquery.export_urdf", "cadquery.export_sdf", "twin.record_document"}
+    ),
+    "bom": frozenset(
+        {
+            "component.search_intent",
+            "component.search_parametric",
+            "twin.record_component_selection",
+        }
+    ),
+    "pinmap": frozenset({"twin.create_firmware_scaffold"}),
+    "firmware_source": frozenset({"twin.create_firmware_scaffold"}),
+}
+
+#: Families dropped first when a discipline mix overflows the budget: niche
+#: simulators and exporters a phase can live without.
+_LOW_PRIORITY_PREFIXES: tuple[str, ...] = ("gazebo.", "isaac_sim.", "omniverse_usd.", "cadquery.")
+
+
+class PhaseToolBudgetError(ValueError):
+    """The common tools plus the deliverable tools alone exceed the phase budget."""
+
+    def __init__(self, deliverables: list[str], size: int) -> None:
+        super().__init__(
+            f"phase deliverables {deliverables} need {size} always-kept tools, over the "
+            f"{PHASE_MCP_BUDGET}-tool phase budget; split the phase or trim DELIVERABLE_TOOLS"
+        )
+
+
+def _service_refused(tool_id: str) -> bool:
+    """Is this tool one the design-flow service caller is always refused?"""
+    from mcp_core.guardrails import ARGUMENT_CLASSIFIED, Caller, decide
+
+    if tool_id in ARGUMENT_CLASSIFIED:
+        return False
+    return decide(tool_id, caller=Caller.SERVICE, twin_mutations_enabled=True).refused
+
+
+def deliverable_tools(deliverables: tuple[str, ...] | list[str]) -> frozenset[str]:
+    """The tools the named deliverable types need, minus service-refused ones."""
+    wanted: set[str] = set()
+    for d in deliverables:
+        wanted |= DELIVERABLE_TOOLS.get(d, frozenset())
+    return frozenset(t for t in wanted if not _service_refused(t))
+
+
+def _drop_rank(tool_id: str) -> tuple[int, str]:
+    """Sort key: tools earlier in this order are kept first when over budget."""
+    low = tool_id.startswith(_LOW_PRIORITY_PREFIXES)
+    return (1 if low else 0, tool_id)
+
+
+def _phase_plan(
+    disciplines: tuple[str, ...] | list[str],
+    deliverables: tuple[str, ...] | list[str],
+) -> tuple[frozenset[str], frozenset[str]]:
+    """(tools kept, tools dropped) for a phase."""
+    must = PHASE_COMMON | deliverable_tools(deliverables)
+    if len(must) > PHASE_MCP_BUDGET:
+        # Never dropped, so the array exceeds the budget: say so loudly rather
+        # than silently truncating a tool the gate needs.
+        raise PhaseToolBudgetError(sorted(deliverables), len(must))
+    extra: set[str] = set()
+    for d in disciplines:
+        profile = DISCIPLINE_PROFILES.get(d.lower())
+        if profile is not None:
+            extra |= PROFILES[profile]
+    # A service-refused tool is a dead slot; never spend budget on it.
+    extra = {t for t in extra if not _service_refused(t)} - must
+    keep = set(must)
+    dropped: list[str] = []
+    for tool in sorted(extra, key=_drop_rank):
+        if len(keep) >= PHASE_MCP_BUDGET:
+            dropped.append(tool)
+        else:
+            keep.add(tool)
+    return frozenset(keep), frozenset(dropped)
+
+
+def tools_for_phase(
+    disciplines: tuple[str, ...] | list[str],
+    deliverables: tuple[str, ...] | list[str] = (),
+) -> frozenset[str]:
+    """The MCP tool ids a design-flow phase carries (FORGE-479, FORGE-497).
+
+    :data:`PHASE_COMMON`, plus the tools for every required and expected
+    deliverable (:data:`DELIVERABLE_TOOLS`, always kept), plus the profile of
+    each discipline the phase names. When that exceeds
+    :data:`PHASE_MCP_BUDGET`, discipline-profile tools are dropped first
+    (niche families before the rest, then alphabetically last); a deliverable
+    tool or a common tool is never dropped. The drop is reported by
+    :func:`phase_overflow`, not silent.
+    """
+    return _phase_plan(disciplines, deliverables)[0]
+
 
 def tools_for_disciplines(disciplines: tuple[str, ...] | list[str]) -> frozenset[str]:
-    """The MCP tool ids a design-flow phase carries (FORGE-479).
-
-    :data:`PHASE_COMMON` plus the profile of each discipline the phase names.
-    An empty tuple (intent, needs, requirements ...) gets the common set, not
-    every tool. The result is always within :data:`PHASE_MCP_BUDGET`: a
-    discipline mix that would overflow is a decision for the template author,
-    so the overflow is dropped in sorted order and the caller is told through
-    :func:`phase_overflow` rather than silently.
-    """
-    wanted: set[str] = set(PHASE_COMMON)
-    for d in disciplines:
-        profile = DISCIPLINE_PROFILES.get(d.lower())
-        if profile is not None:
-            wanted |= PROFILES[profile]
-    if len(wanted) <= PHASE_MCP_BUDGET:
-        return frozenset(wanted)
-    keep = set(PHASE_COMMON)
-    for tool in sorted(wanted - keep):
-        if len(keep) >= PHASE_MCP_BUDGET:
-            break
-        keep.add(tool)
-    return frozenset(keep)
+    """Back-compat wrapper: a phase with no deliverables (see :func:`tools_for_phase`)."""
+    return tools_for_phase(disciplines)
 
 
-def phase_overflow(disciplines: tuple[str, ...] | list[str]) -> list[str]:
-    """Tools :func:`tools_for_disciplines` had to drop for this mix (usually none)."""
-    wanted: set[str] = set(PHASE_COMMON)
-    for d in disciplines:
-        profile = DISCIPLINE_PROFILES.get(d.lower())
-        if profile is not None:
-            wanted |= PROFILES[profile]
-    return sorted(wanted - tools_for_disciplines(disciplines))
+def phase_overflow(
+    disciplines: tuple[str, ...] | list[str],
+    deliverables: tuple[str, ...] | list[str] = (),
+) -> list[str]:
+    """Tools :func:`tools_for_phase` had to drop for this phase (usually none)."""
+    return sorted(_phase_plan(disciplines, deliverables)[1])
 
 
 def profile_names() -> list[str]:

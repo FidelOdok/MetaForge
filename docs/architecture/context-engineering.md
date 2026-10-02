@@ -383,16 +383,33 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   work products (FORGE-244 ordering), re-appends the closing `project_id`
   directives, and points at `metaforge://twin/brief/<project_id>`, which
   serves the uncapped brief.
-- **Design-flow phases carry a scoped tool set.** `ReActPhaseBrain` passes
-  `mcp_core.profiles.tools_for_disciplines(phase.disciplines)`: a common set
-  (project, session, twin reads and records, `twin.record_engineering_entity`,
-  `twin.record_constraint_set`, `twin.query_cypher`) plus the profile of each
-  discipline the phase names (`mechanical` maps to the new
-  `mechanical_product` profile, `simulation`, `electronics` and `supply_chain`
-  to theirs). A phase with no discipline gets only the common set, where it
-  used to get every tool. With `search_tools` and `read_tool_result` the array
-  stays at 40 or fewer, and `search_tools` stops registering once the registry
-  reaches that cap. A test fails if any template phase would overflow.
+- **Design-flow phases carry a scoped tool set, driven by what they deliver.**
+  `ReActPhaseBrain` passes `mcp_core.profiles.tools_for_phase(phase.disciplines,
+  deliverables)` (FORGE-497), where `deliverables` is every required and
+  expected deliverable of the phase. The set is a common base (project,
+  session, twin reads and records, `twin.record_document`,
+  `twin.record_engineering_entity`, `twin.record_constraint_set`,
+  `twin.query_cypher`), plus the tools in `DELIVERABLE_TOOLS` for each
+  deliverable type (`simulation_result` brings `freecad.generate_mesh` and the
+  `calculix` run, extract, convergence and mesh-validation tools; `cad_model`
+  brings the FreeCAD session authoring set and `twin.commit_geometry`; `bom`
+  brings component search and `twin.record_component_selection`), plus the
+  profile of each discipline the phase names. Deliverable tools and the common
+  base are never dropped. When the total exceeds the budget (38 MCP tools),
+  discipline-profile tools go first (niche `gazebo`, `isaac_sim`,
+  `omniverse_usd` and `cadquery` families, then alphabetically last) and the
+  drop is logged as `design_flow_phase_tools_dropped`. Tools the design-flow
+  service caller is always refused (`mcp_core.guardrails`) are never given a
+  slot. This is why tailoring that replaces a phase's disciplines can no
+  longer strip the tools its gate needs. The generator also keeps the template
+  discipline a deliverable depends on when `set_disciplines` is applied
+  (`DELIVERABLE_CORE_DISCIPLINES`). A test fails if any template phase,
+  before or after a live-style tailoring, lacks a tool its deliverables need.
+- **`search_tools` is a bounded escape hatch, not unlimited.** It can register
+  a catalog tool outside the phase set on demand (the sidecar guardrails still
+  decide every call), but only while the registry is below the 40-tool cap.
+  When the cap is reached it answers that the tool exists but is not available
+  to this phase, instead of implying the tool is missing.
 
 Measurement: `tests/unit/test_context_budget.py::test_phase_prompt_tokens_before_and_after`
 scripts one 3-call phase (two large reads, then an answer) against a 121-tool
