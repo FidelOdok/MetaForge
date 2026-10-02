@@ -1,0 +1,5 @@
+{
+  "_comment": "Per-role model routes (FORGE-477). Empty by default: routing is opt-in per deployment, and every role uses the durable harness selection (PUT /v1/harness/selection). See model_routes.example.json and docs/architecture/robust-harness-design.md.",
+  "roles": {},
+  "projects": {}
+}

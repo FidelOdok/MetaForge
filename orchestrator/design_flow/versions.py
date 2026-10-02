@@ -135,6 +135,11 @@ def diff_flows(base: FlowDefinition, candidate: FlowDefinition) -> list[str]:
                 f"phase '{phase_id}' disciplines: "
                 f"{list(before.disciplines) or 'none'} → {list(after.disciplines) or 'none'}"
             )
+        if before.model != after.model:
+            lines.append(
+                f"phase '{phase_id}' model: {before.model or 'routed by role'} → "
+                f"{after.model or 'routed by role'}"
+            )
         if before.enforce_deliverables and not after.enforce_deliverables:
             lines.append(f"phase '{phase_id}' NO LONGER enforces its deliverables")
         if (before.gate is None) != (after.gate is None):

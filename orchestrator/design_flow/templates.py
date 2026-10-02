@@ -97,6 +97,7 @@ def _phase_from(raw: dict[str, Any]) -> Phase:
         enforce_deliverables=bool(raw.get("enforce_deliverables", True)),
         gate=_gate_from(raw.get("gate")),
         disciplines=tuple(raw.get("disciplines") or ()),
+        model=raw.get("model") or None,
     )
 
 
@@ -137,6 +138,8 @@ def to_mapping(
             entry["enforce_deliverables"] = False
         if phase.disciplines:
             entry["disciplines"] = list(phase.disciplines)
+        if phase.model:
+            entry["model"] = phase.model
         if phase.gate is not None:
             gate: dict[str, Any] = {"name": phase.gate.name}
             if phase.gate.auto_approve:

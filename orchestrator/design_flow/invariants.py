@@ -211,6 +211,31 @@ def _rule_deliverables_are_producible(phases: list[Any]) -> list[Violation]:
     return out
 
 
+def _rule_phase_model_is_routable(phases: list[Any]) -> list[Violation]:
+    """A phase's own ``model`` (FORGE-477, input I5) must be a pair that works.
+
+    Checked with the same family rule as every other route (FORGE-468), so a
+    flow naming ``openai-codex:claude-opus-4-8`` is refused when it is saved,
+    not on the phase's first model call.
+    """
+    from orchestrator.harness.providers.routing import (
+        RoutingConfigError,
+        parse_route_ref,
+        validate_route_ref,
+    )
+
+    out: list[Violation] = []
+    for phase in phases:
+        ref = getattr(phase, "model", None)
+        if not ref:
+            continue
+        try:
+            validate_route_ref(parse_route_ref(ref, "model"), "model")
+        except RoutingConfigError as exc:
+            out.append(Violation("phase-model-routable", str(exc), phase.id))
+    return out
+
+
 def _rule_requirements_are_verifiable(phases: list[Any]) -> list[Violation]:
     """Requirements must end up verified somewhere in the flow.
 
@@ -312,6 +337,7 @@ _RULES = (
     _rule_enforcement_not_disabled_at_a_gate,
     _rule_deliverables_are_producible,
     _rule_requirements_are_verifiable,
+    _rule_phase_model_is_routable,
 )
 
 

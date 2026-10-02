@@ -60,6 +60,8 @@ class OperationKind(StrEnum):
     DROP_PHASE = "drop_phase"
     ADD_DELIVERABLE = "add_deliverable"
     SET_DISCIPLINES = "set_disciplines"
+    #: Input I5 (FORGE-477): run one phase on a named "provider:model".
+    SET_MODEL = "set_model"
     #: Server-only (FORGE-463): inserted when the manufacturing route is
     #: "undecided", so the route becomes a gated decision rather than a guess.
     #: Not in :data:`MODEL_OPERATIONS` -- a model cannot add phases.
@@ -68,7 +70,12 @@ class OperationKind(StrEnum):
 
 #: What a model may ask for. Everything else is the server's.
 MODEL_OPERATIONS: frozenset[OperationKind] = frozenset(
-    {OperationKind.DROP_PHASE, OperationKind.ADD_DELIVERABLE, OperationKind.SET_DISCIPLINES}
+    {
+        OperationKind.DROP_PHASE,
+        OperationKind.ADD_DELIVERABLE,
+        OperationKind.SET_DISCIPLINES,
+        OperationKind.SET_MODEL,
+    }
 )
 
 ROUTE_SELECTION_PHASE_ID = "route_selection"
@@ -126,6 +133,8 @@ class Operation:
             return f"drop phase '{self.phase_id}'"
         if self.kind is OperationKind.ADD_DELIVERABLE:
             return f"require '{self.value}' from phase '{self.phase_id}'"
+        if self.kind is OperationKind.SET_MODEL:
+            return f"run phase '{self.phase_id}' on model {self.value}"
         return f"assign {self.value} to phase '{self.phase_id}'"
 
 
@@ -225,6 +234,20 @@ def parse_operations(raw: Any) -> list[Operation]:
     return operations
 
 
+def _model_ref_ok(ref: str) -> bool:
+    from orchestrator.harness.providers.routing import (
+        RoutingConfigError,
+        parse_route_ref,
+        validate_route_ref,
+    )
+
+    try:
+        validate_route_ref(parse_route_ref(ref, "model"), "model")
+    except RoutingConfigError:
+        return False
+    return True
+
+
 def apply_operations(
     base: FlowDefinition, operations: list[Operation]
 ) -> tuple[FlowDefinition, list[Operation]]:
@@ -239,6 +262,7 @@ def apply_operations(
     dropped: set[str] = set()
     extra_deliverables: dict[str, list[str]] = {}
     disciplines: dict[str, list[str]] = {}
+    models: dict[str, str] = {}
     applied: list[Operation] = []
     add_route_selection = False
 
@@ -264,6 +288,15 @@ def apply_operations(
                 continue
             extra_deliverables.setdefault(op.phase_id, []).append(artifact)
             applied.append(op)
+        elif op.kind is OperationKind.SET_MODEL:
+            ref = str(op.value or "").strip()
+            if not _model_ref_ok(ref):
+                # Same leniency as an unknown phase: a model that names a pair
+                # that cannot work loses that one change, not the proposal.
+                logger.info("flow_generator_bad_phase_model", phase=op.phase_id, model=ref)
+                continue
+            models[op.phase_id] = ref
+            applied.append(op)
         elif op.kind is OperationKind.SET_DISCIPLINES:
             value = op.value if isinstance(op.value, list) else []
             names = [str(v).strip() for v in value if str(v).strip()]
@@ -283,6 +316,8 @@ def apply_operations(
             add_route_selection = False
         added = extra_deliverables.get(phase.id, [])
         assigned = disciplines.get(phase.id)
+        if phase.id in models:
+            phase = replace(phase, model=models[phase.id])
         if not added and assigned is None:
             phases.append(phase)
             continue
@@ -309,6 +344,7 @@ def apply_operations(
                 enforce_deliverables=phase.enforce_deliverables,
                 gate=phase.gate,
                 disciplines=tuple(assigned) if assigned is not None else phase.disciplines,
+                model=phase.model,
             )
         )
 

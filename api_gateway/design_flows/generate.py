@@ -98,6 +98,9 @@ only changes that exist are:
   drop_phase        — the phase does not apply to this product at all
   add_deliverable   — require an artifact from a phase, so its gate demands it
   set_disciplines   — the engineering disciplines a phase fans out into
+  set_model         = run one phase on a named "provider:model" (use only when
+                      the intent or project context asks for it; otherwise
+                      phases are routed by role and you leave this alone)
 
 There is no operation to remove a gate, remove a deliverable, or relax a
 check. Tailoring may make a flow stricter, never laxer. If a phase is
@@ -114,7 +117,9 @@ Reply with ONLY JSON:
     {{"op": "add_deliverable", "phase": "<phase id>", "value": "<artifact type>",
       "rationale": "<why this product needs that evidence>"}},
     {{"op": "set_disciplines", "phase": "<phase id>", "value": ["mechanical", "electronics"],
-      "rationale": "<why these disciplines>"}}
+      "rationale": "<why these disciplines>"}},
+    {{"op": "set_model", "phase": "<phase id>", "value": "anthropic:claude-opus-4-8",
+      "rationale": "<why this phase needs that model>"}}
   ]}}
 
 Every operation needs a rationale. An operation without one is discarded.

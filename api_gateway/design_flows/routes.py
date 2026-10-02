@@ -76,6 +76,8 @@ class PhaseView(BaseModel):
     requiredDeliverables: list[str] = Field(default_factory=list)  # noqa: N815
     enforceDeliverables: bool = True  # noqa: N815
     disciplines: list[str] = Field(default_factory=list)
+    #: FORGE-477: "provider:model" this phase runs on, or null to route by role.
+    model: str | None = None
     gate: GateView | None = None
 
 
@@ -133,6 +135,7 @@ def _phase_view(phase: object) -> PhaseView:
         requiredDeliverables=list(phase.required_deliverables),
         enforceDeliverables=phase.enforce_deliverables,
         disciplines=list(phase.disciplines),
+        model=phase.model,
         gate=(
             None
             if gate is None
@@ -569,6 +572,7 @@ class EditPhase(BaseModel):
     requiredDeliverables: list[str] = Field(default_factory=list)  # noqa: N815
     enforceDeliverables: bool = True  # noqa: N815
     disciplines: list[str] = Field(default_factory=list)
+    model: str | None = None
     gate: EditGate | None = None
 
 
@@ -617,6 +621,7 @@ def _definition_from(body: EditFlowRequest) -> FlowDefinition:
                 required_deliverables=tuple(p.requiredDeliverables),
                 enforce_deliverables=p.enforceDeliverables,
                 disciplines=tuple(p.disciplines),
+                model=p.model or None,
                 gate=(
                     None
                     if p.gate is None
