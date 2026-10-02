@@ -94,10 +94,11 @@ class TestAlertingRules:
         # + 2 design-flow engine (FORGE-401)
         # + 2 code staleness (FORGE-411)
         # + 1 provider fallback sustained (FORGE-468)
-        # + 2 held approvals not closed / expiring by deadline (FORGE-466).
+        # + 2 held approvals not closed / expiring by deadline (FORGE-466)
+        # + 1 approval gate refused with no Temporal runtime (FORGE-469).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 34
+        assert len(rules) == 35
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -115,11 +116,12 @@ class TestAlertingRules:
             )
 
     def test_six_critical_rules(self) -> None:
-        """7 critical: 3 original + 3 fleet + 1 design-flow engine (FORGE-401)."""
+        """8 critical: 3 original + 3 fleet + 1 design-flow engine (FORGE-401)
+        + 1 approval gate without a Temporal runtime (FORGE-469)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         critical = [r for r in rules if r["labels"]["severity"] == "critical"]
-        assert len(critical) == 7
+        assert len(critical) == 8
 
     def test_seven_warning_rules(self) -> None:
         # 17 warning: 5 original + 2 fleet + 2 retrieval-quality
@@ -159,6 +161,9 @@ class TestAlertingRules:
                 # fall back to a non-durable engine -- so this is an outage
                 # with a hard 503, not a degradation.
                 "DesignFlowEngineUnavailable",
+                # FORGE-469: a worker without temporalio is refusing every
+                # human gate it reaches (it used to approve them silently).
+                "ApprovalGateNoTemporalRuntime",
             ]
         )
 

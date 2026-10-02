@@ -992,6 +992,17 @@ All tool adapters run in Docker containers with strict isolation:
 | Commit to Twin | Blocked | Requires explicit approval |
 | Execute tools | Allowed (sandboxed) | — |
 
+**Approval gates fail closed (FORGE-469).** The orchestrator's
+`wait_for_approval` activity (used by `HardwareDesignWorkflow`) needs a
+Temporal runtime to wait for a human decision. When `temporalio` cannot be
+imported it raises `ApprovalRuntimeUnavailableError` and the run fails; it
+never approves. It used to return an approval from `approver_id="auto"`, so a
+missing dependency silently passed every human gate. Each refusal logs
+`approval_activity_no_runtime` at error level, increments
+`metaforge_approval_gate_no_runtime_total{required_role}`, and fires the
+critical `ApprovalGateNoTemporalRuntime` alert. Tests that need a decided gate
+inject an explicit test double rather than relying on a missing runtime.
+
 ### Data Locality
 
 MetaForge is local-first:

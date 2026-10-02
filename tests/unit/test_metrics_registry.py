@@ -59,7 +59,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 5 harness (production-harness audit follow-up)
         # + 5 MCP (FORGE-379, FORGE-411) + 3 design-flow (FORGE-401)
         # + 1 provider fallback (FORGE-468) + 1 approval resolution (FORGE-466)
-        assert len(all_metrics) == 60
+        # + 1 approval gate without runtime (FORGE-469)
+        assert len(all_metrics) == 61
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
