@@ -2062,6 +2062,39 @@ class UnifiedMcpServer:
             return {"available": False, "reason": str(exc)}
 
     @staticmethod
+    async def _design_flow_worker_report() -> dict[str, Any]:
+        """Is a worker polling the design-flow task queue (FORGE-475)."""
+        import os
+
+        if (os.environ.get("METAFORGE_FLOW_ENGINE") or "").strip().lower() == "in_process":
+            return {"available": True, "status": "not_required", "engine": "in_process"}
+        try:
+            from orchestrator.design_flow.launcher import connect_temporal
+            from orchestrator.design_flow.temporal_flow import TASK_QUEUE
+            from orchestrator.design_flow.worker_presence import describe_pollers
+            from orchestrator.temporal_worker import temporal_host, temporal_namespace
+
+            client = await asyncio.wait_for(
+                connect_temporal(temporal_host(), temporal_namespace()), timeout=5.0
+            )
+            pollers = await asyncio.wait_for(describe_pollers(client, TASK_QUEUE), timeout=5.0)
+        except Exception as exc:  # noqa: BLE001 - health must never fail on the probe
+            return {"available": False, "status": "unknown", "reason": str(exc)}
+        if not pollers:
+            return {
+                "available": True,
+                "status": "absent",
+                "task_queue": TASK_QUEUE,
+                "reason": f"no worker is polling {TASK_QUEUE!r}; design-flow runs are refused",
+            }
+        return {
+            "available": True,
+            "status": "ok",
+            "task_queue": TASK_QUEUE,
+            "pollers": len(pollers),
+        }
+
+    @staticmethod
     def _model_routing_report() -> dict[str, Any]:
         from orchestrator.harness.providers.routing import effective_routing
 
@@ -2190,6 +2223,9 @@ class UnifiedMcpServer:
             "llm_usage_24h": self._llm_usage_report(),
             # FORGE-477: which model each role is routed to.
             "model_routing": self._model_routing_report(),
+            # FORGE-475: whether anything polls the design-flow queue. Runs
+            # are refused without one, and this is where an operator sees why.
+            "design_flow_worker": await self._design_flow_worker_report(),
         }
         if unreachable:
             # Named at the top level as well as per-adapter: a caller that

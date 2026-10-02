@@ -86,6 +86,9 @@ class _RecordingLauncher:
 
     started: list[str] = []
 
+    async def require_worker(self) -> None:
+        return None
+
     async def start(self, *, run_id: str, **_: Any) -> None:
         self.started.append(run_id)
 

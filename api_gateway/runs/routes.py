@@ -37,6 +37,7 @@ from orchestrator.design_flow.frozen import freeze_flow
 from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
 from orchestrator.design_flow.launcher import (
     DesignFlowLauncher,
+    DesignFlowWorkerUnavailableError,
     TemporalUnavailableError,
     connect_temporal,
 )
@@ -547,6 +548,7 @@ async def _start_on_temporal(run_id: str) -> None:
         run.request["flow_version"] = frozen.version
         run.request["flow_content_hash"] = frozen.content_hash
         launcher = await get_flow_launcher()
+        await launcher.require_worker()
         await launcher.start(
             run_id=run_id,
             goal=str(run.request.get("goal") or "").strip(),
@@ -573,6 +575,7 @@ async def _start_on_temporal(run_id: str) -> None:
     run.request["flow_version"] = frozen.version
     run.request["flow_content_hash"] = frozen.content_hash
     launcher = await get_flow_launcher()
+    await launcher.require_worker()
     await launcher.start(
         run_id=run_id,
         goal=str(run.request.get("goal") or "").strip(),
@@ -625,6 +628,14 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
                 _store.delete(run.id)
                 logger.warning("design_flow_invalid", run_id=run.id, error=str(exc))
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except DesignFlowWorkerUnavailableError as exc:
+                # FORGE-475: Temporal answers but nothing polls the queue, so
+                # the run would be accepted and never advance. Refuse it.
+                _store.delete(run.id)
+                logger.error(
+                    "design_flow_worker_unavailable", queue=exc.task_queue, reason=exc.reason
+                )
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
             except TemporalUnavailableError as exc:
                 # No run is left behind. A record sitting in `queued` that
                 # nothing will ever pick up is worse than no record: it reads
@@ -726,21 +737,43 @@ class FlowRunState(BaseModel):
     #: Run-wide token and cost totals, with per-phase, per-role and per-model
     #: breakdowns (FORGE-476).
     usage: dict[str, Any] | None = None
+    #: The flow this run was frozen on (FORGE-475), read from the run record so
+    #: it is present even when the engine cannot be queried.
+    flow: str | None = None
+    flowVersionId: str | None = None  # noqa: N815
+    flowVersion: str | None = None  # noqa: N815
+    flowContentHash: str | None = None  # noqa: N815
+    #: Why the run failed, when the engine reports it did.
+    error: str | None = None
 
 
-def _run_definition(run: Run) -> FlowDefinition:
+def _frozen_identity(run: Run) -> dict[str, Any]:
+    """The run's own frozen version, from its record."""
+    request = run.request
+    return {
+        "flow": request.get("flow"),
+        "flowVersionId": request.get("flow_version_id"),
+        "flowVersion": request.get("flow_version"),
+        "flowContentHash": request.get("flow_content_hash"),
+    }
+
+
+def _run_definition(run: Run) -> FlowDefinition | None:
     """The phases a run was started on, for display.
 
     A run on a stored version shows that version's phases (FORGE-474), not
     the template it descends from: a dropped phase must not reappear here as
     ``pending``.
+
+    ``None`` when the run names a version that cannot be read back (FORGE-475):
+    showing the base template instead reads as "the wrong flow is running".
     """
     version_id = run.request.get("flow_version_id")
     if version_id:
         try:
             return definition_from_frozen(get_version_store().get(str(version_id)).frozen)
         except VersionNotFoundError:
-            pass
+            return None
     flow_id = run.request.get("flow") or DEFAULT_FLOW_ID
     try:
         return get_flow(str(flow_id))
@@ -763,7 +796,9 @@ async def get_flow_state(run_id: str) -> FlowRunState:
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
 
-    ordered = list(_run_definition(run).phases)
+    definition = _run_definition(run)
+    ordered = list(definition.phases) if definition is not None else []
+    identity = _frozen_identity(run)
     usage = run_usage(run_id)
     by_phase: dict[str, Any] = (usage or {}).get("by_phase", {})
 
@@ -773,6 +808,7 @@ async def get_flow_state(run_id: str) -> FlowRunState:
             status=str(run.status),
             live=False,
             detail="this run is not a design flow, so it has no phases",
+            **identity,
         )
 
     try:
@@ -801,18 +837,29 @@ async def get_flow_state(run_id: str) -> FlowRunState:
                 f"the workflow could not be queried ({exc}). A query is answered by a "
                 "worker, so this usually means the design-flow worker is not running. "
                 "Phase status is unknown, not idle."
+                + (
+                    ""
+                    if definition is not None
+                    else f" The run's frozen version {identity['flowVersionId']} could not "
+                    "be read back, so no phases are listed."
+                )
             ),
+            **identity,
         )
 
     done = {entry["phase"]: entry for entry in state.get("completed", [])}
     current = state.get("current_phase")
     awaiting = state.get("awaiting_gate")
+    run_state = str(state.get("status") or "")
+    run_error = state.get("error") or None
 
     phases: list[FlowPhaseState] = []
     for phase in ordered:
         finished = done.get(phase.id)
         if finished is not None:
             status = "passed"
+        elif phase.id == current and run_state == "failed":
+            status = "failed"
         elif phase.id == current and awaiting:
             status = "awaiting_gate"
         elif phase.id == current:
@@ -824,7 +871,11 @@ async def get_flow_state(run_id: str) -> FlowRunState:
                 id=phase.id,
                 title=phase.title,
                 status=status,
-                summary=str((finished or {}).get("summary") or ""),
+                summary=(
+                    str(run_error)
+                    if status == "failed" and run_error
+                    else str((finished or {}).get("summary") or "")
+                ),
                 artifacts=list((finished or {}).get("artifacts") or []),
                 gate=phase.gate.name if phase.gate else None,
                 disciplines=list(phase.disciplines),
@@ -841,6 +892,8 @@ async def get_flow_state(run_id: str) -> FlowRunState:
         events=events,
         live=True,
         usage=usage,
+        error=str(run_error) if run_error else None,
+        **identity,
     )
 
 
