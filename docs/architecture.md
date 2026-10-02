@@ -177,6 +177,32 @@ promotion and guarded `ect.approve` against a *blank* approver, which is not
 the same as guarding it against a supplied one. Both now read the approver
 from the approval record, and both are in `HUMAN_AUTHORITY_TOOLS`.
 
+### The run record follows the workflow (FORGE-485)
+
+The gateway's run record is a cache of the workflow. A Temporal run used to
+stay `queued` for its whole life (the workflow runs in another process and
+never told the gateway), and the ledger behind the record only remembers
+`queued` for a restored run. Writes made by a run's phases are checked against
+the record, so they were refused with "run is queued, not running", and a run
+parked at a gate read `queued` after a restart and `POST /v1/runs/{id}/approval` returned
+409 (`cannot transition queued -> running`), so no one could answer it.
+
+The record is set `running` as soon as the workflow starts. For a live run on
+the Temporal engine it is then reconciled from the workflow, at all times and
+not only after a restart: by a background pass every few seconds, on `GET /v1/runs/{id}`, on `GET /v1/runs`, on the approval route,
+and at gateway start-up (in the background, so a slow Temporal never delays
+boot). Status, and for a gate the `approval_reason` (the gate name and its
+check summary), are taken from the workflow's `state` query. The approval route
+reconciles first and then signals the workflow, so a decision is accepted
+whenever the workflow is waiting at a gate, whatever the local record said.
+The approver is read from the request (FORGE-393) and relayed with the signal.
+
+Reconciling is read-only toward Temporal and never guesses: if the workflow
+cannot be queried (no worker, engine down) the record is left untouched, and
+an approval against a record that still says `queued` is refused rather than
+sent to a gate nobody has seen. A run already terminal in the record is never
+reopened, and in-process runs are not reconciled.
+
 ### Watching a run (FORGE-396)
 
 `GET /v1/runs/{id}/flow-state` returns phase-by-phase state, queried from the

@@ -276,6 +276,48 @@ class InMemoryRunStore:
         run.approver_verified = approver_verified
         return run
 
+    def reconcile(
+        self,
+        run_id: str,
+        status: RunStatus,
+        *,
+        approval_reason: str | None = None,
+        error: str | None = None,
+    ) -> Run:
+        """Align a run's record with what its engine reports (FORGE-485).
+
+        Not a transition. The state machine describes what *this process*
+        may do next; this records what already happened elsewhere, in a
+        workflow that kept running while the gateway was down. A restored
+        record is ``queued`` because that is all the ledger remembered, and
+        ``queued -> awaiting_approval`` is illegal, which is precisely why a
+        gate could not be answered. The engine is the authority, so its
+        answer is applied without validation.
+
+        A run already in a terminal state is never moved: the record that
+        ended it is the more specific one. Nothing is notified when nothing
+        changed, so polling this does not flood the SSE stream or the ledger.
+        """
+        run = self.get(run_id)
+        if run.is_terminal:
+            return run
+        if (
+            run.status is status
+            and run.approval_reason == approval_reason
+            and (error is None or run.error == error)
+        ):
+            return run
+        run.status = status
+        run.updated_at = self._clock()
+        if run.history[-1:] != [status]:
+            run.history.append(status)
+        run.approval_reason = approval_reason if status is RunStatus.AWAITING_APPROVAL else None
+        if error is not None:
+            run.error = error
+        logger.info("run_reconciled", run_id=run_id, status=status.value)
+        self._notify(run)
+        return run
+
     def delete(self, run_id: str) -> None:
         """Remove a run outright.
 

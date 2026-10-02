@@ -164,6 +164,9 @@ class DesignFlowWorkflow:
         self._current_phase: str | None = None
         self._status = "queued"
         self._gate_open: str | None = None
+        #: Why the gate is open (the gate check's own summary), so a gateway
+        #: that restarted while the run waited can show it (FORGE-485).
+        self._gate_reason: str = ""
         self._answer: GateAnswer | None = None
         self._change: ChangeRequest | None = None
         self._completed: list[dict[str, Any]] = []
@@ -202,6 +205,7 @@ class DesignFlowWorkflow:
             "phase_index": self._phase_index,
             "current_phase": self._current_phase,
             "awaiting_gate": self._gate_open,
+            "gate_reason": self._gate_reason if self._gate_open else "",
             "completed": list(self._completed),
             "error": self._error,
         }
@@ -326,6 +330,7 @@ class DesignFlowWorkflow:
             )
 
         self._gate_open = gate.name
+        self._gate_reason = check.reason
         self._status = "awaiting_approval"
         self._answer = None
         self._record("gate_opened", phase=phase.id, detail=check.reason)
