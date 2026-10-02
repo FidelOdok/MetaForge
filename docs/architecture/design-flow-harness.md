@@ -270,6 +270,19 @@ checks which of those types the phase actually recorded during its window:
   gate** with the missing list, rather than silently passing. The Design gate
   cannot pass without a committed, viewable `cad_model`.
 
+Each required type gets a specific "which tool, which arguments" hint in the
+phase prompt (`deliverable_hints` in `api_gateway/runs/flow_brain.py`), keyed by
+the same type string the gate counts (`WorkProductType` value). For example `prd`
+is `twin.record_document(document_type='prd')`, `constraint_set` is
+`twin.record_constraint_set`, and `simulation_result` / `load_case` are
+`twin.record_document` with that `document_type`. A type no MCP tool can record
+(`schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `manufacturing_file`,
+`test_plan`, `test_result`, `verification_report`) says so and tells the model
+not to substitute another type. `twin.record_document` is in `PHASE_COMMON` (`mcp_core/profiles.py`), so every
+phase carries it. A unit test fails when a type a template requires
+or expects, or that tailoring can add, has no hint, so a tailored deliverable can
+no longer fall back to the generic "record it into the twin" line (FORGE-494).
+
 This makes completeness machine-enforced and quality human-judged: the machine
 guarantees the deliverable exists in the twin; the human reviews whether it's
 right.

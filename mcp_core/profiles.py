@@ -149,7 +149,10 @@ PROFILES: dict[str, frozenset[str]] = {
         "freecad.create_primitive",
         "freecad.create_sketch",
         "freecad.describe_session",
-        "freecad.execute_code",
+        # FORGE-494: freecad.execute_code is out of this profile. The design-flow
+        # service caller is refused it (FORGE-492, mcp_core/annotations.py keeps
+        # it destructive), so it was a dead slot, and the slot makes room for
+        # twin.record_document in PHASE_COMMON at PHASE_MCP_BUDGET.
         "freecad.export_model",
         "freecad.fillet",
         "freecad.measure",
@@ -236,6 +239,9 @@ DEFAULT_PROFILE = "core"
 PHASE_COMMON: frozenset[str] = _BASE | {
     "twin.query_cypher",
     "twin.record_constraint_set",
+    # FORGE-494: records prd, simulation_result and load_case, which gates
+    # require in phases whose profile otherwise lacks a document recorder.
+    "twin.record_document",
     "twin.record_engineering_entity",
 }
 

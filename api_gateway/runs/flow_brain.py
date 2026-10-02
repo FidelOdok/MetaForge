@@ -51,6 +51,104 @@ def _report_phase_tools(phase: Phase) -> frozenset[str]:
     return tools_for_disciplines(phase.disciplines)
 
 
+#: The twin work-product type each hint produces is the key, spelled exactly as
+#: ``gate_eval.ProjectGateEvaluator.present_types`` reports it (the
+#: ``WorkProductType`` value), so following a hint satisfies the gate.
+def deliverable_hints(pid: str) -> dict[str, str]:
+    """Per-deliverable "which tool, which arguments" hints (FORGE-494).
+
+    Every type a template requires or expects, or that tailoring's
+    ``add_deliverable`` is likely to add, has an entry; a type with no
+    model-callable recorder says so instead of inviting a wrong-typed record.
+    """
+    no_tool = (
+        "no MCP tool records this type, the platform's own phase handler produces it; "
+        "do NOT record a different type (decision, entity, documentation) in its place"
+    )
+    return {
+        "design_decision": (
+            "record it with the record-decision tool (title, rationale, alternatives), "
+            f"project_id={pid}"
+        ),
+        "intent": (
+            "record ONE with the record-engineering-entity tool "
+            "(entity_type='intent', statement=why this product exists, "
+            f"give it a short title so later phases can reference it), project_id={pid}"
+        ),
+        "stakeholder_need": (
+            "record at least one with the record-engineering-entity tool "
+            "(entity_type='stakeholder_need', statement=what the stakeholder needs, "
+            "parent_refs=[the intent's title], relation='motivates'), "
+            f"project_id={pid}"
+        ),
+        "cad_model": (
+            "author the geometry with the FreeCAD authoring tools, then PERSIST it "
+            f"with the commit-geometry tool (project_id={pid}) so it becomes a "
+            "viewable cad_model in the twin — a described-but-uncommitted model does "
+            "NOT count"
+        ),
+        "prd": (
+            "record the product requirements document with the record-document tool "
+            "(document_type='prd', name=its title, content=the markdown body), "
+            f"project_id={pid}; recording it as an engineering entity or a "
+            "decision does NOT count"
+        ),
+        "constraint_set": (
+            "record the quantified requirements with the record-constraint-set tool "
+            "(title, constraints=[{name, metric, operator, limit, unit}, ...], at least "
+            f"one entry), project_id={pid}; one call creates the constraint_set"
+        ),
+        "simulation_result": (
+            "run the analysis (calculix run-fea, then extract-results), then record the "
+            "outcome with the record-document tool (document_type='simulation_result', "
+            "name, content=the extract-results JSON summary, metadata=the same summary "
+            "fields, source_part_node_ids=[the analysed cad_model node id]), "
+            f"project_id={pid}"
+        ),
+        "load_case": (
+            "record it with the record-document tool (document_type='load_case', name, "
+            "content=JSON of the boundary conditions, metadata={material, fixed_node_set, "
+            f"load_node_set, load_force_n=[x, y, z]}}), project_id={pid}"
+        ),
+        "documentation": (
+            "record it with the record-document tool "
+            f"(document_type='documentation', name, content=markdown), project_id={pid}"
+        ),
+        "robot_description": (
+            "record the URDF/SDF export with the record-document tool "
+            "(document_type='robot_description', name, content=the export text, "
+            "format='urdf', source_part_node_ids=[the cad_model node ids]), "
+            f"project_id={pid}"
+        ),
+        "bom": (
+            "record each chosen part with the record-component-selection tool "
+            "(mpn, manufacturer, category, purchase_unit, quantity), "
+            f"project_id={pid}; the calls build the project's bom"
+        ),
+        "pinmap": (
+            "derive it with the create-firmware-scaffold tool "
+            f"(work_product_id=a work product with metadata.assembly.joints), project_id={pid}; "
+            "the same call also records the firmware_source"
+        ),
+        "firmware_source": (
+            "derive it with the create-firmware-scaffold tool "
+            f"(work_product_id=a work product with metadata.assembly.joints), project_id={pid}; "
+            "the same call also records the pinmap"
+        ),
+        "schematic": f"{no_tool} (Phase 1 KiCad is read-only)",
+        "pcb_layout": f"{no_tool} (Phase 1 KiCad is read-only)",
+        "gerber": f"{no_tool}; the kicad export-gerber tool writes a file, not a twin node",
+        "pick_and_place": no_tool,
+        "manufacturing_file": no_tool,
+        "test_plan": (
+            f"{no_tool}; the generate-test-plan tool records verification_case entities, "
+            "not a test_plan"
+        ),
+        "test_result": no_tool,
+        "verification_report": no_tool,
+    }
+
+
 class ReActPhaseBrain:
     """A :class:`~orchestrator.design_flow.executor.PhaseBrain` backed by ReAct.
 
@@ -124,29 +222,7 @@ class ReActPhaseBrain:
         if not phase.required_deliverables:
             return ""
         pid = context.project_id or "<the project>"
-        hints = {
-            "design_decision": (
-                "record it with the record-decision tool (title, rationale, alternatives), "
-                f"project_id={pid}"
-            ),
-            "intent": (
-                "record ONE with the record-engineering-entity tool "
-                "(entity_type='intent', statement=why this product exists, "
-                f"give it a short title so later phases can reference it), project_id={pid}"
-            ),
-            "stakeholder_need": (
-                "record at least one with the record-engineering-entity tool "
-                "(entity_type='stakeholder_need', statement=what the stakeholder needs, "
-                "parent_refs=[the intent's title], relation='motivates'), "
-                f"project_id={pid}"
-            ),
-            "cad_model": (
-                "author the geometry with the FreeCAD authoring tools, then PERSIST it "
-                f"with the commit-geometry tool (project_id={pid}) so it becomes a "
-                "viewable cad_model in the twin — a described-but-uncommitted model does "
-                "NOT count"
-            ),
-        }
+        hints = deliverable_hints(pid)
         lines = "\n".join(
             f"  - {d}: {hints.get(d, 'record it into the twin, scoped to the project')}"
             for d in phase.required_deliverables
