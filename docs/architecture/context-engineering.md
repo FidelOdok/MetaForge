@@ -362,6 +362,43 @@ bootstraps (gateway and MCP sidecar). Omitting it left
 `POST /v1/memory/search` and `GET /v1/memory/components/{name}`
 answering 503 on every deployment.
 
+## Context budget (FORGE-479)
+
+Every model call re-sends the tool schemas, the brief and every earlier tool
+result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
+(about 20k per call) with 121 tools on the connection. Three limits cut that.
+
+- **Large tool results become a handle.** A result whose rendered JSON is over
+  `METAFORGE_TOOL_RESULT_INLINE_CHARS` (default 8,000) is stored on the
+  runtime (`orchestrator/harness/result_handles.py`) and the model receives a
+  short summary (key names, list lengths, the first items, scalar fields such
+  as `total`) plus a `result_handle`. The `read_tool_result` native tool reads
+  more on demand, by `offset`/`limit` window or by one top-level `key`, capped
+  at the same limit so a read cannot undo the saving. The recorded trace step
+  keeps the full result. An evicted or unknown handle is an error that says
+  so. This covers the native tool-calling loop; the JSON-ReAct fallback keeps
+  its existing observation truncation.
+- **The project brief is capped.** `build_project_brief` stops at
+  `METAFORGE_BRIEF_CHAR_LIMIT` characters (default 10,000), keeps the newest
+  work products (FORGE-244 ordering), re-appends the closing `project_id`
+  directives, and points at `metaforge://twin/brief/<project_id>`, which
+  serves the uncapped brief.
+- **Design-flow phases carry a scoped tool set.** `ReActPhaseBrain` passes
+  `mcp_core.profiles.tools_for_disciplines(phase.disciplines)`: a common set
+  (project, session, twin reads and records, `twin.record_engineering_entity`,
+  `twin.record_constraint_set`, `twin.query_cypher`) plus the profile of each
+  discipline the phase names (`mechanical` maps to the new
+  `mechanical_product` profile, `simulation`, `electronics` and `supply_chain`
+  to theirs). A phase with no discipline gets only the common set, where it
+  used to get every tool. With `search_tools` and `read_tool_result` the array
+  stays at 40 or fewer, and `search_tools` stops registering once the registry
+  reaches that cap. A test fails if any template phase would overflow.
+
+Measurement: `tests/unit/test_context_budget.py::test_phase_prompt_tokens_before_and_after`
+scripts one 3-call phase (two large reads, then an answer) against a 121-tool
+bridge, with and without the limits, and reads prompt tokens back from the
+FORGE-476 usage store.
+
 ## Observability hooks
 
 - `context.assemble`, `context.collect_knowledge`,

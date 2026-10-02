@@ -44,7 +44,7 @@ class UnknownProfileError(ValueError):
 
 # Shared by every profile. Deliberately small — it is the tax each domain
 # profile pays before it gets any of its own tools, so every entry here has
-# to earn its place in all five.
+# to earn its place in every profile.
 _BASE: frozenset[str] = frozenset(
     {
         # FORGE-418: the entry point. `/metaforge:use` returns the project
@@ -129,6 +129,40 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.commit_geometry",
         "twin.stage_work_product_file",
     },
+    # A mechanical product end to end (FORGE-479): the stateful FreeCAD session
+    # surface (open, sketch, pad/pocket, features, assembly, export, close),
+    # geometry commit, component selection and the records a design phase
+    # leaves behind. `core` and `mechanical` cover neither: the shelf run found
+    # the FreeCAD session tools, component selection and flow.* in no profile.
+    # `twin.attempt_promotion` is deliberately absent: promotion is a human
+    # authority, and an agent profile that carried it would let a run promote
+    # its own work.
+    "mechanical_product": _BASE
+    | {
+        "component.search_parametric",
+        "freecad.add_assembly_joint",
+        "freecad.add_part_to_assembly",
+        "freecad.boolean",
+        "freecad.chamfer",
+        "freecad.close_session",
+        "freecad.create_body",
+        "freecad.create_primitive",
+        "freecad.create_sketch",
+        "freecad.describe_session",
+        "freecad.execute_code",
+        "freecad.export_model",
+        "freecad.fillet",
+        "freecad.measure",
+        "freecad.open_session",
+        "freecad.pad_sketch",
+        "freecad.pocket_sketch",
+        "freecad.transform_object",
+        "twin.commit_geometry",
+        "twin.record_component_selection",
+        "twin.record_constraint_set",
+        "twin.record_engineering_entity",
+        "twin.stage_work_product_file",
+    },
     # Prediction and its evidence. Includes the mesh and geometry-property
     # tools because a load case is set up against real geometry, not against
     # a description of it.
@@ -196,6 +230,67 @@ PROFILES: dict[str, frozenset[str]] = {
 
 DEFAULT_PROFILE = "core"
 
+#: Tools every design-flow phase carries: the shared base plus the records the
+#: early phases (intent, needs, requirements) exist to produce, which no
+#: discipline profile includes.
+PHASE_COMMON: frozenset[str] = _BASE | {
+    "twin.query_cypher",
+    "twin.record_constraint_set",
+    "twin.record_engineering_entity",
+}
+
+#: The profile whose own tools a discipline adds to :data:`PHASE_COMMON`.
+#: A discipline with no entry adds nothing: its phase records through the
+#: common tools.
+DISCIPLINE_PROFILES: dict[str, str] = {
+    "mechanical": "mechanical_product",
+    "simulation": "simulation",
+    "electronics": "electronics",
+    "supply_chain": "electronics",
+    "robotics": "robotics",
+}
+
+#: Slots a phase turn keeps back for the harness's own native tools
+#: (``search_tools`` and ``read_tool_result``), so the whole array stays
+#: within :data:`MAX_TOOLS`.
+PHASE_NATIVE_RESERVE = 2
+PHASE_MCP_BUDGET = MAX_TOOLS - PHASE_NATIVE_RESERVE
+
+
+def tools_for_disciplines(disciplines: tuple[str, ...] | list[str]) -> frozenset[str]:
+    """The MCP tool ids a design-flow phase carries (FORGE-479).
+
+    :data:`PHASE_COMMON` plus the profile of each discipline the phase names.
+    An empty tuple (intent, needs, requirements ...) gets the common set, not
+    every tool. The result is always within :data:`PHASE_MCP_BUDGET`: a
+    discipline mix that would overflow is a decision for the template author,
+    so the overflow is dropped in sorted order and the caller is told through
+    :func:`phase_overflow` rather than silently.
+    """
+    wanted: set[str] = set(PHASE_COMMON)
+    for d in disciplines:
+        profile = DISCIPLINE_PROFILES.get(d.lower())
+        if profile is not None:
+            wanted |= PROFILES[profile]
+    if len(wanted) <= PHASE_MCP_BUDGET:
+        return frozenset(wanted)
+    keep = set(PHASE_COMMON)
+    for tool in sorted(wanted - keep):
+        if len(keep) >= PHASE_MCP_BUDGET:
+            break
+        keep.add(tool)
+    return frozenset(keep)
+
+
+def phase_overflow(disciplines: tuple[str, ...] | list[str]) -> list[str]:
+    """Tools :func:`tools_for_disciplines` had to drop for this mix (usually none)."""
+    wanted: set[str] = set(PHASE_COMMON)
+    for d in disciplines:
+        profile = DISCIPLINE_PROFILES.get(d.lower())
+        if profile is not None:
+            wanted |= PROFILES[profile]
+    return sorted(wanted - tools_for_disciplines(disciplines))
+
 
 def profile_names() -> list[str]:
     return sorted(PROFILES)
@@ -207,3 +302,8 @@ def tools_for_profile(name: str) -> list[str]:
         return sorted(PROFILES[name])
     except KeyError:
         raise UnknownProfileError(name, profile_names()) from None
+
+
+def unmapped_disciplines(disciplines: tuple[str, ...] | list[str]) -> list[str]:
+    """Disciplines with no entry in :data:`DISCIPLINE_PROFILES` (common set only)."""
+    return [d for d in disciplines if d.lower() not in DISCIPLINE_PROFILES]

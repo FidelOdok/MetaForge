@@ -310,6 +310,17 @@ def _declares_project_id(runtime: HarnessRuntime, name: str) -> bool:
     return "project_id" in spec.input_schema.get("properties", {})
 
 
+def _model_content(runtime: HarnessRuntime, tool: str, observation: Any) -> str:
+    """The text the model receives for one tool result (FORGE-479).
+
+    Over the configured inline limit the result becomes a summary plus a
+    handle readable through ``read_tool_result``; otherwise it renders exactly
+    as before. The recorded trace step keeps the full observation either way.
+    """
+    handled = runtime.results.offer(tool, observation)
+    return handled if handled is not None else _json_safe(observation)
+
+
 async def _execute_calls(
     runtime: HarnessRuntime,
     calls: list[dict[str, Any]],
@@ -398,7 +409,7 @@ async def _execute_calls(
                 observation=observation,
                 error=observation_failure_reason(observation),
             )
-            results.append((step, _json_safe(observation), cid))
+            results.append((step, _model_content(runtime, name, observation), cid))
             continue
 
         if not cache.has(key):
@@ -427,7 +438,7 @@ async def _execute_calls(
             observation=view,
             error=observation_failure_reason(cache.get(key)),
         )
-        results.append((step, _json_safe(view), cid))
+        results.append((step, _model_content(runtime, name, view), cid))
     return results
 
 

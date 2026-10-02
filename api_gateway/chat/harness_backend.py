@@ -29,6 +29,7 @@ from api_gateway.chat.experience_adapter import record_chat_experience
 from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, resolve_project
 from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_registry
 from api_gateway.chat.tool_approvals import get_approval_store
+from mcp_core.profiles import MAX_TOOLS as PHASE_TOOL_CAP
 from observability.metrics import MetricsCollector
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
 from orchestrator.harness.compression import default_token_count, summarize_trajectory
@@ -62,6 +63,7 @@ from orchestrator.harness.providers.registry import (
 from orchestrator.harness.providers.routing import resolve_route, routing_scope
 from orchestrator.harness.providers.usage import usage_scope
 from orchestrator.harness.react import ReActStep, run_react
+from orchestrator.harness.result_handles import READER_INPUT_SCHEMA, READER_TOOL_NAME
 from orchestrator.harness.runtime import OnApprovalRequest
 from orchestrator.harness.tools import DuplicateToolError, Handler, ToolRegistry
 from skill_registry.mcp_bridge import McpBridge
@@ -291,6 +293,7 @@ async def mcp_tools_from_bridge(
     bridge: McpBridge,
     enabled: set[str] | None = None,
     domains: tuple[str, ...] | None = None,
+    tool_allowlist: frozenset[str] | None = None,
 ) -> list[tuple[str, NativeToolDef]]:
     """Adapt a provider's MCP bridge tools into harness ``NativeToolDef``s.
 
@@ -317,6 +320,12 @@ async def mcp_tools_from_bridge(
     mid-turn escape hatch for when a scoped turn genuinely needs a tool
     outside its discipline. ``None`` (the default) registers every available
     tool, unchanged from before this parameter existed.
+
+    ``tool_allowlist`` (FORGE-479), when given, is an exact set of tool ids and
+    replaces the domain logic: nothing outside it is registered, not even a
+    core adapter. Design-flow phases pass ``mcp_core.profiles
+    .tools_for_disciplines`` so a phase carries 40 tools or fewer instead of
+    every core adapter plus its skills' tools.
     """
     domain_allow: set[str] | None = None
     if domains:
@@ -338,8 +347,11 @@ async def mcp_tools_from_bridge(
         server, _, tool = tool_id.partition(".")
         if not tool:
             server, tool = "mcp", tool_id
+        if tool_allowlist is not None and tool_id not in tool_allowlist:
+            continue
         if (
-            domain_allow is not None
+            tool_allowlist is None
+            and domain_allow is not None
             and server not in _CORE_ADAPTER_SERVERS
             and tool_id not in domain_allow
         ):
@@ -388,6 +400,7 @@ def make_search_tools_tool(
     bridge: McpBridge,
     enabled: set[str] | None,
     runtime_cell: dict[str, Any],
+    max_total_tools: int | None = None,
 ) -> NativeToolDef:
     """``search_tools`` — dynamic mid-turn tool discovery (MET-747 follow-up).
 
@@ -409,6 +422,10 @@ def make_search_tools_tool(
     once the loop starts) — the caller populates
     ``runtime_cell["runtime"] = ctx.runtime`` immediately after
     ``build_agent_runtime`` returns.
+
+    ``max_total_tools`` (FORGE-479), when given, stops registration once the
+    registry holds that many tools, so the escape hatch cannot grow a
+    phase-scoped turn back past its tool budget. The instruction says so.
     """
 
     async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -422,6 +439,7 @@ def make_search_tools_tool(
         known = {t.name for t in runtime.tools.all_tools()}
         registered: list[str] = []
         already: list[str] = []
+        over_budget: list[str] = []
         for server, tdef in catalog:
             haystack = f"{tdef.name} {tdef.description}".lower()
             if query not in haystack:
@@ -442,6 +460,9 @@ def make_search_tools_tool(
                 continue
             if len(registered) >= _MAX_TOOL_SEARCH_RESULTS:
                 continue
+            if max_total_tools is not None and len(known) >= max_total_tools:
+                over_budget.append(full_name)
+                continue
             try:
                 runtime.tools.register_mcp(
                     server,
@@ -459,6 +480,16 @@ def make_search_tools_tool(
             runtime.tools.pin(full_name)
             registered.append(full_name)
             known.add(full_name)
+        if over_budget and not registered and not already:
+            return {
+                "registered": [],
+                "already_available": [],
+                "not_registered": over_budget[:_MAX_TOOL_SEARCH_RESULTS],
+                "instruction": (
+                    f"This phase is capped at {max_total_tools} tools and they are all in "
+                    "use, so these were NOT registered. Work with the tools you have."
+                ),
+            }
         if not registered and not already:
             return {
                 "registered": [],
@@ -1057,6 +1088,7 @@ async def _build_context(
     on_approval_request: OnApprovalRequest | None = None,
     approval_timeout_seconds: float | None = None,
     domains: tuple[str, ...] | None = None,
+    tool_allowlist: frozenset[str] | None = None,
 ) -> AgentContext:
     """Assemble the harness runtime with per-turn provider/model + tool selection.
 
@@ -1086,7 +1118,9 @@ async def _build_context(
     in an out-of-scope tool mid-turn if the task genuinely needs one."""
     enabled = set(enabled_tools) if enabled_tools is not None else None
     mcp_tools = (
-        await mcp_tools_from_bridge(mcp_bridge, enabled, domains) if mcp_bridge is not None else []
+        await mcp_tools_from_bridge(mcp_bridge, enabled, domains, tool_allowlist)
+        if mcp_bridge is not None
+        else []
     )
     native_tools = (
         [make_set_project_scope_tool(session_id, chat_backend)] if chat_backend is not None else []
@@ -1095,7 +1129,15 @@ async def _build_context(
     # (built_agent_runtime constructs it below) -- populated right after.
     runtime_cell: dict[str, Any] = {}
     if mcp_bridge is not None:
-        native_tools = native_tools + [make_search_tools_tool(mcp_bridge, enabled, runtime_cell)]
+        native_tools = native_tools + [
+            make_search_tools_tool(
+                mcp_bridge,
+                enabled,
+                runtime_cell,
+                max_total_tools=PHASE_TOOL_CAP if tool_allowlist is not None else None,
+            )
+        ]
+    native_tools = native_tools + [make_read_tool_result_tool(runtime_cell)]
     if chat_skills_enabled() and twin is not None and mcp_bridge is not None:
         native_tools = native_tools + await skill_tools_from_registry(
             twin=twin, mcp_bridge=mcp_bridge, session_id=session_id
@@ -1121,6 +1163,45 @@ async def _build_context(
     )
     runtime_cell["runtime"] = ctx.runtime
     return ctx
+
+
+def make_read_tool_result_tool(runtime_cell: dict[str, Any]) -> NativeToolDef:
+    """``read_tool_result``: read back a large tool result by handle (FORGE-479).
+
+    A tool result over the inline limit reaches the model as a summary plus a
+    ``result_handle`` (see ``orchestrator.harness.result_handles``). This is how
+    it gets the rest, a window or one key at a time. Like ``search_tools`` it
+    reads the live runtime out of ``runtime_cell`` at call time.
+    """
+
+    async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
+        runtime = runtime_cell.get("runtime")
+        if runtime is None:
+            raise RuntimeError("read_tool_result: runtime not ready yet")
+        handle = str(arguments.get("handle", "")).strip()
+        if not handle:
+            raise ValueError("read_tool_result: 'handle' is required")
+        key = arguments.get("key")
+        try:
+            return runtime.results.read(
+                handle,
+                offset=int(arguments.get("offset") or 0),
+                limit=int(arguments["limit"]) if arguments.get("limit") else None,
+                key=str(key) if key else None,
+            )
+        except KeyError as exc:
+            raise ValueError(str(exc.args[0])) from exc
+
+    return NativeToolDef(
+        name=READER_TOOL_NAME,
+        description=(
+            "Read a large tool result you were given a result_handle for. Pass the "
+            "handle, and either offset/limit for a window of the text or key for one "
+            "top-level field. Read only what you need; results are large on purpose."
+        ),
+        input_schema=READER_INPUT_SCHEMA,
+        handler=handler,
+    )
 
 
 # FORGE-98: a chat agent can claim a design action was performed ("Assembled
@@ -1209,6 +1290,7 @@ async def _run_chat_turn(
     approval_timeout_seconds: float | None = None,
     project_id: str | None = None,
     domains: tuple[str, ...] | None = None,
+    tool_allowlist: frozenset[str] | None = None,
 ) -> str:
     """Answer a chat message via the harness ReAct loop. Returns the reply text.
 
@@ -1250,6 +1332,7 @@ async def _run_chat_turn(
         metrics=metrics,
         approval_timeout_seconds=approval_timeout_seconds,
         domains=domains,
+        tool_allowlist=tool_allowlist,
     )
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store
     # selection → env), not the raw arg — see resolve_active_provider.
@@ -1604,6 +1687,7 @@ async def run_chat_turn_streaming(
     wall_clock_seconds: float | None = None,
     project_id: str | None = None,
     domains: tuple[str, ...] | None = None,
+    tool_allowlist: frozenset[str] | None = None,
 ) -> str:
     """Run the agent loop, then emit its final answer as chunked deltas.
 
@@ -1650,6 +1734,7 @@ async def run_chat_turn_streaming(
         metrics=metrics,
         on_approval_request=on_approval_request,
         domains=domains,
+        tool_allowlist=tool_allowlist,
     )
 
     # MET-575: decide the path from the RESOLVED provider (arg → auth-store

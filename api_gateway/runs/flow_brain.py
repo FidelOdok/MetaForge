@@ -16,6 +16,7 @@ import structlog
 
 from api_gateway.chat.harness_backend import design_flow_approval_timeout_seconds, run_chat_turn
 from api_gateway.chat.routes import get_metrics
+from mcp_core.profiles import phase_overflow, tools_for_disciplines, unmapped_disciplines
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
 from skill_registry.mcp_bridge import McpBridge
@@ -27,6 +28,27 @@ from skill_registry.skill_context import (
 )
 
 logger = structlog.get_logger(__name__)
+
+#: Disciplines already reported as having no tool profile, so the debug line
+#: appears once per process rather than once per phase.
+_UNMAPPED_LOGGED: set[str] = set()
+
+
+def _report_phase_tools(phase: Phase) -> frozenset[str]:
+    """The phase's tool allowlist, with anything dropped or unmapped made visible."""
+    dropped = phase_overflow(phase.disciplines)
+    if dropped:
+        logger.warning(
+            "design_flow_phase_tools_dropped",
+            phase=phase.id,
+            disciplines=list(phase.disciplines),
+            dropped_tools=dropped,
+        )
+    for d in unmapped_disciplines(phase.disciplines):
+        if d.lower() not in _UNMAPPED_LOGGED:
+            _UNMAPPED_LOGGED.add(d.lower())
+            logger.debug("design_flow_discipline_has_no_tool_profile", discipline=d, phase=phase.id)
+    return tools_for_disciplines(phase.disciplines)
 
 
 class ReActPhaseBrain:
@@ -142,6 +164,11 @@ class ReActPhaseBrain:
             # catalog keeps growing; search_tools is the mid-turn escape
             # hatch if a phase genuinely needs a tool outside its scope.
             domains=phase.disciplines,
+            # FORGE-479: an exact, profile-derived tool set (<= 40 with the
+            # harness's own tools) instead of every core adapter. An empty
+            # discipline tuple used to mean "all tools"; it now means the
+            # common set, which is what the intent/needs/requirements phases use.
+            tool_allowlist=_report_phase_tools(phase),
             # MET-707: this turn is unattended — nothing will ever resolve a
             # requires_approval tool call's /v1/chat/tool_approvals entry for
             # a design-flow-originated run, so chat's 30-minute default
