@@ -23,11 +23,13 @@ from orchestrator.design_flow.context import (
 )
 from orchestrator.design_flow.generator import (
     FlowProposal,
+    ModelProvenance,
     build_proposal,
     parse_operations,
 )
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FLOWS, get_flow
 from orchestrator.design_flow.templates import load_templates
+from orchestrator.harness.providers.provenance import capture_served
 
 logger = structlog.get_logger(__name__)
 
@@ -179,18 +181,32 @@ async def generate_proposal(request: TailoringRequest) -> FlowProposal:
         max_questions=MAX_EXTRA_QUESTIONS,
     )
     try:
-        reply = await run_chat_turn(
-            prompt,
-            mcp_bridge=None,
-            session_id="flow-generator",
-            max_steps=1,
-            provider=request.provider,
-            model=request.model,
-            metrics=get_metrics(),
-        )
+        # FORGE-468: record which provider/model actually answered. The
+        # configured one may not have: the pipeline falls back silently from
+        # the caller's point of view, and run_chat_turn returns only text.
+        with capture_served() as served:
+            reply = await run_chat_turn(
+                prompt,
+                mcp_bridge=None,
+                session_id="flow-generator",
+                max_steps=1,
+                provider=request.provider,
+                model=request.model,
+                metrics=get_metrics(),
+            )
     except Exception as exc:  # noqa: BLE001 — reported, never swallowed
         logger.error("flow_generator_model_unreachable", error=str(exc))
         raise GeneratorUnavailableError(str(exc)) from exc
+    answered = served.last()
+    generated_by = (
+        ModelProvenance(
+            provider=answered.provider,
+            model=answered.model,
+            fell_back_from=answered.fell_back_from,
+        )
+        if answered is not None
+        else None
+    )
 
     parsed = _parse_reply(reply)
     template_id = parsed.get("template")
@@ -218,12 +234,16 @@ async def generate_proposal(request: TailoringRequest) -> FlowProposal:
         context=context,
         assumptions=assumptions,
         open_questions=parse_extra_questions(parsed.get("questions")),
+        generated_by=generated_by,
     )
     logger.info(
         "flow_generated",
         template=template_id,
         operations=len(proposal.operations),
         valid=proposal.valid,
+        provider=generated_by.provider if generated_by else None,
+        model=generated_by.model if generated_by else None,
+        fell_back_from=generated_by.fell_back_from if generated_by else None,
     )
     return proposal
 

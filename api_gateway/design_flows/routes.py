@@ -294,6 +294,16 @@ class FlowChangeView(BaseModel):
     basis: str = ""
 
 
+class GeneratedByView(BaseModel):
+    """The provider and model that actually produced a proposal (FORGE-468)."""
+
+    provider: str
+    model: str
+    #: ``"<provider>:<model>"`` of the configured primary when a fallback
+    #: answered instead. ``None`` when the primary answered.
+    fellBackFrom: str | None = None  # noqa: N815
+
+
 class FlowProposalView(BaseModel):
     """A tailored flow, awaiting a human.
 
@@ -321,6 +331,18 @@ class FlowProposalView(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     #: Product-specific questions that did not block the proposal.
     openQuestions: list[QuestionView] = Field(default_factory=list)  # noqa: N815
+    #: Which provider/model produced this tailoring. ``None`` when unknown.
+    generatedBy: GeneratedByView | None = None  # noqa: N815
+
+
+def _generated_by(proposal: FlowProposal) -> dict[str, str | None] | None:
+    if proposal.generated_by is None:
+        return None
+    return {
+        "provider": proposal.generated_by.provider,
+        "model": proposal.generated_by.model,
+        "fell_back_from": proposal.generated_by.fell_back_from,
+    }
 
 
 def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) -> FlowProposalView:
@@ -336,6 +358,15 @@ def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) ->
         requirementsPending=proposal.requirements_pending,
         assumptions=list(proposal.assumptions),
         openQuestions=[_question_view(q) for q in proposal.open_questions],
+        generatedBy=(
+            GeneratedByView(
+                provider=proposal.generated_by.provider,
+                model=proposal.generated_by.model,
+                fellBackFrom=proposal.generated_by.fell_back_from,
+            )
+            if proposal.generated_by is not None
+            else None
+        ),
         changes=[
             FlowChangeView(
                 op=op.kind.value,
@@ -453,6 +484,8 @@ async def propose_flow(
             "target_maturity": context.target_maturity.value if context.target_maturity else None,
             "requirements_pending": proposal.requirements_pending,
             "assumptions": proposal.assumptions,
+            # FORGE-468: who produced the tailoring the approver is judging.
+            "generated_by": _generated_by(proposal),
         }
     )
     store.start(run.id)
@@ -469,6 +502,7 @@ async def propose_flow(
         template=proposal.base_template_id,
         changes=len(proposal.operations),
         valid=proposal.valid,
+        generated_by=_generated_by(proposal),
     )
     version.approval_id = run.id
     return _proposal_view(proposal, run.id, version.id)

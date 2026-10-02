@@ -92,10 +92,11 @@ class TestAlertingRules:
         # + 2 harness (production-harness audit follow-up)
         # + 4 MCP surface (FORGE-379)
         # + 2 design-flow engine (FORGE-401)
-        # + 2 code staleness (FORGE-411).
+        # + 2 code staleness (FORGE-411)
+        # + 1 provider fallback sustained (FORGE-468).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 31
+        assert len(rules) == 32
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -131,11 +132,12 @@ class TestAlertingRules:
         #   rule alongside it is critical)
         # + 1 code staleness (FORGE-411; the undetectable-skew rule beside it
         #   is severity: info, because it says the check cannot run, not that
-        #   something is broken).
+        #   something is broken)
+        # + 1 harness provider fallback sustained (FORGE-468).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 22
+        assert len(warnings) == 23
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -180,6 +182,7 @@ class TestAlertingRules:
                 "McpUnexpectedErrors",
                 "DeviceOffline",
                 "ErrorBudgetBurnRate",
+                "HarnessProviderFallbackSustained",
                 "HarnessToolCallErrorRateHigh",
                 "HarnessTurnAbnormalStopRateHigh",
                 "HighAgentFailureRate",

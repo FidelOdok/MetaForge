@@ -48,12 +48,14 @@ from orchestrator.harness.providers import (
 from orchestrator.harness.providers.adapters import default_stream_events
 from orchestrator.harness.providers.auth_store import AuthStore
 from orchestrator.harness.providers.pipeline import Invoke, StreamInvoke
+from orchestrator.harness.providers.provenance import record_fallback
 from orchestrator.harness.providers.registry import (
     ANTHROPIC,
     OPENAI,
     InvalidModelError,
     get_profile,
     max_tools_for,
+    model_family_mismatch,
     validate_model,
 )
 from orchestrator.harness.react import ReActStep, run_react
@@ -694,7 +696,10 @@ def resolve_active_provider(provider: str | None = None) -> str:
 
 
 def provider_config_from_env(
-    *, provider: str | None = None, model: str | None = None
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    metrics: MetricsCollector | None = None,
 ) -> HarnessProviderConfig:
     """Build the 'generator' role's provider fallback chain from (in precedence
     order): per-turn UI override → the gateway auth store (`forge auth login` /
@@ -713,6 +718,13 @@ def provider_config_from_env(
     next to it. Returns a real chain instead: primary, then the env default
     (if it's a different provider), then every other provider with a stored
     raw key, each deduped by id.
+
+    FORGE-468: a candidate whose model its provider's family cannot serve
+    (e.g. ``openai-codex`` + ``claude-opus-4-8``, the live fidel-dev pairing)
+    is dropped here with a warning, instead of being sent and 400ing on every
+    call. Dropping the primary raises the fallback alarm (reason
+    ``model_mismatch``) so it is never silent. If nothing usable is left,
+    :class:`InvalidModelError` is raised.
     """
     store = AuthStore()
     selection = store.get_selection()
@@ -801,9 +813,60 @@ def provider_config_from_env(
         candidates.append(_spec_for(other, mdl))
         seen.add(other)
 
+    candidates = _drop_unservable_candidates(candidates, metrics=metrics)
     return HarnessProviderConfig(
         slots=RoleModelSlots(slots={"generator": candidates}), retry=RetryPolicy(), rotor=None
     )
+
+
+def _drop_unservable_candidates(
+    candidates: list[ProviderSpec], *, metrics: MetricsCollector | None
+) -> list[ProviderSpec]:
+    """Remove pairs the provider family cannot serve (FORGE-468).
+
+    Each one is logged as ``harness_provider_model_mismatch``. When the
+    primary is among them, the fallback alarm is raised here, at config time,
+    because the pipeline will only ever see the survivors and would otherwise
+    take the first of them for the primary.
+    """
+    kept: list[ProviderSpec] = []
+    rejected: list[tuple[ProviderSpec, str]] = []
+    for spec in candidates:
+        try:
+            reason = model_family_mismatch(spec.name, spec.model)
+        except UnknownProviderError:
+            reason = None
+        if reason is None:
+            kept.append(spec)
+            continue
+        logger.warning(
+            "harness_provider_model_mismatch",
+            provider=spec.name,
+            model=spec.model,
+            primary=spec is candidates[0],
+            error=reason,
+        )
+        rejected.append((spec, reason))
+    if not kept:
+        _, reason = rejected[0]
+        raise InvalidModelError(
+            f"no usable provider for the chat harness: {reason} "
+            f"(every configured candidate was rejected: "
+            f"{', '.join(f'{s.name}:{s.model}' for s, _ in rejected)})"
+        )
+    if rejected and rejected[0][0] is candidates[0]:
+        primary, reason = rejected[0]
+        record_fallback(
+            role="generator",
+            primary=primary.name,
+            primary_model=primary.model,
+            fallback=kept[0].name,
+            fallback_model=kept[0].model,
+            error=reason,
+            reason="model_mismatch",
+            metrics=metrics,
+        )
+    return kept
 
 
 def _tool_families(runtime: Any) -> list[str]:
@@ -1014,7 +1077,7 @@ async def _build_context(
             twin=twin, mcp_bridge=mcp_bridge, session_id=session_id
         )
     ctx = build_agent_runtime(
-        provider_config_from_env(provider=provider, model=model),
+        provider_config_from_env(provider=provider, model=model, metrics=metrics),
         credentials=store,
         session_id=session_id,
         # MET-569: without an evaluator a gated tool never runs (fail safe),

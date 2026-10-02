@@ -278,6 +278,15 @@ the same ledger the dashboard Approvals page already watches, and this
 endpoint has no ability to create a run — which is how "nothing starts before
 approval" is made true rather than asserted.
 
+**Every proposal names the model that wrote it (FORGE-468).** The configured
+primary and the model that answered can differ, because the provider pipeline
+falls back when the primary fails. The propose response carries
+`generatedBy: {provider, model, fellBackFrom}` (`fellBackFrom` is
+`"<provider>:<model>"` of the primary when a fallback answered, else `null`),
+and the held approval's request payload carries the same thing as
+`generated_by`, so the person approving can see whose tailoring it is. Both
+are optional and `null` when unknown.
+
 If no model is reachable the endpoint returns 503 and makes no proposal. There
 is no untailored fallback: a flow the human believes was tailored, and was
 not, is worse than being told the generator is down, because they would

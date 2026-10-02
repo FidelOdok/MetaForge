@@ -137,28 +137,85 @@ class InvalidModelError(ValueError):
     """A model slug that can't work for this provider's family."""
 
 
-def validate_model(provider_id: str, model: str) -> None:
-    """Reject a model slug that can't work for ``provider_id`` (FORGE-93).
+# FORGE-468: the vendor a bare model slug plainly belongs to, by prefix. Used
+# only to catch a pairing that cannot work (a claude-* model on Codex, a gpt-*
+# model on the native Anthropic API). This is a family check, not a model
+# catalogue: a slug whose vendor is not obvious from its prefix is let through.
+_VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("claude", "anthropic"),
+    ("gpt-", "openai"),
+    ("o1", "openai"),
+    ("o3", "openai"),
+    ("o4", "openai"),
+    ("gemini", "google"),
+)
 
-    Deliberately narrow: this registry maintains no live model catalog, so it
-    can't allowlist valid slugs in general -- it only rejects conventions a
-    real, observed failure confirmed can never work. Today that's exactly one
-    rule: the Codex backend (ChatGPT-subscription auth) rejects any
-    ``vendor/model`` OpenRouter-style slug outright --
-    ``400 "The '<model>' model is not supported when using Codex with a
-    ChatGPT account."`` -- observed for ``openai/gpt-4o`` but true of any
-    slashed slug, since Codex's own models use bare ids (``gpt-5.5``,
-    ``gpt-5-codex``). Silently accepting one lets ``PUT /v1/harness/selection``
-    durably select a pairing that 400s on every single call thereafter, with
-    the provider pipeline's fallback masking it as a normal reply.
+# The one vendor each first-party API family serves. OpenAI-compatible
+# gateways (OpenRouter, vLLM, ...) and Bedrock route to many vendors, so they
+# are absent and never checked.
+_FAMILY_VENDOR: dict[str, str] = {
+    ANTHROPIC: "anthropic",
+    CODEX: "openai",
+    GEMINI: "google",
+}
+
+
+def _vendor_of(model: str) -> str | None:
+    bare = model.strip().lower()
+    for prefix, vendor in _VENDOR_PREFIXES:
+        if bare.startswith(prefix):
+            return vendor
+    return None
+
+
+def model_family_mismatch(provider_id: str, model: str) -> str | None:
+    """Why ``model`` cannot be served by ``provider_id``, or ``None`` if it may be.
+
+    Two rules, both conservative:
+
+    - FORGE-93: the Codex backend (ChatGPT-subscription auth) rejects any
+      ``vendor/model`` OpenRouter-style slug outright --
+      ``400 "The '<model>' model is not supported when using Codex with a
+      ChatGPT account."`` -- since Codex's own models use bare ids
+      (``gpt-5.5``, ``gpt-5-codex``).
+    - FORGE-468: a first-party family serves only its own vendor's models. A
+      ``claude-*`` slug on ``openai-codex`` (the live fidel-dev pairing that
+      400'd on every call and silently fell back to OpenRouter), or a
+      ``gpt-*`` slug on ``anthropic``, can never work. Only a slug whose
+      vendor is plain from its prefix is judged; anything else passes.
+
+    Raises :class:`UnknownProviderError` for an unregistered provider.
     """
     profile = get_profile(provider_id)
     if profile.api_family == CODEX and "/" in model:
-        raise InvalidModelError(
+        return (
             f"'{model}' is not a valid model for provider '{provider_id}' (family "
             f"{CODEX}): Codex expects a bare model slug (e.g. 'gpt-5.5', "
             "'gpt-5-codex'), not a 'vendor/model' slug like OpenRouter uses."
         )
+    expected = _FAMILY_VENDOR.get(profile.api_family)
+    actual = _vendor_of(model)
+    if expected is not None and actual is not None and actual != expected:
+        return (
+            f"'{model}' is a model from vendor '{actual}', but provider "
+            f"'{provider_id}' (family {profile.api_family}) only serves models from "
+            f"vendor '{expected}'. Pick a '{expected}' model for '{provider_id}', or "
+            f"select a provider that serves '{model}'."
+        )
+    return None
+
+
+def validate_model(provider_id: str, model: str) -> None:
+    """Raise :class:`InvalidModelError` if ``model`` cannot work on ``provider_id``.
+
+    See :func:`model_family_mismatch` for the rules. Silently accepting a bad
+    pairing lets ``PUT /v1/harness/selection`` durably select one that fails
+    on every single call thereafter, with the provider pipeline's fallback
+    masking it as a normal reply.
+    """
+    reason = model_family_mismatch(provider_id, model)
+    if reason is not None:
+        raise InvalidModelError(reason)
 
 
 def available_providers() -> list[str]:

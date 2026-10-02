@@ -2,7 +2,7 @@
 
 - ``GET /v1/harness/providers`` — the registered providers, each flagged with
   whether it's configured (key present / local / codex logged in) + the active
-  provider/model from env.
+  provider/model from env, and the last provider fallback (FORGE-468).
 - ``GET /v1/harness/models`` — models for a provider. For OpenAI-compatible
   providers with a base_url + key it live-fetches ``{base_url}/models``; other
   families return an empty list (the UI falls back to a free-text model field).
@@ -30,6 +30,7 @@ from orchestrator.harness.providers.codex_auth import (
     parse_credentials,
     save_credentials,
 )
+from orchestrator.harness.providers.provenance import last_fallback
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/v1/harness", tags=["harness"])
@@ -73,10 +74,30 @@ class ProviderInfo(BaseModel):
     base_url: str | None = None
 
 
+class FallbackInfo(BaseModel):
+    """The most recent time a harness role ran on something other than its primary."""
+
+    role: str
+    primary: str
+    primary_model: str
+    fallback: str
+    fallback_model: str
+    #: The primary's error, or why it was rejected before any call.
+    error: str
+    #: ``call_failed`` or ``model_mismatch`` (capability declines are not kept).
+    reason: str
+    at: str
+
+
 class ProvidersResponse(BaseModel):
     active_provider: str | None = None
     active_model: str | None = None
     providers: list[ProviderInfo] = Field(default_factory=list)
+    #: FORGE-468: the last provider fallback in this gateway process, so a
+    #: primary that never answers is visible here and not only in the logs.
+    last_fallback: FallbackInfo | None = None
+    #: How many fallbacks this gateway process has recorded since it started.
+    fallback_count: int = 0
 
 
 def _is_configured(profile: registry.ProviderProfile) -> bool:
@@ -143,8 +164,13 @@ async def list_providers() -> ProvidersResponse:
     env_model = (os.environ.get("METAFORGE_LLM_MODEL") or "").strip()
     trust_env_model = not env_provider or (active_provider or "").strip().lower() == env_provider
     active_model = stored_model or (env_model if trust_env_model else None) or None
+    event, count = last_fallback()
     return ProvidersResponse(
-        active_provider=active_provider, active_model=active_model, providers=infos
+        active_provider=active_provider,
+        active_model=active_model,
+        providers=infos,
+        last_fallback=FallbackInfo(**event.to_dict()) if event is not None else None,
+        fallback_count=count,
     )
 
 
