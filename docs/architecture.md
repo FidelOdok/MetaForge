@@ -538,6 +538,13 @@ polls the queue. So `POST /v1/runs` (and `flow.start_run` /
 with the reason when there are none. No run record is created. `health.check`
 reports the same thing under `design_flow_worker` (`ok`, `absent`, `unknown`).
 
+In dev, `docker-compose.override.yml` mounts the source into `design-flow-worker`
+the same way it does for the gateway and `temporal-worker` (FORGE-493), so a
+worker fix takes effect on `docker compose restart design-flow-worker` with no
+image pull. There is no auto reload, because a reload would kill a phase
+mid-turn; Temporal retries an activity a restart interrupts, but restart
+between phases when you can.
+
 When a run's live state cannot be read (the workflow query times out because no
 worker answers), `GET /v1/runs/{id}/flow-state` and `flow.status` list the run's
 own frozen version: the phases of the stored version it was started on, with
