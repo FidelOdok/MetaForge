@@ -229,6 +229,16 @@ A held call appears on the dashboard's **Approvals** page, tagged with
 the caller and `source: mcp`. Approve it there and the tool runs;
 reject it and it does not.
 
+When Claude Code declared the `elicitation` capability at `initialize`, the
+question is asked inside Claude Code instead, and the dashboard is only the
+fallback. Over HTTP it travels on whichever stream the session has: a
+`GET /mcp` stream if one is open, otherwise the held `tools/call`'s own
+response, which the server switches to `text/event-stream` when the call
+was sent with `Accept: application/json, text/event-stream` (FORGE-464). Claude Code never opens `GET /mcp`, so this second path is the one it uses.
+The answer comes back as a POST and the tool result follows on the same
+stream. See
+[Over HTTP: which stream carries the question](../capability-matrix.md#over-http-which-stream-carries-the-question).
+
 If it is not approved, the call comes back as a JSON-RPC error naming
 which happened:
 

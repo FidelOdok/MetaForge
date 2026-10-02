@@ -495,6 +495,20 @@ def _session_for_request(headers: dict[str, str], raw_body: bytes) -> str | None
     return None
 
 
+def _accepts_event_stream(accept: str | None) -> bool:
+    """Whether the client said it can read an SSE response (FORGE-464).
+
+    Explicit only. ``*/*`` is what a client sends when it has not thought
+    about it, and answering that with a stream would hand a plain JSON
+    client something it cannot parse.
+    """
+    if not accept:
+        return False
+    return any(
+        part.split(";", 1)[0].strip().lower() == "text/event-stream" for part in accept.split(",")
+    )
+
+
 def build_http_app(
     server: UnifiedMcpServer,
     *,
@@ -744,6 +758,19 @@ def build_http_app(
             # Accepted, and there is nothing to say back.
             return Response(status_code=202)
 
+        # FORGE-464: a tools/call that may be held is answered on its own SSE
+        # stream when the client can read one, so the approval question can
+        # travel on the call it is about. Claude Code never opens GET /mcp,
+        # so without this every held write it made went to the dashboard.
+        if (
+            issued_session is not None
+            and isinstance(inbound, dict)
+            and inbound.get("method") == "tools/call"
+            and _accepts_event_stream(request.headers.get("accept"))
+            and hub.call_stream_allowed(issued_session)
+        ):
+            return await _call_with_stream(raw_body.decode("utf-8"), ctx, issued_session)
+
         with with_context(ctx):
             response = await server.handle_request(raw_body.decode("utf-8"))
         # FORGE-423: record what this session declared, from its own
@@ -770,12 +797,95 @@ def build_http_app(
         # its 204, so it looked fine from outside while the server logged an
         # ASGI traceback on every connection: `notifications/initialized` is
         # the first thing a spec-compliant client sends.
+        return _json_reply(response, issued_session)
+
+    def _json_reply(response: str, session_id: str | None) -> Response:
         if not response:
             return Response(status_code=204)
         out = JSONResponse(json.loads(response))
-        if issued_session is not None:
-            out.headers[MCP_SESSION_HEADER] = issued_session
+        if session_id is not None:
+            out.headers[MCP_SESSION_HEADER] = session_id
         return out
+
+    #: Handler tasks whose POST stream closed before they finished. Held so
+    #: the loop does not garbage-collect a running call; the done callback
+    #: lets each one go.
+    detached: set[asyncio.Task[str]] = set()
+
+    async def _call_with_stream(body: str, ctx: Any, session_id: str) -> Response:
+        """Run one tools/call, switching to SSE only if it asks a question.
+
+        FORGE-464. Most calls are never held, and those keep the plain JSON
+        response they always had: the handler runs as a task and the
+        transport waits for whichever comes first, the result or a message
+        pushed onto this call's stream. A result first means nothing was
+        asked, so it is returned as JSON. A message first means the call is
+        waiting on the client, and the response becomes the stream: the
+        question, then (once the client POSTs its answer, routed by id) the
+        result, then the stream closes.
+        """
+        from mcp_core.context import with_context
+
+        with with_context(ctx), hub.call_stream(session_id) as call:
+            task: asyncio.Task[str] = asyncio.create_task(server.handle_request(body))
+        first: asyncio.Task[str] = asyncio.create_task(call.queue.get())
+        await asyncio.wait({task, first}, return_when=asyncio.FIRST_COMPLETED)
+        if not first.done():
+            first.cancel()
+            hub.close_call_stream(call)
+            return _json_reply(task.result(), session_id)
+
+        logger.info("mcp_call_stream_opened", session_id=session_id)
+
+        def frame(message: str) -> bytes:
+            return f"event: message\ndata: {message}\n\n".encode()
+
+        async def events() -> AsyncIterator[bytes]:
+            try:
+                yield frame(first.result())
+                while True:
+                    getter: asyncio.Task[str] = asyncio.create_task(call.queue.get())
+                    await asyncio.wait(
+                        {task, getter}, timeout=15.0, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if getter.done():
+                        yield frame(getter.result())
+                        continue
+                    getter.cancel()
+                    if not task.done():
+                        # A reviewer is still reading. Keep intermediaries
+                        # from reaping a connection that looks idle.
+                        yield b": keep-alive\n\n"
+                        continue
+                    while not call.queue.empty():
+                        yield frame(call.queue.get_nowait())
+                    break
+                hub.close_call_stream(call)
+                result = task.result()
+                if result:
+                    # Re-serialised so the event is one line whatever the
+                    # handler's formatting.
+                    yield frame(json.dumps(json.loads(result)))
+                logger.info("mcp_call_stream_completed", session_id=session_id)
+            finally:
+                # Normal end, or the client hung up mid-question. Either way
+                # nothing more can be read here, so an unanswered question is
+                # cancelled now rather than at the elicitation timeout.
+                hub.close_call_stream(call)
+                if not task.done():
+                    logger.warning("mcp_call_stream_client_gone", session_id=session_id)
+                    detached.add(task)
+                    task.add_done_callback(detached.discard)
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={
+                MCP_SESSION_HEADER: session_id,
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.delete("/mcp")
     async def mcp_delete(request: Request) -> Response:  # FORGE-422: 204 has no body
