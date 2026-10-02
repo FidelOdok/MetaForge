@@ -408,7 +408,9 @@ async def test_model_gets_a_note_the_round_a_truncation_happens() -> None:
     seen_systems: list[str] = []
 
     async def invoke(spec: ProviderSpec, request: Any) -> dict[str, Any]:
-        seen_systems.append(request["system"])
+        # FORGE-478: the note is a volatile suffix, the system stays cacheable.
+        assert request["system"] == NATIVE_SYSTEM
+        seen_systems.append(request["system_suffix"])
         return {"model": spec.model, "text": "done", "tool_calls": []}
 
     res = await run_native_tools(rt, "hello", invoke=invoke, max_tools=128)

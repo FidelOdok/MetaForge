@@ -712,3 +712,37 @@ features" anyway). Promoting `evals/judge.py`'s own LLM-graded `grounding`
 transcript dimension into a live per-turn check would catch that class too,
 at the cost of an extra judged model call per turn — tracked separately
 (FORGE-104), not folded in here.
+
+## Prompt caching (FORGE-478)
+
+Providers cache by exact prefix, so every harness request is laid out as a
+stable prefix followed by the volatile suffix, and the prefix is kept
+byte-identical across the steps of a turn and across turns while its inputs
+are unchanged.
+
+| Part | Content | Stable? |
+|------|---------|---------|
+| Prefix | tool schemas (sorted by name, keys sorted), system prompt | yes |
+| Suffix | conversation history, latest tool results, per-round `system_suffix` note | no |
+
+The layout lives in `orchestrator/harness/providers/caching.py`:
+
+- **Anthropic** gets explicit `cache_control` breakpoints on the last tool, the
+  stable system block and the last message block (3 of the 4 allowed), so each
+  step reads the previous step's history from the cache.
+- **OpenAI and OpenRouter prefix caching** is automatic, so the
+  adapters only guarantee the ordering and send a stable `prompt_cache_key`
+  (a hash of system prompt and tools) as `extra_body` on OpenAI and OpenRouter
+  endpoints. Self-hosted OpenAI-compatible servers do not receive it.
+- The tools-array truncation note is a per-round `system_suffix`. Anthropic
+  sends it as a second, unmarked system block; other families append it to the
+  system text. It never alters the cached system block.
+- Nothing time- or id-dependent may enter the prefix. Anything that varies per
+  step belongs in the suffix.
+
+Cached tokens are reported through the FORGE-476 accounting
+(`providers/usage.py`): Anthropic `cache_read_input_tokens` and OpenAI
+`prompt_tokens_details.cached_tokens` land in `cached_input_tokens`, priced at
+the model's `cached_input` rate. Compare `cached_input_tokens` to
+`prompt_tokens` in `GET /v1/runs/{id}` usage totals to see the hit rate.
+Gemini, Bedrock and Codex Responses calls are not given cache markers yet.

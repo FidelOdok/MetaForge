@@ -29,6 +29,7 @@ from typing import Any, cast
 
 import structlog
 
+from orchestrator.harness.providers import caching
 from orchestrator.harness.providers.pipeline import ProviderError, ProviderSpec
 
 logger = structlog.get_logger(__name__)
@@ -128,7 +129,9 @@ def _usage_from(
 def _normalize_request(request: Any) -> tuple[str | None, list[dict[str, str]], int, float]:
     if not isinstance(request, dict):
         request = {"prompt": str(request)}
-    system = request.get("system")
+    # FORGE-478: families without block-level system caching get the volatile
+    # note appended; Anthropic and OpenAI re-read the stable part themselves.
+    system = _join_system(request.get("system"), request.get("system_suffix"))
     messages = request.get("messages")
     if not messages:
         messages = [{"role": "user", "content": str(request.get("prompt", ""))}]
@@ -169,6 +172,38 @@ def _to_anthropic_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def _apply_anthropic_cache(
+    kwargs: dict[str, Any], request: Any, system: str | None, tools: Any
+) -> None:
+    """Lay out an Anthropic request prefix-first with cache breakpoints (FORGE-478)."""
+    stable, suffix = caching.system_text(request)
+    blocks = caching.anthropic_system(stable, suffix)
+    if blocks:
+        kwargs["system"] = blocks
+    if tools:
+        kwargs["tools"] = caching.mark_last_tool(
+            _to_anthropic_tools(caching.canonical_tools(tools))
+        )
+        kwargs["messages"] = caching.mark_last_message(kwargs["messages"])
+
+
+def _join_system(system: str | None, suffix: str | None) -> str | None:
+    """Families without block-level system caching append the volatile note."""
+    return f"{system}\n\n{suffix}" if system and suffix else (system or suffix)
+
+
+def _apply_openai_cache(
+    kwargs: dict[str, Any], spec: ProviderSpec, request: Any, tools: Any
+) -> None:
+    """Canonical tool order plus a stable prompt_cache_key (FORGE-478)."""
+    if tools:
+        kwargs["tools"] = _sanitize_openai_tool_names(caching.canonical_tools(tools))
+    if caching.supports_prompt_cache_key(spec.base_url):
+        kwargs["extra_body"] = {
+            "prompt_cache_key": caching.prompt_cache_key(caching.system_text(request)[0], tools)
+        }
 
 
 _OPENAI_NAME_DOT = "__"
@@ -305,10 +340,7 @@ async def anthropic_invoke(
         "temperature": temperature,
         "messages": _to_anthropic_messages(messages) if tools else messages,
     }
-    if system:
-        kwargs["system"] = system
-    if tools:
-        kwargs["tools"] = _to_anthropic_tools(tools)
+    _apply_anthropic_cache(kwargs, request, system, tools)
     try:
         resp = await client.messages.create(**kwargs)
     except ProviderError:
@@ -374,8 +406,8 @@ async def openai_invoke(
         "temperature": temperature,
     }
     tools = request.get("tools") if isinstance(request, dict) else None
+    _apply_openai_cache(kwargs, spec, request, tools)
     if tools:
-        kwargs["tools"] = _sanitize_openai_tool_names(tools)
         kwargs["tool_choice"] = request.get("tool_choice", "auto")
     try:
         resp = await client.chat.completions.create(**kwargs)
@@ -932,8 +964,8 @@ async def openai_stream_events(
         "stream_options": {"include_usage": True},
     }
     tools = request.get("tools") if isinstance(request, dict) else None
+    _apply_openai_cache(kwargs, spec, request, tools)
     if tools:
-        kwargs["tools"] = _sanitize_openai_tool_names(tools)
         kwargs["tool_choice"] = request.get("tool_choice", "auto")
 
     text_parts: list[str] = []
@@ -1021,10 +1053,7 @@ async def anthropic_stream_events(
         "temperature": temperature,
         "messages": _to_anthropic_messages(messages) if tools else messages,
     }
-    if system:
-        kwargs["system"] = system
-    if tools:
-        kwargs["tools"] = _to_anthropic_tools(tools)
+    _apply_anthropic_cache(kwargs, request, system, tools)
 
     try:
         async with client.messages.stream(**kwargs) as stream:
