@@ -412,6 +412,27 @@ This is off unless you configure it, and a valid key alone is not enough:
 A refusal comes back as a JSON-RPC error with `code` `service_scope`,
 `service_other_project` or `service_refused`, and `retryable: false`.
 
+**What a refusal does to a run (FORGE-492).** A refusal is the guardrail
+answering "not this tool", so it does not fail the phase or the run. Inside a
+model-driven phase it is returned to the model as that call's tool result
+(`status: error`, `refused: true`, the reason, and a hint to choose another
+tool), and the loop carries on. If a scripted step of a phase (for example the
+mechanical design handler) is refused, the phase is handed to the model with
+the refusal as its first note. Every refusal is logged as
+`design_flow_tool_refused` and counted in
+`metaforge_design_flow_tool_refusal_total{tool_name,source}`; a sustained rate
+raises the `DesignFlowToolRefusalSustained` alert, because it usually means a
+tool a phase needs is classified destructive.
+
+**The FreeCAD session tools are allowed.** `freecad.open_session`,
+`create_sketch`, `pad_sketch`, `fillet`, `boolean`, `add_part_to_assembly`,
+`export_model`, `close_session` and the rest of the stateful authoring set work
+only on the session's own scratch document and write nothing persistent, so
+they are classified read-only, additive or producing in
+`mcp_core/annotations.py` and are not refused. `freecad.execute_code` stays
+destructive and is refused: its sandbox is source level, and `Import.export`
+can still write to a path the script names.
+
 A wrong or missing key is not an error: the call is simply untrusted and held,
 exactly as a plugin client's would be.
 

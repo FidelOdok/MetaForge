@@ -39,7 +39,9 @@ __all__ = [
     "MIN_SERVICE_KEY_LENGTH",
     "ServiceGrant",
     "ServiceRunVerifier",
+    "SERVICE_REFUSAL_MARKER",
     "ServiceScopeError",
+    "is_service_refusal",
     "service_key_is_usable",
     "verify_service_key",
 ]
@@ -82,6 +84,13 @@ class ServiceGrant:
     flow_version_id: str
 
 
+#: The words every service-caller refusal carries, on the server and after the
+#: trip back through the HTTP bridge, where only the message text survives.
+#: ``is_service_refusal`` matches on it, so the message and the match cannot
+#: drift apart.
+SERVICE_REFUSAL_MARKER = "refused for the design-flow service caller"
+
+
 class ServiceScopeError(RuntimeError):
     """A service call named a run or project it is not entitled to.
 
@@ -94,9 +103,18 @@ class ServiceScopeError(RuntimeError):
         self.tool_id = tool_id
         self.reason = reason
         self.code = code
-        super().__init__(
-            f"{tool_id or 'call'} was refused for the design-flow service caller: {reason}"
-        )
+        super().__init__(f"{tool_id or 'call'} was {SERVICE_REFUSAL_MARKER}: {reason}")
+
+
+def is_service_refusal(exc: BaseException) -> bool:
+    """Is ``exc`` a guardrail refusal of a design-flow service call?
+
+    Matches the server-side error itself and the wrapped form a bridge raises
+    after the refusal crossed HTTP (FORGE-492). A refusal is the guardrail
+    answering "not this tool", which a model can act on by choosing another;
+    it is not a fault in the run.
+    """
+    return isinstance(exc, ServiceScopeError) or SERVICE_REFUSAL_MARKER in str(exc)
 
 
 class ServiceRunVerifier(Protocol):

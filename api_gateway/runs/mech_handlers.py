@@ -18,11 +18,13 @@ from typing import Any
 
 import structlog
 
+from mcp_core.service_auth import is_service_refusal
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
 from orchestrator.harness.providers.routing import routing_scope
 from orchestrator.harness.providers.usage import usage_scope
-from skill_registry.mcp_bridge import McpBridge
+from orchestrator.harness.tool_exec import note_service_refusal
+from skill_registry.mcp_bridge import McpBridge, McpToolError
 
 logger = structlog.get_logger(__name__)
 
@@ -380,5 +382,25 @@ class HybridBrain:
             handler = self._handlers.get(phase.id)
             if handler is not None:
                 logger.info("design_flow_deterministic_phase", phase=phase.id)
-                return await handler.run_phase(goal=goal, phase=phase, context=context)
+                try:
+                    return await handler.run_phase(goal=goal, phase=phase, context=context)
+                except McpToolError as exc:
+                    if not is_service_refusal(exc):
+                        raise
+                    # FORGE-492. The guardrail said no to a tool the scripted
+                    # step needed. Failing the phase and the run on that leaves
+                    # nobody able to choose another tool; the model can. Hand
+                    # the phase to it with the refusal as the first thing it
+                    # reads, and log and count the refusal.
+                    from api_gateway.chat.routes import get_metrics
+
+                    note_service_refusal(get_metrics(), exc.tool_id, exc, source="handler")
+                    refusal = (
+                        f"A scripted step of this phase was refused: {exc.details}. "
+                        "That tool is not available to this run and retrying it cannot "
+                        "change that. Achieve the phase objective with other tools."
+                    )
+                    return await self._fallback.run_phase(
+                        goal=f"{goal}\n\nNOTE: {refusal}", phase=phase, context=context
+                    )
             return await self._fallback.run_phase(goal=goal, phase=phase, context=context)

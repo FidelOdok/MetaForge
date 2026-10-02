@@ -48,6 +48,12 @@ READ_ONLY: frozenset[str] = frozenset(
         "freecad.describe_step_file",
         "freecad.get_properties",
         "freecad.list_named_faces",
+        # FORGE-492: the read side of the stateful session tools. Each only
+        # inspects a session object or the session's own object list.
+        "freecad.describe_session",
+        "freecad.describe_model",
+        "freecad.list_joints",
+        "freecad.measure",
         "omniverse_usd.describe_stage",
         "omniverse_usd.validate_usd_minimum",
         # Analysis that reads an existing result rather than producing one
@@ -145,6 +151,53 @@ CONDITIONALLY_READ_ONLY: frozenset[str] = frozenset({"twin.query_cypher"})
 # data", which is the difference ``destructiveHint`` exists to carry.
 ADDITIVE: frozenset[str] = frozenset(
     {
+        # FORGE-492: the stateful FreeCAD session authoring tools. Every one
+        # works on the session's own scratch document, held in memory by the
+        # adapter (or its per-session worker subprocess) and gone when the
+        # session closes. Nothing here writes to the twin, MinIO or a path
+        # the caller names; persistence is a separate, explicit step
+        # (`twin.commit_geometry`, which is classified above). A few edit an
+        # object already in that scratch document (transform_object,
+        # set_expression, the dress-up and pattern tools); that is still the
+        # session's own throwaway state, not persisted data, so none carries
+        # destructiveHint. `import_step` only reads the staged file it is
+        # pointed at. `close_session` discards the scratch document itself,
+        # which holds nothing that was not already disposable. Left on the
+        # destructive default these were all refused for the design-flow
+        # service caller, so no phase could author CAD at all.
+        "freecad.open_session",
+        "freecad.close_session",
+        "freecad.create_primitive",
+        "freecad.create_body",
+        "freecad.import_step",
+        "freecad.create_sketch",
+        "freecad.pad_sketch",
+        "freecad.pocket_sketch",
+        "freecad.revolve_sketch",
+        "freecad.loft_sketches",
+        "freecad.sweep_sketch",
+        "freecad.shell_solid",
+        "freecad.transform_object",
+        "freecad.fillet",
+        "freecad.fillet_edges",
+        "freecad.chamfer",
+        "freecad.chamfer_edges",
+        "freecad.boolean",
+        "freecad.linear_pattern",
+        "freecad.polar_pattern",
+        "freecad.mirror_feature",
+        "freecad.create_assembly",
+        "freecad.add_part_to_assembly",
+        "freecad.add_assembly_joint",
+        "freecad.create_variable_set",
+        "freecad.set_expression",
+        "freecad.generate_enclosure",
+        "freecad.generate_gear",
+        "freecad.generate_ic_package",
+        "freecad.generate_profile_part",
+        "freecad.fastener_hole",
+        "freecad.thread_insert",
+        "freecad.lattice_perforation",
         # FORGE-400. `flow.propose` writes a flow version and an approval
         # entry; `flow.start_run` starts real work. Both write, so neither is
         # read-only. Neither is held at the call either (FORGE-471): the
@@ -239,6 +292,9 @@ PRODUCING: frozenset[str] = frozenset(
         "cadquery.generate_enclosure",
         "cadquery.generate_ros2_launch",
         "freecad.create_parametric",
+        # FORGE-492: returns the STEP bytes in the response and writes
+        # nothing (its own docstring: "NOT persisted anywhere").
+        "freecad.export_model",
         "freecad.generate_mesh",
         "calculix.run_fea",
         "calculix.run_thermal",
@@ -268,6 +324,15 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         "cadquery.export_usd",
         "cadquery.export_usd_assembly",
         "freecad.boolean_operation",
+        # FORGE-492: deliberately NOT classified with the session tools above.
+        # The sandbox is source-level only (blocked names `open`, `os`, ...),
+        # and the namespace still hands the script `Import` and `Part`, whose
+        # `Import.export(objs, path)` and `Shape.exportStep(path)` write to any
+        # path the script names. The handler's own docstring says the real
+        # isolation boundary is the container. A script that can overwrite a
+        # file outside the session is destructive, so the service caller
+        # keeps being refused it and the model is told so as an observation.
+        "freecad.execute_code",
         "freecad.export_geometry",
         "kicad.export_bom",
         "kicad.export_gerber",

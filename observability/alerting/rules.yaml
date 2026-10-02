@@ -107,6 +107,19 @@ groups:
           summary: "High harness tool-call failure rate for {{ $labels.tool_name }}"
           description: "Tool {{ $labels.tool_name }} has >30% error rate over 10 minutes in the chat harness loop."
 
+      # FORGE-492: the guardrail refusing a design-flow phase's tool call is
+      # survivable (the model is told and picks another tool) but it should be
+      # rare. A sustained rate means a tool a phase needs is classified
+      # destructive, which is how every FreeCAD session tool ended up refused.
+      - alert: DesignFlowToolRefusalSustained
+        expr: sum(increase(metaforge_design_flow_tool_refusal_total[15m])) by (tool_name) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Design-flow phases keep being refused {{ $labels.tool_name }}"
+          description: "The guardrail refused {{ $labels.tool_name }} for the design-flow service caller more than 5 times in 15 minutes. Check its classification in mcp_core/annotations.py."
+
       # FORGE-468: the primary provider pair (e.g. openai-codex + a claude-*
       # model) failed on every call for weeks while the fallback answered,
       # and nothing said so. Any sustained fallback means the configured
