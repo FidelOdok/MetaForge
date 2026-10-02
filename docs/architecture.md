@@ -457,6 +457,21 @@ work. `METAFORGE_FLOW_ENGINE=in_process` selects the old executor explicitly,
 warns on every run start that runs are not durable, and is there for tests and
 for contributors without Docker.
 
+**Both engines run exactly the approved version** (FORGE-474). A run started
+with `flow_version_id` (what `flow.start_run` sends) is pinned to that stored
+version on either engine: Temporal receives its frozen flow as workflow input,
+and the in-process executor walks a definition rebuilt from the same frozen
+flow, after checking its hash and checking that the rebuild reproduces it. A
+dropped phase stays dropped and an added deliverable is required. If the
+in-process engine cannot reproduce the version exactly, the run is refused
+with a `409` and no record is left; it never substitutes the template the
+version came from. Every design-flow run records `flow_engine`
+(`temporal` or `in_process`), `flow_template_id`, `flow_version`,
+`flow_version_id` when it was started from a stored version, and
+`flow_content_hash`. `GET /v1/runs/{id}` returns the engine, version id and
+hash as top-level fields, and `/flow-state` lists the version's phases rather
+than the template's.
+
 Running it needs two services: `temporal` and `design-flow-worker`. Without
 the worker, runs are created durably and then sit forever, because nothing
 polls the queue — which is the quiet half of the same failure the 503 makes

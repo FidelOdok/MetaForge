@@ -272,8 +272,14 @@ class DesignFlowExecutor:
         self._constraint_checker = constraint_checker
         self._consistency_gate_checker = consistency_gate_checker
 
-    async def run(self, run_id: str) -> None:
+    async def run(self, run_id: str, flow: FlowDefinition | None = None) -> None:
         """Drive ``run_id`` through its flow to a terminal state.
+
+        ``flow`` is the exact definition to walk (FORGE-474). The gateway
+        passes the approved, frozen version a run was started on, so a
+        tailored flow runs as approved rather than as the template it came
+        from. Without one, the run's ``flow`` id is looked up in the built-in
+        catalogue, which is only correct for a run that names a template.
 
         Best-effort: swallows :class:`InvalidTransition` (the run was canceled
         or completed out from under us) and records unexpected errors via
@@ -283,9 +289,11 @@ class DesignFlowExecutor:
             span.set_attribute("run.id", run_id)
             try:
                 run = self._store.get(run_id)
-                flow = get_flow(run.request.get("flow") or DEFAULT_FLOW_ID)
+                if flow is None:
+                    flow = get_flow(run.request.get("flow") or DEFAULT_FLOW_ID)
                 goal = str(run.request.get("goal") or "").strip()
                 span.set_attribute("flow.id", flow.id)
+                span.set_attribute("flow.phase_count", len(flow.phases))
                 ctx = FlowContext(
                     goal=goal,
                     project_id=run.request.get("project_id"),

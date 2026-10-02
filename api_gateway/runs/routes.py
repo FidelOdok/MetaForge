@@ -40,7 +40,13 @@ from orchestrator.design_flow.launcher import (
     TemporalUnavailableError,
     connect_temporal,
 )
-from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, flow_version, get_flow
+from orchestrator.design_flow.spec import (
+    DEFAULT_FLOW_ID,
+    FlowDefinition,
+    definition_from_frozen,
+    flow_version,
+    get_flow,
+)
 from orchestrator.design_flow.versions import VersionNotFoundError, get_version_store
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
@@ -375,14 +381,86 @@ async def build_gate_checkers() -> _GateCheckers | None:
     )
 
 
-async def _launch_flow(run_id: str) -> None:
-    """Spawn the in-process executor for ``run_id`` as a tracked background task.
+class FlowVersionNotApprovedError(RuntimeError):
+    """A run named a flow version nobody has approved yet (FORGE-399)."""
 
-    The test double (FORGE-401). Durable runs go through Temporal; this exists
-    so the flow logic can be exercised without a server, and so a contributor
-    with no Docker is not blocked.
+    def __init__(self, version_id: str, status: str) -> None:
+        super().__init__(
+            f"flow version '{version_id}' is {status}, not approved. A run cannot start "
+            "on a flow a human has not agreed to."
+        )
+
+
+class FlowVersionUnrunnableError(RuntimeError):
+    """The in-process engine cannot run this flow version exactly (FORGE-474).
+
+    Raised instead of running something close to it. Substituting the
+    template the version came from is the bug this exists to prevent: the run
+    would look like the approved flow and do a different one.
     """
-    from api_gateway.projects.routes import get_project_backend
+
+    def __init__(self, version_id: str, detail: str) -> None:
+        super().__init__(
+            f"flow version '{version_id}' cannot be run by the in-process engine: {detail}. "
+            "No run was created. The default template was not substituted, because a run "
+            "must do exactly the flow a human approved."
+        )
+
+
+def _resolve_in_process_flow(run: Run) -> FlowDefinition:
+    """The exact flow an in-process run walks, recorded on the run (FORGE-474).
+
+    A run naming ``flow_version_id`` runs that stored, approved version: its
+    frozen content is hash-verified and turned back into a definition, and the
+    round trip must reproduce the same hash. Anything else raises, so the
+    executor never falls back to the template behind the version.
+
+    Raises :class:`~orchestrator.design_flow.versions.VersionNotFoundError`,
+    :class:`FlowVersionNotApprovedError` or :class:`FlowVersionUnrunnableError`
+    for a version, and ``KeyError`` for an unknown template id.
+    """
+    version_id = run.request.get("flow_version_id")
+    if version_id:
+        version = get_version_store().get(str(version_id))
+        if not version.startable:
+            raise FlowVersionNotApprovedError(str(version_id), version.status.value)
+        frozen = version.frozen
+        try:
+            frozen.verify()
+        except ValueError as exc:
+            raise FlowVersionUnrunnableError(str(version_id), str(exc)) from exc
+        definition = definition_from_frozen(frozen)
+        rebuilt = freeze_flow(definition, version=frozen.version).content_hash
+        if rebuilt != frozen.content_hash:
+            raise FlowVersionUnrunnableError(
+                str(version_id),
+                f"rebuilding it changed its content (approved {frozen.content_hash[:12]}, "
+                f"rebuilt {rebuilt[:12]})",
+            )
+        run.request["flow"] = version.base_template_id
+        run.request["flow_template_id"] = version.base_template_id
+        run.request["flow_version"] = frozen.version
+        run.request["flow_content_hash"] = frozen.content_hash
+        return definition
+
+    flow_id = str(run.request.get("flow") or DEFAULT_FLOW_ID)
+    definition = get_flow(flow_id)
+    try:
+        template_version = flow_version(flow_id)
+    except KeyError:
+        # A flow registered without a template file (test doubles only).
+        template_version = "unversioned"
+    run.request["flow"] = flow_id
+    run.request["flow_template_id"] = flow_id
+    run.request["flow_version"] = template_version
+    run.request["flow_content_hash"] = freeze_flow(
+        definition, version=template_version
+    ).content_hash
+    return definition
+
+
+def _build_in_process_executor(brain: Any, project_backend: Any) -> DesignFlowExecutor:
+    """The executor and its live gate checks, bound to the gateway's twin."""
     from api_gateway.runs.gate_eval import (
         ProjectGateEvaluator,
         TwinConsistencyGateChecker,
@@ -390,13 +468,9 @@ async def _launch_flow(run_id: str) -> None:
     )
     from api_gateway.twin.routes import get_twin
 
-    project_backend = get_project_backend()
-    run = _store.get(run_id)
-    await _ensure_run_project(run, project_backend)
-    hybrid = await build_phase_brain(run_id, run.request.get("flow"))
-    executor = DesignFlowExecutor(
+    return DesignFlowExecutor(
         store=_store,
-        brain=hybrid,
+        brain=brain,
         coordinator=_gate_coordinator,
         # The twin lets the gate require a *loadable* cad_model, not a bare node.
         gate_evaluator=ProjectGateEvaluator(project_backend, twin=get_twin()),
@@ -408,19 +482,40 @@ async def _launch_flow(run_id: str) -> None:
         # flag exists for it; see Gate.gate_id's own docstring for why).
         consistency_gate_checker=TwinConsistencyGateChecker(get_twin()),
     )
-    task = asyncio.create_task(executor.run(run_id))
+
+
+async def _launch_flow(run_id: str) -> None:
+    """Spawn the in-process executor for ``run_id`` as a tracked background task.
+
+    The test double (FORGE-401). Durable runs go through Temporal; this exists
+    so the flow logic can be exercised without a server, and so a contributor
+    with no Docker is not blocked.
+
+    The flow is resolved before anything else happens (FORGE-474), so a
+    version this engine cannot run exactly raises here, before a project is
+    created or a task is spawned, and the caller can delete the run record.
+    """
+    from api_gateway.projects.routes import get_project_backend
+
+    run = _store.get(run_id)
+    definition = _resolve_in_process_flow(run)
+    run.request["flow_engine"] = FlowEngine.IN_PROCESS.value
+    project_backend = get_project_backend()
+    await _ensure_run_project(run, project_backend)
+    hybrid = await build_phase_brain(run_id, run.request.get("flow"))
+    executor = _build_in_process_executor(hybrid, project_backend)
+    logger.info(
+        "design_flow_started_in_process",
+        run_id=run_id,
+        flow=definition.id,
+        version_id=run.request.get("flow_version_id"),
+        version=run.request.get("flow_version"),
+        content_hash=str(run.request.get("flow_content_hash") or "")[:12],
+        phases=[p.id for p in definition.phases],
+    )
+    task = asyncio.create_task(executor.run(run_id, definition))
     _flow_tasks.add(task)
     task.add_done_callback(_flow_tasks.discard)
-
-
-class FlowVersionNotApprovedError(RuntimeError):
-    """A run named a flow version nobody has approved yet (FORGE-399)."""
-
-    def __init__(self, version_id: str, status: str) -> None:
-        super().__init__(
-            f"flow version '{version_id}' is {status}, not approved. A run cannot start "
-            "on a flow a human has not agreed to."
-        )
 
 
 async def _start_on_temporal(run_id: str) -> None:
@@ -444,6 +539,7 @@ async def _start_on_temporal(run_id: str) -> None:
         flow_id = version.base_template_id
         frozen = version.frozen
         run.request["flow"] = flow_id
+        run.request["flow_template_id"] = flow_id
         run.request["flow_version"] = frozen.version
         run.request["flow_content_hash"] = frozen.content_hash
         launcher = await get_flow_launcher()
@@ -465,6 +561,7 @@ async def _start_on_temporal(run_id: str) -> None:
     # having skipped its own validation is exactly the case the rules exist
     # for, and refusing costs a 400 rather than a run that cannot pass.
     validate_flow(definition).raise_if_invalid(flow_id)
+    run.request["flow_template_id"] = flow_id
 
     # The version travels with the run, so "which flow did this use" survives
     # the template being edited afterwards.
@@ -505,6 +602,8 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
                 )
                 raise HTTPException(status_code=409, detail=str(refused)) from refused
         engine = resolve_flow_engine()
+        # Run status says which engine is driving it (FORGE-474).
+        run.request["flow_engine"] = engine.value
         if engine is FlowEngine.TEMPORAL:
             try:
                 await _start_on_temporal(run.id)
@@ -533,8 +632,25 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
         else:
             # The in-process double. `resolve_flow_engine` has already warned
-            # that runs started this way are not durable.
-            await _launch_flow(run.id)
+            # that runs started this way are not durable. It runs the exact
+            # approved version or refuses (FORGE-474); it never substitutes
+            # the template a version came from.
+            try:
+                await _launch_flow(run.id)
+            except VersionNotFoundError as exc:
+                _store.delete(run.id)
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except FlowVersionNotApprovedError as exc:
+                _store.delete(run.id)
+                logger.warning("design_flow_version_not_approved", run_id=run.id, error=str(exc))
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except FlowVersionUnrunnableError as exc:
+                _store.delete(run.id)
+                logger.error("design_flow_version_unrunnable", run_id=run.id, error=str(exc))
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except KeyError as exc:
+                _store.delete(run.id)
+                raise HTTPException(status_code=400, detail=str(exc.args[0])) from exc
         logger.info(
             "run_api_created",
             run_id=run.id,
@@ -595,6 +711,26 @@ class FlowRunState(BaseModel):
     detail: str = ""
 
 
+def _run_definition(run: Run) -> FlowDefinition:
+    """The phases a run was started on, for display.
+
+    A run on a stored version shows that version's phases (FORGE-474), not
+    the template it descends from: a dropped phase must not reappear here as
+    ``pending``.
+    """
+    version_id = run.request.get("flow_version_id")
+    if version_id:
+        try:
+            return definition_from_frozen(get_version_store().get(str(version_id)).frozen)
+        except VersionNotFoundError:
+            pass
+    flow_id = run.request.get("flow") or DEFAULT_FLOW_ID
+    try:
+        return get_flow(str(flow_id))
+    except KeyError:
+        return get_flow(DEFAULT_FLOW_ID)
+
+
 @router.get("/{run_id}/flow-state", response_model=FlowRunState)
 async def get_flow_state(run_id: str) -> FlowRunState:
     """Phase-by-phase state of a design-flow run.
@@ -610,12 +746,7 @@ async def get_flow_state(run_id: str) -> FlowRunState:
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
 
-    flow_id = run.request.get("flow") or DEFAULT_FLOW_ID
-    try:
-        definition = get_flow(str(flow_id))
-    except KeyError:
-        definition = get_flow(DEFAULT_FLOW_ID)
-    ordered = list(definition.phases)
+    ordered = list(_run_definition(run).phases)
 
     if not _is_design_flow(run.request):
         return FlowRunState(

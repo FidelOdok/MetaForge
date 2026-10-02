@@ -28,6 +28,10 @@ class ApprovalRequest(BaseModel):
     decision: Literal["approve", "reject"]
 
 
+def _optional_str(value: Any) -> str | None:
+    return None if value in (None, "") else str(value)
+
+
 class RunResponse(BaseModel):
     """Serialized run state."""
 
@@ -48,6 +52,14 @@ class RunResponse(BaseModel):
     approver_verified: bool = False
     result: dict[str, Any] | None = None
     history: list[str]
+    #: Which design-flow engine drives this run, ``temporal`` or
+    #: ``in_process`` (FORGE-474). ``None`` for a plain run.
+    engine: str | None = None
+    #: The flow version a design-flow run is pinned to (FORGE-474): the
+    #: stored version id when it was started from one, and the content hash
+    #: of what it actually runs, on either engine.
+    flow_version_id: str | None = None
+    flow_content_hash: str | None = None
 
     @classmethod
     def from_run(cls, run: Run) -> RunResponse:
@@ -64,6 +76,9 @@ class RunResponse(BaseModel):
             approver_verified=run.approver_verified,
             result=run.result,
             history=[str(s) for s in run.history],
+            engine=_optional_str(run.request.get("flow_engine")),
+            flow_version_id=_optional_str(run.request.get("flow_version_id")),
+            flow_content_hash=_optional_str(run.request.get("flow_content_hash")),
         )
 
 

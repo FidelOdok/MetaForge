@@ -17,6 +17,10 @@ flow.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from orchestrator.design_flow.frozen import FrozenFlow
 
 
 @dataclass(frozen=True)
@@ -159,3 +163,41 @@ def get_flow(flow_id: str | None) -> FlowDefinition:
         return FLOWS[flow_id]
     except KeyError as exc:
         raise KeyError(f"unknown flow '{flow_id}'; known flows: {sorted(FLOWS)}") from exc
+
+
+def definition_from_frozen(frozen: FrozenFlow) -> FlowDefinition:
+    """Rebuild a :class:`FlowDefinition` from a frozen, approved flow (FORGE-474).
+
+    The in-process executor walks ``FlowDefinition`` objects; Temporal walks
+    the :class:`~orchestrator.design_flow.frozen.FrozenFlow` itself. Building
+    the definition from the frozen form, rather than from a template lookup,
+    is what makes both engines run the same approved content. Callers verify
+    the hash first and compare it again after the round trip.
+    """
+    return FlowDefinition(
+        id=frozen.template_id,
+        name=frozen.name,
+        phases=tuple(
+            Phase(
+                id=p.id,
+                title=p.title,
+                objective=p.objective,
+                expected_artifacts=tuple(p.expected_artifacts),
+                required_deliverables=tuple(p.required_deliverables),
+                enforce_deliverables=p.enforce_deliverables,
+                disciplines=tuple(p.disciplines),
+                gate=(
+                    None
+                    if p.gate is None
+                    else Gate(
+                        name=p.gate.name,
+                        auto_approve=p.gate.auto_approve,
+                        criteria=tuple(p.gate.criteria),
+                        enforce_constraints=p.gate.enforce_constraints,
+                        gate_id=p.gate.gate_id,
+                    )
+                ),
+            )
+            for p in frozen.phases
+        ),
+    )
