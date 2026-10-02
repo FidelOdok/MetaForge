@@ -30,6 +30,7 @@ from api_gateway.chat.scope import ScopeResolutionError, apply_thread_scope, res
 from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_registry
 from api_gateway.chat.tool_approvals import get_approval_store
 from observability.metrics import MetricsCollector
+from orchestrator.design_flow.grounding import UNGROUNDED_BANNER
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
 from orchestrator.harness.compression import default_token_count, summarize_trajectory
 from orchestrator.harness.native_tools import NATIVE_SYSTEM, run_native_tools
@@ -1169,10 +1170,7 @@ def _flag_if_unfounded_completion_claim(answer: str, steps: list[ReActStep]) -> 
     lowered = answer.lower()
     if not any(verb in lowered for verb in _COMPLETION_CLAIM_VERBS):
         return answer
-    return (
-        "⚠ No tool calls were made this turn — the actions described below "
-        "were NOT actually performed; treat this reply as unverified.\n\n" + answer
-    )
+    return UNGROUNDED_BANNER + "\n\n" + answer
 
 
 def _attributed_as_chat(fn: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:

@@ -40,6 +40,7 @@ from temporalio.exceptions import ApplicationError
 
 from mcp_core.context import McpCallContext, with_context
 from observability.tracing import get_tracer
+from orchestrator.design_flow.grounding import phase_status
 from orchestrator.design_flow.temporal_activities import DesignFlowActivities
 from orchestrator.design_flow.temporal_flow import GateCheck, PhaseRequest, PhaseResult
 from orchestrator.design_flow.worker import build_design_flow_worker
@@ -50,6 +51,7 @@ tracer = get_tracer("api_gateway.runs.flow_worker")
 __all__ = [
     "DEFAULT_MCP_URL",
     "build_activities",
+    "ensure_gate_stores",
     "ensure_mcp_bridge",
     "main",
     "mcp_server_url",
@@ -62,8 +64,56 @@ DEFAULT_MCP_URL = "http://mcp-http:8765/mcp"
 #: The actor every phase's tool calls are attributed to on the sidecar.
 _ACTOR = "agent:design-flow"
 
+_stores_ready = False
+_stores_lock: asyncio.Lock | None = None
 _bridge: Any = None
 _bridge_lock: asyncio.Lock | None = None
+
+
+async def ensure_gate_stores() -> None:
+    """Point the gate evaluator at the real project store and twin (FORGE-484).
+
+    This process is not the gateway, so nothing runs the lifespan that swaps
+    the route modules' in-memory defaults for the Postgres project backend and
+    the Neo4j twin. Without it the gate check read an empty in-memory project,
+    reported "0 deliverable type(s) recorded", and judged a phase that had
+    recorded its deliverable. A failure here raises a retryable activity error
+    rather than falling back to the empty store: an unreadable store must not
+    be read as "nothing recorded" or as "all clear".
+    """
+    global _stores_ready, _stores_lock  # noqa: PLW0603
+    if _stores_ready:
+        return
+    if _stores_lock is None:
+        _stores_lock = asyncio.Lock()
+    async with _stores_lock:
+        if _stores_ready:
+            return
+        from api_gateway.projects import routes as project_routes
+        from api_gateway.projects.backend import create_project_backend
+        from api_gateway.server import _init_database
+        from api_gateway.twin import routes as twin_routes
+        from twin_core.api import InMemoryTwinAPI
+
+        try:
+            await _init_database()
+            backend = await create_project_backend()
+            twin = await InMemoryTwinAPI.create_from_env()
+        except Exception as exc:
+            logger.error("design_flow_worker_stores_unavailable", error=str(exc))
+            raise ApplicationError(
+                f"design-flow worker cannot reach the project store or twin: {exc}",
+                type="StoreUnavailable",
+            ) from exc
+        project_routes.init_project_backend(backend)
+        project_routes.init_twin(twin)
+        twin_routes.init_twin(twin)
+        _stores_ready = True
+        logger.info(
+            "design_flow_worker_stores_ready",
+            backend=type(backend).__name__,
+            graph=type(getattr(twin, "_graph", None)).__name__,
+        )
 
 
 def mcp_server_url() -> str:
@@ -291,7 +341,7 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
     return PhaseResult(
         summary=outcome.summary,
         artifacts=list(outcome.artifacts),
-        status=outcome.status,
+        status=phase_status(outcome.summary, outcome.status),
     )
 
 
@@ -304,6 +354,7 @@ async def _check_gate(payload: dict[str, Any]) -> GateCheck:
     """
     from api_gateway.runs.routes import build_gate_checkers
 
+    await ensure_gate_stores()
     checkers = await build_gate_checkers()
     if checkers is None:
         return GateCheck(checked=False, constraints_checked=False, reason="no evaluators wired")

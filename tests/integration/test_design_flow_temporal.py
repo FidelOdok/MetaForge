@@ -447,3 +447,71 @@ async def _wait_for_gate(
             return
         await asyncio.sleep(0.05)
     raise AssertionError(f"run {run_id} never reached a gate: {await launcher.state(run_id)}")
+
+
+class TestDeliverableGateOnTemporal:
+    """FORGE-484: same gate contract as the in-process executor."""
+
+    async def _run(self, env, phases, checker):
+        run_id = str(uuid.uuid4())
+        asked: list[str] = []
+
+        async def announcer(rid: str, gate: str, reason: str) -> None:
+            asked.append(gate)
+
+        flow = _flow()
+        flow.phases[0].enforce_deliverables = True
+        flow.phases[0].required_deliverables = ["intent"]
+        flow.content_hash = flow.compute_hash()
+        acts = DesignFlowActivities(
+            phase_runner=phases, gate_checker=checker, gate_announcer=announcer
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=flow)
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+        return result, asked
+
+    async def test_no_deliverable_fails_with_names_and_phase_failed(self, env) -> None:
+        async def none_recorded(payload: dict) -> GateCheck:
+            return GateCheck(ready=False, checked=True, missing=["intent"], present=[])
+
+        result, asked = await self._run(env, _Phases(), none_recorded)
+        assert result["status"] == "failed"
+        assert "intent" in result["error"]
+        assert result["phases"][0]["status"] == "failed"
+        assert asked == []
+
+    async def test_ungrounded_phase_is_not_passed(self, env) -> None:
+        from orchestrator.design_flow.grounding import UNGROUNDED_BANNER
+
+        class _Ungrounded(_Phases):
+            async def __call__(self, request: PhaseRequest) -> PhaseResult:
+                return PhaseResult(summary=f"{UNGROUNDED_BANNER}\n\nbuilt it")
+
+        result, asked = await self._run(env, _Ungrounded(), _ok_gate)
+        assert result["status"] == "failed"
+        assert "ungrounded" in result["error"]
+        assert result["phases"][0]["status"] == "failed"
+        assert asked == []
+
+    async def test_recorded_deliverable_opens_a_ready_gate_and_lists_artifact(self, env) -> None:
+        async def present(payload: dict) -> GateCheck:
+            return GateCheck(ready=True, checked=True, present=["intent"], reason="ok")
+
+        run_id = str(uuid.uuid4())
+        flow = _flow()
+        flow.phases[0].enforce_deliverables = True
+        flow.phases[0].required_deliverables = ["intent"]
+        flow.content_hash = flow.compute_hash()
+        acts = DesignFlowActivities(
+            phase_runner=_Phases(), gate_checker=present, gate_announcer=_announced
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=flow)
+            await _wait_for_gate(env, launcher, run_id)
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:reviewer")
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+        assert result["status"] == "completed"
+        assert "intent" in result["phases"][0]["artifacts"]

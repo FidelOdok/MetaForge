@@ -435,7 +435,14 @@ class _GateCheckers:
             # No project means nothing to evaluate against. Say so rather
             # than returning a clean result nobody looked for.
             return GateCheck(checked=False, constraints_checked=False, reason="run has no project")
-        required = list(getattr(phase, "required_deliverables", []) or [])
+        # Over Temporal the phase arrives as a plain dict (the activity payload is
+        # untyped), where getattr found nothing: the required list read empty, the
+        # check came back ``checked=False`` and an empty gate opened as ready
+        # (FORGE-484). Read both shapes.
+        if isinstance(phase, dict):
+            required = list(phase.get("required_deliverables") or [])
+        else:
+            required = list(getattr(phase, "required_deliverables", []) or [])
         # ``since_ts=0`` asks "what has this project ever recorded", which is
         # the right question for a durable engine: the phase that produced the
         # deliverable may have run in a different process, hours earlier and
