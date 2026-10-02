@@ -42,7 +42,13 @@ from orchestrator.harness.runs import (
     InMemoryRunStore,
     await_approval_decision,
 )
-from orchestrator.harness.tools import ApprovalDeniedError, GateCheck, ToolRegistry, ToolSpec
+from orchestrator.harness.tools import (
+    NATIVE,
+    ApprovalDeniedError,
+    GateCheck,
+    ToolRegistry,
+    ToolSpec,
+)
 from orchestrator.harness.validation import validate_arguments
 from twin_core.policy.engine import PolicyEngine
 
@@ -279,7 +285,21 @@ class HarnessRuntime:
                 # error path already surfaces to the model -- this only moves
                 # *when* that check runs, not what it checks.
                 validate_arguments(name, spec.input_schema, arguments)
-                if spec.requires_approval and self.approval_mode != "forward":
+                if spec.requires_approval and self.approval_mode == "forward":
+                    # FORGE-490: only an MCP tool reaches the sidecar's
+                    # service-caller policy. An in-process tool would run with
+                    # no check at all, so refuse it: not run, not held.
+                    if spec.origin == NATIVE:
+                        logger.warning(
+                            "approval_tool_refused_unattended",
+                            tool=spec.name,
+                            session_id=self.session_id,
+                        )
+                        raise ApprovalDeniedError(
+                            spec.name,
+                            "not available in an unattended design-flow turn",
+                        )
+                elif spec.requires_approval:
                     await self._await_approval(spec, arguments)
                 # FORGE-71: actor/state are deliberately minimal here -- a
                 # generic tool-dispatch layer has no domain-specific

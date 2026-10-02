@@ -36,15 +36,55 @@ def _registry(calls: list[dict[str, object]]) -> ToolRegistry:
 
 
 @pytest.mark.asyncio
-async def test_forward_mode_invokes_tool_without_creating_a_hold() -> None:
+async def test_forward_mode_creates_no_hold_for_mcp_tool() -> None:
     calls: list[dict[str, object]] = []
     runs = InMemoryRunStore()
-    rt = HarnessRuntime.build(
-        tools=_registry(calls), runs=runs, approval_mode="forward", approver_reachable=False
+    tools = ToolRegistry()
+
+    async def _h(args: dict[str, object]) -> dict[str, object]:
+        calls.append(args)
+        return {"done": True}
+
+    tools.register_mcp(
+        "metaforge", "t", description="d", input_schema={}, handler=_h, requires_approval=True
     )
-    assert await rt.call_tool("twin_record_decision", {"x": 1}) == {"done": True}
+    rt = HarnessRuntime.build(
+        tools=tools, runs=runs, approval_mode="forward", approver_reachable=False
+    )
+    assert await rt.call_tool("mcp_metaforge_t", {"x": 1}) == {"done": True}
     assert calls == [{"x": 1}]
     assert runs.list() == []
+
+
+@pytest.mark.asyncio
+async def test_forward_mode_forwards_mcp_tool() -> None:
+    calls: list[dict[str, object]] = []
+    tools = ToolRegistry()
+
+    async def _h(args: dict[str, object]) -> dict[str, object]:
+        calls.append(args)
+        return {"done": True}
+
+    tools.register_mcp(
+        "metaforge", "twin_record_decision", description="d", input_schema={},
+        handler=_h, requires_approval=True,
+    )
+    rt = HarnessRuntime.build(tools=tools, approval_mode="forward")
+    assert await rt.call_tool("mcp_metaforge_twin_record_decision", {"x": 1}) == {"done": True}
+    assert calls == [{"x": 1}]
+
+
+@pytest.mark.asyncio
+async def test_forward_mode_refuses_native_approval_tool_without_hold_or_run() -> None:
+    calls: list[dict[str, object]] = []
+    runs = InMemoryRunStore()
+    rt = HarnessRuntime.build(tools=_registry(calls), runs=runs, approval_mode="forward")
+    with structlog.testing.capture_logs() as logs:
+        with pytest.raises(ApprovalDeniedError, match="unattended design-flow turn"):
+            await rt.call_tool("twin_record_decision", {"x": 1})
+    assert calls == []
+    assert runs.list() == []
+    assert [e for e in logs if e["event"] == "approval_tool_refused_unattended"]
 
 
 @pytest.mark.asyncio
