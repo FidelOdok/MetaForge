@@ -479,6 +479,24 @@ groups:
             back (`docker compose up temporal`); nothing needs replaying,
             since no run was created.
 
+      # FORGE-469: an approval gate reached with no Temporal runtime used to
+      # auto-approve. It now refuses and the run fails, so any sample here
+      # means a worker is running without temporalio and every human gate
+      # it reaches is being refused.
+      - alert: ApprovalGateNoTemporalRuntime
+        expr: rate(metaforge_approval_gate_no_runtime_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Approval gates refused: no Temporal runtime (role {{ $labels.required_role }})"
+          description: >-
+            wait_for_approval ran in a process where temporalio is not
+            importable. The gate was refused rather than approved, so the
+            run failed instead of silently passing review. Install the
+            Temporal SDK in that worker and check the
+            approval_activity_no_runtime log event for the run and step.
+
       - alert: DesignFlowGatesNeverAnswered
         expr: >-
           rate(metaforge_design_flow_gate_total{outcome="timed_out"}[1h]) > 0

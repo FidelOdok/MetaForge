@@ -412,6 +412,16 @@ class MetricsRegistry:
         description=("Design-flow run starts refused because the workflow engine was unreachable"),
         labels=["target"],
     )
+    # FORGE-469: a human approval gate asked to decide with no Temporal
+    # runtime to wait on. It used to approve on the spot, so a missing
+    # dependency silently waved every gate through. It now refuses, and
+    # this counts the refusals so the broken worker is visible.
+    APPROVAL_GATE_NO_RUNTIME_TOTAL = MetricDefinition(
+        name="metaforge_approval_gate_no_runtime_total",
+        type="counter",
+        description="Approval gates refused because no Temporal runtime was available",
+        labels=["required_role"],
+    )
     DESIGN_FLOW_RUN_STARTED = MetricDefinition(
         name="metaforge_design_flow_run_started_total",
         type="counter",
@@ -567,11 +577,12 @@ class MetricsRegistry:
 
     @classmethod
     def design_flow_metrics(cls) -> list[MetricDefinition]:
-        """Design-flow engine metrics (FORGE-401)."""
+        """Design-flow engine and approval-gate metrics (FORGE-401, FORGE-469)."""
         return [
             cls.DESIGN_FLOW_ENGINE_UNAVAILABLE,
             cls.DESIGN_FLOW_RUN_STARTED,
             cls.DESIGN_FLOW_GATE_TOTAL,
+            cls.APPROVAL_GATE_NO_RUNTIME_TOTAL,
         ]
 
     @classmethod
@@ -1241,6 +1252,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.TOOL_APPROVAL_RESOLUTION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome, "trigger": trigger, "result": result})
+
+    def record_approval_gate_no_runtime(self, required_role: str) -> None:
+        """Record one approval gate refused for lack of a Temporal runtime (FORGE-469)."""
+        counter = self._instruments.get(MetricsRegistry.APPROVAL_GATE_NO_RUNTIME_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"required_role": required_role})
 
 
 def collector_for(component: str) -> MetricsCollector:
