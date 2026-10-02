@@ -1652,6 +1652,7 @@ async def _bootstrap(
         logger.warning("mcp_brief_provider_unavailable", error=str(exc))
 
     approval_gate = _build_approval_gate()
+    approval_ledger = _build_approval_ledger()
 
     # FORGE-413: without this the MCP server holds `metrics=None`, every
     # recorder returns at its `if counter is not None` guard, and all four
@@ -1697,6 +1698,7 @@ async def _bootstrap(
         constraint_recorder=make_constraint_recorder(twin, project_backend),
         adapter_ids=_adapter_ids_from_args(args.adapters),
         approval_gate=approval_gate,
+        approval_ledger=approval_ledger,
         metrics=metrics,
         brief_provider=brief_provider,
         # FORGE-371: unset means no links, reported by health/check. The
@@ -1839,6 +1841,31 @@ def _build_approval_gate() -> Any:
         ),
     )
     return build_mcp_approval_gate()
+
+
+def _build_approval_ledger() -> Any:
+    """The ledger inline (elicitation) holds are written to (FORGE-473).
+
+    Mirrors :func:`_build_approval_gate`: a sidecar with ``METAFORGE_GATEWAY_URL``
+    writes to the gateway over HTTP; inside the gateway it uses the process's own
+    store. Neither available means ``None``, and the log says so, because an
+    inline answer then leaves no ledger entry.
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_approvals import RemoteApprovalLedger
+
+        return RemoteApprovalLedger(gateway_url)
+    try:
+        from api_gateway.mcp_approvals import InProcessApprovalLedger
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.warning(
+            "mcp_approval_ledger_missing",
+            error=str(exc),
+            detail="Inline approvals will have no approval id and will not reach the ledger.",
+        )
+        return None
+    return InProcessApprovalLedger()
 
 
 def _configure_logging_for_transport(transport: str) -> None:

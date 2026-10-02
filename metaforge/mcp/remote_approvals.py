@@ -41,6 +41,7 @@ import structlog
 from mcp_core.guardrails import (
     ApprovalAsk,
     ApprovalGateFn,
+    ApprovalLedgerUnavailableError,
     ApprovalOutcome,
     ApprovalResolution,
     Approver,
@@ -51,7 +52,12 @@ from observability.metrics import MetricsCollector, collector_for
 
 logger = structlog.get_logger(__name__)
 
-__all__ = ["DEFAULT_POLL_INTERVAL", "DEFAULT_TIMEOUT_SECONDS", "build_remote_approval_gate"]
+__all__ = [
+    "DEFAULT_POLL_INTERVAL",
+    "DEFAULT_TIMEOUT_SECONDS",
+    "RemoteApprovalLedger",
+    "build_remote_approval_gate",
+]
 
 #: Matches the in-process gate. Shorter than a chat approval on purpose: an
 #: MCP client holds a request open, and most give up well before a generous
@@ -172,6 +178,8 @@ def build_remote_approval_gate(
                         "source": "mcp",
                         "session_id": ask.session_id,
                         "project": ask.project,
+                        "route": "dashboard",
+                        "client": ask.client,
                         # FORGE-466: the gateway expires the hold past this
                         # window if this side never closes it.
                         "timeout_seconds": timeout,
@@ -285,3 +293,107 @@ async def _close_then_release(closing: Any, http: httpx.AsyncClient | None) -> N
     finally:
         if http is not None:
             await http.aclose()
+
+
+#: Outcome names the gateway's resolve route takes (FORGE-473).
+_LEDGER_OUTCOMES = {
+    ApprovalOutcome.APPROVED: "approved",
+    ApprovalOutcome.REJECTED: "rejected",
+    ApprovalOutcome.TIMED_OUT: "timed_out",
+    ApprovalOutcome.CANCELLED: "canceled",
+}
+_STATUS_OUTCOMES = {
+    "running": ApprovalOutcome.APPROVED,
+    "completed": ApprovalOutcome.APPROVED,
+    "rejected": ApprovalOutcome.REJECTED,
+    "timed_out": ApprovalOutcome.TIMED_OUT,
+    "canceled": ApprovalOutcome.CANCELLED,
+    "failed": ApprovalOutcome.REJECTED,
+}
+
+
+class RemoteApprovalLedger:
+    """Writes inline (elicitation) holds into the gateway's ledger (FORGE-473).
+
+    The same ledger :func:`build_remote_approval_gate` uses, so a call answered
+    in the client's own prompt has an approval id, a route, a requester and an
+    approver, and shows up beside the dashboard ones.
+    """
+
+    def __init__(
+        self,
+        gateway_url: str,
+        *,
+        client: httpx.AsyncClient | None = None,
+        timeout: float = RESOLVE_TIMEOUT_SECONDS,
+    ) -> None:
+        self._endpoint = f"{gateway_url.rstrip('/')}/v1/chat/tool_approvals"
+        self._client = client
+        self._timeout = timeout
+
+    async def _post(self, url: str, body: dict[str, Any]) -> httpx.Response:
+        if self._client is not None:
+            return await self._client.post(url, json=body, timeout=self._timeout)
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
+            return await http.post(url, json=body)
+
+    async def open_hold(self, ask: ApprovalAsk, *, route: str) -> str:
+        try:
+            created = await self._post(
+                self._endpoint,
+                {
+                    "tool": ask.tool_id,
+                    "arguments": ask.arguments,
+                    "reason": ask.reason,
+                    "caller": ask.caller.value,
+                    "source": "mcp",
+                    "session_id": ask.session_id,
+                    "project": ask.project,
+                    "route": route,
+                    "client": ask.client,
+                    "timeout_seconds": ask.timeout_seconds,
+                },
+            )
+            created.raise_for_status()
+            approval_id = str(created.json()["id"])
+        except Exception as exc:  # noqa: BLE001 - reported as a refusal, never a pass
+            logger.error(
+                "mcp_inline_ledger_unreachable",
+                tool_id=ask.tool_id,
+                endpoint=self._endpoint,
+                error=str(exc) or type(exc).__name__,
+            )
+            raise ApprovalLedgerUnavailableError(
+                ask.tool_id, str(exc) or type(exc).__name__
+            ) from exc
+        logger.info(
+            "mcp_inline_ledger_opened", run_id=approval_id, tool_id=ask.tool_id, route=route
+        )
+        return approval_id
+
+    async def close_hold(
+        self,
+        approval_id: str,
+        outcome: ApprovalOutcome,
+        *,
+        route: str,
+        approver: Approver | None,
+        reason: str | None = None,
+    ) -> ApprovalOutcome:
+        body: dict[str, Any] = {"outcome": _LEDGER_OUTCOMES[outcome], "reason": reason}
+        if approver is not None:
+            body["approver"] = approver.actor_id
+            body["approver_verified"] = approver.verified
+        response = await self._post(f"{self._endpoint}/{approval_id}/resolve", body)
+        if response.status_code == 409:
+            # Decided elsewhere first. Read what is on record and act on it.
+            async with httpx.AsyncClient(timeout=self._timeout) as http:
+                current = await http.get(f"{self._endpoint}/{approval_id}")
+            current.raise_for_status()
+            return _STATUS_OUTCOMES.get(str(current.json().get("status")), ApprovalOutcome.REJECTED)
+        response.raise_for_status()
+        recorded = _STATUS_OUTCOMES.get(str(response.json().get("status")))
+        logger.info(
+            "mcp_inline_ledger_closed", run_id=approval_id, outcome=outcome.value, route=route
+        )
+        return recorded or outcome

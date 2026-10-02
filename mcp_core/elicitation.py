@@ -37,12 +37,22 @@ from typing import Any, Protocol
 
 import structlog
 
-from mcp_core.guardrails import ApprovalAsk, ApprovalGateFn, ApprovalOutcome
+from mcp_core.context import current_context
+from mcp_core.guardrails import (
+    ApprovalAsk,
+    ApprovalGateFn,
+    ApprovalLedger,
+    ApprovalLedgerUnavailableError,
+    ApprovalOutcome,
+    ApprovalResolution,
+    Approver,
+)
 
 logger = structlog.get_logger(__name__)
 
 __all__ = [
     "ELICITATION_PROTOCOL_VERSION",
+    "ELICITATION_ROUTE",
     "ElicitAction",
     "ElicitResult",
     "Elicitor",
@@ -50,6 +60,7 @@ __all__ = [
     "approval_request",
     "cancelled_notification",
     "elicitation_gate",
+    "inline_approver",
     "result_from_payload",
 ]
 
@@ -227,7 +238,30 @@ def cancelled_notification(request_id: str | int, reason: str) -> dict[str, Any]
     }
 
 
-def elicitation_gate(elicitor: Elicitor) -> ApprovalGateFn:
+#: The route name an inline hold carries on the ledger (FORGE-473).
+ELICITATION_ROUTE = "elicitation"
+
+#: Stands in for the person at the client prompt when the session carries no
+#: identity of its own, like ``local:dashboard`` for an unauthenticated click.
+LOCAL_ELICITATION_ACTOR = "local:elicitation"
+
+
+def inline_approver() -> Approver:
+    """The human who answered the client's prompt (FORGE-473).
+
+    Taken from the authenticated session, never from the answer's content: a
+    model can fill the ``note`` field, and the form is rendered by a client we
+    do not control. A session with no identity (``METAFORGE_AUTH_MODE=off``,
+    local stdio) is recorded as unverified, the same honest record a dashboard
+    click on an open gateway gets.
+    """
+    ctx = current_context()
+    if ctx.actor_is_attributable:
+        return Approver(actor_id=ctx.actor_id, verified=True)
+    return Approver(actor_id=LOCAL_ELICITATION_ACTOR, verified=False)
+
+
+def elicitation_gate(elicitor: Elicitor, ledger: ApprovalLedger | None = None) -> ApprovalGateFn:
     """An :data:`ApprovalGateFn` that asks through the connected client.
 
     The three-action response maps onto the outcomes F1 already defines,
@@ -248,7 +282,7 @@ def elicitation_gate(elicitor: Elicitor) -> ApprovalGateFn:
     deadline as a cancellation, which is where it withdraws the question.
     """
 
-    async def gate(ask: ApprovalAsk) -> ApprovalOutcome:
+    async def ask_client(ask: ApprovalAsk) -> ApprovalOutcome:
         message, schema = approval_request(ask)
         try:
             result = await asyncio.wait_for(elicitor(message, schema), timeout=ask.timeout_seconds)
@@ -268,7 +302,72 @@ def elicitation_gate(elicitor: Elicitor) -> ApprovalGateFn:
         # unreviewed write.
         return ApprovalOutcome.APPROVED if approved is True else ApprovalOutcome.REJECTED
 
+    if ledger is None:
+        return ask_client
+
+    async def gate(ask: ApprovalAsk) -> ApprovalResolution:
+        # FORGE-473: the entry exists before the question does, so every held
+        # call has an id whichever route answers it. If it cannot be written
+        # the error propagates and the write is refused.
+        approval_id = await ledger.open_hold(ask, route=ELICITATION_ROUTE)
+        try:
+            outcome = await ask_client(ask)
+        except asyncio.CancelledError:
+            # The call is being torn down. Close the entry in a task of its
+            # own, because a cancelled scope may refuse further awaits.
+            closing = asyncio.ensure_future(
+                ledger.close_hold(
+                    approval_id,
+                    ApprovalOutcome.CANCELLED,
+                    route=ELICITATION_ROUTE,
+                    approver=None,
+                    reason="the waiting call was cancelled",
+                )
+            )
+            _background.add(closing)
+            closing.add_done_callback(_background.discard)
+            raise
+        # Only a person's answer has an approver. A dismissal or an expired
+        # window is nobody's decision.
+        answered = outcome in (ApprovalOutcome.APPROVED, ApprovalOutcome.REJECTED)
+        approver = inline_approver() if answered else None
+        try:
+            recorded = await ledger.close_hold(
+                approval_id, outcome, route=ELICITATION_ROUTE, approver=approver
+            )
+        except Exception as exc:  # noqa: BLE001 - an approval we cannot record must not run
+            logger.error(
+                "elicitation_ledger_close_failed",
+                approval_id=approval_id,
+                tool_id=ask.tool_id,
+                error=str(exc) or type(exc).__name__,
+            )
+            if outcome is ApprovalOutcome.APPROVED:
+                # Approved in the prompt but not on record: the write would
+                # have no recorded approver. Refuse it.
+                raise ApprovalLedgerUnavailableError(
+                    ask.tool_id, f"approval {approval_id} could not be closed: {exc}"
+                ) from exc
+            recorded = outcome
+        if recorded is not outcome:
+            # Decided elsewhere first (a dashboard answer, or the gateway
+            # expired the hold). What is on record wins.
+            logger.warning(
+                "elicitation_ledger_outcome_differs",
+                approval_id=approval_id,
+                answered=outcome.value,
+                recorded=recorded.value,
+            )
+            outcome = recorded
+            approver = inline_approver() if outcome is ApprovalOutcome.APPROVED else None
+        return ApprovalResolution(outcome=outcome, approver=approver, approval_id=approval_id)
+
     return gate
+
+
+#: Closes started while a call was being cancelled. Held here so the task is
+#: not garbage-collected before it finishes.
+_background: set[asyncio.Task[Any]] = set()
 
 
 def first_available_gate(

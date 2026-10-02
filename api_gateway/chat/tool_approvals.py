@@ -209,15 +209,19 @@ def _decide_flow_version(run: Run, *, approved: bool) -> None:
 
 
 @router.get("", response_model=RunListResponse)
-def list_pending_approvals() -> RunListResponse:
-    """All tool-call approvals currently awaiting a decision.
+def list_pending_approvals(status: Literal["pending", "all"] = "pending") -> RunListResponse:
+    """Tool-call approvals: the ones awaiting a decision, or every one.
 
-    Overdue holds are expired first, so nothing listed here is a call whose
-    waiter has already given up (FORGE-466).
+    Overdue holds are expired first, so nothing listed as pending is a call
+    whose waiter has already given up (FORGE-466). ``status=all`` is the audit
+    view (FORGE-473): every entry whichever route answered it, each carrying
+    its ``route``, outcome and approver.
     """
     expire_overdue_holds()
-    pending = [r for r in _approval_store.list() if r.status is RunStatus.AWAITING_APPROVAL]
-    return RunListResponse(runs=[RunResponse.from_run(r) for r in pending])
+    runs = _approval_store.list()
+    if status == "pending":
+        runs = [r for r in runs if r.status is RunStatus.AWAITING_APPROVAL]
+    return RunListResponse(runs=[RunResponse.from_run(r) for r in runs])
 
 
 @router.get("/{run_id}", response_model=RunResponse)
@@ -239,6 +243,12 @@ class HoldToolCallRequest(BaseModel):
     source: str = "mcp"
     session_id: str | None = None
     project: str | None = None
+    #: How the question is being asked (FORGE-473): ``dashboard`` waits for a
+    #: click on the Approvals page, ``elicitation`` is asked inside the
+    #: client's own prompt and closed by the sidecar with the answer.
+    route: Literal["dashboard", "elicitation"] = "dashboard"
+    #: The MCP client that made the call, for the audit trail.
+    client: str | None = None
     #: How long the caller will wait for an answer (FORGE-466). The gateway
     #: stores a deadline from it and expires the hold if the caller never
     #: closes it, so a crashed waiter cannot leave it pending forever.
@@ -268,6 +278,8 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
             "source": body.source,
             "session_id": body.session_id,
             "project": body.project,
+            "route": body.route,
+            "client": body.client,
         }
     )
     _approval_store.start(run.id)
@@ -283,6 +295,7 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
         tool=body.tool,
         caller=body.caller,
         source=body.source,
+        route=body.route,
         deadline=run.approval_deadline,
     )
     return RunResponse.from_run(run)
@@ -291,12 +304,19 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
 class ResolveHoldRequest(BaseModel):
     """Close a hold nobody is waiting for any more (FORGE-466)."""
 
-    outcome: Literal["timed_out", "canceled"]
+    #: ``approved`` and ``rejected`` are an inline answer (FORGE-473): the
+    #: person answered in the client's own prompt, and the sidecar that saw
+    #: it records the result here.
+    outcome: Literal["timed_out", "canceled", "approved", "rejected"]
     reason: str | None = None
+    #: Who answered, as established by the sidecar from the authenticated MCP
+    #: session. Only used with ``approved`` / ``rejected``.
+    approver: str | None = None
+    approver_verified: bool = False
 
 
 @router.post("/{run_id}/resolve", response_model=RunResponse)
-def resolve_unanswered_hold(run_id: str, body: ResolveHoldRequest) -> RunResponse:
+def resolve_unanswered_hold(run_id: str, body: ResolveHoldRequest, request: Request) -> RunResponse:
     """The waiting side stopped waiting: close the hold so nobody answers it.
 
     Idempotent. A hold already ``timed_out`` or ``canceled`` comes back as it
@@ -323,7 +343,9 @@ def resolve_unanswered_hold(run_id: str, body: ResolveHoldRequest) -> RunRespons
             detail=f"approval '{run_id}' was already decided ({run.status.value}); "
             "read the decision instead of closing it",
         )
-    if body.outcome == "timed_out":
+    if body.outcome in ("approved", "rejected"):
+        run = _record_inline_answer(run_id, body, request)
+    elif body.outcome == "timed_out":
         run = _approval_store.time_out(
             run_id, reason=body.reason or "the waiting call timed out before anyone answered"
         )
@@ -339,6 +361,52 @@ def resolve_unanswered_hold(run_id: str, body: ResolveHoldRequest) -> RunRespons
         source=run.request.get("source"),
     )
     return RunResponse.from_run(run)
+
+
+def record_inline_answer(
+    run_id: str, *, approved: bool, approver: str | None, verified: bool
+) -> Run:
+    """Close a hold with the answer a person gave in the client's own prompt.
+
+    Shared by the sidecar's route and the in-process ledger so both write the
+    same entry. ``approved_by`` falls back to ``local:elicitation`` rather than
+    being left empty: somebody answered, and what is known is that they did it
+    inline on an identity-less session.
+    """
+    from mcp_core.elicitation import LOCAL_ELICITATION_ACTOR
+
+    run = _approval_store.submit_approval(
+        run_id,
+        ApprovalDecision.APPROVE if approved else ApprovalDecision.REJECT,
+        approved_by=approver or LOCAL_ELICITATION_ACTOR,
+        approver_verified=verified if approver else False,
+    )
+    logger.info(
+        "tool_approval_answered_inline",
+        run_id=run_id,
+        approved=approved,
+        approved_by=run.approved_by,
+        approver_verified=run.approver_verified,
+    )
+    return run
+
+
+def _record_inline_answer(run_id: str, body: ResolveHoldRequest, request: Request) -> Run:
+    # A claim of "verified" is honoured only when this request itself came in
+    # authenticated. On an open gateway anyone can POST here, and an identity
+    # nobody checked must not be recorded as one somebody did (FORGE-393).
+    from api_gateway.auth.dependencies import current_principal
+
+    verified = body.approver_verified and current_principal(request) is not None
+    try:
+        return record_inline_answer(
+            run_id,
+            approved=body.outcome == "approved",
+            approver=body.approver,
+            verified=verified,
+        )
+    except InvalidTransition as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{run_id}", response_model=RunResponse)
@@ -369,6 +437,18 @@ def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -
             detail=f"approval '{run_id}' is {current.status.value}: "
             f"{current.error or 'nobody is waiting for this call any more'}. "
             "Nothing was recorded; ask for the call again if it is still wanted.",
+        )
+    if (
+        current.request.get("route") == "elicitation"
+        and current.status is RunStatus.AWAITING_APPROVAL
+    ):
+        # FORGE-473: the question is on screen in the client right now, and
+        # that prompt is the one that gets the answer. A click here would be
+        # recorded and then overwritten by (or fight with) the inline answer.
+        raise HTTPException(
+            status_code=409,
+            detail=f"approval '{run_id}' is being answered in the client's own approval "
+            "prompt. Answer it there; it appears here as resolved once you do.",
         )
     try:
         run = _approval_store.submit_approval(
