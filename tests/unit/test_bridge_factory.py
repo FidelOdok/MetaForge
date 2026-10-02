@@ -196,3 +196,62 @@ class TestConnectHttpBridge:
         )
         with pytest.raises(RuntimeError, match="failed to connect"):
             await connect_http_bridge("http://mcp-http:8765", require=True)
+
+
+class TestDiscoveredToolRouting:
+    """FORGE-483: tools reported with other adapter ids still route to the transport."""
+
+    @pytest.mark.asyncio
+    async def test_call_reaches_transport_for_foreign_adapter_ids(self) -> None:
+        import json
+
+        from mcp_core.client import McpClient
+        from skill_registry.bridge_factory import _discover_tools
+
+        calls: list[dict[str, Any]] = []
+        list_payload = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "discover",
+                "result": {
+                    "tools": [
+                        {"tool_id": "twin.get_node", "adapter_id": "twin", "name": "get_node"},
+                        {"tool_id": "health.check", "adapter_id": "health", "name": "check"},
+                    ]
+                },
+            }
+        )
+
+        class FakeTransport:
+            async def connect(self) -> None:
+                pass
+
+            async def disconnect(self) -> None:
+                pass
+
+            def is_connected(self) -> bool:
+                return True
+
+            async def send(self, message: str) -> str:
+                req = json.loads(message)
+                if req["method"] == "tool/list":
+                    return list_payload
+                calls.append(req)
+                return json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req["id"],
+                        "result": {"tool_id": req["params"]["tool_id"], "data": {}},
+                    }
+                )
+
+        transport = FakeTransport()
+        client = McpClient()
+        await client.connect("metaforge", transport)  # type: ignore[arg-type]
+        await _discover_tools(client, transport)
+
+        from mcp_core.schemas import ToolCallRequest
+
+        await client.call_tool(ToolCallRequest(tool_id="twin.get_node", arguments={"id": "x"}))
+        assert [c["method"] for c in calls] == ["tool/call"]
+        assert calls[0]["params"]["tool_id"] == "twin.get_node"

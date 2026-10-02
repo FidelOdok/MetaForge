@@ -186,11 +186,15 @@ async def _discover_tools(client: McpClient, transport: Any) -> None:
     if "error" in payload:
         raise RuntimeError(f"tool/list returned an error: {payload['error']}")
     tools = payload.get("result", {}).get("tools", [])
+    # Every tool listed over this transport is reachable only through it, so
+    # register under the transport's adapter id. The server-reported per-tool
+    # adapter id (twin, health, ...) names no connected transport and would
+    # make McpClient.call_tool raise ToolUnavailableError (FORGE-483).
     for tool_data in tools:
         client.register_manifest(
             ToolManifest(
                 tool_id=tool_data["tool_id"],
-                adapter_id=tool_data.get("adapter_id", _DEFAULT_ADAPTER_ID),
+                adapter_id=_DEFAULT_ADAPTER_ID,
                 name=tool_data["name"],
                 description=tool_data.get("description", ""),
                 capability=tool_data.get("capability", ""),
