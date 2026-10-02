@@ -87,6 +87,17 @@ class HarnessRuntime:
     on_approval_request: OnApprovalRequest | None = None
     approval_timeout_seconds: float = 120.0
     approval_poll_interval: float = 1.0
+    # FORGE-490: ``"hold"`` (default) parks a ``requires_approval`` call in
+    # ``runs`` until someone answers it. ``"forward"`` makes no in-process hold
+    # at all: the call goes straight to the tool, which for an MCP tool is the
+    # sidecar, where the service-caller policy decides (in-scope writes run,
+    # refused ones come back refused, human-authority tools go to the shared
+    # approval ledger). Used by unattended design-flow phase turns.
+    approval_mode: str = "hold"
+    # FORGE-490: whether anything can answer a hold in ``runs``. False in a
+    # process whose store no dashboard or person can reach (the design-flow
+    # worker); a hold created there is alarmed, because it can only time out.
+    approver_reachable: bool = True
     # Injectable so tests don't wait real wall-clock time (same seam as
     # ProviderPipeline's `sleep`).
     approval_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
@@ -111,6 +122,8 @@ class HarnessRuntime:
         approval_timeout_seconds: float = 120.0,
         approval_poll_interval: float = 1.0,
         approval_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        approval_mode: str = "hold",
+        approver_reachable: bool = True,
     ) -> HarnessRuntime:
         """Assemble a runtime from an optional provider config.
 
@@ -140,6 +153,8 @@ class HarnessRuntime:
             approval_timeout_seconds=approval_timeout_seconds,
             approval_poll_interval=approval_poll_interval,
             approval_sleep=approval_sleep,
+            approval_mode=approval_mode,
+            approver_reachable=approver_reachable,
         )
 
     def _effective_invoke(self, base_invoke: Invoke) -> Invoke:
@@ -203,6 +218,21 @@ class HarnessRuntime:
         all, an explicit rejection, or a timeout all raise
         :class:`ApprovalDeniedError` rather than ever silently proceeding.
         """
+        if not self.approver_reachable:
+            # FORGE-490: a hold nobody can answer. It will only time out and
+            # deny, so say so loudly instead of looking like a slow approver.
+            logger.error(
+                "approval_hold_unreachable",
+                tool=spec.name,
+                session_id=self.session_id,
+                detail="in-process approval store has no reachable approver; "
+                "the call will time out and be denied",
+            )
+            if self.metrics is not None:
+                try:
+                    self.metrics.record_unreachable_approval_hold(spec.name)
+                except Exception:  # noqa: BLE001 - metrics must never break a tool call
+                    pass
         run = self.runs.create({"tool": spec.name, "arguments": arguments})
         self.runs.start(run.id)
         self.runs.request_approval(run.id, reason=f"approval required for tool '{spec.name}'")
@@ -249,7 +279,7 @@ class HarnessRuntime:
                 # error path already surfaces to the model -- this only moves
                 # *when* that check runs, not what it checks.
                 validate_arguments(name, spec.input_schema, arguments)
-                if spec.requires_approval:
+                if spec.requires_approval and self.approval_mode != "forward":
                     await self._await_approval(spec, arguments)
                 # FORGE-71: actor/state are deliberately minimal here -- a
                 # generic tool-dispatch layer has no domain-specific

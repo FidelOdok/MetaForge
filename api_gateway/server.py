@@ -1461,8 +1461,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # was never built, so an abandoned run sat non-terminal forever. Observed
     # live: three `awaiting_approval` runs left behind by a client killed
     # mid-turn, still listed as pending long afterwards.
-    from api_gateway.chat.tool_approvals import get_approval_store
+    from api_gateway.chat.tool_approvals import get_approval_store, mark_approver_reachable
     from orchestrator.harness.heartbeat import RunReaper
+
+    mark_approver_reachable()
 
     app.state.run_reaper = RunReaper(get_approval_store())
     app.state.run_reaper.start()
