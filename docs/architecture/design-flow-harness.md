@@ -106,7 +106,7 @@ live failure: tailoring replaced the simulation phase's disciplines with
 and recorded `fail_blocked_no_fea`. Now every required and expected
 deliverable contributes its tools, always kept, and `set_disciplines` merges
 with (rather than replaces) the template discipline a deliverable depends on.
-See [context engineering](context-engineering.md) for budget and drop rules.
+See [context engineering](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/context-engineering.md) for budget and drop rules.
 
 ## Goal-driven deterministic handlers
 
