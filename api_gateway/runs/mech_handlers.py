@@ -20,6 +20,7 @@ import structlog
 
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
 from orchestrator.design_flow.spec import Phase
+from orchestrator.harness.providers.usage import usage_scope
 from skill_registry.mcp_bridge import McpBridge
 
 logger = structlog.get_logger(__name__)
@@ -356,13 +357,20 @@ class GoalDrivenMechanicalHandler(_BridgeHandler):
 class HybridBrain:
     """Routes each phase to a deterministic handler, else the fallback brain."""
 
-    def __init__(self, *, handlers: dict[str, Any], fallback: Any) -> None:
+    def __init__(
+        self, *, handlers: dict[str, Any], fallback: Any, run_id: str | None = None
+    ) -> None:
         self._handlers = handlers
         self._fallback = fallback
+        self._run_id = run_id
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
-        handler = self._handlers.get(phase.id)
-        if handler is not None:
-            logger.info("design_flow_deterministic_phase", phase=phase.id)
-            return await handler.run_phase(goal=goal, phase=phase, context=context)
-        return await self._fallback.run_phase(goal=goal, phase=phase, context=context)
+        # FORGE-476: every model call a phase makes, deterministic handler or
+        # ReAct brain, is attributed to this run and phase. Both engines
+        # (in-process and the Temporal worker) build their brain through here.
+        with usage_scope(run_id=self._run_id, phase=phase.id, role="phase_brain"):
+            handler = self._handlers.get(phase.id)
+            if handler is not None:
+                logger.info("design_flow_deterministic_phase", phase=phase.id)
+                return await handler.run_phase(goal=goal, phase=phase, context=context)
+            return await self._fallback.run_phase(goal=goal, phase=phase, context=context)

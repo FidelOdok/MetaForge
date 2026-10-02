@@ -463,6 +463,14 @@ the transport declared nothing) and `client` (the `clientInfo` from the
 asked for is not the one the server pinned). Both are described under
 [What is protecting this connection](capability-matrix.md#what-is-protecting-this-connection).
 
+The report also carries `llm_usage_24h` (FORGE-476): calls, prompt,
+completion and cached-input tokens and cost over the trailing 24 hours, with
+`by_phase`, `by_role` and `by_model` breakdowns. `available: false` plus a
+`reason` means the usage store could not be read, which is not the same as
+nothing having been spent; a non-zero `calls_unpriced` means `cost_usd` is a
+lower bound. Details are in
+[Token and cost accounting](architecture/robust-harness-design.md#token-and-cost-accounting-forge-476).
+
 `status` is `healthy` only if every adapter answered, `degraded`
 otherwise. `tools_registered` is a registry count and does not shrink
 when an adapter goes down — `reachable` is the field that says whether

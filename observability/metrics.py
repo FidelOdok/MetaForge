@@ -492,6 +492,36 @@ class MetricsRegistry:
         description="Harness model calls served by a fallback instead of the primary provider",
         labels=["primary", "fallback", "role", "reason"],
     )
+    # FORGE-476: token and cost accounting. ``kind`` is prompt, completion or
+    # cached_input; cost is only counted when the model has a known price, so
+    # a model missing from the price table adds tokens but no dollars.
+    LLM_TOKENS_TOTAL = MetricDefinition(
+        name="metaforge_llm_tokens_total",
+        type="counter",
+        description="LLM tokens consumed by role, provider, model and kind",
+        labels=["role", "provider", "model", "kind"],
+    )
+    LLM_COST_USD_TOTAL = MetricDefinition(
+        name="metaforge_llm_cost_usd_total",
+        type="counter",
+        description="LLM spend in USD by role, provider and model (priced models only)",
+        labels=["role", "provider", "model"],
+        unit="USD",
+    )
+    LLM_CALLS_TOTAL = MetricDefinition(
+        name="metaforge_llm_calls_total",
+        type="counter",
+        description="LLM calls by role, provider, model and whether usage was reported",
+        labels=["role", "provider", "model", "usage_reported"],
+    )
+    # Per-run cost cannot be a label (unbounded cardinality), so the alert is
+    # on a counter bumped once when a run crosses the spend threshold.
+    LLM_RUN_SPEND_EXCEEDED_TOTAL = MetricDefinition(
+        name="metaforge_llm_run_spend_exceeded_total",
+        type="counter",
+        description="Runs whose accumulated LLM spend crossed the runaway-spend threshold",
+        labels=["role"],
+    )
     # FORGE-466: a held approval closed because nobody is waiting for it any
     # more. ``outcome`` is timed_out or canceled; ``trigger`` is ``waiter``
     # (the side that held the call said so) or ``deadline`` (the gateway
@@ -618,6 +648,10 @@ class MetricsRegistry:
             cls.HARNESS_TOOL_CALL_TOTAL,
             cls.HARNESS_PROVIDER_CALL_DURATION,
             cls.HARNESS_PROVIDER_FALLBACK_TOTAL,
+            cls.LLM_TOKENS_TOTAL,
+            cls.LLM_COST_USD_TOTAL,
+            cls.LLM_CALLS_TOTAL,
+            cls.LLM_RUN_SPEND_EXCEEDED_TOTAL,
             cls.TOOL_APPROVAL_RESOLUTION_TOTAL,
         ]
 
@@ -1258,6 +1292,50 @@ class MetricsCollector:
                     "reason": reason,
                 },
             )
+
+    def record_llm_usage(
+        self,
+        *,
+        role: str,
+        provider: str,
+        model: str,
+        prompt: int | None,
+        completion: int | None,
+        cached_input: int | None,
+        cost_usd: float | None,
+    ) -> None:
+        """Record one LLM call's tokens and cost (FORGE-476)."""
+        reported = prompt is not None or completion is not None
+        calls = self._instruments.get(MetricsRegistry.LLM_CALLS_TOTAL.name)
+        if calls is not None:
+            calls.add(
+                1,
+                attributes={
+                    "role": role,
+                    "provider": provider,
+                    "model": model,
+                    "usage_reported": str(reported).lower(),
+                },
+            )
+        tokens = self._instruments.get(MetricsRegistry.LLM_TOKENS_TOTAL.name)
+        if tokens is not None:
+            base = {"role": role, "provider": provider, "model": model}
+            for kind, count in (
+                ("prompt", prompt),
+                ("completion", completion),
+                ("cached_input", cached_input),
+            ):
+                if count:
+                    tokens.add(count, attributes={**base, "kind": kind})
+        cost = self._instruments.get(MetricsRegistry.LLM_COST_USD_TOTAL.name)
+        if cost is not None and cost_usd:
+            cost.add(cost_usd, attributes={"role": role, "provider": provider, "model": model})
+
+    def record_llm_run_spend_exceeded(self, role: str) -> None:
+        """A run's LLM spend crossed the runaway threshold (FORGE-476)."""
+        counter = self._instruments.get(MetricsRegistry.LLM_RUN_SPEND_EXCEEDED_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"role": role})
 
     def record_tool_approval_resolution(self, outcome: str, trigger: str, result: str) -> None:
         """Record one held approval closed with no answer (FORGE-466)."""

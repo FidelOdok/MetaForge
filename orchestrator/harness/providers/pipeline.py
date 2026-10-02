@@ -27,6 +27,7 @@ import structlog
 from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
 from orchestrator.harness.providers.provenance import ServedBy, note_served, record_fallback
+from orchestrator.harness.providers.usage import record_call
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.harness.providers.pipeline")
@@ -42,6 +43,15 @@ StreamInvoke = Callable[["ProviderSpec", Any], AsyncIterator[str]]
 StreamEvents = Callable[["ProviderSpec", Any], AsyncIterator[dict[str, Any]]]
 # Injected sleep, so tests can assert backoff without real delays.
 Sleep = Callable[[float], Awaitable[None]]
+
+
+async def _chain_first(
+    first: dict[str, Any], rest: AsyncIterator[dict[str, Any]]
+) -> AsyncIterator[dict[str, Any]]:
+    """Yield an already-pulled first event, then the rest of the stream."""
+    yield first
+    async for event in rest:
+        yield event
 
 
 class ProviderError(Exception):
@@ -245,6 +255,7 @@ class ProviderPipeline:
                         )
                         span.set_attribute("provider.chosen", spec.name)
                         self._on_served(role, candidates, spec, attempts)
+                        self._record_usage(role, spec, result)
                         return result
 
                 assert last_exc is not None  # loop only exits the try via break/exhaust
@@ -306,6 +317,20 @@ class ProviderPipeline:
             f"({spec.max_context_tokens} tokens) is no larger than a window "
             f"that already rejected this request as too long "
             f"({known_insufficient_window} tokens)"
+        )
+
+    def _record_usage(
+        self, role: Role, spec: ProviderSpec, result: Any, *, reported: bool = True
+    ) -> None:
+        """FORGE-476: account this call's tokens and cost (best-effort)."""
+        usage = result.get("usage") if isinstance(result, dict) else None
+        record_call(
+            provider=spec.name,
+            model=spec.model,
+            pipeline_role=role,
+            usage=usage if isinstance(usage, dict) else None,
+            metrics=self._metrics,
+            reported=reported and isinstance(usage, dict),
         )
 
     def _record_call_duration(self, spec: ProviderSpec, role: Role, duration: float) -> None:
@@ -370,6 +395,8 @@ class ProviderPipeline:
                 # First token obtained → commit to this provider, no more failover.
                 logger.info("provider_stream_ok", role=role, provider=spec.name, model=spec.model)
                 self._on_served(role, candidates, spec, attempts)
+                # A text-delta stream carries no usage: counted, tokens unknown.
+                self._record_usage(role, spec, None, reported=False)
                 yield first
                 async for delta in agen:
                     yield delta
@@ -433,9 +460,18 @@ class ProviderPipeline:
                     "provider_stream_events_ok", role=role, provider=spec.name, model=spec.model
                 )
                 self._on_served(role, candidates, spec, attempts)
-                yield first
-                async for event in agen:
-                    yield event
+                recorded = False
+                try:
+                    async for event in _chain_first(first, agen):
+                        if not recorded and event.get("type") == "response":
+                            recorded = True
+                            self._record_usage(role, spec, event.get("result"))
+                        yield event
+                finally:
+                    if not recorded:
+                        # Ended (or was abandoned) before a final response:
+                        # the call happened, its tokens are unknown.
+                        self._record_usage(role, spec, None, reported=False)
                 return
 
             assert last_exc is not None

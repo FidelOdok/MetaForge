@@ -230,6 +230,49 @@ Callers that need to know which model answered wrap the call in
 `provenance.capture_served()`; the flow generator uses it to record
 `generatedBy` on every proposal.
 
+### Token and cost accounting (FORGE-476)
+
+Every model call the pipeline makes records one usage event: prompt,
+completion and cached-input tokens, cost, provider and model, attributed to a
+run id, a phase, a role and a caller. Attribution rides a context variable
+(`providers/usage.py`, `usage_scope(...)`), so child tasks inherit it:
+
+- `HybridBrain.run_phase` sets `run_id`, `phase` and role `phase_brain` for
+  both engines (in-process and the Temporal worker);
+- the flow generator sets role `flow_generator`;
+- `run_chat_turn` and `run_chat_turn_streaming` default the role to `chat`
+  when no caller set one.
+
+Adapters report usage per family: Anthropic (`input_tokens` excludes cache
+reads and writes, which are added back so `prompt` is always the full input),
+OpenAI-compatible (`prompt_tokens_details.cached_tokens`), Codex (the
+`response.completed` event), Gemini and Bedrock. A path that cannot see usage
+(text-delta streaming) still records the call with unknown tokens; unknown is
+never recorded as zero, and a model missing from
+`providers/model_prices.json` has cost `null`, never `0`. Totals carry
+`calls_without_usage` and `calls_unpriced`, so a cost with either non-zero is a
+lower bound.
+
+Events are stored in a SQLite file (`llm_usage.db` beside the run ledger, or
+`METAFORGE_LLM_USAGE_DB_PATH`) that the gateway and the design-flow worker both
+write. Where they read it:
+
+- `GET /v1/runs/{id}` returns `usage`, and `GET /v1/runs/{id}/flow-state` (and
+  so `flow.status`) returns `usage` on the run and on each phase: totals plus
+  `by_phase`, `by_role` and `by_model`;
+- `GET /v1/runs/usage/summary?window_hours=24` returns the trailing-window
+  summary, and `health.check` includes it as `llm_usage_24h` (`available: false`
+  with a reason when the store cannot be read).
+
+Metrics: `metaforge_llm_tokens_total{role, provider, model, kind}` (`kind` is
+`prompt`, `completion` or `cached_input`), `metaforge_llm_cost_usd_total{role,
+provider, model}`, `metaforge_llm_calls_total{..., usage_reported}` and
+`metaforge_llm_run_spend_exceeded_total{role}`. Per-run cost is not a label
+(unbounded cardinality); instead the gateway bumps the last counter once when a
+run's accumulated spend crosses `METAFORGE_RUN_SPEND_ALERT_USD` (default 5) and
+logs `llm_run_spend_exceeded` with the run id. The `LlmRunawaySpendPerRun`
+alert fires on it.
+
 ## Success criteria (from MET-547)
 
 - Same agent loop runs against Anthropic, OpenAI, OpenRouter, and local

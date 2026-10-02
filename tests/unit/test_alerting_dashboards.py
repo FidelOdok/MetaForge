@@ -97,9 +97,10 @@ class TestAlertingRules:
         # + 2 held approvals not closed / expiring by deadline (FORGE-466)
         # + 1 approval gate refused with no Temporal runtime (FORGE-469)
         # + 1 iteration gate with no approval workflow (FORGE-470).
+        # + 1 runaway LLM spend per run (FORGE-476).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 36
+        assert len(rules) == 37
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -144,7 +145,8 @@ class TestAlertingRules:
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 25
+        # + 1 runaway LLM spend per run (FORGE-476)
+        assert len(warnings) == 26
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -199,6 +201,7 @@ class TestAlertingRules:
                 "KafkaConsumerLagHigh",
                 "KnowledgeSearchLatencySLO",
                 "LLMCostSpike",
+                "LlmRunawaySpendPerRun",
                 "MinIOKBAccessErrorsRising",
                 "MinIOKBBucketSizeHigh",
                 "MinIOKBWriteLatencyHigh",

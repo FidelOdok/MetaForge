@@ -60,6 +60,9 @@ class RunResponse(BaseModel):
     #: of what it actually runs, on either engine.
     flow_version_id: str | None = None
     flow_content_hash: str | None = None
+    #: Token and cost totals for the run, overall and per phase, role and model
+    #: (FORGE-476). ``None`` when no model call has been recorded for it.
+    usage: dict[str, Any] | None = None
 
     @classmethod
     def from_run(cls, run: Run) -> RunResponse:

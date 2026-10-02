@@ -2017,6 +2017,15 @@ class UnifiedMcpServer:
         entry["reachable"] = True
         return entry
 
+    @staticmethod
+    def _llm_usage_report() -> dict[str, Any]:
+        from orchestrator.harness.providers.usage import usage_report
+
+        try:
+            return usage_report()
+        except Exception as exc:  # noqa: BLE001 - health must never fail on accounting
+            return {"available": False, "reason": str(exc)}
+
     async def _health_check(self) -> dict[str, Any]:
         """Aggregate health across every adapter into one report.
 
@@ -2128,6 +2137,10 @@ class UnifiedMcpServer:
                 else "disabled (no METAFORGE_DASHBOARD_URL configured)"
             ),
             "adapters": adapter_health,
+            # FORGE-476: what the model calls cost in the last 24 h. Read from
+            # the shared usage store; "available": false says it could not be
+            # read, which is not the same as nothing having been spent.
+            "llm_usage_24h": self._llm_usage_report(),
         }
         if unreachable:
             # Named at the top level as well as per-adapter: a caller that
