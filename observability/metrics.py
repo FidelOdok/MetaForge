@@ -422,6 +422,17 @@ class MetricsRegistry:
         description="Approval gates refused because no Temporal runtime was available",
         labels=["required_role"],
     )
+    # FORGE-470: an IterationController gate decided with no approval
+    # workflow behind it. outcome="blocked" is a converged loop that could
+    # not be approved because nothing can ask a human (it used to approve
+    # silently); outcome="auto_approved" is an explicit auto_approve config
+    # merging without review, counted so automatic approvals are visible.
+    ITERATION_GATE_UNATTENDED_TOTAL = MetricDefinition(
+        name="metaforge_iteration_gate_unattended_total",
+        type="counter",
+        description="Iteration gates decided without an approval workflow, by outcome",
+        labels=["outcome", "agent_code"],
+    )
     DESIGN_FLOW_RUN_STARTED = MetricDefinition(
         name="metaforge_design_flow_run_started_total",
         type="counter",
@@ -577,12 +588,13 @@ class MetricsRegistry:
 
     @classmethod
     def design_flow_metrics(cls) -> list[MetricDefinition]:
-        """Design-flow engine and approval-gate metrics (FORGE-401, FORGE-469)."""
+        """Design-flow engine and approval-gate metrics (FORGE-401, FORGE-469, FORGE-470)."""
         return [
             cls.DESIGN_FLOW_ENGINE_UNAVAILABLE,
             cls.DESIGN_FLOW_RUN_STARTED,
             cls.DESIGN_FLOW_GATE_TOTAL,
             cls.APPROVAL_GATE_NO_RUNTIME_TOTAL,
+            cls.ITERATION_GATE_UNATTENDED_TOTAL,
         ]
 
     @classmethod
@@ -1258,6 +1270,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.APPROVAL_GATE_NO_RUNTIME_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"required_role": required_role})
+
+    def record_iteration_gate_unattended(self, outcome: str, agent_code: str) -> None:
+        """Record one iteration gate decided with no approval workflow (FORGE-470)."""
+        counter = self._instruments.get(MetricsRegistry.ITERATION_GATE_UNATTENDED_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "agent_code": agent_code})
 
 
 def collector_for(component: str) -> MetricsCollector:

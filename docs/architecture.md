@@ -1003,6 +1003,18 @@ missing dependency silently passed every human gate. Each refusal logs
 critical `ApprovalGateNoTemporalRuntime` alert. Tests that need a decided gate
 inject an explicit test double rather than relying on a missing runtime.
 
+**Iteration gates fail closed too (FORGE-470).** `IterationController`
+(the propose-validate-refine loop in `orchestrator/iteration_controller.py`)
+used to approve and merge a converged branch whenever no approval workflow was
+configured, even with `auto_approve` off. It now ends that loop `BLOCKED`,
+merges nothing, logs `iteration_gate_no_approval_workflow` at warning level,
+increments `metaforge_iteration_gate_unattended_total{outcome="blocked"}`,
+and fires the warning `IterationGateNoApprovalWorkflow` alert. An explicit
+`auto_approve` still merges, but the result records the non-human approver
+`auto:iteration_controller`, the `iteration_gate_auto_approved` event is
+logged at warning, and it is counted as `outcome="auto_approved"`
+(informational, no alert).
+
 ### Data Locality
 
 MetaForge is local-first:
