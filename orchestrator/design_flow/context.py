@@ -131,6 +131,24 @@ class FlowContext:
             parts.append(f"quantity: {m.production_quantity}")
         return "; ".join(parts)
 
+    def render_for_phases(self) -> str:
+        """The block every phase brain receives (FORGE-491).
+
+        Deterministic for a given context, so it is byte-identical across
+        phases and runs and sits in the cacheable prompt prefix. Empty when
+        nothing was stated, so a flow with no context adds no block.
+        """
+        if (
+            self.manufacturing is None
+            and self.target_maturity is None
+            and not (self.loads_and_use or "").strip()
+            and not (self.budget or "").strip()
+            and not self.requirements
+        ):
+            return ""
+        reqs = "\n".join(f"  - {r}" for r in self.requirements) or "  (none recorded yet)"
+        return f"{self.describe_for_prompt()}\nRequirements stated:\n{reqs}"
+
     def describe_for_prompt(self) -> str:
         m = self.manufacturing or ManufacturingContext()
 

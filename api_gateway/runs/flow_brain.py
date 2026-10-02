@@ -91,7 +91,16 @@ class ReActPhaseBrain:
         deliverables = self._deliverable_guidance(phase, context)
         overlay = procedural_overlay(cards_for_domains(self._cards, phase.disciplines))
         overlay_block = f"{overlay}\n" if overlay else ""
+        # FORGE-491: the flow's stated context leads the prompt, identical for
+        # every phase, so it is part of the cacheable prefix.
+        flow_block = (
+            "Flow context (stated by the requester; treat as given, not unknown):\n"
+            f"{context.flow_context}\n\n"
+            if context.flow_context
+            else ""
+        )
         return (
+            f"{flow_block}"
             f"You are MetaForge's autonomous design engineer executing the "
             f"**{phase.title}** phase of a gated design flow.\n\n"
             f"Product goal: {goal}\n"

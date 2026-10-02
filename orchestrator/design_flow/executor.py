@@ -62,6 +62,8 @@ class FlowContext:
     goal: str
     project_id: str | None = None
     session_id: str | None = None
+    #: FORGE-491: the approved flow's context block, shown to every phase.
+    flow_context: str = ""
     completed: list[tuple[Phase, PhaseOutcome]] = field(default_factory=list)
 
 
@@ -273,7 +275,9 @@ class DesignFlowExecutor:
         self._constraint_checker = constraint_checker
         self._consistency_gate_checker = consistency_gate_checker
 
-    async def run(self, run_id: str, flow: FlowDefinition | None = None) -> None:
+    async def run(
+        self, run_id: str, flow: FlowDefinition | None = None, *, flow_context: str = ""
+    ) -> None:
         """Drive ``run_id`` through its flow to a terminal state.
 
         ``flow`` is the exact definition to walk (FORGE-474). The gateway
@@ -299,6 +303,7 @@ class DesignFlowExecutor:
                     goal=goal,
                     project_id=run.request.get("project_id"),
                     session_id=run.request.get("session_id"),
+                    flow_context=flow_context,
                 )
                 if run.status is RunStatus.QUEUED:
                     self._store.start(run_id)

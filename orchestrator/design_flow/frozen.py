@@ -75,6 +75,13 @@ class FrozenFlow:
     #: start is caught rather than quietly run.
     content_hash: str = ""
 
+    #: FORGE-491: the proposal's context (manufacturing route and capabilities,
+    #: target maturity, loads and use, budget, requirements) rendered once as a
+    #: stable text block. Part of the hashed content, so it cannot change after
+    #: approval, and carried to every phase brain. Optional with a default so
+    #: flows frozen before this field, and in-flight workflow inputs, still load.
+    context: str = ""
+
     def compute_hash(self) -> str:
         rows = []
         for p in self.phases:
@@ -84,7 +91,9 @@ class FrozenFlow:
             if row.get("model") is None:
                 row.pop("model", None)
             rows.append(row)
-        payload = json.dumps(rows, sort_keys=True, separators=(",", ":"))
+        # Absent when empty, so flows frozen before FORGE-491 keep their hash.
+        body: object = {"phases": rows, "context": self.context} if self.context else rows
+        payload = json.dumps(body, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def verify(self) -> None:
@@ -103,7 +112,7 @@ class FrozenFlow:
             )
 
 
-def freeze_flow(definition: object, *, version: str = "builtin") -> FrozenFlow:
+def freeze_flow(definition: object, *, version: str = "builtin", context: str = "") -> FrozenFlow:
     """Convert a :class:`~orchestrator.design_flow.spec.FlowDefinition`.
 
     Takes ``object`` rather than the real type on purpose: this module is
@@ -141,6 +150,7 @@ def freeze_flow(definition: object, *, version: str = "builtin") -> FrozenFlow:
         name=getattr(definition, "name", ""),
         phases=phases,
         version=version,
+        context=context,
     )
     flow.content_hash = flow.compute_hash()
     return flow

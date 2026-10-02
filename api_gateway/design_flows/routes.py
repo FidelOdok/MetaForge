@@ -518,6 +518,7 @@ async def propose_flow(
             changes=proposal.diff(),
             origin="caller" if proposal.proposed_by else "generated",
             intent=proposal.intent,
+            context=context.render_for_phases(),
         )
     except FlowInvariantError as exc:
         # A proposal that cannot pass the rules is refused rather than stored
