@@ -105,10 +105,23 @@ async def ensure_mcp_bridge() -> Any:
             or os.environ.get("METAFORGE_MCP_API_KEY")
             or None
         )
+        # FORGE-487: the worker's service credential, shared only with the
+        # sidecar. Absent, the sidecar keeps treating this process as an
+        # untrusted caller and holds its writes; that is the safe default, so
+        # a missing key is logged, not fatal.
+        service_key = (os.environ.get("METAFORGE_MCP_SERVICE_KEY") or "").strip() or None
+        if service_key is None:
+            logger.warning(
+                "design_flow_worker_no_service_key",
+                detail="METAFORGE_MCP_SERVICE_KEY is not set: the sidecar will hold every "
+                "phase write for a dashboard approval",
+            )
         with tracer.start_as_current_span("design_flow_worker.connect_mcp") as span:
             span.set_attribute("mcp.url", url)
             try:
-                bridge = await connect_http_bridge(url, api_key=api_key, require=True)
+                bridge = await connect_http_bridge(
+                    url, api_key=api_key, require=True, service_key=service_key
+                )
                 tools = await bridge.list_tools()
             except Exception as exc:
                 span.record_exception(exc)
@@ -160,6 +173,12 @@ def _phase_scope(request: PhaseRequest) -> Iterator[McpCallContext]:
         project_id=_project_uuid(request.project_id),
         session_id=uuid.uuid5(uuid.NAMESPACE_URL, f"metaforge:design-flow:{request.run_id}"),
         actor_id=_ACTOR,
+        # FORGE-487: what the sidecar records against every write. Claims here;
+        # the sidecar only believes them after the service key checks out and
+        # the gateway confirms the run.
+        run_id=request.run_id,
+        phase=request.phase.id,
+        model=request.phase.model,
     )
     with with_context(ctx):
         yield ctx

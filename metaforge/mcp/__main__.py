@@ -53,6 +53,7 @@ from mcp_core.elicitation import (
 )
 from mcp_core.guardrails import Caller
 from mcp_core.protocol import AUTH_DENIED as AUTH_DENIED_CODE
+from mcp_core.service_auth import HEADER_SERVICE_KEY, ServiceRunVerifier
 from metaforge.mcp.http_elicitation import (
     ElicitationHub,
     HttpElicitor,
@@ -562,6 +563,8 @@ def build_http_app(
     enable_sse: bool,
     api_key: str | None = None,
     oauth: OAuthProvider | None = None,
+    service_key: str | None = None,
+    service_verifier: ServiceRunVerifier | None = None,
 ) -> Any:
     """Construct a FastAPI app exposing the unified server.
 
@@ -601,6 +604,11 @@ def build_http_app(
     # establishes who they are; a shared credential, or none, is UNTRUSTED.
     # Both hold writes -- the difference is what a reviewer is told.
     server.declare_caller(Caller.REMOTE if identifies else Caller.UNTRUSTED)
+    # FORGE-487: the design-flow worker is the one HTTP caller that can be
+    # something other than untrusted/remote, and only per request: it must
+    # present ``service_key`` AND name a run the gateway confirms. Off unless
+    # both are supplied, in any auth mode.
+    server.attach_service_auth(service_key, service_verifier)
     app = FastAPI(
         title="MetaForge MCP",
         version="0.1.0",
@@ -805,6 +813,13 @@ def build_http_app(
         if is_jsonrpc_response(inbound) and hub.resolve(inbound):
             # Accepted, and there is nothing to say back.
             return Response(status_code=202)
+
+        # FORGE-487: the design-flow worker's calls. After the answer-routing
+        # above, which must not be delayed by a gateway lookup, and before the
+        # context is used anywhere (including the SSE path below).
+        ctx = await server.authenticate_service_caller(
+            ctx, request.headers.get(HEADER_SERVICE_KEY), inbound
+        )
 
         # FORGE-464: a tools/call that may be held is answered on its own SSE
         # stream when the client can read one, so the approval question can
@@ -1233,7 +1248,15 @@ async def serve_http_async(
     api_key = os.environ.get("METAFORGE_MCP_API_KEY") or None
     oauth_config = OAuthConfig.from_env()
     oauth = OAuthProvider(oauth_config) if oauth_config else None
-    app = build_http_app(server, enable_sse=enable_sse, api_key=api_key, oauth=oauth)
+    service_key, service_verifier = _service_auth_from_env()
+    app = build_http_app(
+        server,
+        enable_sse=enable_sse,
+        api_key=api_key,
+        oauth=oauth,
+        service_key=service_key,
+        service_verifier=service_verifier,
+    )
     config = uvicorn.Config(
         app,
         host=host,
@@ -1786,6 +1809,27 @@ def _build_flow_bindings() -> dict[str, Any]:
         "design_flow_run_starter": make_run_starter(),
         "run_launcher": make_run_launcher(),
     }
+
+
+def _service_auth_from_env() -> tuple[str | None, ServiceRunVerifier | None]:
+    """The design-flow service credential and what verifies runs (FORGE-487).
+
+    ``METAFORGE_MCP_SERVICE_KEY`` is shared between this sidecar and the
+    ``design-flow-worker`` only. There is no default: unset, the feature is
+    off and the worker is an ordinary untrusted caller whose writes are held.
+    ``METAFORGE_GATEWAY_URL`` is where runs are verified; without it the key
+    alone enables nothing (``attach_service_auth`` says so).
+    """
+    key = (os.environ.get("METAFORGE_MCP_SERVICE_KEY") or "").strip() or None
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if key is None:
+        logger.info("mcp_service_caller_off", reason="METAFORGE_MCP_SERVICE_KEY is not set")
+        return None, None
+    if not gateway_url:
+        return key, None
+    from metaforge.mcp.service_runs import GatewayRunVerifier
+
+    return key, GatewayRunVerifier(gateway_url)
 
 
 def _build_approval_gate() -> Any:

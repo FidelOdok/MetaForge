@@ -515,6 +515,16 @@ a phase brain needs itself (FORGE-475):
   carry the run's project, actor `agent:design-flow` and one session per run.
   An unreachable sidecar, or one listing no tools, fails the phase with that
   reason rather than running it toolless.
+- **Writes (FORGE-487).** The sidecar would otherwise classify the worker as
+  `untrusted` and hold every write for a dashboard click. With
+  `METAFORGE_MCP_SERVICE_KEY` set on both services (and nowhere else) the
+  sidecar treats a call carrying it as `Caller.SERVICE`, but only after asking
+  the gateway that the run it names is `running` on an `approved` flow version
+  and belongs to the call's project. In-scope writes then run without a
+  per-call hold; project, flow and run administration, human-authority tools
+  and destructive tools are refused. Provenance carries run id, phase and
+  model. With the key unset the worker stays untrusted and its writes are held.
+  See [Claude Code integration](integrations/claude-code.md#the-design-flow-worker-is-not-held-per-call-forge-487).
 - **Model.** It reads the same `METAFORGE_LLM_*` env and mounts the same
   `metaforge-home` and `codex-home` volumes as the gateway, so a phase resolves
   the provider and model a chat turn would. A phase whose every provider failed

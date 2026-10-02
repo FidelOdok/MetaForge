@@ -78,6 +78,28 @@ class McpCallContext(BaseModel):
         ),
     )
 
+    # ── Design-flow service caller (FORGE-487) ──────────────────────────────
+    #
+    # ``run_id`` / ``phase`` / ``model`` are what the design-flow worker says
+    # it is doing. They ride in headers like the project does, so on their own
+    # they are a *claim*. ``service_verified`` is the server's conclusion and is
+    # never read from a header: only the sidecar's own service-key check, after
+    # asking the gateway about the run, sets it (``model_copy`` on the
+    # server side). ``service_refusal`` is set instead when the key was valid
+    # but the run was not (not running, another project), so the call is
+    # refused rather than quietly demoted to a held write.
+    run_id: str | None = Field(default=None, description="Design-flow run this call serves.")
+    phase: str | None = Field(default=None, description="Design-flow phase id, as claimed.")
+    model: str | None = Field(default=None, description="Model the phase runs on, as claimed.")
+    service_verified: bool = Field(
+        default=False,
+        description="True only when the server verified a service key AND the run.",
+    )
+    service_refusal: str | None = Field(
+        default=None,
+        description="Why a call carrying a valid service key was refused. Server-set only.",
+    )
+
     model_config = ConfigDict(frozen=True)
 
     #: The all-zero session of the unattributed sentinel. Binding anything to
@@ -178,6 +200,13 @@ HEADER_PROJECT = "X-MetaForge-Project"
 HEADER_SESSION = "X-MetaForge-Session"
 HEADER_ACTOR = "X-MetaForge-Actor"
 HEADER_CORRELATION = "X-MetaForge-Correlation"
+# FORGE-487: design-flow worker claims. The service *key* has its own header
+# (``mcp_core.service_auth.HEADER_SERVICE_KEY``) and is deliberately not part
+# of McpCallContext, which is logged and copied around.
+HEADER_RUN = "X-MetaForge-Run"
+HEADER_PHASE = "X-MetaForge-Phase"
+HEADER_MODEL = "X-MetaForge-Model"
+_MAX_CLAIM_LENGTH = 200
 
 # Stdio — client passes these env vars at spawn (see .mcp.json).
 ENV_PROJECT = "METAFORGE_PROJECT_ID"
@@ -314,7 +343,24 @@ def context_to_headers(ctx: McpCallContext) -> dict[str, str]:
     }
     if ctx.project_id is not None:
         headers[HEADER_PROJECT] = str(ctx.project_id)
+    for header, value in (
+        (HEADER_RUN, ctx.run_id),
+        (HEADER_PHASE, ctx.phase),
+        (HEADER_MODEL, ctx.model),
+    ):
+        if value:
+            headers[header] = value
     return headers
+
+
+def _claim(value: str | None) -> str | None:
+    """A header claim, bounded and printable, or None."""
+    if not value:
+        return None
+    value = value.strip()
+    if not value or not value.isprintable():
+        return None
+    return value[:_MAX_CLAIM_LENGTH]
 
 
 def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
@@ -339,6 +385,10 @@ def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
         fields["session_id"] = session
     if correlation is not None:
         fields["correlation_id"] = correlation
+    # Claims only. ``service_verified`` is not a header and cannot become one.
+    fields["run_id"] = _claim(folded.get(HEADER_RUN.lower()))
+    fields["phase"] = _claim(folded.get(HEADER_PHASE.lower()))
+    fields["model"] = _claim(folded.get(HEADER_MODEL.lower()))
     _apply_session_binding(fields, session)
     return McpCallContext(**fields)
 
@@ -366,7 +416,10 @@ __all__ = [
     "ENV_SESSION",
     "HEADER_ACTOR",
     "HEADER_CORRELATION",
+    "HEADER_MODEL",
+    "HEADER_PHASE",
     "HEADER_PROJECT",
+    "HEADER_RUN",
     "HEADER_SESSION",
     "McpCallContext",
     "bind_session_project",

@@ -468,6 +468,14 @@ services:
       # in the reason when it cannot connect, rather than running toolless.
       - METAFORGE_MCP_URL=${METAFORGE_MCP_URL:-http://mcp-http:8765/mcp}
       - METAFORGE_MCP_CLIENT_KEY=${METAFORGE_MCP_API_KEY:-}
+      # FORGE-487: the service credential that lets the sidecar tell this
+      # worker from a plugin client, so a phase's writes inside an approved,
+      # running flow are not each held for a dashboard click. Shared with
+      # `mcp-http` ONLY (docker-compose.override.yml); never give it to the
+      # gateway or any other service. No default on purpose: unset, the
+      # feature is off and this worker stays an untrusted caller whose writes
+      # are held. Generate with `openssl rand -hex 32`.
+      - METAFORGE_MCP_SERVICE_KEY=${METAFORGE_MCP_SERVICE_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101

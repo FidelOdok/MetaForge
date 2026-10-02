@@ -65,3 +65,27 @@ def test_worker_is_pointed_at_the_mcp_sidecar() -> None:
     assert worker.get("METAFORGE_MCP_URL") == "${METAFORGE_MCP_URL:-http://mcp-http:8765/mcp}"
     # The sidecar's key, when it is guarded, is the client key here.
     assert worker.get("METAFORGE_MCP_CLIENT_KEY") == "${METAFORGE_MCP_API_KEY:-}"
+
+
+def test_service_key_goes_to_the_worker_and_the_sidecar_only() -> None:
+    """FORGE-487: the secret is shared by two services and has no default."""
+    base = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    override = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.override.yml").read_text(encoding="utf-8")
+    )["services"]
+    expected = "METAFORGE_MCP_SERVICE_KEY=${METAFORGE_MCP_SERVICE_KEY:-}"
+
+    assert expected in base["design-flow-worker"]["environment"]
+    assert expected in override["mcp-http"]["environment"]
+
+    holders = [
+        name
+        for source in (base, override)
+        for name, service in source.items()
+        if any(
+            "METAFORGE_MCP_SERVICE_KEY" in entry
+            for entry in (service.get("environment") or [])
+            if isinstance(entry, str)
+        )
+    ]
+    assert sorted(holders) == ["design-flow-worker", "mcp-http"]
