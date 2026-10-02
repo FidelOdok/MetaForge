@@ -313,6 +313,23 @@ Running over **stdio on your own machine**, writes are not held by
 default: there is nowhere to answer an approval in that transport yet.
 That changes when a deployment sets `exempt_local_writes=False`.
 
+### Writes that are not held at the call
+
+Some tools write but are not held, because holding the call would only ask
+the same person a question that is already asked somewhere else. Their
+annotations still say `readOnlyHint: false`.
+
+| Tool | Why the call is not held |
+| --- | --- |
+| `session.start`, `session.log_event`, `session.complete` | record the agent's own activity, not design state (FORGE-407) |
+| `flow.propose` | the proposal it writes is itself held for a person; an intent-only call returns `needs_input` questions and writes nothing (FORGE-471) |
+| `flow.start_run` | it starts only a flow version a person has already approved; any other version is refused with `409` (FORGE-471) |
+
+So a flow proposal takes **one approval**: the one on the flow version it
+creates. Starting a run on that version, once approved, takes none.
+`run.start_design_flow` is still held, because a built-in template has no
+version approval behind it.
+
 ## Design flows from Claude Code
 
 The sidecar serves the design-flow tools, and they are in the `core`
@@ -321,8 +338,8 @@ profile the plugin installs by default (FORGE-462):
 | Tool | |
 | --- | --- |
 | `flow.list` | every launchable flow, with its phases and gates (read) |
-| `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (held write) |
-| `flow.start_run` | start a run on a flow version a person has **approved** (held write) |
+| `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (write; the version is held, not the call) |
+| `flow.start_run` | start a run on a flow version a person has **approved** (write; refused unless the version is approved) |
 | `flow.status` | phase-by-phase state of one run (read) |
 | `run.start_design_flow` | start one of the built-in flows on a goal (held write) |
 | `run.get_status` | a run's state, gate reason and result (read) |

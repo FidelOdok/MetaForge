@@ -486,6 +486,24 @@ async def _start_on_temporal(run_id: str) -> None:
 async def create_run(body: CreateRunRequest) -> RunResponse:
     run = _store.create(body.request)
     if _is_design_flow(body.request) and body.start:
+        # FORGE-471: checked before choosing an engine, not only inside the
+        # Temporal path. `flow.start_run` is not held at the call because this
+        # refusal is its authorisation, so it has to hold on the in-process
+        # engine too, which otherwise never looks at the version.
+        version_id = body.request.get("flow_version_id")
+        if version_id:
+            try:
+                version = get_version_store().get(str(version_id))
+            except VersionNotFoundError as exc:
+                _store.delete(run.id)
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            if not version.startable:
+                refused = FlowVersionNotApprovedError(str(version_id), version.status.value)
+                _store.delete(run.id)
+                logger.warning(
+                    "design_flow_version_not_approved", run_id=run.id, error=str(refused)
+                )
+                raise HTTPException(status_code=409, detail=str(refused)) from refused
         engine = resolve_flow_engine()
         if engine is FlowEngine.TEMPORAL:
             try:

@@ -119,12 +119,14 @@ class TestTheTools:
         partial = DesignFlowServer(catalogue_reader=_catalogue)
         assert sorted(partial.tool_ids) == ["flow.list"]
 
-    def test_reads_are_reads_and_writes_are_held(self) -> None:
+    def test_reads_are_reads_and_writes_are_approved_on_the_version(self) -> None:
+        """FORGE-471: both write, but the approval is on the flow version, not
+        on the call. Holding the call too asked the same person twice."""
         assert annotations_for("flow.list")["readOnlyHint"] is True
         assert annotations_for("flow.status")["readOnlyHint"] is True
         for tool_id in ("flow.propose", "flow.start_run"):
             assert annotations_for(tool_id)["readOnlyHint"] is False
-            assert decide(tool_id, caller=Caller.REMOTE).requires_approval
+            assert not decide(tool_id, caller=Caller.REMOTE).requires_approval
 
     def test_status_is_not_held(self) -> None:
         """An agent following a run calls this repeatedly. Holding every poll
