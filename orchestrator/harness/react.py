@@ -25,6 +25,7 @@ from orchestrator.harness.tool_exec import (
     TurnToolCache,
     cached_view,
     error_content,
+    note_service_refusal,
     observation_failure_reason,
 )
 
@@ -224,7 +225,8 @@ async def run_react(
                 # Failures are never cached, so a retry really retries.
                 steps.append(ReActStep(action.thought, call, error=error_content(exc)))
                 await _emit(steps[-1])
-                logger.warning("react_tool_error", tool=call.name, error=str(exc))
+                if not note_service_refusal(getattr(runtime, "metrics", None), call.name, exc):
+                    logger.warning("react_tool_error", tool=call.name, error=str(exc))
 
         logger.info("react_exhausted", goal=goal, steps=max_steps)
         span.set_attribute("steps", max_steps)

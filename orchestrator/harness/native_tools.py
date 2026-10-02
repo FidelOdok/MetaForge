@@ -40,6 +40,7 @@ from orchestrator.harness.tool_exec import (
     cached_view,
     dedup_key,
     error_content,
+    note_service_refusal,
     observation_failure_reason,
 )
 from orchestrator.harness.tools import NATIVE
@@ -374,7 +375,10 @@ async def _execute_calls(
             try:
                 return await runtime.call_tool(call_name, call_args), None
             except Exception as exc:  # noqa: BLE001 - surface to the model, don't abort
-                logger.warning("native_tool_error", tool=call_name, error=str(exc))
+                # FORGE-492: a guardrail refusal is an answer, not a fault; it
+                # is logged and counted, then handed to the model below.
+                if not note_service_refusal(getattr(runtime, "metrics", None), call_name, exc):
+                    logger.warning("native_tool_error", tool=call_name, error=str(exc))
                 return None, exc
 
         # A tool that pauses for a human decision must not do so alongside

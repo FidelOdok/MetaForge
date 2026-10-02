@@ -475,6 +475,16 @@ class MetricsRegistry:
         description="Total harness tool calls by tool and outcome",
         labels=["tool_name", "status"],
     )
+    DESIGN_FLOW_TOOL_REFUSAL_TOTAL = MetricDefinition(
+        name="metaforge_design_flow_tool_refusal_total",
+        type="counter",
+        description=(
+            "Tool calls the guardrail refused for the design-flow service caller "
+            "(FORGE-492); source is 'model' (returned as an observation) or "
+            "'handler' (a scripted step was refused and the phase fell back to the model)"
+        ),
+        labels=["tool_name", "source"],
+    )
     HARNESS_PROVIDER_CALL_DURATION = MetricDefinition(
         name="metaforge_harness_provider_call_duration_seconds",
         type="histogram",
@@ -646,6 +656,7 @@ class MetricsRegistry:
             cls.HARNESS_TURN_TOTAL,
             cls.HARNESS_TOOL_CALL_DURATION,
             cls.HARNESS_TOOL_CALL_TOTAL,
+            cls.DESIGN_FLOW_TOOL_REFUSAL_TOTAL,
             cls.HARNESS_PROVIDER_CALL_DURATION,
             cls.HARNESS_PROVIDER_FALLBACK_TOTAL,
             cls.LLM_TOKENS_TOTAL,
@@ -1193,6 +1204,12 @@ class MetricsCollector:
         hist = self._instruments.get(MetricsRegistry.HARNESS_TOOL_CALL_DURATION.name)
         if hist is not None:
             hist.record(duration, attributes=attrs)
+
+    def record_design_flow_tool_refusal(self, tool_name: str, source: str) -> None:
+        """Count one guardrail refusal of a design-flow service call (FORGE-492)."""
+        counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_TOOL_REFUSAL_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"tool_name": tool_name, "source": source})
 
     def record_mcp_tool_call(
         self, tool_id: str, status: str, duration: float, client: str = "unknown"

@@ -56,7 +56,20 @@ def declared_tool_ids() -> set[str]:
     from tool_registry.tools.distributors.mcp_adapter import distributor_tool_ids
 
     ids |= distributor_tool_ids()
+    # FORGE-492: and ids registered through a loop (`f"freecad.{name}"`), which
+    # no source scan can see. The registry is the only honest list of them.
+    ids |= set(registered_tool_ids())
     return ids
+
+
+def registered_tool_ids() -> list[str]:
+    """Every tool the adapters register when bootstrapped, as the server sees them."""
+    import asyncio
+
+    from tool_registry.bootstrap import bootstrap_tool_registry
+
+    registry = asyncio.run(bootstrap_tool_registry())
+    return sorted(m.tool_id for m in registry.list_tools())
 
 
 class TestSafeByDefault:
@@ -133,6 +146,56 @@ class TestCoverage:
         )
         stale = sorted(classified - declared)
         assert stale == [], f"classified but no adapter declares them: {stale}"
+
+
+class TestRegistryCoverage:
+    """FORGE-492: the source scan misses ids an adapter builds at run time.
+
+    `FreecadServer` registers its 39 session tools as ``f"freecad.{name}"``, so
+    the regex scan never saw them, they sat on the destructive default, and
+    the design-flow service caller was refused every one. This asks the
+    registry what is actually registered instead of what the source spells out.
+    """
+
+    def test_every_registered_tool_is_classified(self) -> None:
+        ids = registered_tool_ids()
+        assert len(ids) > 60, f"only {len(ids)} tools registered, did bootstrap break"
+        assert "freecad.open_session" in ids
+        missing = unclassified(ids)
+        assert missing == [], (
+            "registered by an adapter but not in mcp_core/annotations.py: " + ", ".join(missing)
+        )
+
+    def test_the_session_tools_a_phase_needs_are_not_refused_for_the_service_caller(self) -> None:
+        from mcp_core.guardrails import Caller, decide
+
+        for tool in (
+            "freecad.open_session",
+            "freecad.create_sketch",
+            "freecad.pad_sketch",
+            "freecad.fillet",
+            "freecad.describe_session",
+            "freecad.measure",
+            "freecad.export_model",
+            "freecad.close_session",
+        ):
+            decision = decide(tool, caller=Caller.SERVICE)
+            assert not decision.refused, f"{tool}: {decision.reason}"
+
+    def test_execute_code_stays_destructive(self) -> None:
+        # Its sandbox is source-level; Import.export(objs, path) still writes
+        # wherever the script says.
+        assert "freecad.execute_code" in DESTRUCTIVE
+        assert annotations_for("freecad.execute_code")["destructiveHint"] is True
+
+    def test_inspection_tools_are_read_only(self) -> None:
+        for tool in (
+            "freecad.describe_session",
+            "freecad.describe_model",
+            "freecad.list_joints",
+            "freecad.measure",
+        ):
+            assert annotations_for(tool)["readOnlyHint"] is True
 
 
 class TestShape:

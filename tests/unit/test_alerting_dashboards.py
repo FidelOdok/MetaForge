@@ -98,9 +98,10 @@ class TestAlertingRules:
         # + 1 approval gate refused with no Temporal runtime (FORGE-469)
         # + 1 iteration gate with no approval workflow (FORGE-470).
         # + 1 runaway LLM spend per run (FORGE-476).
+        # + 1 design-flow tool refusals sustained (FORGE-492).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 37
+        assert len(rules) == 38
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -146,7 +147,8 @@ class TestAlertingRules:
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
         # + 1 runaway LLM spend per run (FORGE-476)
-        assert len(warnings) == 26
+        # + 1 design-flow tool refusals sustained (FORGE-492)
+        assert len(warnings) == 27
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -185,6 +187,8 @@ class TestAlertingRules:
                 # counted apart from outcome="rejected", which is a reviewer
                 # actually deciding.
                 "DesignFlowGatesNeverAnswered",
+                # FORGE-492: the guardrail keeps refusing a tool a phase calls.
+                "DesignFlowToolRefusalSustained",
                 "McpAdapterUnreachable",
                 "McpErrorRateHigh",
                 # FORGE-411: the process is serving code other than the
