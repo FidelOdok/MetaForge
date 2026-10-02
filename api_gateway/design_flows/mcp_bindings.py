@@ -79,6 +79,9 @@ def make_proposer() -> Any:
         target_maturity: str | None = None,
         loads_and_use: str | None = None,
         budget: str | None = None,
+        template: str | None = None,
+        operations: list[dict[str, Any]] | None = None,
+        caller: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from fastapi import HTTPException, Response
         from pydantic import ValidationError
@@ -109,6 +112,9 @@ def make_proposer() -> Any:
                     "target_maturity": target_maturity,
                     "loads_and_use": loads_and_use,
                     "budget": budget,
+                    "template": template,
+                    "operations": operations,
+                    "caller": caller,
                 }
             )
         except ValidationError as exc:
@@ -152,6 +158,7 @@ def make_proposer() -> Any:
             "requirements_pending": view.requirementsPending,
             "assumptions": view.assumptions,
             "open_questions": [q.model_dump() for q in view.openQuestions],
+            "proposed_by": view.proposedBy,
             "changes": [
                 {
                     "op": c.op,

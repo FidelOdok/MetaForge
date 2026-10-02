@@ -394,6 +394,26 @@ unknown is refused with `422 physical-verification-kept`.
 returns the questions and tells the agent to ask the user rather than answer
 them itself.
 
+### Caller-proposed tailoring (FORGE-481)
+
+`POST /v1/design-flows/propose` (and the `flow.propose` tool) optionally
+accepts `template` and `operations` written by the caller's own model, each
+operation being `drop_phase`, `add_deliverable`, `set_disciplines` or
+`set_model` on a phase of the template, with a `rationale`. When either is
+supplied the server makes **no generator model call**, not even for the
+optional product-specific questions: it applies the operations with the same
+deterministic generator (`parse_caller_operations` then `build_proposal`),
+runs the same invariants (including FORGE-463's physical-verification rule),
+and holds the same single approval. Unlike the lenient server-model path, an
+unknown operation, template or phase, or an operation without a rationale, is
+refused with `422` and the reason, because a caller can read the refusal and
+correct its call. The required questions still come from the server: a
+missing manufacturing route, target maturity or loads still returns
+`needs_input`. Provenance is recorded as `proposed_by` (`client`, `model`, from
+the optional `caller` object) on the approval and the response, the stored
+version has `origin: "caller"`, and `generatedBy` stays empty. Because no
+generator call is made, FORGE-476 usage records no `flow_generator` tokens.
+
 ### The flow catalogue is served, not copied (FORGE-395)
 
 `GET /v1/design-flows` returns every launchable flow as the gateway will run

@@ -45,6 +45,7 @@ logger = structlog.get_logger(__name__)
 __all__ = [
     "MODEL_OPERATIONS",
     "ROUTE_SELECTION_PHASE_ID",
+    "CallerProvenance",
     "FlowProposal",
     "ModelProvenance",
     "Operation",
@@ -52,6 +53,7 @@ __all__ = [
     "TailoringError",
     "apply_operations",
     "build_proposal",
+    "parse_caller_operations",
     "parse_operations",
 ]
 
@@ -157,6 +159,21 @@ class ModelProvenance:
     fell_back_from: str | None = None
 
 
+@dataclass(frozen=True)
+class CallerProvenance:
+    """Who proposed a tailoring that no server-side model produced (FORGE-481).
+
+    The caller's own model wrote the operations; the server only applied them.
+    Recorded so a reviewer knows the tailoring was a client's, and which one.
+    """
+
+    client: str | None = None
+    model: str | None = None
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {"proposed_by": "caller", "client": self.client, "model": self.model}
+
+
 @dataclass
 class FlowProposal:
     """A tailored flow, its provenance, and whether it is startable."""
@@ -176,6 +193,8 @@ class FlowProposal:
     open_questions: list[ClarifyingQuestion] = field(default_factory=list)
     #: The provider/model that produced the tailoring, when known.
     generated_by: ModelProvenance | None = None
+    #: Set instead of ``generated_by`` when the caller supplied the operations.
+    proposed_by: CallerProvenance | None = None
 
     @property
     def valid(self) -> bool:
@@ -231,6 +250,58 @@ def parse_operations(raw: Any) -> list[Operation]:
                 value=entry.get("value"),
             )
         )
+    return operations
+
+
+def parse_caller_operations(raw: Any, base: FlowDefinition) -> list[Operation]:
+    """Operations a caller supplied, checked strictly against ``base`` (FORGE-481).
+
+    The opposite stance to :func:`parse_operations`. That one is lenient
+    because a server-side model's stray request should vanish; here a caller
+    can read the refusal and fix its call, so silently dropping an operation
+    would hand back a proposal that is not the one it asked for. Anything
+    unknown, unrecognised, unexplained or aimed at a phase the template does
+    not have raises :class:`TailoringError` naming the offending operation.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise TailoringError("operations must be a list")
+    phase_ids = {phase.id for phase in base.phases}
+    allowed = ", ".join(sorted(k.value for k in MODEL_OPERATIONS))
+    operations: list[Operation] = []
+    for index, entry in enumerate(raw):
+        where = f"operation {index + 1}"
+        if not isinstance(entry, dict):
+            raise TailoringError(f"{where} must be an object with op, phase and rationale")
+        kind_raw = str(entry.get("op") or entry.get("kind") or "").strip()
+        try:
+            kind = OperationKind(kind_raw)
+        except ValueError:
+            kind = None
+        if kind is None or kind not in MODEL_OPERATIONS:
+            raise TailoringError(f"{where}: unknown operation '{kind_raw}'; allowed: {allowed}")
+        phase_id = str(entry.get("phase") or entry.get("phase_id") or "").strip()
+        if phase_id not in phase_ids:
+            raise TailoringError(
+                f"{where} ({kind.value}): unknown phase '{phase_id}' in template "
+                f"'{base.id}'; phases: {', '.join(sorted(phase_ids))}"
+            )
+        rationale = str(entry.get("rationale") or entry.get("reason") or "").strip()
+        if not rationale:
+            raise TailoringError(f"{where} ({kind.value} {phase_id}): a rationale is required")
+        value = entry.get("value")
+        if kind is OperationKind.ADD_DELIVERABLE and not str(value or "").strip():
+            raise TailoringError(f"{where}: add_deliverable needs a 'value' (artifact type)")
+        if kind is OperationKind.SET_DISCIPLINES and not (
+            isinstance(value, list) and any(str(v).strip() for v in value)
+        ):
+            raise TailoringError(f"{where}: set_disciplines needs a non-empty list 'value'")
+        if kind is OperationKind.SET_MODEL and not _model_ref_ok(str(value or "").strip()):
+            raise TailoringError(
+                f"{where}: set_model value '{value}' is not a usable provider:model"
+            )
+        operations.append(Operation(kind=kind, phase_id=phase_id, rationale=rationale, value=value))
     return operations
 
 
@@ -367,6 +438,7 @@ def build_proposal(
     assumptions: list[str] | None = None,
     open_questions: list[ClarifyingQuestion] | None = None,
     generated_by: ModelProvenance | None = None,
+    proposed_by: CallerProvenance | None = None,
 ) -> FlowProposal:
     """Tailor ``base`` and report whether the result can be started.
 
@@ -410,6 +482,7 @@ def build_proposal(
         assumptions=notes,
         open_questions=list(open_questions or []),
         generated_by=generated_by,
+        proposed_by=proposed_by,
     )
     logger.info(
         "flow_proposal_built",

@@ -437,7 +437,7 @@ profile the plugin installs by default (FORGE-462):
 | Tool | |
 | --- | --- |
 | `flow.list` | every launchable flow, with its phases and gates (read) |
-| `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (write; the version is held, not the call) |
+| `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (write; the version is held, not the call). Optional `template`, `operations` and `caller` apply your own tailoring with no server-side model call; the same invariants and approval apply, and an invalid operation is refused with the reason (FORGE-481) |
 | `flow.start_run` | start a run on a flow version a person has **approved** (write; refused unless the version is approved) |
 | `flow.status` | phase-by-phase state of one run (read) |
 | `run.start_design_flow` | start one of the built-in flows on a goal (held write) |

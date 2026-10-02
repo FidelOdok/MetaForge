@@ -1010,6 +1010,68 @@
         "title": "BringupStep",
         "type": "object"
       },
+      "CallerBody": {
+        "description": "Who is proposing: the client and, if known, its model.",
+        "properties": {
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "title": "CallerBody",
+        "type": "object"
+      },
+      "CallerOperation": {
+        "description": "One tailoring operation from the caller's model (FORGE-481).",
+        "properties": {
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "rationale": {
+            "default": "",
+            "title": "Rationale",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "op",
+          "phase"
+        ],
+        "title": "CallerOperation",
+        "type": "object"
+      },
       "Candidate": {
         "properties": {
           "manufacturer": {
@@ -3146,6 +3208,27 @@
             },
             "title": "Openquestions",
             "type": "array"
+          },
+          "proposedBy": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposedby"
           },
           "requirementsPending": {
             "default": false,
@@ -6515,6 +6598,16 @@
             ],
             "title": "Budget"
           },
+          "caller": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CallerBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "intent": {
             "title": "Intent",
             "type": "string"
@@ -6550,6 +6643,20 @@
               }
             ],
             "title": "Model"
+          },
+          "operations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CallerOperation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operations"
           },
           "projectId": {
             "anyOf": [
@@ -6589,6 +6696,17 @@
                 "type": "null"
               }
             ]
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
           }
         },
         "required": [

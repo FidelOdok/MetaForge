@@ -176,6 +176,7 @@ def _proposal(view: dict[str, Any]) -> dict[str, Any]:
         "requirements_pending": view.get("requirementsPending", False),
         "assumptions": view.get("assumptions", []),
         "open_questions": list(view.get("openQuestions", [])),
+        "proposed_by": view.get("proposedBy"),
         "changes": [
             {
                 "op": c.get("op"),
@@ -314,6 +315,9 @@ def build_remote_flow_bindings(
         target_maturity: str | None = None,
         loads_and_use: str | None = None,
         budget: str | None = None,
+        template: str | None = None,
+        operations: list[dict[str, Any]] | None = None,
+        caller: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # FORGE-463's inputs travel as the route spells them. The nested
         # manufacturing_context keys are accepted in either case by the route.
@@ -325,6 +329,10 @@ def build_remote_flow_bindings(
             "targetMaturity": target_maturity,
             "loadsAndUse": loads_and_use,
             "budget": budget,
+            # FORGE-481: caller-proposed tailoring; the route makes no model call.
+            "template": template,
+            "operations": operations,
+            "caller": caller,
         }
         with tracer.start_as_current_span("remote_flows.propose") as span:
             span.set_attribute("flow.intent_length", len(intent))

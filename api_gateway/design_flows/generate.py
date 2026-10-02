@@ -22,9 +22,12 @@ from orchestrator.design_flow.context import (
     FlowContext,
 )
 from orchestrator.design_flow.generator import (
+    CallerProvenance,
     FlowProposal,
     ModelProvenance,
+    TailoringError,
     build_proposal,
+    parse_caller_operations,
     parse_operations,
 )
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FLOWS, get_flow
@@ -35,8 +38,10 @@ from orchestrator.harness.providers.usage import usage_scope
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "CallerTailoringRequest",
     "GeneratorUnavailableError",
     "TailoringRequest",
+    "build_caller_proposal",
     "generate_proposal",
     "parse_extra_questions",
     "suggest_extra_questions",
@@ -72,6 +77,57 @@ class TailoringRequest:
     #: what it must carry (FORGE-463). The route checks that the required
     #: parts are present before a model is ever asked.
     context: FlowContext | None = None
+
+
+@dataclass
+class CallerTailoringRequest:
+    """A tailoring the caller's own model wrote (FORGE-481).
+
+    ``operations`` is the raw list as received; it is validated strictly
+    against the chosen template, not leniently like a server model's reply.
+    """
+
+    intent: str
+    operations: Any
+    template: str | None = None
+    requirements: list[str] | None = None
+    context: FlowContext | None = None
+    client: str | None = None
+    model: str | None = None
+
+
+def build_caller_proposal(request: CallerTailoringRequest) -> FlowProposal:
+    """Apply a caller's operations deterministically. Makes no model call.
+
+    Raises :class:`orchestrator.design_flow.generator.TailoringError` for an
+    unknown template, operation or phase. The invariants run in
+    ``build_proposal`` exactly as for a generated flow, and the route refuses
+    an invalid result before anything is stored.
+    """
+    template_id = request.template or DEFAULT_FLOW_ID
+    if template_id not in FLOWS:
+        raise TailoringError(
+            f"unknown template '{template_id}'; templates: {', '.join(sorted(FLOWS))}"
+        )
+    base = get_flow(template_id)
+    operations = parse_caller_operations(request.operations, base)
+    proposal = build_proposal(
+        base,
+        base_version=load_templates()[template_id].version,
+        operations=operations,
+        intent=request.intent,
+        context=request.context,
+        proposed_by=CallerProvenance(client=request.client, model=request.model),
+    )
+    logger.info(
+        "flow_caller_proposal_built",
+        template=template_id,
+        operations=len(proposal.operations),
+        valid=proposal.valid,
+        client=request.client,
+        model=request.model,
+    )
+    return proposal
 
 
 def _catalogue_for_prompt() -> str:
