@@ -38,6 +38,9 @@ class RunResponse(BaseModel):
     updated_at: float
     error: str | None = None
     approval_reason: str | None = None
+    #: Wall-clock time after which a held approval is expired as
+    #: ``timed_out`` if nobody closed it first (FORGE-466).
+    approval_deadline: float | None = None
     #: Who answered the approval, and whether that identity was verified
     #: (FORGE-393). Exposed so a remote approval gate can read the approver
     #: back out of the ledger rather than inventing one (FORGE-406).
@@ -56,6 +59,7 @@ class RunResponse(BaseModel):
             updated_at=run.updated_at,
             error=run.error,
             approval_reason=run.approval_reason,
+            approval_deadline=run.approval_deadline,
             approved_by=run.approved_by,
             approver_verified=run.approver_verified,
             result=run.result,

@@ -93,10 +93,11 @@ class TestAlertingRules:
         # + 4 MCP surface (FORGE-379)
         # + 2 design-flow engine (FORGE-401)
         # + 2 code staleness (FORGE-411)
-        # + 1 provider fallback sustained (FORGE-468).
+        # + 1 provider fallback sustained (FORGE-468)
+        # + 2 held approvals not closed / expiring by deadline (FORGE-466).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 32
+        assert len(rules) == 34
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -134,10 +135,12 @@ class TestAlertingRules:
         #   is severity: info, because it says the check cannot run, not that
         #   something is broken)
         # + 1 harness provider fallback sustained (FORGE-468).
+        # + 1 held approvals not being closed (FORGE-466; the
+        #   expiring-by-deadline rule beside it is severity: info)
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         warnings = [r for r in rules if r["labels"]["severity"] == "warning"]
-        assert len(warnings) == 23
+        assert len(warnings) == 24
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -196,6 +199,9 @@ class TestAlertingRules:
                 "RetrievalPrecisionRegression",
                 "SensorOutOfRange",
                 "TwinOrphansDetected",
+                # FORGE-466: the sidecar cannot close holds it opened, so
+                # stale entries sit on the Approvals page until expired.
+                "ToolApprovalHoldCloseFailing",
             ]
         )
 

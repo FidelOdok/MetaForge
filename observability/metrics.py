@@ -471,6 +471,19 @@ class MetricsRegistry:
         description="Harness model calls served by a fallback instead of the primary provider",
         labels=["primary", "fallback", "role", "reason"],
     )
+    # FORGE-466: a held approval closed because nobody is waiting for it any
+    # more. ``outcome`` is timed_out or canceled; ``trigger`` is ``waiter``
+    # (the side that held the call said so) or ``deadline`` (the gateway
+    # expired it because the waiter never did); ``result`` is resolved,
+    # already_resolved, decided or failed. A rise in trigger="deadline" means
+    # waiters are dying without saying so; result="failed" means the
+    # sidecar cannot reach the ledger to close what it opened.
+    TOOL_APPROVAL_RESOLUTION_TOTAL = MetricDefinition(
+        name="metaforge_tool_approval_resolution_total",
+        type="counter",
+        description="Held tool approvals closed with no answer, by outcome, trigger and result",
+        labels=["outcome", "trigger", "result"],
+    )
 
     # ── MCP surface (FORGE-379) ────────────────────────────────────────
     #
@@ -582,6 +595,7 @@ class MetricsRegistry:
             cls.HARNESS_TOOL_CALL_TOTAL,
             cls.HARNESS_PROVIDER_CALL_DURATION,
             cls.HARNESS_PROVIDER_FALLBACK_TOTAL,
+            cls.TOOL_APPROVAL_RESOLUTION_TOTAL,
         ]
 
     @classmethod
@@ -1221,6 +1235,12 @@ class MetricsCollector:
                     "reason": reason,
                 },
             )
+
+    def record_tool_approval_resolution(self, outcome: str, trigger: str, result: str) -> None:
+        """Record one held approval closed with no answer (FORGE-466)."""
+        counter = self._instruments.get(MetricsRegistry.TOOL_APPROVAL_RESOLUTION_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome, "trigger": trigger, "result": result})
 
 
 def collector_for(component: str) -> MetricsCollector:

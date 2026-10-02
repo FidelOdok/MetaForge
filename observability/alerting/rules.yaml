@@ -122,6 +122,30 @@ groups:
           summary: "Harness role {{ $labels.role }} is running on fallback {{ $labels.fallback }}, not primary {{ $labels.primary }}"
           description: "For 15m, {{ $labels.role }} calls have been served by {{ $labels.fallback }} because the primary {{ $labels.primary }} failed or was rejected. The configured model is not the one producing output. Check GET /v1/harness/providers (lastFallback) and the harness_provider_fallback log event."
 
+      # FORGE-466: a held approval whose waiter stopped waiting must be closed,
+      # or the Approvals page offers a button for a call nobody is waiting
+      # for. result="failed" means the sidecar cannot reach the ledger to
+      # close what it opened; trigger="deadline" means waiters are dying
+      # without closing their holds, and the gateway is cleaning up after them.
+      - alert: ToolApprovalHoldCloseFailing
+        expr: |
+          sum(increase(metaforge_tool_approval_resolution_total{result="failed"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Held tool approvals are not being closed when their waiter stops waiting"
+          description: "The MCP sidecar failed to close a held approval in the gateway ledger in the last 15m. Stale entries stay on the Approvals page until the gateway deadline expires them. Check the mcp_remote_approval_resolve_failed log event and gateway reachability from the sidecar."
+      - alert: ToolApprovalHoldsExpiringByDeadline
+        expr: |
+          sum(increase(metaforge_tool_approval_resolution_total{trigger="deadline"}[30m])) > 3
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Held tool approvals are being expired by the gateway deadline"
+          description: "More than 3 held approvals in 30m were expired by the gateway because their waiter never closed them, which usually means the MCP sidecar is crashing or restarting mid-hold. Check the tool_approval_hold_expired log event and the sidecar's restarts."
+
   - name: metaforge_fleet_alerts
     rules:
       # Device has not sent telemetry for > N minutes (configurable per device type).

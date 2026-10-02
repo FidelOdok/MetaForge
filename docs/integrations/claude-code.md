@@ -246,6 +246,15 @@ which happened:
 — refused rather than run). None is worth retrying without a person
 doing something first.
 
+A held call that stops waiting takes its entry off the **Approvals** page
+with it (FORGE-466). When the 180s window closes the entry is marked
+`timed_out`; when the call is cancelled (your client disconnected, or the
+server shut down) it is marked `canceled`. If the server dies before it can
+say so, the gateway expires the entry itself 30s after the window it was
+given. Approving or rejecting an entry in either state returns `409` with
+the reason and records nothing, so a late click can never approve a call
+that is no longer running. Ask for the call again if it is still wanted.
+
 Running over **stdio on your own machine**, writes are not held by
 default: there is nowhere to answer an approval in that transport yet.
 That changes when a deployment sets `exempt_local_writes=False`.

@@ -294,7 +294,9 @@ class TestThreeTierApproval:
         with pytest.raises(ApprovalDeniedError, match="timed out"):
             await rt.call_tool("commit", {})
         assert calls["n"] == 0
-        assert runs.list()[0].status is RunStatus.REJECTED  # denial is durably recorded
+        # Denial is durably recorded, as timed_out rather than rejected
+        # (FORGE-466): nobody said no, nobody said anything.
+        assert runs.list()[0].status is RunStatus.TIMED_OUT
 
     @pytest.mark.asyncio
     async def test_fails_safe_with_no_evaluator_available(self) -> None:

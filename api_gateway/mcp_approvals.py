@@ -20,7 +20,7 @@ import asyncio
 
 import structlog
 
-from api_gateway.chat.tool_approvals import get_approval_store
+from api_gateway.chat.tool_approvals import HOLD_DEADLINE_GRACE_SECONDS, get_approval_store
 from mcp_core.guardrails import (
     ApprovalAsk,
     ApprovalGateFn,
@@ -74,7 +74,13 @@ def build_mcp_approval_gate(
             }
         )
         store.start(run.id)
-        store.request_approval(run.id, reason=ask.reason)
+        # FORGE-466: the wait below closes its own hold however it ends; the
+        # deadline is the backstop the ledger's readers expire it by if not.
+        store.request_approval(
+            run.id,
+            reason=ask.reason,
+            deadline=store.now() + timeout_seconds + HOLD_DEADLINE_GRACE_SECONDS,
+        )
         logger.info(
             "mcp_approval_requested",
             run_id=run.id,

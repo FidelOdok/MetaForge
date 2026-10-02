@@ -11,16 +11,22 @@ A run moves through an explicit state machine::
     queued ── start ──▶ running ──┬── request_approval ──▶ awaiting_approval
                                   │                              │
                                   ├── complete ──▶ completed      ├─ approve ─▶ running
-                                  ├── fail ──────▶ failed         └─ reject ──▶ rejected
-                                  └── cancel ────▶ canceled
+                                  ├── fail ──────▶ failed         ├─ reject ──▶ rejected
+                                  └── cancel ────▶ canceled       ├─ time_out ▶ timed_out
+                                                                  └─ cancel ──▶ canceled
 
-``completed``, ``failed``, ``rejected``, ``canceled`` are terminal. Illegal
+``completed``, ``failed``, ``rejected``, ``canceled``, ``timed_out`` are
+terminal. ``timed_out`` and ``canceled`` out of ``awaiting_approval`` mean the
+same thing to a reviewer: nobody is waiting for this answer any more
+(FORGE-466). Illegal
 transitions raise :class:`InvalidTransition`, so the gateway can return a clean
 409 instead of corrupting run state.
 """
 
 from __future__ import annotations
 
+import asyncio
+import builtins
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -41,11 +47,24 @@ class RunStatus(StrEnum):
     FAILED = "failed"
     REJECTED = "rejected"
     CANCELED = "canceled"
+    #: The wait for a human ended with no answer (FORGE-466). Distinct from
+    #: ``rejected``: nobody said no, nobody said anything.
+    TIMED_OUT = "timed_out"
 
 
 TERMINAL: frozenset[RunStatus] = frozenset(
-    {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.REJECTED, RunStatus.CANCELED}
+    {
+        RunStatus.COMPLETED,
+        RunStatus.FAILED,
+        RunStatus.REJECTED,
+        RunStatus.CANCELED,
+        RunStatus.TIMED_OUT,
+    }
 )
+
+#: An approval that ended without anyone answering it. Approving one of these
+#: would record an approval for a call that is no longer waiting.
+UNANSWERED: frozenset[RunStatus] = frozenset({RunStatus.TIMED_OUT, RunStatus.CANCELED})
 
 # Allowed status transitions (source -> set of legal destinations).
 _TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
@@ -59,7 +78,7 @@ _TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
         }
     ),
     RunStatus.AWAITING_APPROVAL: frozenset(
-        {RunStatus.RUNNING, RunStatus.REJECTED, RunStatus.CANCELED}
+        {RunStatus.RUNNING, RunStatus.REJECTED, RunStatus.CANCELED, RunStatus.TIMED_OUT}
     ),
 }
 
@@ -94,6 +113,11 @@ class Run:
     updated_at: float
     error: str | None = None
     approval_reason: str | None = None
+    #: Wall-clock time after which nobody is waiting for this approval
+    #: (FORGE-466). Set when the hold is created; ``expire_overdue`` marks a
+    #: run past it ``timed_out`` so a waiter that died without saying so
+    #: cannot leave it pending forever. ``None`` means no deadline.
+    approval_deadline: float | None = None
     #: Who answered the approval, and whether that identity was verified
     #: (FORGE-393). Set by ``submit_approval``; never by the code that asked
     #: for the approval, and never by a tool argument.
@@ -130,6 +154,10 @@ class InMemoryRunStore:
     def set_on_transition(self, callback: Callable[[Run], None] | None) -> None:
         """Set (or clear) the status-change observer after construction."""
         self._on_transition = callback
+
+    def now(self) -> float:
+        """This store's clock, so a deadline is measured on the same one."""
+        return self._clock()
 
     def _notify(self, run: Run) -> None:
         if self._on_transition is not None:
@@ -185,10 +213,43 @@ class InMemoryRunStore:
     def start(self, run_id: str) -> Run:
         return self._transition(run_id, RunStatus.RUNNING)
 
-    def request_approval(self, run_id: str, *, reason: str | None = None) -> Run:
+    def request_approval(
+        self,
+        run_id: str,
+        *,
+        reason: str | None = None,
+        deadline: float | None = None,
+    ) -> Run:
         run = self._transition(run_id, RunStatus.AWAITING_APPROVAL)
         run.approval_reason = reason
+        run.approval_deadline = deadline
         return run
+
+    def time_out(self, run_id: str, *, reason: str = "timed out waiting for approval") -> Run:
+        """Close a pending approval nobody answered (FORGE-466)."""
+        run = self._transition(run_id, RunStatus.TIMED_OUT)
+        run.error = reason
+        return run
+
+    def expire_overdue(self, *, now: float | None = None) -> builtins.list[Run]:
+        """Mark every pending approval past its deadline ``timed_out``.
+
+        The waiter is meant to resolve its own hold when it stops waiting.
+        This is the backstop for when it cannot: a process that crashed, or
+        lost the network at the wrong moment, says nothing on the way out.
+        """
+        current = self._clock() if now is None else now
+        expired: builtins.list[Run] = []
+        for run in list(self._runs.values()):
+            if (
+                run.status is RunStatus.AWAITING_APPROVAL
+                and run.approval_deadline is not None
+                and run.approval_deadline <= current
+            ):
+                expired.append(
+                    self.time_out(run.id, reason="deadline passed with nobody waiting (expired)")
+                )
+        return expired
 
     def submit_approval(
         self,
@@ -239,8 +300,11 @@ class InMemoryRunStore:
         run.error = error
         return run
 
-    def cancel(self, run_id: str) -> Run:
-        return self._transition(run_id, RunStatus.CANCELED)
+    def cancel(self, run_id: str, *, reason: str | None = None) -> Run:
+        run = self._transition(run_id, RunStatus.CANCELED)
+        if reason is not None:
+            run.error = reason
+        return run
 
 
 # ---------------------------------------------------------------------------
@@ -273,23 +337,48 @@ async def await_approval_decision(
     loses it is the one that drops an approval a human actually gave.
 
     Fails closed on every path that is not an explicit approval.
+
+    However the wait ends without an answer, the hold is closed on the way
+    out (FORGE-466): ``timed_out`` when the window closes, ``canceled`` when
+    the waiter itself is cancelled. Left ``awaiting_approval``, it is a
+    button on the Approvals page for a call nobody is waiting for.
     """
     deadline = monotonic() + timeout_seconds
-    while monotonic() < deadline:
-        status = store.get(run_id).status
-        if status is RunStatus.RUNNING:
-            return ApprovalWait.APPROVED
-        if status is RunStatus.REJECTED:
-            return ApprovalWait.REJECTED
-        await sleep(poll_interval)
+    try:
+        while monotonic() < deadline:
+            status = store.get(run_id).status
+            if status is RunStatus.RUNNING:
+                return ApprovalWait.APPROVED
+            if status is RunStatus.REJECTED:
+                return ApprovalWait.REJECTED
+            if status in UNANSWERED:
+                return ApprovalWait.TIMED_OUT
+            await sleep(poll_interval)
+    except asyncio.CancelledError:
+        _close_unanswered(store, run_id, RunStatus.CANCELED, "waiter cancelled")
+        raise
 
     # Timed out. Deny by default -- but a decision landing in the exact
     # instant between the last poll and here is still honoured rather than
     # clobbered by the race with submit_approval.
+    _close_unanswered(store, run_id, RunStatus.TIMED_OUT, "timed out waiting for approval")
     try:
-        store.submit_approval(run_id, ApprovalDecision.REJECT)
-    except (InvalidTransition, RunNotFoundError):
+        if store.get(run_id).status is RunStatus.RUNNING:
+            return ApprovalWait.APPROVED
+    except RunNotFoundError:
         pass
-    if store.get(run_id).status is RunStatus.RUNNING:
-        return ApprovalWait.APPROVED
     return ApprovalWait.TIMED_OUT
+
+
+def _close_unanswered(store: InMemoryRunStore, run_id: str, target: RunStatus, reason: str) -> None:
+    """Best-effort: a hold already decided or gone is left as it is."""
+    try:
+        if store.get(run_id).status is not RunStatus.AWAITING_APPROVAL:
+            return
+        if target is RunStatus.TIMED_OUT:
+            store.time_out(run_id, reason=reason)
+        else:
+            store.cancel(run_id, reason=reason)
+    except (InvalidTransition, RunNotFoundError):
+        return
+    logger.info("approval_hold_closed", run_id=run_id, status=target.value, reason=reason)
