@@ -105,6 +105,22 @@ class TestGeometryRecorder:
         assert result["minio_object_key"] is None
         assert result["project_linked"] is False  # no project_id / backend
 
+    async def test_require_blob_store_fails_loudly_and_creates_no_node(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-501: a deterministic fallback commit must not mint an unloadable cad_model."""
+        import digital_twin.storage.work_product_blobs as blobs
+
+        def boom(*a: object, **k: object) -> str:
+            raise RuntimeError("MinIO settings missing required env var: MINIO_ENDPOINT")
+
+        monkeypatch.setattr(blobs, "store_work_product_blob", boom)
+        twin = _FakeTwin()
+        record = make_geometry_recorder(twin, None)
+        with pytest.raises(RuntimeError, match="MINIO_ENDPOINT"):
+            await record(step_base64=_STEP_B64, name="Part", require_blob_store=True)
+        assert twin.created == []
+
     async def test_invalid_base64_raises(self) -> None:
         record = make_geometry_recorder(_FakeTwin(), None)
         with pytest.raises(ValueError, match="not valid base64"):

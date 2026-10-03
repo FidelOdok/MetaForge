@@ -481,6 +481,15 @@ def make_search_tools_tool(
             runtime.tools.pin(full_name)
             registered.append(full_name)
             known.add(full_name)
+        # FORGE-501: a phase hunting for a missing tool was invisible. Log the
+        # query and what it found, so the hunt shows up next to the step count.
+        logger.info(
+            "search_tools_query",
+            query=query,
+            registered=registered,
+            already_available=already,
+            not_registered=over_budget[:_MAX_TOOL_SEARCH_RESULTS],
+        )
         if over_budget and not registered and not already:
             return {
                 "registered": [],

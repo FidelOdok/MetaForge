@@ -125,6 +125,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
         script_source: str | None = None,
         parameters: dict[str, Any] | None = None,
         properties: dict[str, Any] | None = None,
+        require_blob_store: bool = False,
     ) -> dict[str, Any]:
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -206,6 +207,15 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                     content_type=_EXT_CONTENT_TYPE.get(ext, "application/octet-stream"),
                 )
             except Exception as exc:  # noqa: BLE001 — degrade like /v1/twin/import
+                if require_blob_store:
+                    # FORGE-501: a cad_model with no stored geometry cannot be
+                    # loaded or shown. A deterministic fallback commit must
+                    # fail so the phase reports it, not mint an empty node.
+                    logger.error("geometry_blob_store_required_failed", name=name, error=str(exc))
+                    raise RuntimeError(
+                        f"cannot commit '{name}': geometry blob store unavailable ({exc}). "
+                        "No cad_model was created."
+                    ) from exc
                 logger.warning("geometry_blob_store_skipped", name=name, error=str(exc))
 
             metadata: dict[str, Any] = {

@@ -1474,10 +1474,22 @@ class FreecadServer(McpToolServer):
         session_id = self._require(arguments, "session_id")
         session = self._sessions.get(session_id)
         body = self._ops.create_body(session.document, arguments.get("name", "Body"))
-        obj_id = self._sessions.register_object(
-            session_id, body, "body", arguments.get("name", "Body")
-        )
-        return {"obj_id": obj_id, "kind": "body"}
+        label = arguments.get("name", "Body")
+        obj_id = self._sessions.register_object(session_id, body, "body", label)
+        # FORGE-501: a bare {"obj_id", "kind"} left the model unsure the body
+        # existed or what to do next, so a phase called this about nine times.
+        return {
+            "obj_id": obj_id,
+            "body_id": obj_id,
+            "kind": "body",
+            "label": label,
+            "message": (
+                f"Body '{label}' created as {obj_id}. Do NOT call create_body again for "
+                f"this part. Next: freecad.create_sketch with body_id='{obj_id}' (plane "
+                f"XY/XZ/YZ + elements), then freecad.pad_sketch with body_id='{obj_id}' "
+                "and the returned sketch_id. Add more features to this same body."
+            ),
+        }
 
     async def import_step(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
@@ -1508,7 +1520,16 @@ class FreecadServer(McpToolServer):
             offset=float(arguments.get("offset", 0.0)),
         )
         obj_id = self._sessions.register_object(session_id, sketch, "sketch", "Sketch")
-        return {"obj_id": obj_id, "kind": "sketch", "body_id": body_id}
+        return {
+            "obj_id": obj_id,
+            "sketch_id": obj_id,
+            "kind": "sketch",
+            "body_id": body_id,
+            "message": (
+                f"Sketch {obj_id} created on body {body_id}. Next: freecad.pad_sketch "
+                f"(or pocket_sketch) with body_id='{body_id}', sketch_id='{obj_id}', length."
+            ),
+        }
 
     async def loft_sketches(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

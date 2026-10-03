@@ -131,3 +131,18 @@ def test_dev_worker_mounts_the_same_source_as_the_gateway() -> None:
     assert "design-flow-worker" in data, "dev override has no design-flow-worker block"
     missing = _source_mounts(data["gateway"]) - _source_mounts(data["design-flow-worker"])
     assert not missing, f"design-flow-worker does not mount {sorted(missing)}"
+
+
+def test_worker_carries_every_minio_var_the_gateway_has() -> None:
+    """FORGE-501: the worker's fallback commit stores blobs in MinIO.
+
+    Unset, the commit logged ``geometry_blob_store_skipped`` and made a
+    cad_model with no stored geometry.
+    """
+    services = _services()
+    gateway, worker = _env(services["gateway"]), _env(services["design-flow-worker"])
+    minio = {k for k in gateway if k.startswith("MINIO_")}
+    assert "MINIO_ENDPOINT" in minio
+    for key in sorted(minio):
+        assert key in worker, f"design-flow-worker is missing {key}"
+        assert worker[key] == gateway[key], f"{key} differs from the gateway's"
