@@ -272,7 +272,8 @@ class TestAllMetricsCombined:
         # + 1 iteration gate without approval workflow (FORGE-470)
         # + 1 design-flow tool refusal (FORGE-492)
         # + 1 unreachable approval hold (FORGE-490)
-        assert len(MetricsRegistry.all_metrics()) == 69
+        # + 1 unified approval decision (FORGE-507)
+        assert len(MetricsRegistry.all_metrics()) == 70
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
