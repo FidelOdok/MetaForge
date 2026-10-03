@@ -2281,14 +2281,43 @@ class FreecadOperations:
 
     @staticmethod
     def _baked_shape(shape: Any) -> Any:
-        """Copy of ``shape`` with its Placement applied to the geometry itself
+        """Copy of ``shape`` with its Placement written into the geometry itself
         (identity Placement), so a placement-blind STEP reader sees the global
-        frame (FORGE-505)."""
-        c = shape.copy()
-        m = c.Placement.toMatrix()
-        c.Placement = FreeCAD.Placement()
-        c.transformShape(m)
-        return c
+        frame (FORGE-505).
+
+        ``transformShape`` is NOT enough: on a rigid transform OCCT stores it as
+        the shape's Location, FreeCAD re-exposes that as ``Placement``, and
+        ``Import.export`` writes it back out as an assembly transform (verified
+        against FreeCAD in the adapter image). ``transformGeometry`` bakes it
+        but turns every face into a B-spline. A raw ``exportStep`` / ``read``
+        round trip writes the Location into the geometry's own axes and keeps
+        planes and cylinders analytic.
+        """
+        import tempfile
+
+        fd, path = tempfile.mkstemp(suffix=".step")
+        os.close(fd)
+        try:
+            shape.exportStep(path)
+            baked = Part.Shape()
+            baked.read(path)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        return baked
+
+    @staticmethod
+    def _global_shape(leaf: Any) -> Any:
+        """``leaf.Shape`` carrying its global placement (own plus any parent
+        ``App::Part`` placements), which is the frame the twin records."""
+        shape = leaf.Shape.copy()
+        try:
+            shape.Placement = leaf.getGlobalPlacement()
+        except Exception:  # noqa: BLE001 -- not a document object, keep own placement
+            pass
+        return shape
 
     def _leaf_objects(self, obj: Any, _seen: set[int] | None = None) -> list[Any]:
         """Like ``_shape_leaves`` but returns the objects (keeps Labels)."""
@@ -2325,7 +2354,7 @@ class FreecadOperations:
             for leaf in self._leaf_objects(obj):
                 f = doc.addObject("Part::Feature", "Leaf")
                 f.Label = getattr(leaf, "Label", "Part")
-                f.Shape = self._baked_shape(leaf.Shape)
+                f.Shape = self._baked_shape(self._global_shape(leaf))
                 feats.append(f)
             doc.recompute()
             Import.export(feats, tmp_path)
@@ -2537,7 +2566,10 @@ class FreecadOperations:
             # Import.export stores that Placement as an assembly transform,
             # which gmsh/Part.Shape.read drop, so the stored file's own frame
             # differed from the recorded one (axes cycled). Make them agree.
-            expected = self._bb_dict(self._resolve_shape(obj).BoundBox)
+            placed = [self._global_shape(leaf) for leaf in self._leaf_objects(obj)]
+            expected = self._bb_dict(
+                (placed[0] if len(placed) == 1 else Part.makeCompound(placed)).BoundBox
+            )
             raw = Part.Shape()
             raw.read(tmp_path)
             if not _bboxes_match(expected, self._bb_dict(raw.BoundBox), _FRAME_TOL_MM):

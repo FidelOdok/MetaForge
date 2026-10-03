@@ -3,8 +3,15 @@
 Live finding: a part authored on a rotated plane was committed with twin bbox
 x 194..206, y 0..220, z -120..0 but meshed with (x, y, z) = twin (y, z, x),
 because the STEP carries the Placement as an assembly transform that gmsh's
-reader drops. Pure-Python parts run everywhere; the end-to-end test needs
-FreeCAD and gmsh and is skipped without them.
+reader drops. Pure-Python parts run everywhere; the end-to-end tests need
+FreeCAD (and gmsh for the mesh one) and are skipped when it is not importable,
+which is the case in CI.
+
+Running the FreeCAD tests: they need the adapter image, e.g. copy
+``operations.py`` and this file into the running freecad-adapter container
+under /tmp (not /app) and run them with that container's ``python3`` with
+``/tmp`` ahead of ``/app`` on ``sys.path``; the image has no pytest, so use a
+small shim that provides ``pytest.mark.skipif`` and ``pytest.approx``.
 """
 
 from __future__ import annotations
@@ -130,3 +137,64 @@ def test_export_round_trip_frame_matches_live_bbox_after_transform(tmp_path: Pat
     com = props["center_of_mass"]
     assert 194.0 <= com[0] <= 206.0 and 0.0 <= com[1] <= 220.0 and -120.0 <= com[2] <= 0.0
     assert stored["min_x"] == 194.0 and stored["max_y"] == 220.0 and stored["min_z"] == -120.0
+
+
+@pytest.mark.skipif(not HAS_FREECAD, reason="needs FreeCAD")
+def test_export_bakes_placement_and_keeps_analytic_faces(tmp_path: Path) -> None:
+    """The bake must reach the written STEP and not degrade planes/cylinders
+    into B-splines (transformGeometry would)."""
+    import FreeCAD
+    import Part
+
+    ops = FreecadOperations(work_dir=str(tmp_path))
+    doc = FreeCAD.newDocument("an505")
+    try:
+        obj = doc.addObject("Part::Feature", "Plate")
+        obj.Shape = Part.makeBox(220, 120, 12).cut(Part.makeCylinder(5, 30))
+        obj.Placement = FreeCAD.Placement(
+            FreeCAD.Vector(194, 0, -120), FreeCAD.Rotation(FreeCAD.Vector(1, 1, 1), 120)
+        )
+        doc.recompute()
+        step = ops.export_object_step_bytes(obj)
+    finally:
+        FreeCAD.closeDocument(doc.Name)
+    path = tmp_path / "plate.step"
+    path.write_bytes(step)
+    shape = Part.Shape()
+    shape.read(str(path))
+    kinds = {type(f.Surface).__name__ for f in shape.Faces}
+    assert kinds == {"Plane", "Cylinder"}
+
+
+@pytest.mark.skipif(not HAS_FREECAD, reason="needs FreeCAD")
+def test_export_assembly_child_frame_matches_global_bbox(tmp_path: Path) -> None:
+    """A placed part inside a placed App::Part exports in the global frame."""
+    import FreeCAD
+    import Part
+
+    ops = FreecadOperations(work_dir=str(tmp_path))
+    doc = FreeCAD.newDocument("asm505")
+    try:
+        asm = doc.addObject("App::Part", "Asm")
+        asm.Placement = FreeCAD.Placement(FreeCAD.Vector(0, 50, 0), FreeCAD.Rotation())
+        child = doc.addObject("Part::Feature", "Child")
+        child.Shape = Part.makeBox(220, 120, 12)
+        child.Placement = FreeCAD.Placement(
+            FreeCAD.Vector(194, 0, -120), FreeCAD.Rotation(FreeCAD.Vector(1, 1, 1), 120)
+        )
+        asm.addObject(child)
+        doc.recompute()
+        gb = ops._global_shape(child).BoundBox
+        step = ops.export_object_step_bytes(asm)
+    finally:
+        FreeCAD.closeDocument(doc.Name)
+    stored = ops.measure_step_bytes(step)["bounding_box"]
+    for key, want in (
+        ("min_x", gb.XMin),
+        ("min_y", gb.YMin),
+        ("min_z", gb.ZMin),
+        ("max_x", gb.XMax),
+        ("max_y", gb.YMax),
+        ("max_z", gb.ZMax),
+    ):
+        assert abs(stored[key] - want) < 0.01, (key, stored[key], want)
