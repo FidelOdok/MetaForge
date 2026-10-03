@@ -136,3 +136,16 @@ def test_cad_model_plus_simulation_result_exceeds_the_budget_today() -> None:
 
     with pytest.raises(profiles.PhaseToolBudgetError):
         profiles.tools_for_phase((), ("cad_model", "simulation_result"))
+
+
+def test_simulation_phase_can_stage_committed_geometry() -> None:
+    """FORGE-504: a committed cad_model is in the blob store, not on disk.
+
+    Live, a simulation phase recorded 'FEA blocked: no meshable STEP path'
+    because nothing in its tool set could materialise the committed geometry.
+    """
+    from mcp_core import profiles
+
+    tools = profiles.tools_for_phase(("mechanical",), ("simulation_result",))
+    assert "twin.stage_work_product_file" in tools
+    assert "freecad.generate_mesh" in tools
