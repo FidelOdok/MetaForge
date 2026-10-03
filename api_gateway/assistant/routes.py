@@ -10,6 +10,7 @@ Endpoints live under ``/v1/assistant``.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -220,17 +221,35 @@ async def decide_proposal(
     On approval, run the proposal's diff via the apply executor (if wired) so the
     change is actually applied to the twin (HITL: propose → approve → apply).
     """
-    proposal = await workflow.decide(
-        change_id=change_id,
-        decision=body.decision,
+    return await decide_change(
+        request.app,
+        change_id,
+        body.decision,
         reason=body.reason,
         reviewer=body.reviewer,
+    )
+
+
+async def decide_change(
+    app: Any,
+    change_id: UUID,
+    decision: ApprovalDecisionType,
+    *,
+    reason: str,
+    reviewer: str,
+) -> DesignChangeProposal:
+    """Decide a proposal and apply it on approval. Shared with ``/v1/approvals`` (FORGE-507)."""
+    proposal = await workflow.decide(
+        change_id=change_id,
+        decision=decision,
+        reason=reason,
+        reviewer=reviewer,
     )
     if proposal is None:
         raise HTTPException(status_code=404, detail="Proposal not found")
 
-    if body.decision == ApprovalDecisionType.APPROVE and proposal.status == ChangeStatus.APPROVED:
-        executor = getattr(request.app.state, "proposal_apply", None)
+    if decision == ApprovalDecisionType.APPROVE and proposal.status == ChangeStatus.APPROVED:
+        executor = getattr(app.state, "proposal_apply", None)
         if executor is not None:
             try:
                 result = await executor(proposal)

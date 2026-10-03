@@ -562,6 +562,18 @@ class MetricsRegistry:
         labels=["tool"],
     )
 
+    # FORGE-507: one decision through the unified /v1/approvals API. ``kind``
+    # is gate, tool, change, design_loop, sketch or drawing; ``surface`` is
+    # dashboard, cli, agent or unknown; ``outcome`` is ok, refused (a 4xx the
+    # existing rules produced) or error. No alert: refusals are a reviewer
+    # answering something already closed, not a fault.
+    APPROVAL_DECISION_TOTAL = MetricDefinition(
+        name="metaforge_approval_decision_total",
+        type="counter",
+        description="Decisions made through /v1/approvals, by kind, decision, surface and outcome",
+        labels=["kind", "decision", "surface", "outcome"],
+    )
+
     # ── MCP surface (FORGE-379) ────────────────────────────────────────
     #
     # The MCP server is where every external harness meets MetaForge, and it
@@ -682,6 +694,7 @@ class MetricsRegistry:
             cls.LLM_RUN_SPEND_EXCEEDED_TOTAL,
             cls.TOOL_APPROVAL_RESOLUTION_TOTAL,
             cls.UNREACHABLE_APPROVAL_HOLD_TOTAL,
+            cls.APPROVAL_DECISION_TOTAL,
         ]
 
     @classmethod
@@ -1383,6 +1396,22 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.TOOL_APPROVAL_RESOLUTION_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome, "trigger": trigger, "result": result})
+
+    def record_approval_decision(
+        self, kind: str, decision: str, surface: str, outcome: str
+    ) -> None:
+        """Record one decision through the unified approvals API (FORGE-507)."""
+        counter = self._instruments.get(MetricsRegistry.APPROVAL_DECISION_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "kind": kind,
+                    "decision": decision,
+                    "surface": surface,
+                    "outcome": outcome,
+                },
+            )
 
     def record_unreachable_approval_hold(self, tool: str) -> None:
         """Record one approval hold with no reachable approver (FORGE-490)."""

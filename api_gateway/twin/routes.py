@@ -1087,6 +1087,14 @@ async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> Ap
     this is the dashboard's side of the gate — a human explicitly approving it
     before the calling agent is expected to proceed to real CAD/build work.
     """
+    result = await approve_sketch_node(node_id, body.approved_by)
+    return ApproveSketchResponse(
+        node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
+    )
+
+
+async def approve_sketch_node(node_id: UUID, approved_by: str | None) -> dict[str, Any]:
+    """Approve a design_sketch. Shared with ``/v1/approvals`` (FORGE-507)."""
     if _design_sketch_approver is None:
         raise HTTPException(status_code=503, detail="design-sketch approval is not configured")
     wp = await _twin.get_work_product(node_id)
@@ -1098,12 +1106,12 @@ async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> Ap
             detail=f"Node {node_id} is a {wp.type.value}, not a design_sketch",
         )
     try:
-        result = await _design_sketch_approver(str(node_id), approved_by=body.approved_by)
+        result: dict[str, Any] = await _design_sketch_approver(
+            str(node_id), approved_by=approved_by
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return ApproveSketchResponse(
-        node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
-    )
+    return result
 
 
 @router.post(
@@ -1117,6 +1125,14 @@ async def approve_technical_drawing(
     Mirrors ``approve_design_sketch`` above -- a real work product, a real
     approval gate, not a dashboard-local checkbox.
     """
+    result = await approve_drawing_node(node_id, body.approved_by)
+    return ApproveTechnicalDrawingResponse(
+        node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
+    )
+
+
+async def approve_drawing_node(node_id: UUID, approved_by: str | None) -> dict[str, Any]:
+    """Approve a technical_drawing. Shared with ``/v1/approvals`` (FORGE-507)."""
     if _technical_drawing_approver is None:
         raise HTTPException(status_code=503, detail="technical-drawing approval is not configured")
     wp = await _twin.get_work_product(node_id)
@@ -1128,12 +1144,12 @@ async def approve_technical_drawing(
             detail=f"Node {node_id} is a {wp.type.value}, not a technical_drawing",
         )
     try:
-        result = await _technical_drawing_approver(str(node_id), approved_by=body.approved_by)
+        result: dict[str, Any] = await _technical_drawing_approver(
+            str(node_id), approved_by=approved_by
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return ApproveTechnicalDrawingResponse(
-        node_id=result["node_id"], approved=result["approved"], approved_at=result["approved_at"]
-    )
+    return result
 
 
 # ---------------------------------------------------------------------------

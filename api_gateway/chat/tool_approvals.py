@@ -28,6 +28,7 @@ from api_gateway.runs.schemas import (
     RunResponse,
     filter_by_project,
 )
+from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector, collector_for
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import (
@@ -448,7 +449,16 @@ def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -
     cannot nominate the approver, which is the whole point: some tools write
     the approver's name down as their result.
     """
-    approver = approver_from_request(request)
+    run = decide_tool_approval(run_id, body.decision, approver_from_request(request))
+    return RunResponse.from_run(run)
+
+
+def decide_tool_approval(run_id: str, decision: str, approver: Approver) -> Run:
+    """Answer a held tool call. Shared by this route and ``/v1/approvals`` (FORGE-507).
+
+    Refusals are ``HTTPException`` s (404, 409, 422) so both surfaces apply
+    one set of rules.
+    """
     expire_overdue_holds()
     try:
         current = _approval_store.get(run_id)
@@ -461,7 +471,7 @@ def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -
             "tool_approval_submit_refused",
             run_id=run_id,
             status=current.status.value,
-            decision=body.decision,
+            decision=decision,
         )
         raise HTTPException(
             status_code=409,
@@ -481,16 +491,16 @@ def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -
             detail=f"approval '{run_id}' is being answered in the client's own approval "
             "prompt. Answer it there; it appears here as resolved once you do.",
         )
-    if body.decision in (ApprovalDecision.RETRY.value, ApprovalDecision.REWORK.value):
+    if decision in (ApprovalDecision.RETRY.value, ApprovalDecision.REWORK.value):
         # FORGE-495/500: retry and rework re-run design-flow phases; a tool call has none.
         raise HTTPException(
             status_code=422,
-            detail=f"'{body.decision}' applies to design-flow gates, not tool approvals",
+            detail=f"'{decision}' applies to design-flow gates, not tool approvals",
         )
     try:
         run = _approval_store.submit_approval(
             run_id,
-            ApprovalDecision(body.decision),
+            ApprovalDecision(decision),
             approved_by=approver.label,
             approver_verified=approver.verified,
         )
@@ -498,12 +508,12 @@ def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -
         raise HTTPException(status_code=404, detail=f"approval '{run_id}' not found") from exc
     except InvalidTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    _decide_flow_version(run, approved=body.decision == ApprovalDecision.APPROVE.value)
+    _decide_flow_version(run, approved=decision == ApprovalDecision.APPROVE.value)
     logger.info(
         "tool_approval_submitted",
         run_id=run_id,
-        decision=body.decision,
+        decision=decision,
         approved_by=approver.actor_id,
         approver_verified=approver.verified,
     )
-    return RunResponse.from_run(run)
+    return run

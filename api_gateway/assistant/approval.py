@@ -150,6 +150,10 @@ class ApprovalWorkflow:
             proposals = [p for p in proposals if p.project_id == project_id]
         return proposals
 
+    def list_proposals(self) -> list[DesignChangeProposal]:
+        """Every proposal, whatever its status (the unified approvals audit view)."""
+        return list(self._proposals.values())
+
     def get_proposal(self, change_id: UUID) -> DesignChangeProposal | None:
         """Return a single proposal by *change_id*, or ``None``."""
         return self._proposals.get(change_id)
