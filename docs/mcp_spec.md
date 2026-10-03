@@ -1113,3 +1113,7 @@ class ToolUnavailableError(McpError):
             ),
         )
 ```
+
+### Mesh coordinate frame (FORGE-505)
+
+`freecad.generate_mesh` returns a mesh in the Digital Twin's coordinate frame: node coordinates equal the committed work product's `bounding_box` axes. If the STEP carries a Placement as an assembly transform (a part authored on a rotated plane), which gmsh's reader drops, the placement is baked into the geometry before meshing (`placement_baked: true`). The result also carries `surface_sets` (named surface set to `bbox_mm`, `centroid_mm`, `area_mm2`, `normal`), `mesh_bbox_mm` and `coordinate_frame: "twin"`, so a caller picks fixed and load faces by position. `calculix.run_fea`'s `load_force_n` is expressed in this same frame.

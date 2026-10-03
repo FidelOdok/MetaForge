@@ -219,7 +219,10 @@ class CalculixServer(McpToolServer):
                             "maxItems": 3,
                             "description": (
                                 "Required for 'static_stress'. [Fx, Fy, Fz] TOTAL force in "
-                                "Newtons, distributed evenly across load_node_set's nodes."
+                                "Newtons, distributed evenly across load_node_set's nodes. "
+                                "Expressed in the mesh frame, which freecad.generate_mesh "
+                                "guarantees is the twin's coordinate frame (FORGE-505), so "
+                                "a load given in twin x/y/z acts along the same axes."
                             ),
                         },
                         "num_modes": {

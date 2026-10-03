@@ -19,6 +19,18 @@ from tool_registry.tools.freecad.operations import (
     _resolve_parameters,
 )
 
+
+@pytest.fixture(autouse=True)
+def _passthrough_twin_frame_step():
+    """FORGE-505: these tests mesh placeholder STEP text, not real geometry, so
+    the placement-baking step (needs FreeCAD) is a passthrough here. It is
+    covered in tests/unit/test_freecad_mesh_frame.py."""
+    with patch.object(
+        FreecadOperations, "_twin_frame_step", lambda self, input_file: (input_file, False)
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # 1a2. _sketch_point / _sketch_scalar -- FORGE-227: create_sketch elements must
 #     accept both this tool's flat-key convention (cx/cy/r, x1/y1/x2/y2) and

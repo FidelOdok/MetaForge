@@ -228,6 +228,30 @@ class FreecadServer(McpToolServer):
                                 "vector -- 'a' normal, not verified outward)."
                             ),
                         },
+                        "surface_sets": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-505. Same data as 'faces' keyed by set name "
+                                "(bbox_mm, centroid_mm, area_mm2, normal), in the "
+                                "mesh frame = the twin frame, so fixed and load "
+                                "faces can be picked by position."
+                            ),
+                        },
+                        "mesh_bbox_mm": {
+                            "type": "object",
+                            "description": "Bounding box {min,max} of all mesh nodes (twin frame).",
+                        },
+                        "coordinate_frame": {
+                            "type": "string",
+                            "description": "Always 'twin': mesh coordinates equal the twin's.",
+                        },
+                        "placement_baked": {
+                            "type": "boolean",
+                            "description": (
+                                "True when the STEP carried a Placement that the mesher "
+                                "would have dropped and it was baked in first."
+                            ),
+                        },
                     },
                 },
                 phase=1,
