@@ -89,6 +89,8 @@ class ApprovalDecision(StrEnum):
     #: FORGE-495: re-run the phase the gate belongs to. The run goes back to
     #: ``running`` like an approval, but the engine re-runs instead of advancing.
     RETRY = "retry"
+    #: FORGE-500: send the run back to an earlier phase and re-run from there.
+    REWORK = "rework"
 
 
 class RunNotFoundError(KeyError):

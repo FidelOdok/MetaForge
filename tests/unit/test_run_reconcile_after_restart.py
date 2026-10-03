@@ -193,3 +193,105 @@ def test_retry_on_a_plain_run_is_refused() -> None:
     resp = client.post(f"/v1/runs/{run.id}/approval", json={"decision": "retry"})
     assert resp.status_code == 422
     reset_run_store()
+
+
+# ── FORGE-500: rework decision ───────────────────────────────────────────
+
+REWORK_STATE = {
+    **GATE_STATE,
+    "current_phase": "simulation",
+    "gate_ready": False,
+    "retries_left": 3,
+    "reworks_left": 3,
+}
+
+
+class ReworkLauncher(FakeLauncher):
+    def __init__(self, state: dict[str, Any] | None = None) -> None:
+        super().__init__(state)
+        self.reworks: list[tuple[str, str]] = []
+
+    async def events(self, run_id: str) -> list[dict[str, Any]]:
+        return []
+
+    async def answer_gate(  # type: ignore[override]
+        self,
+        run_id: str,
+        *,
+        approved: bool,
+        decided_by: str,
+        comment: str = "",
+        retry: bool = False,
+        rework_to: str = "",
+    ) -> None:
+        await super().answer_gate(
+            run_id, approved=approved, decided_by=decided_by, comment=comment, retry=retry
+        )
+        self.reworks.append((rework_to, comment))
+        self.current["status"] = "running"
+
+
+def test_rework_is_signalled_with_target_and_reason_even_at_a_not_ready_gate(restarted) -> None:
+    run_id, client = restarted
+    launcher = ReworkLauncher(REWORK_STATE)
+    set_flow_launcher(launcher)  # type: ignore[arg-type]
+    resp = client.post(
+        f"/v1/runs/{run_id}/approval",
+        json={"decision": "rework", "to_phase": "design", "reason": "thicken the arm"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert launcher.reworks == [("design", "thicken the arm")]
+
+
+@pytest.mark.parametrize(
+    ("body", "needle"),
+    [
+        ({"decision": "rework"}, "needs 'to_phase'"),
+        ({"decision": "rework", "to_phase": "nope"}, "not part of this run's flow"),
+        ({"decision": "rework", "to_phase": "simulation"}, "not earlier"),
+    ],
+)
+def test_rework_to_an_invalid_phase_is_422_with_a_named_reason(
+    restarted, body: dict[str, str], needle: str
+) -> None:
+    run_id, client = restarted
+    launcher = ReworkLauncher(REWORK_STATE)
+    set_flow_launcher(launcher)  # type: ignore[arg-type]
+    resp = client.post(f"/v1/runs/{run_id}/approval", json=body)
+    assert resp.status_code == 422
+    assert needle in resp.json()["detail"]
+    assert launcher.reworks == []
+
+
+def test_rework_past_the_cap_is_refused(restarted) -> None:
+    run_id, client = restarted
+    launcher = ReworkLauncher({**REWORK_STATE, "reworks_left": 0})
+    set_flow_launcher(launcher)  # type: ignore[arg-type]
+    resp = client.post(
+        f"/v1/runs/{run_id}/approval", json={"decision": "rework", "to_phase": "design"}
+    )
+    assert resp.status_code == 409
+    assert "rework cycles" in resp.json()["detail"]
+    assert launcher.reworks == []
+
+
+def test_rework_on_a_plain_run_is_refused() -> None:
+    reset_run_store()
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    run = get_run_store().create({"goal": "g"})
+    resp = client.post(
+        f"/v1/runs/{run.id}/approval", json={"decision": "rework", "to_phase": "design"}
+    )
+    assert resp.status_code == 422
+    reset_run_store()
+
+
+def test_flow_state_exposes_rework_cycles(restarted) -> None:
+    run_id, client = restarted
+    set_flow_launcher(ReworkLauncher({**REWORK_STATE, "rework_cycles": 1, "max_rework_cycles": 3}))  # type: ignore[arg-type]
+    state = client.get(f"/v1/runs/{run_id}/flow-state").json()
+    assert state["reworkCycles"] == 1
+    assert state["maxReworkCycles"] == 3
+    assert state["reworksLeft"] == 3

@@ -202,6 +202,7 @@ DesignFlowExecutor.run(run_id)          # orchestrator/design_flow/executor.py
           decision = await gate         # resolved by POST /v1/runs/{id}/approval
           approve → next phase
           retry   → re-run THIS phase (see "Retrying a phase"), same gate again
+          rework  → go back to an EARLIER phase (see "Sending a run back"), re-run from there
           reject  → run ends (rejected)
   store.complete(run_id, result)
 ```
@@ -358,6 +359,56 @@ old failure replays it unchanged. The in-process executor behaves the same way
 
 There is no MCP run-approval tool: a gate is answered by a human on the
 dashboard or the approval endpoint, never by the agent.
+
+## Sending a run back to an earlier phase (FORGE-500)
+
+A retry re-runs the phase a gate belongs to. That cannot fix a verdict that is
+really about earlier work: a verification gate that fails on a safety factor
+needs a design change, and the design phase is behind it. A fourth decision,
+*rework*, names an earlier phase:
+
+| Decision | Body | Effect |
+|---|---|---|
+| rework | `{"decision": "rework", "to_phase": "design", "reason": "..."}` | the run goes back to `to_phase`, re-runs it and every later phase in order, and re-opens each of their gates |
+
+The target phase's brain gets, as the **first** block of its prompt, the
+reviewer's `reason`, the findings of the gate that sent the run back, and the
+summary of the phase that failed. Later phases get no special block; they see the
+reworked phase's new summary in the thread so far. Phases **before** `to_phase`
+keep their completed entries and their approvals and are not asked again. A
+rework is accepted at a gate that is not ready as well as at one that is.
+
+**Validation.** `to_phase` must be an earlier phase of *this run's own frozen
+flow*. A missing id, an id that is not part of the flow, or the current or a
+later phase is refused with `422` and a reason that names the problem (naming the
+current phase points at `retry`). Rework on a run that is not a design flow is
+`422` too.
+
+**Cap.** One run may be sent back `METAFORGE_DESIGN_FLOW_MAX_REWORK_CYCLES`
+times (default `3`), counted across the whole run. It is read when the run starts
+and carried in `DesignFlowInput.max_rework_cycles`; the count survives a
+continue-as-new. A rework past the cap is refused with `409`; if one reaches the
+engine anyway the run ends `failed` with the reason. Each phase keeps its own
+retry budget (FORGE-495) on every pass.
+
+**Visibility.** Each cycle is a `phase_rework_requested` run event carrying
+`from`, `to` and `cycle` (and the reviewer and reason in `detail`).
+`GET /v1/runs/{id}/flow-state` adds `reworkCycles`, `maxReworkCycles` and
+`reworksLeft`; phases after the target read `pending` until they run again.
+
+**Temporal.** The target travels as an optional `rework_to` field on the
+`submit_gate_decision` signal (`GateAnswer.rework_to`, default empty), and
+`DesignFlowInput` gains `max_rework_cycles` and `rework_cycles`, so inputs from
+before the change still deserialize. Handling a rework adds commands that older
+histories do not contain, so it is guarded by
+`workflow.patched("forge-500-rework")`, which is consulted only *after* a rework
+answer has arrived. A run parked at a gate before the deploy, including one
+parked at its last gate, therefore replays exactly as before and accepts a rework
+as new history. A rework signal with an invalid target is recorded as
+`gate_decision_ignored` and the gate stays open. The in-process executor behaves
+the same way (`GateCoordinator.note_rework`), so the two engines stay at parity.
+There is still no MCP tool for this: like approve and retry, only a human answers
+a gate.
 
 ## Constraint-as-gate-criteria (MET-583)
 

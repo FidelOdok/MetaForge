@@ -25,10 +25,13 @@ class CreateRunRequest(BaseModel):
 class ApprovalRequest(BaseModel):
     """Body for ``POST /v1/runs/{id}/approval``."""
 
-    decision: Literal["approve", "reject", "retry"]
+    decision: Literal["approve", "reject", "retry", "rework"]
     #: Why, for a ``retry`` (FORGE-495): given to the phase brain, with the
     #: gate's findings, as the first thing in its prompt. Optional elsewhere.
     reason: str = Field(default="", max_length=2000)
+    #: For a ``rework`` (FORGE-500): the id of an earlier phase of this run to
+    #: go back to. The phase and every later one re-run and re-open their gates.
+    to_phase: str = Field(default="", max_length=200)
 
 
 def _optional_str(value: Any) -> str | None:

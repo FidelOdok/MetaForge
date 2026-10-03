@@ -492,6 +492,12 @@ Four things are worth knowing about the shape:
   reviewer can retry the phase, with the gate's findings and a reason given to
   the phase brain first, or reject. Earlier approved phases are kept. See
   [Retrying a phase](architecture/design-flow-harness.md#retrying-a-phase-from-its-gate-forge-495).
+- **A gate can send the run back to an earlier phase** (FORGE-500). A verdict
+  that is really about earlier work (a failed safety factor needs a design
+  change) takes a `rework` decision naming that phase: it and every later phase
+  re-run with the reason and findings first, earlier approvals stand, and a
+  per-run cap bounds the loops. See
+  [Sending a run back](architecture/design-flow-harness.md#sending-a-run-back-to-an-earlier-phase-forge-500).
 - **A gate that expires is a rejection**, on a durable timer. Not "carry on",
   which would promote work nobody read; not "wait forever", which leaves a
   run that reads as live.

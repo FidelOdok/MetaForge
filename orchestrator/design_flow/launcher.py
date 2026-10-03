@@ -23,6 +23,7 @@ import structlog
 from observability.tracing import get_tracer
 from orchestrator.design_flow.frozen import FrozenFlow
 from orchestrator.design_flow.retry import max_phase_retries as max_phase_retries_default
+from orchestrator.design_flow.rework import max_rework_cycles as max_rework_cycles_default
 from orchestrator.design_flow.temporal_flow import (
     TASK_QUEUE,
     ChangeRequest,
@@ -145,6 +146,7 @@ class DesignFlowLauncher:
         session_id: str | None = None,
         gate_timeout_seconds: float | None = None,
         max_phase_retries: int | None = None,
+        max_rework_cycles: int | None = None,
     ) -> str:
         """Start a run. Returns the workflow id."""
         flow.verify()
@@ -159,6 +161,9 @@ class DesignFlowLauncher:
             payload.gate_timeout_seconds = gate_timeout_seconds
         payload.max_phase_retries = (
             max_phase_retries if max_phase_retries is not None else max_phase_retries_default()
+        )
+        payload.max_rework_cycles = (
+            max_rework_cycles if max_rework_cycles is not None else max_rework_cycles_default()
         )
         workflow_id = workflow_id_for(run_id)
         with tracer.start_as_current_span("design_flow.start") as span:
@@ -194,6 +199,7 @@ class DesignFlowLauncher:
         decided_by: str,
         comment: str = "",
         retry: bool = False,
+        rework_to: str = "",
     ) -> None:
         """Relay a human's gate decision into the waiting run.
 
@@ -203,13 +209,20 @@ class DesignFlowLauncher:
         handle = self.client.get_workflow_handle(workflow_id_for(run_id))
         await handle.signal(
             "submit_gate_decision",
-            GateAnswer(approved=approved, decided_by=decided_by, comment=comment, retry=retry),
+            GateAnswer(
+                approved=approved,
+                decided_by=decided_by,
+                comment=comment,
+                retry=retry,
+                rework_to=rework_to,
+            ),
         )
         logger.info(
             "design_flow_gate_answered",
             run_id=run_id,
             approved=approved,
             retry=retry,
+            rework_to=rework_to,
             decided_by=decided_by,
         )
 

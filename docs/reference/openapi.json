@@ -92,7 +92,8 @@
             "enum": [
               "approve",
               "reject",
-              "retry"
+              "retry",
+              "rework"
             ],
             "title": "Decision",
             "type": "string"
@@ -101,6 +102,12 @@
             "default": "",
             "maxLength": 2000,
             "title": "Reason",
+            "type": "string"
+          },
+          "to_phase": {
+            "default": "",
+            "maxLength": 200,
+            "title": "To Phase",
             "type": "string"
           }
         },
@@ -3391,6 +3398,17 @@
             "title": "Live",
             "type": "boolean"
           },
+          "maxReworkCycles": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxreworkcycles"
+          },
           "phases": {
             "items": {
               "$ref": "#/components/schemas/FlowPhaseState"
@@ -3408,6 +3426,22 @@
               }
             ],
             "title": "Retriesleft"
+          },
+          "reworkCycles": {
+            "default": 0,
+            "title": "Reworkcycles",
+            "type": "integer"
+          },
+          "reworksLeft": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reworksleft"
           },
           "runId": {
             "title": "Runid",
