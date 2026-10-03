@@ -92,27 +92,6 @@ def test_get_missing(capsys: pytest.CaptureFixture[str]) -> None:
     assert "No run with id" in capsys.readouterr().err
 
 
-def test_approve(capsys: pytest.CaptureFixture[str]) -> None:
-    client = FakeClient()
-    handle_runs(_args(runs_command="approve", run_id="r1"), client)  # type: ignore[arg-type]
-    assert client.calls[0] == ("approval", "r1", "approve")
-    assert "r1 -> running" in capsys.readouterr().out
-
-
-def test_reject(capsys: pytest.CaptureFixture[str]) -> None:
-    client = FakeClient()
-    handle_runs(_args(runs_command="reject", run_id="r1"), client)  # type: ignore[arg-type]
-    assert client.calls[0] == ("approval", "r1", "reject")
-    assert "r1 -> rejected" in capsys.readouterr().out
-
-
-def test_approve_conflict_surfaces_error(capsys: pytest.CaptureFixture[str]) -> None:
-    client = FakeClient()
-    client.raise_approval = ForgeClientError("409 run is running")
-    handle_runs(_args(runs_command="approve", run_id="r1"), client)  # type: ignore[arg-type]
-    assert "could not approve" in capsys.readouterr().err
-
-
 def test_watch_streams_events(capsys: pytest.CaptureFixture[str]) -> None:
     handle_runs(_args(runs_command="watch", run_id="r1"), FakeClient())  # type: ignore[arg-type]
     out = capsys.readouterr().out

@@ -551,6 +551,63 @@ python -m cli.forge_cli twin list --domain electronics --type schematic
 | `--domain` | One of: `mechanical`, `electronics`, `firmware`, `simulation`, … |
 | `--type` | Work-product type: `cad_model`, `schematic`, `bom`, etc. |
 
+### `approvals`: review and decide pending approvals {#approvals}
+
+```
+approvals list [--project <id>] [--kind <kind>] [--all | --decided] [--json]
+approvals show <id> [--json]
+approvals approve <id> [--reason <text>] [--json]
+approvals reject  <id> --reason <text> [--json]
+approvals retry   <id> --reason <text> [--json]
+approvals rework  <id> --to <phase> --reason <text> [--json]
+```
+
+One place to see and decide every pending human decision (design-flow gates,
+tool calls, flow proposals, design changes, sketches, drawings), served by
+`/v1/approvals`. Ids are `<kind>:<native id>`, for example `gate:run_abc`,
+`tool:run_def`, `change:<uuid>`.
+
+- `list` shows pending items by default; `--decided` shows only decided ones and
+  `--all` shows both. `--project` and `--kind` filter. Items with no project are
+  counted separately and noted under the table (the count is `unscoped_count` in
+  `--json`).
+- `show` prints the whole card: summary, findings, the decisions allowed now, the
+  decisions that need a reason, the rework targets, whether it is decidable (and
+  why not), the kind-specific detail, and the recorded decision once decided.
+- `approve`, `reject`, `retry` and `rework` first read the item, then check the
+  decision locally against `allowed_decisions`, `reason_required_for` and
+  `rework_targets` so a bad request fails fast without posting.
+- `--json` prints the raw gateway item (or list), so an agent can drive it.
+
+Requests carry `X-MetaForge-Surface: cli`. If both `METAFORGE_APPROVAL_AGENT` and
+`METAFORGE_APPROVAL_ON_BEHALF_OF` are set the surface is `agent` and the
+on-behalf-of user is attached. `METAFORGE_AUTH_TOKEN`, when set, is sent as a
+bearer token.
+
+**Exit codes** (the same in the Python CLI and the `forge` binary):
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Other failure (network error, 5xx) |
+| `2` | Usage error (missing or unknown argument) |
+| `3` | Not found: no approval with that id (HTTP 404) |
+| `4` | Not decidable right now: expired, waiting on the elicitation route, gate not ready, retries or rework exhausted (HTTP 409) |
+| `5` | Invalid decision: not in `allowed_decisions`, bad `--to` phase, or missing required reason (HTTP 422, or the same check failing locally) |
+| `6` | Not authorized (HTTP 401 or 403) |
+
+```bash
+python -m cli.forge_cli approvals list --project 6f1c... --json
+python -m cli.forge_cli approvals show gate:run_abc
+python -m cli.forge_cli approvals rework gate:run_abc --to design --reason "bracket too thin"
+```
+
+The older commands remain as aliases on the same API: `runs approve|reject <run_id>`
+decides `gate:<run_id>`, and `approve|reject <change_id>` (and `forge proposals
+approve|reject` in the `forge` binary) decides `change:<change_id>`. They now
+honour the same local checks and exit codes, so a `reject` that the gate requires
+a reason for needs `--reason`.
+
 ### `proposals` — list pending proposals
 
 ```
@@ -558,19 +615,21 @@ proposals
 ```
 
 Lists every change proposal that's still in `pending`. The output
-includes `change_id` (use it with `approve` / `reject`), the
+includes `change_id` (use it with `approve` / `reject`, or as
+`change:<change_id>` with [`approvals`](#approvals)), the
 proposing agent, the target work product, and the diff summary.
 
 ### `approve` / `reject` — act on a proposal
 
 ```
-approve <change_id> --reason "..." [--reviewer <id>]
-reject  <change_id> --reason "..." [--reviewer <id>]
+approve <change_id> --reason "..."
+reject  <change_id> --reason "..."
 ```
 
-Both commands require a `--reason` (audit-trail). `--reviewer`
-defaults to `cli-user`; pass your identity if you have a real
-reviewer record.
+Aliases for `approvals approve|reject change:<change_id>`. Both require a
+`--reason` (audit trail). `--reviewer` is still accepted but ignored: the
+approver identity now comes from the authenticated caller and the
+`X-MetaForge-Surface` headers.
 
 ```bash
 python -m cli.forge_cli approve 1a2b-... --reason "fits power budget"
@@ -748,17 +807,15 @@ runs create [--goal <text>] [--request-json <json>] [--no-start]
 runs list [--json]
 runs get <run_id> [--json]
 runs watch <run_id>
-runs approve <run_id>
-runs reject <run_id>
+runs approve <run_id> [--reason <text>]
+runs reject <run_id> [--reason <text>]
 ```
 
 The lower-level surface over `/v1/runs`. `runs create --request-json '{...}'`
 takes a full run request (used by `design` under the hood); `watch` streams a
-run's SSE status; `approve`/`reject` resolve a run paused at a gate. A third
-decision, `retry`, re-runs the gate's phase (`POST /v1/runs/{id}/approval` with
-`{"decision": "retry", "reason": "..."}`); a fourth, `rework`, sends the run back to
-an earlier phase (`{"decision": "rework", "to_phase": "design", "reason": "..."}`).
-The CLI does not expose either yet.
+run's SSE status; `approve`/`reject` resolve a run paused at a gate and are
+aliases for [`approvals approve|reject gate:<run_id>`](#approvals). Use
+`approvals retry` and `approvals rework` for the other two gate decisions.
 
 ## Output formats
 
@@ -777,6 +834,8 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 |---|---|---|
 | `METAFORGE_GATEWAY_URL` | every command | Base URL for the gateway |
 | `METAFORGE_HARNESS_ADMIN_TOKEN` | `auth` (client + gateway) | If set on the gateway, credential writes require it; the CLI sends the matching value from this env var |
+| `METAFORGE_AUTH_TOKEN` | `approvals` | Bearer token sent with approvals requests when set |
+| `METAFORGE_APPROVAL_AGENT` + `METAFORGE_APPROVAL_ON_BEHALF_OF` | `approvals` | When both are set, requests use surface `agent` and name the user the agent acts for |
 | `METAFORGE_INGEST_TIMEOUT` | `ingest` | Override the default 300 s timeout |
 | `METAFORGE_MAX_OUTPUT_TOKENS` | chat (gateway-side) | Output-token cap per model completion (default 8192) |
 | `FORGE_LOG` | `forge` (TUI) | `1`/`true` enables verbose logging (raw SSE frames); same as `--debug` |
