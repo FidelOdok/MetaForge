@@ -88,23 +88,64 @@ Clients say where the decision came from with headers:
   `unknown`; any other value is a 422.
 - `X-MetaForge-On-Behalf-Of`: the human an agent acts for. Only valid with
   `agent`.
+- `X-MetaForge-Agent`: the agent's name, such as `claude-code`. Only valid with
+  `agent`.
 
 The `decision` block on the item holds `decision`, `reason`, `approver`,
-`approver_verified`, `surface`, `on_behalf_of` and `decided_at`. All of it is
+`approver_verified`, `surface`, `on_behalf_of`, `agent` and `decided_at`. All of it is
 persisted on the same record the existing handler writes, so it survives a
 restart:
 
 | Kind | Where it is stored |
 |------|--------------------|
 | `gate`, `tool` | The run's `request.decisions` log, written with the run ledger on the decision's transition. |
-| `change` | `reviewer`, `reviewer_verified`, `decision_surface`, `decision_on_behalf_of` on the proposal. |
-| `sketch`, `drawing` | `approved_by`, `approver_verified`, `approval_surface`, `approval_on_behalf_of` in the work product metadata. |
-| `design_loop` | The same four fields on the winning iteration node. |
+| `change` | `reviewer`, `reviewer_verified`, `decision_surface`, `decision_on_behalf_of`, `decision_agent` on the proposal. |
+| `sketch`, `drawing` | `approved_by`, `approver_verified`, `approval_surface`, `approval_on_behalf_of`, `approval_agent` in the work product metadata. |
+| `design_loop` | The same fields on the winning iteration node. |
 
 A decision made on an older route reports `surface: "unknown"`, because no
 surface was sent. A refused decision leaves no entry behind. A gate that was
 retried or reworked shows its decision only once the next gate resolves, since
 the item is pending again at that point.
+
+## Delegating approvals to an agent
+
+An agent such as Claude Code can run `forge approvals` for you. The decision is
+recorded as yours, taken by the agent, never as an anonymous dashboard click.
+
+**Permission rule.** In `.claude/settings.local.json`, allow the command group
+and tell the CLI who the agent is and whom it acts for:
+
+```json
+{
+  "permissions": { "allow": ["Bash(forge approvals:*)"] },
+  "env": {
+    "METAFORGE_APPROVAL_AGENT": "claude-code",
+    "METAFORGE_APPROVAL_ON_BEHALF_OF": "you@example.com",
+    "METAFORGE_AUTH_TOKEN": "<your token, if the gateway needs one>"
+  }
+}
+```
+
+With both `METAFORGE_APPROVAL_AGENT` and `METAFORGE_APPROVAL_ON_BEHALF_OF` set,
+both CLIs send `X-MetaForge-Surface: agent`, `X-MetaForge-Agent` and
+`X-MetaForge-On-Behalf-Of`.
+
+**What is recorded.**
+
+| Gateway | `approver` | `approver_verified` | `surface` | `agent` | `on_behalf_of` |
+|---------|------------|---------------------|-----------|---------|----------------|
+| Auth on, token valid | the authenticated principal | `true` | `agent` | the agent name | the user; must be that principal, else 403 |
+| Auth off (local dev) | the `on_behalf_of` user | `false` | `agent` | the agent name | the user |
+
+An agent decision without `X-MetaForge-On-Behalf-Of` is a 422.
+
+**Human-authority approvals stay human.** Items of kind `human_authority`
+(`twin.attempt_promotion`, `twin.approve_design_loop`,
+`twin.approve_engineering_change`) and `design_loop` cannot be decided by an
+agent. For an agent caller they show `decidable: false` with an explanation,
+and a decision attempt is a 403. The gateway owner can delegate them by setting
+`METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY=true` on the gateway (default off).
 
 ## Observability
 

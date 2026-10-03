@@ -2389,6 +2389,17 @@
       "DecisionRecord": {
         "description": "Who decided, and through what (FORGE-507).",
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
           "approver": {
             "anyOf": [
               {
@@ -2572,6 +2583,18 @@
             ],
             "description": "When the proposal was approved or rejected",
             "title": "Decided At"
+          },
+          "decision_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For an agent decision, the agent that took it (FORGE-510)",
+            "title": "Decision Agent"
           },
           "decision_on_behalf_of": {
             "anyOf": [

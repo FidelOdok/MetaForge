@@ -47,6 +47,7 @@ export interface ApprovalDecisionRecord {
   approver_verified: boolean;
   surface: string | null;
   on_behalf_of: string | null;
+  agent?: string | null;
   decided_at: string;
 }
 

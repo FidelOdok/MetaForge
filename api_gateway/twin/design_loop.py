@@ -352,6 +352,7 @@ def make_design_loop_approver(twin: Any) -> Any:
                             "approver_verified": bool(audit.get("verified")),
                             "approval_surface": audit.get("surface"),
                             "approval_on_behalf_of": audit.get("on_behalf_of"),
+                            "approval_agent": audit.get("agent"),
                         }
                         if audit
                         else {}

@@ -168,6 +168,7 @@ class ApprovalWorkflow:
         reviewer_verified: bool = False,
         surface: str | None = None,
         on_behalf_of: str | None = None,
+        agent: str | None = None,
     ) -> DesignChangeProposal | None:
         """Record an approval or rejection for the given proposal.
 
@@ -201,6 +202,7 @@ class ApprovalWorkflow:
         proposal.reviewer_verified = reviewer_verified
         proposal.decision_surface = surface
         proposal.decision_on_behalf_of = on_behalf_of
+        proposal.decision_agent = agent
 
         logger.info(
             "proposal_decided",

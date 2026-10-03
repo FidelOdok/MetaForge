@@ -73,6 +73,7 @@ class DesignLoopIteration(NodeBase):
     approver_verified: bool = False
     approval_surface: str | None = None
     approval_on_behalf_of: str | None = None
+    approval_agent: str | None = None
     approved_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     # FORGE-291 (gap G-G5): sha256 of {work_product_id, **optimize_kwargs}

@@ -207,6 +207,7 @@ def test_client_agent_surface_and_decision_body(monkeypatch: pytest.MonkeyPatch)
     assert json.loads(req.content) == {"decision": "rework", "reason": "why", "to_phase": "design"}
     assert req.headers["x-metaforge-surface"] == "agent"
     assert req.headers["x-metaforge-on-behalf-of"] == "alice"
+    assert req.headers["x-metaforge-agent"] == "bot"
 
 
 def test_client_raises_with_status_and_detail() -> None:

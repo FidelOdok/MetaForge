@@ -215,6 +215,10 @@ class DesignChangeProposal(BaseModel):
         default=None,
         description="For an agent decision, the human it acted for (FORGE-507)",
     )
+    decision_agent: str | None = Field(
+        default=None,
+        description="For an agent decision, the agent that took it (FORGE-510)",
+    )
 
 
 class WebSocketEvent(BaseModel):

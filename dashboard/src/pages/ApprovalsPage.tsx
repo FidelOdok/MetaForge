@@ -50,6 +50,7 @@ function AuditTable({ items }: { items: ApprovalItem[] }) {
             <th>Outcome</th>
             <th>Who</th>
             <th>Surface</th>
+            <th>Agent</th>
             <th>On behalf of</th>
             <th>Verified</th>
             <th>When</th>
@@ -67,6 +68,7 @@ function AuditTable({ items }: { items: ApprovalItem[] }) {
                 </td>
                 <td>{d?.approver ?? 'unknown'}</td>
                 <td>{d?.surface ?? 'unknown'}</td>
+                <td>{d?.agent ?? 'none'}</td>
                 <td>{d?.on_behalf_of ?? 'none'}</td>
                 <td>{d ? (d.approver_verified ? 'verified' : 'unverified') : 'n/a'}</td>
                 <td>{d ? formatRelativeTime(d.decided_at) : 'n/a'}</td>

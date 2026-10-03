@@ -81,6 +81,7 @@ describe('ApprovalsPage', () => {
                     approver_verified: true,
                     surface: 'agent',
                     on_behalf_of: 'grace',
+                    agent: 'claude-code',
                     decided_at: '2026-10-03T11:00:00Z',
                   },
                 }),
@@ -98,6 +99,7 @@ describe('ApprovalsPage', () => {
     expect(row).toHaveTextContent('ada');
     expect(row).toHaveTextContent('agent');
     expect(row).toHaveTextContent('grace');
+    expect(row).toHaveTextContent('claude-code');
     expect(row).toHaveTextContent('verified');
     expect(row).toHaveTextContent('approve: looks good');
   });

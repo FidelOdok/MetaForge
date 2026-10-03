@@ -21,6 +21,7 @@ from api_gateway.approvals.schemas import (
     Surface,
 )
 from api_gateway.auth.approver import approver_from_request
+from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector, collector_for
 
 logger = structlog.get_logger(__name__)
@@ -29,6 +30,7 @@ router = APIRouter(prefix="/v1/approvals", tags=["approvals"])
 
 SURFACE_HEADER = "X-MetaForge-Surface"
 ON_BEHALF_OF_HEADER = "X-MetaForge-On-Behalf-Of"
+AGENT_HEADER = "X-MetaForge-Agent"
 _SURFACES = ("dashboard", "cli", "agent")
 _IGNORED_BODY_IDENTITY = ("reviewer", "approved_by", "approvedBy")
 
@@ -73,6 +75,43 @@ def surface_from_request(request: Request) -> tuple[Surface, str | None]:
     return surface, on_behalf
 
 
+def agent_from_request(request: Request, surface: str) -> str | None:
+    """The agent's name (``claude-code``); only meaningful with the agent surface."""
+    agent = (request.headers.get(AGENT_HEADER) or "").strip()[:100] or None
+    if agent and surface != "agent":
+        raise HTTPException(
+            status_code=422,
+            detail=f"{AGENT_HEADER} is only valid with {SURFACE_HEADER}: agent",
+        )
+    return agent
+
+
+def resolve_agent_identity(approver: Approver, on_behalf_of: str | None) -> Approver:
+    """Who an agent decision is attributable to (FORGE-510).
+
+    Authenticated: the principal, and the agent must act for that same user
+    (403 otherwise). Unauthenticated: the user the agent names, unverified,
+    never a bare ``local:dashboard``.
+    """
+    if not on_behalf_of:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{ON_BEHALF_OF_HEADER} is required with {SURFACE_HEADER}: agent",
+        )
+    if approver.verified:
+        names = {approver.actor_id, approver.actor_id.partition(":")[2], approver.display_name}
+        if on_behalf_of not in names:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"an agent may only decide on behalf of the authenticated user "
+                    f"('{approver.actor_id}'), not '{on_behalf_of}'"
+                ),
+            )
+        return approver
+    return Approver(actor_id=on_behalf_of, verified=False)
+
+
 @router.get("", response_model=ApprovalListResponse)
 async def list_approvals(
     request: Request,
@@ -81,7 +120,8 @@ async def list_approvals(
     kind: ApprovalKind | None = None,
 ) -> ApprovalListResponse:
     """Every approval, normalized. ``status=decided`` and ``all`` are the audit views."""
-    items = await service.list_items(request.app)
+    surface, _ = surface_from_request(request)
+    items = [service.for_caller(i, surface) for i in await service.list_items(request.app)]
     if status == "pending":
         items = [i for i in items if i.status == "pending"]
     elif status == "decided":
@@ -97,7 +137,8 @@ async def list_approvals(
 
 @router.get("/{approval_id}", response_model=ApprovalItem)
 async def get_approval(approval_id: str, request: Request) -> ApprovalItem:
-    return await service.get_item(request.app, approval_id)
+    surface, _ = surface_from_request(request)
+    return service.for_caller(await service.get_item(request.app, approval_id), surface)
 
 
 @router.post("/{approval_id}/decision", response_model=ApprovalItem)
@@ -111,6 +152,9 @@ async def decide_approval(
     """
     approver = approver_from_request(request)
     surface, on_behalf_of = surface_from_request(request)
+    agent = agent_from_request(request, surface)
+    if surface == "agent":
+        approver = resolve_agent_identity(approver, on_behalf_of)
     ignored = [k for k in _IGNORED_BODY_IDENTITY if k in (body.model_extra or {})]
     if ignored:
         logger.warning(
@@ -131,6 +175,7 @@ async def decide_approval(
             approver=approver,
             surface=surface,
             on_behalf_of=on_behalf_of,
+            agent=agent,
         )
     except HTTPException as exc:
         outcome = "refused" if exc.status_code < 500 else "error"
@@ -156,5 +201,6 @@ async def decide_approval(
         approver_verified=approver.verified,
         surface=surface,
         on_behalf_of=on_behalf_of,
+        agent=agent,
     )
     return item

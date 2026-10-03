@@ -169,6 +169,7 @@ export function approvalHeaders(env: NodeJS.ProcessEnv = process.env): Record<st
   if (agent && onBehalf) {
     headers["X-MetaForge-Surface"] = "agent";
     headers["X-MetaForge-On-Behalf-Of"] = onBehalf;
+    headers["X-MetaForge-Agent"] = agent;
   }
   const token = (env.METAFORGE_AUTH_TOKEN ?? "").trim();
   if (token) headers.Authorization = `Bearer ${token}`;
