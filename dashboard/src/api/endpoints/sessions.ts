@@ -22,6 +22,8 @@ interface SessionResponseRaw {
 interface SessionListResponseRaw {
   sessions: SessionResponseRaw[];
   total: number;
+  /** Internal workflow runs omitted for having no project. */
+  unscoped_count?: number;
 }
 
 function mapSession(raw: SessionResponseRaw): AgentSession {
@@ -44,10 +46,23 @@ function mapSession(raw: SessionResponseRaw): AgentSession {
   };
 }
 
-export async function getSessions(projectId?: string): Promise<AgentSession[]> {
+/** Sessions, with how many were left out for carrying no project.
+ *
+ * The count rides along rather than being dropped, so the page can say so:
+ * a shorter list with no explanation reads as "nothing ran here".
+ */
+export interface SessionList {
+  sessions: AgentSession[];
+  unscopedCount: number;
+}
+
+export async function getSessions(projectId?: string): Promise<SessionList> {
   const params = projectId ? { project_id: projectId } : {};
   const { data } = await apiClient.get<SessionListResponseRaw>('/sessions', { params });
-  return data.sessions.map(mapSession);
+  return {
+    sessions: data.sessions.map(mapSession),
+    unscopedCount: data.unscoped_count ?? 0,
+  };
 }
 
 export async function getSession(id: string): Promise<AgentSession | undefined> {

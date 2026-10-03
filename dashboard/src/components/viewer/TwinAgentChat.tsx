@@ -677,8 +677,8 @@ export function TwinAgentChat({ projectId, projectName, node, onApplied, onEngag
                 <p>Loading captured sessions…</p>
               ) : captured.isError ? (
                 <p>Captured sessions unavailable.</p>
-              ) : captured.data?.length ? (
-                captured.data.slice(0, 8).map((s) => (
+              ) : captured.data?.sessions.length ? (
+                captured.data.sessions.slice(0, 8).map((s) => (
                   <Link key={s.id} className="sc-captured" to={`/sessions/${encodeURIComponent(s.id)}`}>
                     <strong>
                       {s.agentCode} · {s.taskType}

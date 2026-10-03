@@ -134,11 +134,18 @@ async def list_sessions(request: Request, project_id: str | None = None) -> Sess
     with tracer.start_as_current_span("sessions.list") as span:
         sessions: list[SessionResponse] = []
 
-        # Workflow runs have no project — only include them in the unscoped view.
+        # Workflow runs have no project — only include them in the unscoped
+        # view. They are *counted* when excluded rather than silently
+        # dropped: the page otherwise just gets shorter, which reads as
+        # "nothing ran" rather than "these are not this project's".
         workflow_engine = getattr(request.app.state, "workflow_engine", None)
-        if workflow_engine is not None and not project_id:
+        unscoped = 0
+        if workflow_engine is not None:
             runs = await workflow_engine.list_runs()
-            sessions.extend(_run_to_session(run) for run in runs)
+            if project_id:
+                unscoped = len(runs)
+            else:
+                sessions.extend(_run_to_session(run) for run in runs)
 
         store = _store(request)
         external = 0
@@ -152,8 +159,13 @@ async def list_sessions(request: Request, project_id: str | None = None) -> Sess
         # Most recent first (ISO timestamps sort lexically)
         sessions.sort(key=lambda s: s.started_at, reverse=True)
 
-        logger.info("sessions_listed", count=len(sessions), external=external)
-        return SessionListResponse(sessions=sessions, total=len(sessions))
+        logger.info(
+            "sessions_listed",
+            count=len(sessions),
+            external=external,
+            unscoped=unscoped,
+        )
+        return SessionListResponse(sessions=sessions, total=len(sessions), unscoped_count=unscoped)
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
