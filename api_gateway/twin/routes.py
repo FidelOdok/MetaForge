@@ -16,6 +16,7 @@ import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
 from api_gateway.convert.service import ConversionError, ConversionService
+from api_gateway.runs.geometry_constraints import assembly_parts
 from api_gateway.twin.boolean_ops import (
     BooleanOpError,
     InvalidFormatError,
@@ -203,11 +204,7 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
             else None
         ),
         # FORGE-511: an assembly cad_model's part list (metadata.parts).
-        assemblyParts=(
-            [p for p in wp.metadata["parts"] if isinstance(p, dict)]
-            if isinstance(wp.metadata.get("parts"), list)
-            else None
-        ),
+        assemblyParts=assembly_parts(wp.metadata) or None,
         # FORGE-293: a technical_drawing node's own structured dimensions/
         # GD&T/surface-finish/inspection data and approval state, keyed by
         # wp.type rather than a shape-sniff (unlike `assembly` above, there's

@@ -60,3 +60,17 @@ def test_assembly_missing_a_part_is_a_finding() -> None:
     refs = [{"node_id": "a", "name": "A"}]
     out = check_assembly([_part("a", "A"), _part("b", "B"), _assembly(refs, None)])
     assert any("B" in v and "no assembly" in v for v in out.violations)
+
+
+def test_assembly_parts_read_from_commit_parameters() -> None:
+    """An assembly committed with its part list in ``parameters`` is still an assembly.
+
+    The shelf assembly (2026-10-03) was committed before the ``parts`` argument
+    existed, so its list sits under ``geometry_features.parameters.parts``.
+    """
+    from api_gateway.runs.geometry_constraints import assembly_parts
+
+    nested = {"geometry_features": {"parameters": {"parts": [{"node_id": "a", "name": "A"}]}}}
+    assert assembly_parts(nested) == [{"node_id": "a", "name": "A"}]
+    assert assembly_parts({"parts": [{"node_id": "b"}]}) == [{"node_id": "b"}]
+    assert assembly_parts({"geometry_features": {"parameters": {"material": "PETG"}}}) == []

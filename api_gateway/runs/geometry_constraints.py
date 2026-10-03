@@ -293,8 +293,17 @@ def _bounds(bbox: Any) -> tuple[tuple[float, float, float], tuple[float, float, 
 
 
 def assembly_parts(metadata: dict[str, Any]) -> list[dict[str, Any]]:
-    """The ``metadata.parts`` entries of an assembly cad_model (empty when not one)."""
+    """The part entries of an assembly cad_model (empty when not one).
+
+    Read from ``metadata.parts`` (the FORGE-511 ``parts`` argument of
+    ``twin.commit_geometry``) or, for assemblies committed with the part list
+    in ``parameters``, from ``metadata.geometry_features.parameters.parts``.
+    """
     parts = metadata.get("parts")
+    if not isinstance(parts, list):
+        features = metadata.get("geometry_features")
+        params = features.get("parameters") if isinstance(features, dict) else None
+        parts = params.get("parts") if isinstance(params, dict) else None
     if not isinstance(parts, list):
         return []
     return [p for p in parts if isinstance(p, dict)]
