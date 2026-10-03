@@ -4,9 +4,7 @@ import {
   createRun,
   getRun,
   listRuns,
-  submitRunApproval,
 } from '../api/endpoints/runs';
-import type { ApprovalDecision } from '../types/run';
 
 export const runKeys = {
   all: ['runs'] as const,
@@ -45,18 +43,5 @@ export function useCreateRun() {
     mutationFn: (vars: { request?: Record<string, unknown>; start?: boolean }) =>
       createRun(vars.request ?? {}, vars.start ?? true),
     onSuccess: () => qc.invalidateQueries({ queryKey: runKeys.all }),
-  });
-}
-
-/** Approve or reject a paused run and refresh it. */
-export function useSubmitApproval() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: { id: string; decision: ApprovalDecision }) =>
-      submitRunApproval(vars.id, vars.decision),
-    onSuccess: (run) => {
-      qc.invalidateQueries({ queryKey: runKeys.all });
-      qc.invalidateQueries({ queryKey: runKeys.detail(run.id) });
-    },
   });
 }

@@ -2,13 +2,15 @@ import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight, RefreshCw, ShieldCheck, X } from 'lucide-react';
 
+import { ApprovalCard } from '../components/approvals/ApprovalCard';
+
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { FlowGraph } from '../components/runs/FlowGraph';
 import { PhaseActivity } from '../components/runs/PhaseActivity';
 import { useDesignFlows } from '../hooks/use-design-flows';
 import { useFlowState } from '../hooks/use-flow-state';
-import { useRun, useSubmitApproval } from '../hooks/use-runs';
-import type { ApprovalDecision } from '../types/run';
+import { useApproval } from '../hooks/use-approvals';
+import { useRun } from '../hooks/use-runs';
 
 type PhaseResult = Record<string, unknown>;
 
@@ -27,14 +29,14 @@ export function RunDetailPage() {
     String(runQuery.data?.status ?? ''),
   );
   const flowState = useFlowState(id, runActive);
-  const approval = useSubmitApproval();
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [decision, setDecision] = useState<ApprovalDecision>('approve');
   const run = runQuery.data;
+  const awaiting = run?.status === 'awaiting_approval';
+  // The gate is read through the unified approvals API so the dialog shows
+  // the same card, findings and allowed decisions as /approvals.
+  const gate = useApproval(run ? `gate:${run.id}` : undefined, awaiting);
 
-  function openDecision(next: ApprovalDecision) {
-    setDecision(next);
-    approval.reset();
+  function openDecision() {
     // jsdom lacks showModal; fall back to the open attribute.
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -87,7 +89,6 @@ export function RunDetailPage() {
   const phases: PhaseResult[] = Array.isArray(rawPhases)
     ? rawPhases.filter((p): p is PhaseResult => !!p && typeof p === 'object')
     : [];
-  const awaiting = run.status === 'awaiting_approval';
 
   return (
     <div className="flow-workspace">
@@ -132,8 +133,8 @@ export function RunDetailPage() {
             phases={flowState.data.phases}
             selectedPhaseId={selectedPhaseId}
             onSelectPhase={setSelectedPhaseId}
-            canApprove={awaiting && !approval.isPending}
-            onApprove={(decision) => openDecision(decision)}
+            canApprove={awaiting}
+            onApprove={() => openDecision()}
           />
           <PhaseActivity
             phase={
@@ -181,11 +182,8 @@ export function RunDetailPage() {
               </Link>
             )}
             <div className="heading-actions">
-              <button type="button" className="action-primary" onClick={() => openDecision('approve')}>
+              <button type="button" className="action-primary" onClick={() => openDecision()}>
                 Review approval
-              </button>
-              <button type="button" className="action-secondary" onClick={() => openDecision('reject')}>
-                Reject run
               </button>
             </div>
           </div>
@@ -267,58 +265,28 @@ export function RunDetailPage() {
       <dialog ref={dialogRef} className="project-dialog" aria-labelledby="decision-title">
         <div className="flow-form">
           <div className="section-heading">
-            <h2 id="decision-title">
-              {decision === 'approve' ? 'Approve this gate?' : 'Reject this run?'}
-            </h2>
-            <button
-              type="button"
-              className="icon-control"
-              aria-label="Close decision"
-              disabled={approval.isPending}
-              onClick={closeDecision}
-            >
+            <h2 id="decision-title">Review this gate</h2>
+            <button type="button" className="icon-control" aria-label="Close decision" onClick={closeDecision}>
               <X size={20} />
             </button>
           </div>
-          <p>
-            {decision === 'approve'
-              ? 'Approval resumes execution. Confirm that you have reviewed the available evidence and accept this gate.'
-              : 'Rejection ends this run. Its recorded history remains available for review.'}
-          </p>
-          {approval.isError && (
-            <p className="form-error" role="alert">
-              The decision could not be confirmed. Refresh the run to check its current state before
-              retrying.
-            </p>
-          )}
-          {!awaiting && (
+          {!awaiting ? (
             <p role="status">
               This run is no longer waiting for approval. Close this dialog to view its current
               state.
             </p>
+          ) : gate.isError ? (
+            <p className="form-error" role="alert">
+              The gate could not be loaded. Refresh the run to check its current state.
+            </p>
+          ) : gate.data ? (
+            <ApprovalCard item={gate.data} onDecided={() => closeDecision()} />
+          ) : (
+            <p role="status">Loading gate…</p>
           )}
           <div className="dialog-actions">
-            <button
-              type="button"
-              className="action-secondary"
-              disabled={approval.isPending}
-              onClick={closeDecision}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="action-primary"
-              disabled={approval.isPending || !awaiting}
-              onClick={() =>
-                approval.mutate({ id: run.id, decision }, { onSuccess: () => closeDecision() })
-              }
-            >
-              {approval.isPending
-                ? 'Submitting…'
-                : decision === 'approve'
-                  ? 'Approve & continue'
-                  : 'Confirm rejection'}
+            <button type="button" className="action-secondary" onClick={closeDecision}>
+              Close
             </button>
           </div>
         </div>

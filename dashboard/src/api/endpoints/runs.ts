@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 import apiClient from '../client';
-import type { ApprovalDecision, HarnessRun, RunStatus } from '../../types/run';
+import type { HarnessRun, RunStatus } from '../../types/run';
 
 interface RunRaw {
   id: string;
@@ -75,14 +75,5 @@ export async function createRun(
   start = true,
 ): Promise<HarnessRun> {
   const { data } = await apiClient.post<RunRaw>('/runs', { request, start });
-  return mapRun(data);
-}
-
-/** Approve or reject a paused run via `POST /v1/runs/{id}/approval`. */
-export async function submitRunApproval(
-  id: string,
-  decision: ApprovalDecision,
-): Promise<HarnessRun> {
-  const { data } = await apiClient.post<RunRaw>(`/runs/${id}/approval`, { decision });
   return mapRun(data);
 }

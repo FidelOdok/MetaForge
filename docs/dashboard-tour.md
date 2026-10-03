@@ -204,24 +204,37 @@ loaded shows a *Run could not be loaded* state rather than *not found*.
 
 ## `/approvals`: human review
 
-The human-in-the-loop gate, in three parts: **run approval gates**
-(runs paused for a decision), **tool approvals** (agent tool calls
-waiting for a yes/no), and **change proposals** submitted against the
-Twin, each with a diff against the current state.
+One queue for everything that needs a human, rendered by a single card
+component: design-flow **gates**, flow proposals and versions, held
+**tool calls**, human-authority requests, design changes, design loops,
+sketches and drawings.
 
-- **Backed by:** `GET /v1/runs?project_id=…`,
-  `GET /v1/chat/tool_approvals?project_id=…`,
-  `GET /v1/assistant/proposals`.
-- **All three are scoped to the active project.** Proposals always were;
-  the run gates and the tool approvals were not, so a reviewer saw every
-  project's held writes in one queue — and a held write names a tool and
-  a caller, not a product, so there was no way to tell from the row which
-  project it belonged to. Held calls with no project are counted and
-  reported for the same reason as on `/runs`: an approval that quietly
-  disappears is the one nobody answers.
-- **Use it to:** approve or reject. Same outcome as
-  `python -m cli.forge_cli approve <id> --reason …`, but with a
-  side-by-side diff view.
+- **Backed by:** `GET /v1/approvals?status=pending|decided&project_id=…&kind=…`
+  and `POST /v1/approvals/{id}/decision`. Every request carries
+  `X-MetaForge-Surface: dashboard` so the audit trail records where a
+  decision came from.
+- **Each card shows:** title, kind, project, age and deadline, why the
+  item was held, structured findings (errors, warnings and info are
+  styled apart), and the kind's own detail: tool and arguments, the flow
+  proposal's changes, the design change diff, or the gate's run, phase,
+  attempt and retries left.
+- **Decisions are exactly what the gateway allows.** The buttons are the
+  item's `allowed_decisions` (approve, reject, retry, rework). A reason
+  box appears for the decisions in `reason_required_for`, and rework
+  asks for a phase from the item's `rework_targets`. When the item is not
+  decidable the controls are disabled and show the gateway's reason. The
+  dashboard no longer sends a hard-coded reviewer name; the gateway
+  identifies the approver.
+- **Audit tab:** decided items with who decided, from which surface, on
+  whose behalf, whether the approver was verified, when, and the outcome.
+- **Scoped to the active project.** Items with no project are counted and
+  reported, because an approval that quietly disappears is the one
+  nobody answers.
+- **The run page uses the same card.** The gate dialog on `/runs/{id}`
+  and the Approve and Reject buttons on the flow graph open the
+  `gate:<run id>` approval in this card.
+- **Use it to:** same outcome as
+  `python -m cli.forge_cli approve <id> --reason …`.
 
 ## `/bom`: bill of materials
 
