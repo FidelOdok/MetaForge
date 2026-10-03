@@ -45,6 +45,11 @@ with workflow.unsafe.imports_passed_through():
     from orchestrator.design_flow.frozen import FrozenFlow, FrozenPhase
     from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
     from orchestrator.design_flow.retry import DEFAULT_MAX_PHASE_RETRIES, build_retry_feedback
+    from orchestrator.design_flow.rework import (
+        DEFAULT_MAX_REWORK_CYCLES,
+        build_rework_feedback,
+        rework_target_error,
+    )
 
 __all__ = [
     "DEFAULT_GATE_TIMEOUT",
@@ -62,6 +67,13 @@ TASK_QUEUE = "metaforge-design-flows"
 #: the run; it now parks for a decision. Runs whose history already holds the
 #: old failure replay it unchanged.
 RETRY_PATCH_ID = "forge-495-gate-retry"
+
+#: ``workflow.patched`` id for FORGE-500. A rework decision at a gate jumps the
+#: run back to an earlier phase. It is checked only once a rework answer has
+#: arrived, which is after any history recorded by older code, so a run parked
+#: at a gate (its last one included) before this change replays unchanged and
+#: then accepts a rework as new history.
+REWORK_PATCH_ID = "forge-500-rework"
 
 #: How long a gate waits before it is treated as refused. Long, because the
 #: reviewer is a person who may be asleep; finite, because a run that waits
@@ -137,6 +149,9 @@ class GateAnswer:
     #: FORGE-495: re-run the phase instead of ending the run. ``approved`` is
     #: False for a retry; ``comment`` is the reviewer's reason.
     retry: bool = False
+    #: FORGE-500: send the run back to this earlier phase (``comment`` is the
+    #: reviewer's reason). ``approved`` is False for a rework.
+    rework_to: str = ""
 
 
 @dataclass
@@ -161,6 +176,10 @@ class DesignFlowInput:
     completed: list[dict[str, Any]] = field(default_factory=list)
     #: FORGE-495: how many times one phase may be re-run from its gate.
     max_phase_retries: int = DEFAULT_MAX_PHASE_RETRIES
+    #: FORGE-500: how many times the run may be sent back to an earlier phase,
+    #: and how many it already has (carried across a continue-as-new).
+    max_rework_cycles: int = DEFAULT_MAX_REWORK_CYCLES
+    rework_cycles: int = 0
 
 
 @workflow.defn(name="DesignFlow")
@@ -203,6 +222,12 @@ class DesignFlowWorkflow:
         self._gate_findings: list[str] = []
         #: Set by a retry decision; consumed by the phase loop.
         self._retry_reason: str | None = None
+        #: FORGE-500: rework cycles used / allowed, and the pending jump set by a
+        #: rework decision (target phase id + the feedback for its brain).
+        self._rework_cycles = 0
+        self._max_rework_cycles = DEFAULT_MAX_REWORK_CYCLES
+        self._rework_to: str | None = None
+        self._rework_feedback = ""
 
     # ── signals ──────────────────────────────────────────────────────────
 
@@ -244,6 +269,9 @@ class DesignFlowWorkflow:
             "retries_left": max(self._max_retries - (self._attempt - 1), 0),
             "gate_ready": self._gate_ready,
             "gate_findings": list(self._gate_findings) if self._gate_open else [],
+            "rework_cycles": self._rework_cycles,
+            "max_rework_cycles": self._max_rework_cycles,
+            "reworks_left": max(self._max_rework_cycles - self._rework_cycles, 0),
         }
 
     @workflow.query
@@ -264,12 +292,18 @@ class DesignFlowWorkflow:
         self._record("run_started", detail=inp.flow.template_id)
 
         self._max_retries = inp.max_phase_retries
+        self._max_rework_cycles = inp.max_rework_cycles
+        self._rework_cycles = inp.rework_cycles
         phases = inp.flow.phases
         while self._phase_index < len(phases):
             phase = phases[self._phase_index]
             self._current_phase = phase.id
             self._attempt = 1
-            retry_feedback = ""
+            # A rework hands its feedback to the phase it jumped back to; any
+            # other phase starts clean.
+            retry_feedback = self._rework_feedback
+            self._rework_feedback = ""
+            jumped = False
 
             while True:
                 self._record(
@@ -331,6 +365,17 @@ class DesignFlowWorkflow:
                 if verdict is not None:
                     return verdict
 
+                if self._rework_to is not None:
+                    # FORGE-500: drop this phase's entry and every one from the
+                    # target on; earlier phases keep their entries and approvals.
+                    target = self._rework_to
+                    self._rework_to = None
+                    index = [p.id for p in phases].index(target)
+                    del self._completed[index:]
+                    self._phase_index = index
+                    jumped = True
+                    break
+
                 if self._retry_reason is not None:
                     # FORGE-495: keep every earlier approved phase, drop only this
                     # attempt's entry, and run the same phase again.
@@ -349,6 +394,8 @@ class DesignFlowWorkflow:
                     return await self._apply_change(inp)
                 break
 
+            if jumped:
+                continue
             self._phase_index += 1
 
         self._status = "completed"
@@ -436,6 +483,16 @@ class DesignFlowWorkflow:
             except TimeoutError:
                 break
             answer = self._answer
+            if answer is not None and answer.rework_to:
+                error = rework_target_error(
+                    [p.id for p in inp.flow.phases], phase.id, answer.rework_to
+                )
+                if error is not None:
+                    # Refused, not applied: the gate stays open and answerable.
+                    self._answer = None
+                    self._record("gate_decision_ignored", phase=phase.id, detail=error)
+                    continue
+                break
             if answer is not None and not answer.approved and not answer.retry:
                 break
             if answer is not None and answer.approved and not self._gate_ready:
@@ -459,6 +516,37 @@ class DesignFlowWorkflow:
 
         self._gate_open = None
         answer = self._answer
+        if answer is not None and answer.rework_to and workflow.patched(REWORK_PATCH_ID):
+            if self._rework_cycles >= self._max_rework_cycles:
+                self._gate_ready = True
+                return self._fail(
+                    f"Gate '{gate.name}' sent the run back to '{answer.rework_to}' but the run "
+                    f"already used its {self._max_rework_cycles} rework "
+                    f"cycle{'' if self._max_rework_cycles == 1 else 's'} (the per-run cap)."
+                )
+            self._rework_cycles += 1
+            self._rework_to = answer.rework_to
+            self._rework_feedback = build_rework_feedback(
+                from_phase=phase.id,
+                to_phase=answer.rework_to,
+                findings=self._gate_findings,
+                reason=answer.comment,
+                from_summary=str(entry.get("summary") or ""),
+                cycle=self._rework_cycles,
+            )
+            self._status = "running"
+            self._gate_ready = True
+            self._record(
+                "phase_rework_requested",
+                phase=phase.id,
+                detail=(
+                    f"cycle {self._rework_cycles} of {self._max_rework_cycles} by "
+                    f"{answer.decided_by or 'a reviewer'}: back to '{answer.rework_to}'"
+                    + (f": {answer.comment}" if answer.comment else "")
+                ),
+                **{"from": phase.id, "to": answer.rework_to, "cycle": self._rework_cycles},
+            )
+            return None
         if answer is not None and answer.retry:
             retries_used = self._attempt - 1
             if retries_used >= self._max_retries:
@@ -569,6 +657,8 @@ class DesignFlowWorkflow:
                 gate_timeout_seconds=inp.gate_timeout_seconds,
                 completed=list(self._completed),
                 max_phase_retries=inp.max_phase_retries,
+                max_rework_cycles=inp.max_rework_cycles,
+                rework_cycles=self._rework_cycles,
             )
         )
         raise AssertionError("unreachable: continue_as_new does not return")
@@ -586,12 +676,15 @@ class DesignFlowWorkflow:
         self._record("run_rejected", detail=message)
         return {"status": "rejected", "error": message, "phases": self._completed}
 
-    def _record(self, event: str, *, phase: str | None = None, detail: str = "") -> None:
+    def _record(
+        self, event: str, *, phase: str | None = None, detail: str = "", **extra: Any
+    ) -> None:
         self._events.append(
             {
                 "event": event,
                 "phase": phase,
                 "detail": detail,
+                **extra,
                 # workflow.now() is the replay-safe clock; time.time() here
                 # would make every replay diverge.
                 "at": workflow.now().isoformat(),

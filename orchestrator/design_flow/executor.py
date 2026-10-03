@@ -25,6 +25,11 @@ import structlog
 from observability.tracing import get_tracer
 from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
 from orchestrator.design_flow.retry import build_retry_feedback, max_phase_retries
+from orchestrator.design_flow.rework import (
+    build_rework_feedback,
+    max_rework_cycles,
+    rework_target_error,
+)
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FlowDefinition, Phase, get_flow
 from orchestrator.harness.runs import (
     ApprovalDecision,
@@ -36,6 +41,14 @@ from twin_core.consistency import GateEvaluation
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("orchestrator.design_flow.executor")
+
+
+@dataclass
+class ReworkJump:
+    """A reviewer sent the run back to an earlier phase (FORGE-500)."""
+
+    to_index: int
+    feedback: str
 
 
 class FlowCanceled(Exception):
@@ -183,6 +196,8 @@ class GateCoordinator:
         #: transition observer cannot tell from an approval. The route notes
         #: the retry here first, with the reviewer's reason.
         self._retries: dict[str, str] = {}
+        #: FORGE-500: the same for a rework: ``(to_phase, reason)`` per run.
+        self._reworks: dict[str, tuple[str, str]] = {}
         self._gate_state: dict[str, dict[str, object]] = {}
 
     def note_retry(self, run_id: str, reason: str) -> None:
@@ -191,8 +206,27 @@ class GateCoordinator:
     def take_retry_reason(self, run_id: str) -> str:
         return self._retries.pop(run_id, "")
 
-    def set_gate_state(self, run_id: str, *, ready: bool, retries_left: int) -> None:
-        self._gate_state[run_id] = {"ready": ready, "retries_left": retries_left}
+    def note_rework(self, run_id: str, to_phase: str, reason: str) -> None:
+        self._reworks[run_id] = (to_phase, reason)
+
+    def take_rework(self, run_id: str) -> tuple[str, str] | None:
+        return self._reworks.pop(run_id, None)
+
+    def set_gate_state(
+        self,
+        run_id: str,
+        *,
+        ready: bool,
+        retries_left: int,
+        phase: str | None = None,
+        reworks_left: int | None = None,
+    ) -> None:
+        self._gate_state[run_id] = {
+            "ready": ready,
+            "retries_left": retries_left,
+            "phase": phase,
+            "reworks_left": reworks_left,
+        }
 
     def gate_state(self, run_id: str) -> dict[str, object] | None:
         """What the in-process executor reports about the gate ``run_id`` is at."""
@@ -224,8 +258,12 @@ class GateCoordinator:
         if fut is None or fut.done():
             return
         if status is RunStatus.RUNNING:
-            retry = run_id in self._retries
-            fut.set_result(ApprovalDecision.RETRY if retry else ApprovalDecision.APPROVE)
+            if run_id in self._reworks:
+                fut.set_result(ApprovalDecision.REWORK)
+            elif run_id in self._retries:
+                fut.set_result(ApprovalDecision.RETRY)
+            else:
+                fut.set_result(ApprovalDecision.APPROVE)
         elif status is RunStatus.REJECTED:
             fut.set_result(ApprovalDecision.REJECT)
         elif status is RunStatus.CANCELED:
@@ -369,28 +407,60 @@ class DesignFlowExecutor:
 
     async def _walk(self, run_id: str, flow: FlowDefinition, ctx: FlowContext) -> None:
         max_retries = max_phase_retries()
-        for phase in flow.phases:
+        max_rework = max_rework_cycles()
+        cycles = 0
+        index = 0
+        pending_feedback = ""
+        while index < len(flow.phases):
+            phase = flow.phases[index]
             attempt = 1
-            ctx.retry_feedback = ""
+            # A rework hands its feedback to the phase it jumped back to.
+            ctx.retry_feedback = pending_feedback
+            pending_feedback = ""
             ctx.attempt = 1
+            jump: ReworkJump | None = None
             while True:
-                if await self._attempt_phase(run_id, phase, ctx, attempt, max_retries):
+                result = await self._attempt_phase(
+                    run_id, phase, ctx, attempt, max_retries, flow, cycles, max_rework
+                )
+                if isinstance(result, ReworkJump):
+                    jump = result
+                    break
+                if result:
                     break
                 # Retry: drop this attempt's outcome, keep every earlier phase.
                 attempt += 1
                 ctx.attempt = attempt
+            if jump is not None:
+                # Drop this phase's outcome and every one from the target on;
+                # earlier phases keep their outcomes and approvals.
+                cycles += 1
+                del ctx.completed[jump.to_index :]
+                pending_feedback = jump.feedback
+                index = jump.to_index
+                continue
             if self._store.get(run_id).is_terminal:
                 return
+            index += 1
         ctx.retry_feedback = ""
         self._store.complete(run_id, result=self._summarize(flow, ctx))
 
     async def _attempt_phase(
-        self, run_id: str, phase: Phase, ctx: FlowContext, attempt: int, max_retries: int
-    ) -> bool:
+        self,
+        run_id: str,
+        phase: Phase,
+        ctx: FlowContext,
+        attempt: int,
+        max_retries: int,
+        flow: FlowDefinition,
+        rework_cycles: int = 0,
+        max_rework: int = 0,
+    ) -> bool | ReworkJump:
         """Run one attempt of ``phase`` and its gate.
 
         Returns True when the phase is done (approved, or ended the run), False
-        when a reviewer asked for a retry. Each attempt is logged.
+        when a reviewer asked for a retry, or a :class:`ReworkJump` when they
+        sent the run back to an earlier phase (FORGE-500). Each attempt is logged.
         """
         phase_start = time.time()
         logger.info("design_flow_phase_start", run_id=run_id, phase=phase.id, attempt=attempt)
@@ -457,7 +527,14 @@ class DesignFlowExecutor:
             if constraints.checked:
                 reason += _constraint_details(constraints)
         retries_left = max(max_retries - (attempt - 1), 0)
-        self._coordinator.set_gate_state(run_id, ready=not blocking, retries_left=retries_left)
+        reworks_left = max(max_rework - rework_cycles, 0)
+        self._coordinator.set_gate_state(
+            run_id,
+            ready=not blocking,
+            retries_left=retries_left,
+            phase=phase.id,
+            reworks_left=reworks_left,
+        )
 
         # Register the waiter BEFORE moving to awaiting_approval so a fast
         # approval can't race ahead of the future.
@@ -465,7 +542,41 @@ class DesignFlowExecutor:
         self._store.request_approval(run_id, reason=reason[:2000])
         logger.info("design_flow_gate_wait", run_id=run_id, gate=gate.name, ready=not blocking)
         decision = await self._coordinator.wait(run_id)
-        self._coordinator.set_gate_state(run_id, ready=True, retries_left=retries_left)
+        self._coordinator.set_gate_state(
+            run_id,
+            ready=True,
+            retries_left=retries_left,
+            phase=phase.id,
+            reworks_left=reworks_left,
+        )
+        if decision is ApprovalDecision.REWORK:
+            noted = self._coordinator.take_rework(run_id)
+            to_phase, reviewer = noted if noted is not None else ("", "")
+            phase_ids = [p.id for p in flow.phases]
+            error = rework_target_error(phase_ids, phase.id, to_phase)
+            if error is None and rework_cycles >= max_rework:
+                error = f"the run already used its {max_rework} rework cycle(s) (the per-run cap)"
+            if error is not None:
+                logger.warning("design_flow_rework_refused", run_id=run_id, reason=error)
+                self._store.fail(run_id, f"Rework from gate '{gate.name}' refused: {error}.")
+                return True
+            cycle = rework_cycles + 1
+            logger.info(
+                "design_flow_phase_rework_requested",
+                run_id=run_id,
+                **{"from": phase.id, "to": to_phase, "cycle": cycle},
+            )
+            return ReworkJump(
+                to_index=phase_ids.index(to_phase),
+                feedback=build_rework_feedback(
+                    from_phase=phase.id,
+                    to_phase=to_phase,
+                    findings=findings,
+                    reason=reviewer,
+                    from_summary=outcome.summary,
+                    cycle=cycle,
+                ),
+            )
         if decision is ApprovalDecision.REJECT:
             # submit_approval already moved the run to REJECTED (terminal).
             logger.info("design_flow_gate_rejected", run_id=run_id, gate=gate.name)

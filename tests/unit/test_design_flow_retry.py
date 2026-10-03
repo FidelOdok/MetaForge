@@ -121,7 +121,8 @@ async def test_retry_reruns_only_that_phase_with_findings_and_keeps_earlier_appr
 
     await _wait_awaiting(store, run.id, after=1)  # gate two, NOT ready
     assert "NOT READY" in (store.get(run.id).approval_reason or "")
-    assert coord.gate_state(run.id) == {"ready": False, "retries_left": 3}
+    state = coord.gate_state(run.id)
+    assert state is not None and state["ready"] is False and state["retries_left"] == 3
     _decide(coord, store, run.id, ApprovalDecision.RETRY, "record the cad model")
 
     await _wait_awaiting(store, run.id, after=2)  # gate two again, now ready
@@ -159,7 +160,8 @@ async def test_retry_cap_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
         await _wait_awaiting(store, run.id, after=n)
         _decide(coord, store, run.id, ApprovalDecision.RETRY, f"try {n}")
     await _wait_awaiting(store, run.id, after=3)
-    assert coord.gate_state(run.id) == {"ready": False, "retries_left": 0}
+    state = coord.gate_state(run.id)
+    assert state is not None and state["ready"] is False and state["retries_left"] == 0
     _decide(coord, store, run.id, ApprovalDecision.RETRY, "one more")
     await asyncio.wait_for(task, timeout=3.0)
 

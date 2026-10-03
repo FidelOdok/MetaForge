@@ -465,10 +465,11 @@ def submit_tool_approval(run_id: str, body: ApprovalRequest, request: Request) -
             detail=f"approval '{run_id}' is being answered in the client's own approval "
             "prompt. Answer it there; it appears here as resolved once you do.",
         )
-    if body.decision == ApprovalDecision.RETRY.value:
-        # FORGE-495: retry re-runs a design-flow phase; a tool call has nothing to re-run.
+    if body.decision in (ApprovalDecision.RETRY.value, ApprovalDecision.REWORK.value):
+        # FORGE-495/500: retry and rework re-run design-flow phases; a tool call has none.
         raise HTTPException(
-            status_code=422, detail="'retry' applies to design-flow gates, not tool approvals"
+            status_code=422,
+            detail=f"'{body.decision}' applies to design-flow gates, not tool approvals",
         )
     try:
         run = _approval_store.submit_approval(

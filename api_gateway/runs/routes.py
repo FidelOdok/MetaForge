@@ -5,7 +5,7 @@ The OpenAI-compatible Runs API surface over the harness run lifecycle:
 * ``POST   /v1/runs``               create a run (optionally start it)
 * ``GET    /v1/runs``               list runs
 * ``GET    /v1/runs/{id}``          fetch one run
-* ``POST   /v1/runs/{id}/approval`` approve, reject or (design flows) retry a paused run
+* ``POST   /v1/runs/{id}/approval`` approve, reject or (design flows) retry or rework a paused run
 
 The run store is process-local for now (mirrors the chat backend pattern);
 persistence lands in Phase 4. Domain errors map to clean HTTP status:
@@ -41,6 +41,7 @@ from orchestrator.design_flow.launcher import (
     TemporalUnavailableError,
     connect_temporal,
 )
+from orchestrator.design_flow.rework import rework_target_error
 from orchestrator.design_flow.spec import (
     DEFAULT_FLOW_ID,
     FlowDefinition,
@@ -906,6 +907,11 @@ class FlowRunState(BaseModel):
     retriesLeft: int | None = None  # noqa: N815
     gateReady: bool = True  # noqa: N815
     gateFindings: list[str] = Field(default_factory=list)  # noqa: N815
+    #: FORGE-500: how many times the run has been sent back to an earlier phase,
+    #: the per-run cap, and how many are left.
+    reworkCycles: int = 0  # noqa: N815
+    maxReworkCycles: int | None = None  # noqa: N815
+    reworksLeft: int | None = None  # noqa: N815
 
 
 def _frozen_identity(run: Run) -> dict[str, Any]:
@@ -1058,6 +1064,9 @@ async def get_flow_state(run_id: str) -> FlowRunState:
         retriesLeft=state.get("retries_left"),
         gateReady=bool(state.get("gate_ready", True)),
         gateFindings=[str(f) for f in state.get("gate_findings") or []],
+        reworkCycles=int(state.get("rework_cycles") or 0),
+        maxReworkCycles=state.get("max_rework_cycles"),
+        reworksLeft=state.get("reworks_left"),
         **identity,
     )
 
@@ -1143,7 +1152,9 @@ async def _note_gate_in_session(request: Request, run: Run, gate: str) -> None:
         logger.info("design_flow_gate_session_note_skipped", run_id=run.id, error=str(exc))
 
 
-async def _refuse_undeliverable_decision(run: Run, decision: ApprovalDecision) -> None:
+async def _refuse_undeliverable_decision(
+    run: Run, decision: ApprovalDecision, to_phase: str = ""
+) -> None:
     """409 a decision the open gate cannot take (FORGE-495).
 
     A gate that is not ready (missing deliverables, an ungrounded reply,
@@ -1152,10 +1163,21 @@ async def _refuse_undeliverable_decision(run: Run, decision: ApprovalDecision) -
     record moves, keeps the run parked and answerable. Best effort: when the
     gate's state cannot be read, the workflow's own guard still holds.
     """
-    if decision is ApprovalDecision.RETRY and not _is_design_flow(run.request):
+    if decision in (ApprovalDecision.RETRY, ApprovalDecision.REWORK) and not _is_design_flow(
+        run.request
+    ):
         raise HTTPException(
-            status_code=422, detail="'retry' re-runs a design-flow phase; this run is not one"
+            status_code=422,
+            detail=f"'{decision.value}' re-runs design-flow phases; this run is not one",
         )
+    definition = _run_definition(run) if decision is ApprovalDecision.REWORK else None
+    if decision is ApprovalDecision.REWORK:
+        # Without the run's own phases there is nothing to validate against; the
+        # engine's check still applies.
+        known = [p.id for p in definition.phases] if definition is not None else [to_phase]
+        error = rework_target_error(known, None, to_phase)
+        if error is not None:
+            raise HTTPException(status_code=422, detail=error)
     if decision is ApprovalDecision.REJECT or not _is_design_flow(run.request):
         return
     gate: dict[str, Any] | None = None
@@ -1168,10 +1190,27 @@ async def _refuse_undeliverable_decision(run: Run, decision: ApprovalDecision) -
             gate = {
                 "ready": state.get("gate_ready", True),
                 "retries_left": state.get("retries_left"),
+                "phase": state.get("current_phase"),
+                "reworks_left": state.get("reworks_left"),
             }
         except Exception as exc:  # noqa: BLE001 - the workflow's own guard still applies
             logger.info("approval_gate_state_unavailable", run_id=run.id, error=str(exc))
     if gate is None:
+        return
+    if decision is ApprovalDecision.REWORK:
+        phase_ids = [p.id for p in definition.phases] if definition is not None else []
+        current = gate.get("phase")
+        if phase_ids:
+            error = rework_target_error(phase_ids, str(current) if current else None, to_phase)
+            if error is not None:
+                raise HTTPException(status_code=422, detail=error)
+        reworks_left = gate.get("reworks_left")
+        if isinstance(reworks_left, int) and reworks_left <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail="This run has used all its rework cycles. Approve (if the gate is ready), "
+                "retry the phase or reject.",
+            )
         return
     if decision is ApprovalDecision.APPROVE and gate.get("ready") is False:
         raise HTTPException(
@@ -1210,9 +1249,11 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
         reconciled = await _reconcile_run(_store.get(run_id))
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
-    await _refuse_undeliverable_decision(reconciled, decision)
+    await _refuse_undeliverable_decision(reconciled, decision, body.to_phase)
     if decision is ApprovalDecision.RETRY:
         _gate_coordinator.note_retry(run_id, body.reason)
+    elif decision is ApprovalDecision.REWORK:
+        _gate_coordinator.note_rework(run_id, body.to_phase, body.reason)
     try:
         run = _store.submit_approval(
             run_id,
@@ -1222,21 +1263,27 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
         )
     except RunNotFoundError as exc:
         _gate_coordinator.take_retry_reason(run_id)
+        _gate_coordinator.take_rework(run_id)
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
     except InvalidTransition as exc:
         _gate_coordinator.take_retry_reason(run_id)
+        _gate_coordinator.take_rework(run_id)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     approved = decision is ApprovalDecision.APPROVE
     if _is_design_flow(run.request) and resolve_flow_engine() is FlowEngine.TEMPORAL:
         try:
             launcher = await get_flow_launcher()
+            extra: dict[str, Any] = (
+                {"rework_to": body.to_phase} if decision is ApprovalDecision.REWORK else {}
+            )
             await launcher.answer_gate(
                 run_id,
                 approved=approved,
                 decided_by=approver.label,
                 comment=body.reason,
                 retry=decision is ApprovalDecision.RETRY,
+                **extra,
             )
         except TemporalUnavailableError as exc:
             # The store already moved, but the run itself did not hear the
@@ -1255,7 +1302,9 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
 
     _metrics().record_design_flow_gate(
         str(run.request.get("flow") or DEFAULT_FLOW_ID),
-        {"approve": "approved", "reject": "rejected", "retry": "retried"}[decision.value],
+        {"approve": "approved", "reject": "rejected", "retry": "retried", "rework": "reworked"}[
+            decision.value
+        ],
     )
     logger.info(
         "run_api_approval",

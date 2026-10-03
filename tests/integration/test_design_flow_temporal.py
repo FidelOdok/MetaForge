@@ -658,3 +658,273 @@ class TestRetryPhase:
             result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
         assert result["status"] == "rejected"
         assert phases.ran == ["phase0"]
+
+
+class TestReworkPhase:
+    """FORGE-500: a fourth gate decision sends the run back to an earlier phase."""
+
+    @staticmethod
+    def _flow3() -> FrozenFlow:
+        built = [
+            FrozenPhase(
+                id=f"phase{i}",
+                title=f"Phase {i}",
+                objective=f"do step {i}",
+                enforce_deliverables=False,
+                gate=FrozenGate(name=f"gate{i}", enforce_constraints=(i == 2)),
+            )
+            for i in range(3)
+        ]
+        flow = FrozenFlow(template_id="test_v1", name="Test", phases=built)
+        flow.content_hash = flow.compute_hash()
+        return flow
+
+    @staticmethod
+    def _recording():
+        requests: list[PhaseRequest] = []
+        announced: list[str] = []
+
+        class _Recording(_Phases):
+            async def __call__(self, request: PhaseRequest) -> PhaseResult:
+                requests.append(request)
+                return await super().__call__(request)
+
+        async def announce(run_id: str, gate: str, reason: str) -> None:
+            announced.append(gate)
+
+        return _Recording(), requests, announce, announced
+
+    @staticmethod
+    def _violating_final_gate(times: int):
+        """A gate check that fails phase2's constraints ``times`` times, then passes."""
+        seen = {"n": 0}
+
+        async def gate(payload: dict) -> GateCheck:
+            if payload["phase"]["id"] != "phase2":
+                return GateCheck(ready=True, checked=True, constraints_checked=True)
+            seen["n"] += 1
+            if seen["n"] <= times:
+                return GateCheck(
+                    ready=True,
+                    checked=True,
+                    constraints_checked=True,
+                    constraints_passed=False,
+                    violations=["safety factor 1.56 < 2"],
+                )
+            return GateCheck(ready=True, checked=True, constraints_checked=True)
+
+        return gate
+
+    async def _wait(self, launcher, run_id: str, gate: str, **expect) -> dict:
+        for _ in range(400):
+            state = await launcher.state(run_id)
+            if state["awaiting_gate"] == gate and all(state[k] == v for k, v in expect.items()):
+                return state
+            await asyncio.sleep(0.05)
+        raise AssertionError(f"never reached {gate} {expect}: {await launcher.state(run_id)}")
+
+    async def test_rework_from_the_last_gate_reruns_target_and_later_phases(self, env) -> None:
+        run_id = str(uuid.uuid4())
+        phases, requests, announce, announced = self._recording()
+        acts = DesignFlowActivities(
+            phase_runner=phases,
+            gate_checker=self._violating_final_gate(1),
+            gate_announcer=announce,
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=self._flow3())
+            await self._wait(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait(launcher, run_id, "gate1")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            state = await self._wait(launcher, run_id, "gate2")
+            assert state["gate_ready"] is False
+            assert state["rework_cycles"] == 0 and state["reworks_left"] == 3
+            await launcher.answer_gate(
+                run_id,
+                approved=False,
+                decided_by="user:r",
+                comment="thicken the arm",
+                rework_to="phase1",
+            )
+            # Phase 1 re-runs and its gate re-opens; earlier approvals stand.
+            state = await self._wait(launcher, run_id, "gate1", rework_cycles=1)
+            assert state["reworks_left"] == 2
+            assert [c["phase"] for c in state["completed"]] == ["phase0", "phase1"]
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            state = await self._wait(launcher, run_id, "gate2", rework_cycles=1)
+            assert state["gate_ready"] is True
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+            events = await launcher.events(run_id)
+
+        assert result["status"] == "completed"
+        # phase0 ran once (kept); phase1 and phase2 ran twice, in order.
+        assert [r.phase.id for r in requests] == ["phase0", "phase1", "phase2", "phase1", "phase2"]
+        # gate0 was never asked again; every later gate was re-opened.
+        assert announced == ["gate0", "gate1", "gate2", "gate1", "gate2"]
+        first = requests[3].retry_feedback
+        assert first.startswith("REWORK")
+        assert "safety factor 1.56 < 2" in first  # the gate's findings
+        assert "did phase2" in first  # the failing phase's summary
+        assert "thicken the arm" in first  # the reviewer's reason
+        assert all(r.retry_feedback == "" for r in (requests[0], requests[1], requests[2]))
+        assert requests[4].retry_feedback == ""  # only the target phase gets it
+        assert [p["phase"] for p in result["phases"]] == ["phase0", "phase1", "phase2"]
+        rework = [e for e in events if e["event"] == "phase_rework_requested"]
+        assert len(rework) == 1
+        assert (rework[0]["from"], rework[0]["to"], rework[0]["cycle"]) == ("phase2", "phase1", 1)
+
+    async def test_rework_cap_is_enforced(self, env) -> None:
+        run_id = str(uuid.uuid4())
+        phases, _requests, announce, _announced = self._recording()
+        acts = DesignFlowActivities(
+            phase_runner=phases,
+            gate_checker=self._violating_final_gate(99),
+            gate_announcer=announce,
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=self._flow3(), max_rework_cycles=1)
+            await self._wait(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait(launcher, run_id, "gate1")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait(launcher, run_id, "gate2")
+            await launcher.answer_gate(run_id, approved=False, rework_to="phase1", decided_by="u")
+            await self._wait(launcher, run_id, "gate1", rework_cycles=1)
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            state = await self._wait(launcher, run_id, "gate2", rework_cycles=1)
+            assert state["reworks_left"] == 0
+            await launcher.answer_gate(run_id, approved=False, rework_to="phase1", decided_by="u")
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+
+        assert result["status"] == "failed"
+        assert "rework cycle" in result["error"] and "per-run cap" in result["error"]
+
+    async def test_an_invalid_target_is_ignored_and_the_gate_stays_answerable(self, env) -> None:
+        run_id = str(uuid.uuid4())
+        phases, _requests, announce, _announced = self._recording()
+        acts = DesignFlowActivities(
+            phase_runner=phases, gate_checker=_ok_gate, gate_announcer=announce
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=self._flow3())
+            await self._wait(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait(launcher, run_id, "gate1")
+            # One at a time: signals landing in the same workflow task share one
+            # answer slot, and the last wins.
+            for n, target in enumerate(("phase1", "nope", "phase2"), start=1):
+                await launcher.answer_gate(run_id, approved=False, rework_to=target, decided_by="u")
+                for _ in range(200):
+                    seen = [
+                        e
+                        for e in await launcher.events(run_id)
+                        if e["event"] == "gate_decision_ignored"
+                    ]
+                    if len(seen) == n:
+                        break
+                    await asyncio.sleep(0.05)
+            # Still parked at the same gate, and it still takes a real decision.
+            state = await self._wait(launcher, run_id, "gate1")
+            assert state["rework_cycles"] == 0
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait(launcher, run_id, "gate2")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+            events = await launcher.events(run_id)
+
+        assert result["status"] == "completed"
+        ignored = [e for e in events if e["event"] == "gate_decision_ignored"]
+        assert len(ignored) == 3
+        assert any("not part of this run's flow" in e["detail"] for e in ignored)
+        assert any("not earlier" in e["detail"] for e in ignored)
+
+    async def test_a_run_parked_at_its_last_gate_before_the_change_accepts_rework(
+        self, env
+    ) -> None:
+        """Replay safety for runs already parked when FORGE-500 deploys.
+
+        The run is started with the *pre-change* input shape (no rework fields)
+        and parked at its final gate. Rework is only ever recorded as new
+        history after the wait, and ``workflow.patched`` is consulted only then,
+        so the history up to the park is what older code wrote. The test replays
+        that history, restarts the worker (a deploy), and sends the rework.
+        """
+        import dataclasses
+
+        from temporalio.worker import Replayer
+
+        from orchestrator.design_flow.temporal_flow import TASK_QUEUE
+
+        run_id = str(uuid.uuid4())
+        flow = self._flow3()
+        old_input = {
+            "run_id": run_id,
+            "goal": "g",
+            "flow": dataclasses.asdict(flow),
+            "project_id": None,
+            "session_id": None,
+            "gate_timeout_seconds": 86400.0,
+            "completed": [],
+            "max_phase_retries": 3,
+        }
+        assert "max_rework_cycles" not in old_input
+        phases, requests, announce, announced = self._recording()
+        acts = DesignFlowActivities(
+            phase_runner=phases, gate_checker=_ok_gate, gate_announcer=announce
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        handle = env.client.get_workflow_handle(f"design-flow-{run_id}")
+        async with _worker(env, acts):
+            await env.client.start_workflow(
+                "DesignFlow", old_input, id=f"design-flow-{run_id}", task_queue=TASK_QUEUE
+            )
+            await self._wait(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait(launcher, run_id, "gate1")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            state = await self._wait(launcher, run_id, "gate2")
+            # Defaults apply to the old input shape.
+            assert state["max_rework_cycles"] == 3 and state["rework_cycles"] == 0
+            history = await handle.fetch_history()
+
+        await Replayer(
+            workflows=[DesignFlowWorkflow], workflow_runner=design_flow_runner()
+        ).replay_workflow(history)
+
+        # A deploy: no worker, then a new one that must rebuild the run by replay.
+        acts2 = DesignFlowActivities(
+            phase_runner=phases, gate_checker=_ok_gate, gate_announcer=announce
+        )
+        async with _worker(env, acts2):
+            await launcher.answer_gate(
+                run_id, approved=False, decided_by="user:r", comment="redo", rework_to="phase0"
+            )
+            await self._wait(launcher, run_id, "gate0", rework_cycles=1)
+            for gate in ("gate0", "gate1", "gate2"):
+                await self._wait(launcher, run_id, gate)
+                await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            result = await handle.result()
+            final = await handle.fetch_history()
+
+        assert result["status"] == "completed"
+        assert [r.phase.id for r in requests] == [
+            "phase0",
+            "phase1",
+            "phase2",
+            "phase0",
+            "phase1",
+            "phase2",
+        ]
+        assert requests[3].retry_feedback.startswith("REWORK")
+        assert "redo" in requests[3].retry_feedback
+        assert announced[-3:] == ["gate0", "gate1", "gate2"]
+        # The patch marker is recorded with the rework, and the whole history
+        # (old part plus new) replays.
+        await Replayer(
+            workflows=[DesignFlowWorkflow], workflow_runner=design_flow_runner()
+        ).replay_workflow(final)
