@@ -309,6 +309,7 @@ _MESH_ALGORITHMS = ("gmsh", "netgen", "mefisto")
 _MESH_TIMEOUT_SECONDS = 180
 
 # FORGE-505: tolerance when comparing a mesh/STEP bounding box to the twin's.
+_CAD_SUFFIXES = (".step", ".stp")
 _FRAME_TOL_MM = 0.01
 
 # CalculiX/Abaqus element-type prefixes that are real *volumetric* solid
@@ -967,6 +968,54 @@ class FreecadOperations:
                 "step_base64": step_base64,
             }
 
+    def _resolve_cad_input(self, input_file: str) -> str:
+        """Locate a CAD input, recovering a staged work-product file (FORGE-514).
+
+        ``twin.stage_work_product_file`` writes to
+        ``<work_dir>/_staged_work_products/<node_id>/<file>`` and that file is
+        never removed by meshing. Callers nevertheless re-derive other paths
+        from a mesh result (``<work_dir>/<stem>.inp`` -> ``<work_dir>/<stem>.step``)
+        or pass the bare node id, none of which exist. When the given path is
+        missing, look for the file (by basename, or by node id) under the
+        staging root and use it when the match is unambiguous; otherwise raise
+        an error naming the expected path and the staged candidates.
+        """
+        if Path(input_file).exists():
+            return input_file
+
+        staged_root = Path(self.work_dir) / "_staged_work_products"
+        name = Path(input_file).name
+        matches: list[Path] = []
+        if staged_root.is_dir():
+            node_dir = staged_root / name
+            if node_dir.is_dir():
+                matches = sorted(p for p in node_dir.iterdir() if p.suffix.lower() in _CAD_SUFFIXES)
+            elif Path(name).suffix:
+                matches = sorted(staged_root.glob(f"*/{name}"))
+            else:
+                matches = sorted(
+                    p for suffix in _CAD_SUFFIXES for p in staged_root.glob(f"*/{name}{suffix}")
+                )
+        if len(matches) == 1:
+            logger.warning(
+                "freecad_input_resolved_to_staged_file",
+                requested=input_file,
+                resolved=str(matches[0]),
+            )
+            return str(matches[0])
+
+        detail = (
+            f" Ambiguous staged candidates: {', '.join(str(m) for m in matches[:5])}."
+            if matches
+            else ""
+        )
+        raise FileNotFoundError(
+            f"CAD file not found: {input_file}. Expected the path returned by "
+            "twin.stage_work_product_file (under "
+            f"{staged_root}/<node_id>/<file>), which stays readable for repeated "
+            "meshes; re-run twin.stage_work_product_file if it is gone." + detail
+        )
+
     def generate_mesh(
         self,
         input_file: str,
@@ -1038,8 +1087,7 @@ class FreecadOperations:
         if gmsh_binary is None:
             raise RuntimeError("gmsh binary is not available on PATH")
 
-        if not Path(input_file).exists():
-            raise FileNotFoundError(f"CAD file not found: {input_file}")
+        input_file = self._resolve_cad_input(input_file)
 
         with tracer.start_as_current_span("freecad.mesh") as span:
             span.set_attribute("input.file", input_file)
