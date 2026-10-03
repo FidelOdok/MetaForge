@@ -621,6 +621,19 @@ class TestStatefulAuthoring:
         s._ops = ops  # type: ignore[assignment]
         return s
 
+    async def test_create_body_result_names_the_body_and_next_step(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """FORGE-501: the result must say the body exists and how to sketch on it."""
+        s = authoring_server
+        sid = (await s.open_session({"name": "widget"}))["session_id"]
+        body = await s.create_body({"session_id": sid, "name": "Bracket"})
+        assert body["body_id"] == body["obj_id"]
+        assert body["label"] == "Bracket"
+        assert f"body_id='{body['obj_id']}'" in body["message"]
+        assert "create_sketch" in body["message"]
+        assert "Do NOT call create_body again" in body["message"]
+
     async def test_full_authoring_flow(self, authoring_server: FreecadServer) -> None:
         s = authoring_server
         sid = (await s.open_session({"name": "widget"}))["session_id"]

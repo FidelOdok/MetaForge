@@ -253,6 +253,8 @@ class MechanicalDesignHandler(_BridgeHandler):
             project_id=context.project_id,
             session_id=context.session_id,
             extra_metadata={"material": _MATERIAL, "load_case_N": _LOAD_N},
+            # FORGE-501: no stored blob means an unloadable cad_model; fail the phase.
+            require_blob_store=True,
         )
         node_id = rec.get("node_id") if isinstance(rec, dict) else None
         await self._record_decision(
@@ -408,6 +410,8 @@ class GoalDrivenMechanicalHandler(_BridgeHandler):
                 "kind": spec["kind"],
                 "dimensions_mm": dict(zip("xyz", _spec_extents(spec), strict=True)),
             },
+            # FORGE-501: no stored blob means an unloadable cad_model; fail the phase.
+            require_blob_store=True,
         )
         node_id = rec.get("node_id") if isinstance(rec, dict) else None
         dims = ", ".join(f"{k}={v:g}mm" for k, v in spec["parameters"].items())

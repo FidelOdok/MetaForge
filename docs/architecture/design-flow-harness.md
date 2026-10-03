@@ -410,6 +410,38 @@ the same way (`GateCoordinator.note_rework`), so the two engines stay at parity.
 There is still no MCP tool for this: like approve and retry, only a human answers
 a gate.
 
+## Phase step budget, blob storage and tool visibility (FORGE-501)
+
+**Step budget.** Each native phase has its own tool-use budget instead of one
+hard-coded 24. A phase whose required or expected deliverables include
+`cad_model` or `simulation_result` is "heavy" and gets a larger budget, because
+building several sketch-based parts takes many CAD calls.
+
+| Variable | Default | Applies to |
+|----------|---------|-----------|
+| `METAFORGE_FLOW_PHASE_MAX_STEPS` | `24` | every other phase |
+| `METAFORGE_FLOW_PHASE_MAX_STEPS_HEAVY` | `60` | phases that need `cad_model` / `simulation_result` |
+
+An invalid or non-positive value falls back to the default with a
+`flow_phase_budget_env_invalid` warning. The budget is logged per phase in
+`design_flow_brain_phase` (`max_steps`, `heavy`), and a phase that runs out
+logs `design_flow_phase_exhausted` and ends its summary with the budget it used.
+
+**Blob storage in the worker.** `design-flow-worker` carries the same `MINIO_*`
+variables as `gateway` (a test keeps them in step). The deterministic commit
+paths, `GoalDrivenMechanicalHandler` and `MechanicalDesignHandler`, call the
+geometry recorder with `require_blob_store=True`: if the STEP blob cannot be
+stored, the commit raises and the phase reports the failure instead of creating
+a `cad_model` with no stored geometry. The optional path is unchanged:
+`twin.commit_geometry` called over MCP and the `/v1/twin/import` route still keep
+the node and log `geometry_blob_store_skipped` when storage is down.
+
+**Tool visibility.** Every `search_tools` call logs `search_tools_query` with the
+query and the tools it registered, found already available, or could not
+register, so a phase hunting for a missing tool shows up in the logs.
+`freecad.create_body` and `freecad.create_sketch` now return the body or sketch
+id, its label, and the next call to make, so a phase does not re-create the body.
+
 ## Constraint-as-gate-criteria (MET-583)
 
 Gate *criteria* were previously prose shown to the approver but never

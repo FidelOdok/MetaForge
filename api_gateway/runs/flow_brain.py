@@ -12,6 +12,8 @@ the MCP bridge; the executor it plugs into stays pure in ``orchestrator``.
 
 from __future__ import annotations
 
+import os
+
 import structlog
 
 from api_gateway.chat.harness_backend import design_flow_approval_timeout_seconds, run_chat_turn
@@ -159,10 +161,54 @@ def deliverable_hints(pid: str) -> dict[str, str]:
     }
 
 
+#: FORGE-501: per-phase tool-use budget. A phase building several sketch-based
+#: parts ran out of the old hard-coded 24 before committing a cad_model.
+DEFAULT_PHASE_MAX_STEPS = 24
+DEFAULT_PHASE_MAX_STEPS_HEAVY = 60
+#: Deliverables whose authoring is a long chain of CAD/solver calls.
+HEAVY_DELIVERABLES = frozenset({"cad_model", "simulation_result"})
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("flow_phase_budget_env_invalid", var=name, value=raw)
+        return default
+    if value < 1:
+        logger.warning("flow_phase_budget_env_invalid", var=name, value=raw)
+        return default
+    return value
+
+
+def phase_is_heavy(phase: Phase) -> bool:
+    """True when the phase must or may produce a cad_model or simulation_result."""
+    wanted = {*phase.required_deliverables, *phase.expected_artifacts}
+    return bool(wanted & HEAVY_DELIVERABLES)
+
+
+def phase_step_budget(phase: Phase, override: int | None = None) -> int:
+    """The tool-use budget for ``phase``.
+
+    An explicit ``override`` (constructor ``max_steps``) wins. Otherwise
+    ``METAFORGE_FLOW_PHASE_MAX_STEPS_HEAVY`` (default 60) for heavy phases and
+    ``METAFORGE_FLOW_PHASE_MAX_STEPS`` (default 24) for the rest.
+    """
+    if override is not None:
+        return override
+    if phase_is_heavy(phase):
+        return _env_int("METAFORGE_FLOW_PHASE_MAX_STEPS_HEAVY", DEFAULT_PHASE_MAX_STEPS_HEAVY)
+    return _env_int("METAFORGE_FLOW_PHASE_MAX_STEPS", DEFAULT_PHASE_MAX_STEPS)
+
+
 class ReActPhaseBrain:
     """A :class:`~orchestrator.design_flow.executor.PhaseBrain` backed by ReAct.
 
-    ``max_steps`` bounds the tool-use budget per phase; ``provider``/``model``
+    ``max_steps`` pins the tool-use budget for every phase; left unset the
+    budget is per phase (:func:`phase_step_budget`). ``provider``/``model``
     override the env defaults (else the gateway's configured LLM is used).
     """
 
@@ -171,7 +217,7 @@ class ReActPhaseBrain:
         *,
         mcp_bridge: McpBridge | None,
         session_id: str = "design-flow",
-        max_steps: int = 24,
+        max_steps: int | None = None,
         provider: str | None = None,
         model: str | None = None,
     ) -> None:
@@ -248,12 +294,19 @@ class ReActPhaseBrain:
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
         prompt = self._prompt(goal, phase, context)
-        logger.info("design_flow_brain_phase", phase=phase.id, project_id=context.project_id)
+        budget = phase_step_budget(phase, self._max_steps)
+        logger.info(
+            "design_flow_brain_phase",
+            phase=phase.id,
+            project_id=context.project_id,
+            max_steps=budget,
+            heavy=phase_is_heavy(phase),
+        )
         summary = await run_chat_turn(
             prompt,
             mcp_bridge=self._bridge,
             session_id=f"{self._session_id}:{phase.id}",
-            max_steps=self._max_steps,
+            max_steps=budget,
             provider=self._provider,
             model=self._model,
             metrics=get_metrics(),
@@ -280,6 +333,9 @@ class ReActPhaseBrain:
         )
         # run_chat_turn returns a fallback sentence when the loop doesn't converge.
         status = "exhausted" if summary.startswith("I couldn't converge") else "completed"
+        if status == "exhausted":
+            summary = f"{summary} (phase '{phase.id}' used its full budget of {budget} steps.)"
+            logger.warning("design_flow_phase_exhausted", phase=phase.id, max_steps=budget)
         await self._backstop_decision(phase, context, summary)
         return PhaseOutcome(summary=summary, artifacts=[], status=status)
 

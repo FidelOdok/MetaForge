@@ -473,6 +473,14 @@ services:
       # and the failure shows as outcome="failed" on the announce metric.
       - METAFORGE_GATEWAY_URL=${METAFORGE_GATEWAY_URL:-http://gateway:8000}
       - METAFORGE_GATEWAY_API_KEY=${METAFORGE_GATEWAY_API_KEY:-}
+      # FORGE-501: the worker's deterministic fallback commit (geometry
+      # recorder) stores the STEP blob in MinIO. Without these a cad_model was
+      # created with no stored geometry. Same names and defaults as `gateway`.
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
       # FORGE-487: the service credential that lets the sidecar tell this
       # worker from a plugin client, so a phase's writes inside an approved,
       # running flow are not each held for a dashboard click. Shared with
