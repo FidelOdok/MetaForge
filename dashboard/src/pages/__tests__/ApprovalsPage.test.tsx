@@ -29,7 +29,7 @@ const mockUsePendingToolApprovals = vi.mocked(usePendingToolApprovals);
 const mockUseRuns = vi.mocked(useRuns);
 
 beforeEach(() => {
-  mockUseRuns.mockReturnValue({ data: [], isLoading: false, isError: false } as unknown as ReturnType<typeof useRuns>);
+  mockUseRuns.mockReturnValue({ data: { runs: [], unscopedCount: 0 }, isLoading: false, isError: false } as unknown as ReturnType<typeof useRuns>);
 });
 
 describe('ApprovalsPage', () => {
@@ -123,10 +123,13 @@ describe('ApprovalsPage', () => {
   it('lists runs paused at an approval gate, linking to the run', () => {
     mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
     mockUseRuns.mockReturnValue({
-      data: [
-        { id: 'run_gate', status: 'awaiting_approval', request: { goal: 'lift 2 kg' }, createdAt: 0, updatedAt: 0, approvalReason: 'Requirements sign-off', history: [] },
-        { id: 'run_done', status: 'completed', request: { goal: 'finished run' }, createdAt: 0, updatedAt: 0, history: [] },
-      ],
+      data: {
+        runs: [
+          { id: 'run_gate', status: 'awaiting_approval', request: { goal: 'lift 2 kg' }, createdAt: 0, updatedAt: 0, approvalReason: 'Requirements sign-off', history: [] },
+          { id: 'run_done', status: 'completed', request: { goal: 'finished run' }, createdAt: 0, updatedAt: 0, history: [] },
+        ],
+        unscopedCount: 0,
+      },
       isLoading: false,
       isError: false,
     } as unknown as ReturnType<typeof useRuns>);
@@ -141,5 +144,49 @@ describe('ApprovalsPage', () => {
     mockUseRuns.mockReturnValue({ data: undefined, isLoading: false, isError: true } as unknown as ReturnType<typeof useRuns>);
     render(<ApprovalsPage />);
     expect(screen.getByText(/Run gates could not be loaded/)).toBeInTheDocument();
+  });
+});
+
+describe('ApprovalsPage project scoping', () => {
+  it('scopes both queues to the active project', () => {
+    // Three data sources feed this page. Proposals were already scoped;
+    // the run gates and the held tool calls were not, so a reviewer saw
+    // every project's work in one list -- and a held write names a tool and
+    // a caller, not a product, so the rows gave no way to tell them apart.
+    mockUseProposals.mockReturnValue({
+      data: { proposals: [], total: 0 },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useProposals>);
+    mockUseRuns.mockReturnValue({
+      data: { runs: [], unscopedCount: 0 },
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useRuns>);
+    render(<ApprovalsPage />);
+    // `undefined` here, not a project id: the shared test harness has no
+    // project selected. What matters is that the value is threaded through
+    // at all rather than the hook being called bare.
+    expect(mockUseRuns).toHaveBeenCalledWith(undefined);
+    expect(mockUsePendingToolApprovals).toHaveBeenCalledWith(undefined);
+  });
+
+  it('says how many run gates were hidden for having no project', () => {
+    mockUseProposals.mockReturnValue({
+      data: { proposals: [], total: 0 },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useProposals>);
+    mockUseRuns.mockReturnValue({
+      data: {
+        runs: [
+          { id: 'run_gate', status: 'awaiting_approval', request: { goal: 'lift 2 kg' }, createdAt: 0, updatedAt: 0, history: [] },
+        ],
+        unscopedCount: 3,
+      },
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useRuns>);
+    render(<ApprovalsPage />);
+    const notes = screen.getAllByTestId('run-gates-unscoped');
+    expect(notes[0]).toHaveTextContent('3 runs not shown');
   });
 });

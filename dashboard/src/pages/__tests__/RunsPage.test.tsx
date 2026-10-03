@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../test/test-utils';
 import type { HarnessRun } from '../../types/run';
@@ -7,10 +7,26 @@ vi.mock('../../hooks/use-runs', () => ({
   useRuns: vi.fn(),
 }));
 
+vi.mock('../../hooks/use-active-project', () => ({
+  useActiveProject: vi.fn(),
+}));
+
 import { RunsPage } from '../RunsPage';
 import { useRuns } from '../../hooks/use-runs';
+import { useActiveProject } from '../../hooks/use-active-project';
 
 const mockUseRuns = vi.mocked(useRuns);
+const mockActiveProject = vi.mocked(useActiveProject);
+
+const PROJECT = '11111111-1111-1111-1111-111111111111';
+
+beforeEach(() => {
+  // Default: no project selected, which is the pre-existing behaviour every
+  // test below was written against.
+  mockActiveProject.mockReturnValue({ activeProjectId: null } as unknown as ReturnType<
+    typeof useActiveProject
+  >);
+});
 
 const RUNNING_RUN: HarnessRun = {
   id: 'run_1',
@@ -30,8 +46,17 @@ const DONE_RUN: HarnessRun = {
   history: ['queued', 'running', 'completed'],
 };
 
-function mockRuns(value: Partial<ReturnType<typeof useRuns>>) {
-  mockUseRuns.mockReturnValue({ refetch: vi.fn(), isFetching: false, ...value } as unknown as ReturnType<typeof useRuns>);
+/** `useRuns` now returns `{ runs, unscopedCount }` rather than a bare array.
+ *  Tests pass the array they care about and this wraps it, so a shape change
+ *  stays in one place instead of being spelled out at every call site. */
+function mockRuns(value: { data?: HarnessRun[]; isLoading?: boolean; isError?: boolean }) {
+  const { data, ...rest } = value;
+  mockUseRuns.mockReturnValue({
+    refetch: vi.fn(),
+    isFetching: false,
+    data: data === undefined ? undefined : { runs: data, unscopedCount: 0 },
+    ...rest,
+  } as unknown as ReturnType<typeof useRuns>);
 }
 
 describe('RunsPage', () => {
@@ -88,5 +113,49 @@ describe('RunsPage', () => {
 
     await user.selectOptions(screen.getByLabelText('Run status'), 'failed');
     expect(screen.getByText('No matching runs')).toBeInTheDocument();
+  });
+});
+
+describe('RunsPage project scoping', () => {
+  it('asks only for the active project\'s runs', () => {
+    mockActiveProject.mockReturnValue({ activeProjectId: PROJECT } as unknown as ReturnType<
+      typeof useActiveProject
+    >);
+    mockRuns({ data: [RUNNING_RUN], isLoading: false });
+    render(<RunsPage />);
+    // The whole bug: this page listed every project's runs in one table,
+    // and a run's project lived only inside its request blob.
+    expect(mockUseRuns).toHaveBeenCalledWith(PROJECT);
+  });
+
+  it('asks for everything when no project is selected', () => {
+    mockRuns({ data: [RUNNING_RUN], isLoading: false });
+    render(<RunsPage />);
+    expect(mockUseRuns).toHaveBeenCalledWith(undefined);
+  });
+
+  it('says how many runs were hidden for having no project', () => {
+    // The part that matters. Filtering them out silently is how a run
+    // disappears and the absence reads as "there are none" -- five of the
+    // seventeen runs on the dev gateway carry no project.
+    mockActiveProject.mockReturnValue({ activeProjectId: PROJECT } as unknown as ReturnType<
+      typeof useActiveProject
+    >);
+    mockUseRuns.mockReturnValue({
+      refetch: vi.fn(),
+      isFetching: false,
+      isLoading: false,
+      data: { runs: [RUNNING_RUN], unscopedCount: 5 },
+    } as unknown as ReturnType<typeof useRuns>);
+    render(<RunsPage />);
+    const note = screen.getByTestId('runs-unscoped');
+    expect(note).toHaveTextContent('5 runs not shown');
+    expect(note).toHaveTextContent('no project recorded');
+  });
+
+  it('says nothing when nothing is hidden', () => {
+    mockRuns({ data: [RUNNING_RUN], isLoading: false });
+    render(<RunsPage />);
+    expect(screen.queryByTestId('runs-unscoped')).not.toBeInTheDocument();
   });
 });

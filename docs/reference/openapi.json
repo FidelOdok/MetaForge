@@ -7754,6 +7754,11 @@
             },
             "title": "Runs",
             "type": "array"
+          },
+          "unscoped_count": {
+            "default": 0,
+            "title": "Unscoped Count",
+            "type": "integer"
           }
         },
         "required": [
@@ -7861,6 +7866,17 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
           },
           "request": {
             "additionalProperties": true,
@@ -12474,7 +12490,7 @@
     },
     "/v1/chat/tool_approvals": {
       "get": {
-        "description": "Tool-call approvals: the ones awaiting a decision, or every one.\n\nOverdue holds are expired first, so nothing listed as pending is a call\nwhose waiter has already given up (FORGE-466). ``status=all`` is the audit\nview (FORGE-473): every entry whichever route answered it, each carrying\nits ``route``, outcome and approver.",
+        "description": "Tool-call approvals: the ones awaiting a decision, or every one.\n\nOverdue holds are expired first, so nothing listed as pending is a call\nwhose waiter has already given up (FORGE-466). ``status=all`` is the audit\nview (FORGE-473): every entry whichever route answered it, each carrying\nits ``route``, outcome and approver.\n\n``project_id`` scopes the queue. Unscoped before, so a reviewer working\non one project saw every project's held writes in one list -- and a held\nwrite names a tool and a caller, not a product, so there was no way to\ntell from the row which one it belonged to. Approvals whose tool call\ncarried no project are counted rather than dropped: an approval that\nquietly disappears is the one nobody answers.",
         "operationId": "list_pending_approvals_v1_chat_tool_approvals_get",
         "parameters": [
           {
@@ -12489,6 +12505,22 @@
               ],
               "title": "Status",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
             }
           }
         ],
@@ -15646,7 +15678,26 @@
     },
     "/v1/runs": {
       "get": {
+        "description": "Every run, or one project's.\n\nUnfiltered before: `/runs` showed every project's work in one list, and\nthe project a run belonged to was only inside its request blob. Passing\n``project_id`` scopes it; the response says how many runs were left out\nfor having no project, so they do not simply vanish.",
         "operationId": "list_runs_v1_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -15657,6 +15708,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Runs",

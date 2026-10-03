@@ -69,6 +69,15 @@ class RunResponse(BaseModel):
     #: Token and cost totals for the run, overall and per phase, role and model
     #: (FORGE-476). ``None`` when no model call has been recorded for it.
     usage: dict[str, Any] | None = None
+    #: Which project this run belongs to, promoted out of ``request``.
+    #:
+    #: It was only ever inside the request blob, so `/runs` and the approvals
+    #: queue listed every project's work together and a client had to dig
+    #: through an untyped dict to tell them apart. ``None`` is a real answer
+    #: and not a gap: a run can genuinely have no project (12 of 17 on the
+    #: dev gateway carried one), and those must stay visible rather than
+    #: disappear the moment a project is selected.
+    project_id: str | None = None
 
     @classmethod
     def from_run(cls, run: Run) -> RunResponse:
@@ -88,10 +97,49 @@ class RunResponse(BaseModel):
             engine=_optional_str(run.request.get("flow_engine")),
             flow_version_id=_optional_str(run.request.get("flow_version_id")),
             flow_content_hash=_optional_str(run.request.get("flow_content_hash")),
+            project_id=project_of(run.request),
         )
+
+
+def project_of(request: dict[str, Any]) -> str | None:
+    """The project a run belongs to, wherever the caller put it.
+
+    Two shapes in practice: a design-flow run carries ``project_id`` at the
+    top of its request, and a held tool call carries the tool's own
+    ``arguments.project_id``. Both are the same fact, so both resolve here
+    rather than at each call site.
+    """
+    direct = request.get("project_id")
+    if isinstance(direct, str) and direct:
+        return direct
+    arguments = request.get("arguments")
+    if isinstance(arguments, dict):
+        nested = arguments.get("project_id")
+        if isinstance(nested, str) and nested:
+            return nested
+    return None
+
+
+def filter_by_project(runs: list[Run], project_id: str | None) -> tuple[list[Run], int]:
+    """Runs for one project, and how many carry no project at all.
+
+    The count is returned rather than folded in, because the alternative --
+    silently dropping unscoped runs once a project is selected -- is the
+    failure this codebase keeps producing: something disappears and the
+    absence reads as "there are none" rather than "these are hidden".
+    """
+    if not project_id:
+        return runs, 0
+    matching = [r for r in runs if project_of(r.request) == project_id]
+    unscoped = sum(1 for r in runs if project_of(r.request) is None)
+    return matching, unscoped
 
 
 class RunListResponse(BaseModel):
     """Body for ``GET /v1/runs``."""
 
     runs: list[RunResponse]
+    #: How many runs were left out because they carry no project, when the
+    #: list was scoped to one. Zero on an unscoped listing. The dashboard
+    #: says so rather than letting them vanish.
+    unscoped_count: int = 0

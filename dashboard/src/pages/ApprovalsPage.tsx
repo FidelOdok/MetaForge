@@ -12,15 +12,19 @@ import type { Proposal } from '../api/endpoints/assistant';
 import type { ToolApprovalRun } from '../api/endpoints/toolApprovals';
 
 // ─── Run approval gates (design-flow runs paused at a gate) ──────────────────
-function RunGatesQueue() {
-  const runs = useRuns();
-  const awaiting = (runs.data ?? []).filter((r) => r.status === 'awaiting_approval');
+function RunGatesQueue({ projectId }: { projectId?: string }) {
+  const runs = useRuns(projectId);
+  const awaiting = (runs.data?.runs ?? []).filter((r) => r.status === 'awaiting_approval');
+  // Runs with no project are filtered out server-side when a project is
+  // selected. Said out loud rather than left as a shorter list: a gate that
+  // silently disappears is a gate nobody answers.
+  const unscoped = runs.data?.unscopedCount ?? 0;
 
   return (
     <section className="context-panel run-review-queue" aria-labelledby="run-gates-heading">
       <div className="section-heading">
         <h2 id="run-gates-heading">Run approval gates</h2>
-        <span className="eyebrow">ALL PROJECTS</span>
+        <span className="eyebrow">{projectId ? 'THIS PROJECT' : 'ALL PROJECTS'}</span>
       </div>
       {runs.isLoading ? (
         <p className="review-queue-message" role="status">
@@ -32,6 +36,11 @@ function RunGatesQueue() {
         </p>
       ) : awaiting.length ? (
         <div className="review-list">
+          {unscoped > 0 && (
+            <p className="review-queue-message" role="status" data-testid="run-gates-unscoped">
+              {unscoped} run{unscoped === 1 ? '' : 's'} not shown: no project recorded.
+            </p>
+          )}
           {awaiting.map((run) => (
             <Link key={run.id} to={`/runs/${run.id}`}>
               <strong>{String(run.request.goal ?? run.id)}</strong>
@@ -381,7 +390,10 @@ function ToolApprovalCard({ approval }: { approval: ToolApprovalRun }) {
 export function ApprovalsPage() {
   const { activeProjectId } = useActiveProject();
   const { data, isLoading, isError } = useProposals(activeProjectId ?? undefined);
-  const { data: toolApprovalsData } = usePendingToolApprovals();
+  // Scoped like the proposals above it. A held write names a tool and a
+  // caller, not a product, so an unscoped queue gave a reviewer no way to
+  // tell which project a row belonged to.
+  const { data: toolApprovalsData } = usePendingToolApprovals(activeProjectId ?? undefined);
   const pendingToolApprovals = toolApprovalsData?.runs ?? [];
 
   if (isError) {
@@ -393,7 +405,7 @@ export function ApprovalsPage() {
             <h1>Approvals.</h1>
           </div>
         </div>
-        <RunGatesQueue />
+        <RunGatesQueue projectId={activeProjectId ?? undefined} />
         {/* Tool calls come from a separate endpoint; a paused chat turn is
             still actionable even when proposals fail to load. */}
         {pendingToolApprovals.length > 0 && (
@@ -469,7 +481,7 @@ export function ApprovalsPage() {
         </div>
       </div>
 
-      <RunGatesQueue />
+      <RunGatesQueue projectId={activeProjectId ?? undefined} />
 
       {/* ── 3-column regime cards ────────────────────────────────────────── */}
       <div

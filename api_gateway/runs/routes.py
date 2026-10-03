@@ -29,6 +29,7 @@ from api_gateway.runs.schemas import (
     CreateRunRequest,
     RunListResponse,
     RunResponse,
+    filter_by_project,
 )
 from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
 from observability.metrics import MetricsCollector
@@ -835,10 +836,18 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
 
 
 @router.get("", response_model=RunListResponse)
-async def list_runs() -> RunListResponse:
+async def list_runs(project_id: str | None = None) -> RunListResponse:
+    """Every run, or one project's.
+
+    Unfiltered before: `/runs` showed every project's work in one list, and
+    the project a run belonged to was only inside its request blob. Passing
+    ``project_id`` scopes it; the response says how many runs were left out
+    for having no project, so they do not simply vanish.
+    """
     for run in list(_store.list()):
         await _reconcile_run(run)
-    return RunListResponse(runs=[RunResponse.from_run(r) for r in _store.list()])
+    runs, unscoped = filter_by_project(list(_store.list()), project_id)
+    return RunListResponse(runs=[RunResponse.from_run(r) for r in runs], unscoped_count=unscoped)
 
 
 @router.get("/usage/summary")
