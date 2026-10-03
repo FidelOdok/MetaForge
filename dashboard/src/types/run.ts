@@ -11,8 +11,6 @@ export type RunStatus =
   // FORGE-466: an approval whose waiter stopped waiting before anyone answered.
   | 'timed_out';
 
-export type ApprovalDecision = 'approve' | 'reject';
-
 export interface HarnessRun {
   id: string;
   status: RunStatus;

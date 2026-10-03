@@ -1,192 +1,111 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../test/test-utils';
 
-vi.mock('../../hooks/use-assistant', () => ({
-  useProposals: vi.fn(),
-  useDecideProposal: () => ({ mutate: vi.fn(), isPending: false }),
-}));
-
-// FORGE-33: real network call otherwise (getPendingToolApprovals hits
-// /chat/tool_approvals) — same hermetic-mock treatment as use-assistant above.
-// Defaults to an empty pending list so tests that don't care about this
-// panel (most of them) don't need their own mockReturnValue.
-vi.mock('../../hooks/use-tool-approvals', () => ({
-  usePendingToolApprovals: vi.fn(() => ({ data: { runs: [] } })),
-  useDecideToolApproval: () => ({ mutate: vi.fn(), isPending: false }),
-}));
-
-vi.mock('../../hooks/use-runs', () => ({
-  useRuns: vi.fn(),
+vi.mock('../../hooks/use-approvals', () => ({
+  useApprovals: vi.fn(),
+  useDecideApproval: () => ({ mutate: vi.fn(), isPending: false, isError: false, reset: vi.fn(), error: null }),
 }));
 
 import { ApprovalsPage } from '../ApprovalsPage';
-import { useRuns } from '../../hooks/use-runs';
-import { useProposals } from '../../hooks/use-assistant';
-import { usePendingToolApprovals } from '../../hooks/use-tool-approvals';
+import { useApprovals } from '../../hooks/use-approvals';
+import { makeApproval } from '../../test/approval-fixtures';
 
-const mockUseProposals = vi.mocked(useProposals);
-const mockUsePendingToolApprovals = vi.mocked(usePendingToolApprovals);
-const mockUseRuns = vi.mocked(useRuns);
+const mockUseApprovals = vi.mocked(useApprovals);
+
+function mockList(value: Record<string, unknown>) {
+  mockUseApprovals.mockReturnValue(value as unknown as ReturnType<typeof useApprovals>);
+}
 
 beforeEach(() => {
-  mockUseRuns.mockReturnValue({ data: { runs: [], unscopedCount: 0 }, isLoading: false, isError: false } as unknown as ReturnType<typeof useRuns>);
+  mockUseApprovals.mockReset();
+  mockList({ data: { items: [], unscopedCount: 0 }, isLoading: false, isError: false });
 });
 
 describe('ApprovalsPage', () => {
   it('shows loading state', () => {
-    mockUseProposals.mockReturnValue({ data: undefined, isLoading: true } as unknown as ReturnType<typeof useProposals>);
+    mockList({ data: undefined, isLoading: true, isError: false });
     const { container } = render(<ApprovalsPage />);
-    // KC renders animate-pulse skeleton divs (no data-testid)
     expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
   });
 
   it('shows empty state', () => {
-    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
     render(<ApprovalsPage />);
-    expect(screen.getByText('No pending proposals')).toBeInTheDocument();
+    expect(screen.getByText('Nothing awaiting approval')).toBeInTheDocument();
   });
 
-  it('does not render static/fabricated gate content unrelated to real proposal data', () => {
-    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
+  it('shows an error state', () => {
+    mockList({ data: undefined, isLoading: false, isError: true });
     render(<ApprovalsPage />);
-    // These used to be hardcoded regardless of the real (zero) counts above them.
-    expect(screen.queryByText('AT-RISK')).not.toBeInTheDocument();
-    expect(screen.queryByText('READY')).not.toBeInTheDocument();
-    expect(screen.queryByText('IN PROGRESS')).not.toBeInTheDocument();
-    expect(screen.queryByText('W3 Gate Check')).not.toBeInTheDocument();
-    expect(screen.queryByText('CHECKLIST')).not.toBeInTheDocument();
-    expect(screen.queryByText('Design review sign-off')).not.toBeInTheDocument();
-    expect(screen.queryByText('P9')).not.toBeInTheDocument();
+    expect(screen.getByText('Approvals could not be loaded')).toBeInTheDocument();
   });
 
-  it('FORGE-33: shows empty state for pending tool calls by default', () => {
-    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
-    render(<ApprovalsPage />);
-    expect(screen.getByText('No tool calls awaiting approval')).toBeInTheDocument();
-  });
-
-  it('FORGE-33: renders a pending tool call awaiting approval', () => {
-    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
-    mockUsePendingToolApprovals.mockReturnValue({
+  it('renders every kind through one card', () => {
+    mockList({
       data: {
-        runs: [{
-          id: 'run_1',
-          status: 'awaiting_approval',
-          request: { tool: 'mcp_twin_commit_geometry', arguments: { name: 'leg bracket' } },
-          created_at: Date.now() / 1000,
-          updated_at: Date.now() / 1000,
-          error: null,
-          approval_reason: "approval required for tool 'mcp_twin_commit_geometry'",
-          result: null,
-          history: ['queued', 'running', 'awaiting_approval'],
-        }],
-      },
-    } as unknown as ReturnType<typeof usePendingToolApprovals>);
-    render(<ApprovalsPage />);
-    expect(screen.getByText('mcp_twin_commit_geometry')).toBeInTheDocument();
-    expect(screen.getByText(/leg bracket/)).toBeInTheDocument();
-    expect(screen.queryByText('No tool calls awaiting approval')).not.toBeInTheDocument();
-  });
-
-  it('renders proposals', () => {
-    mockUsePendingToolApprovals.mockReturnValue({ data: { runs: [] } } as unknown as ReturnType<typeof usePendingToolApprovals>);
-    mockUseProposals.mockReturnValue({
-      data: {
-        proposals: [{
-          change_id: 'c1',
-          agent_code: 'MECH',
-          description: 'Update stress report',
-          diff: {},
-          work_products_affected: [],
-          status: 'pending',
-          session_id: 's1',
-          created_at: new Date().toISOString(),
-          decided_at: null,
-          decision_reason: null,
-          reviewer: null,
-        }],
-        total: 1,
-      },
-      isLoading: false,
-    } as unknown as ReturnType<typeof useProposals>);
-    render(<ApprovalsPage />);
-    expect(screen.getByText('Update stress report')).toBeInTheDocument();
-  });
-
-  it('shows an error state when proposals cannot be loaded', () => {
-    mockUseProposals.mockReturnValue({ data: undefined, isLoading: false, isError: true } as unknown as ReturnType<typeof useProposals>);
-    render(<ApprovalsPage />);
-    expect(screen.getByText('Proposals could not be loaded')).toBeInTheDocument();
-    expect(screen.getByText('Run approval gates')).toBeInTheDocument();
-  });
-
-  it('lists runs paused at an approval gate, linking to the run', () => {
-    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
-    mockUseRuns.mockReturnValue({
-      data: {
-        runs: [
-          { id: 'run_gate', status: 'awaiting_approval', request: { goal: 'lift 2 kg' }, createdAt: 0, updatedAt: 0, approvalReason: 'Requirements sign-off', history: [] },
-          { id: 'run_done', status: 'completed', request: { goal: 'finished run' }, createdAt: 0, updatedAt: 0, history: [] },
+        items: [
+          makeApproval(),
+          makeApproval({ id: 'tool:run_d', kind: 'tool_call', title: 'Held write', allowed_decisions: ['approve', 'reject'], detail: { tool: 'project.delete', arguments: {} } }),
+          makeApproval({ id: 'change:1', kind: 'design_change', title: 'Widen rib', detail: { diff: {}, affected: [] } }),
         ],
         unscopedCount: 0,
       },
       isLoading: false,
       isError: false,
-    } as unknown as ReturnType<typeof useRuns>);
+    });
     render(<ApprovalsPage />);
-    expect(screen.getByText('lift 2 kg').closest('a')).toHaveAttribute('href', '/runs/run_gate');
-    expect(screen.getByText('Requirements sign-off')).toBeInTheDocument();
-    expect(screen.queryByText('finished run')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('approval-card')).toHaveLength(3);
+    expect(screen.getByText('Held write')).toBeInTheDocument();
+    expect(screen.getByText('Widen rib')).toBeInTheDocument();
   });
 
-  it('reports when run gates cannot be loaded', () => {
-    mockUseProposals.mockReturnValue({ data: { proposals: [], total: 0 }, isLoading: false } as unknown as ReturnType<typeof useProposals>);
-    mockUseRuns.mockReturnValue({ data: undefined, isLoading: false, isError: true } as unknown as ReturnType<typeof useRuns>);
+  it('reports items hidden for having no project', () => {
+    mockList({ data: { items: [], unscopedCount: 2 }, isLoading: false, isError: false });
     render(<ApprovalsPage />);
-    expect(screen.getByText(/Run gates could not be loaded/)).toBeInTheDocument();
-  });
-});
-
-describe('ApprovalsPage project scoping', () => {
-  it('scopes both queues to the active project', () => {
-    // Three data sources feed this page. Proposals were already scoped;
-    // the run gates and the held tool calls were not, so a reviewer saw
-    // every project's work in one list -- and a held write names a tool and
-    // a caller, not a product, so the rows gave no way to tell them apart.
-    mockUseProposals.mockReturnValue({
-      data: { proposals: [], total: 0 },
-      isLoading: false,
-    } as unknown as ReturnType<typeof useProposals>);
-    mockUseRuns.mockReturnValue({
-      data: { runs: [], unscopedCount: 0 },
-      isLoading: false,
-      isError: false,
-    } as unknown as ReturnType<typeof useRuns>);
-    render(<ApprovalsPage />);
-    // `undefined` here, not a project id: the shared test harness has no
-    // project selected. What matters is that the value is threaded through
-    // at all rather than the hook being called bare.
-    expect(mockUseRuns).toHaveBeenCalledWith(undefined);
-    expect(mockUsePendingToolApprovals).toHaveBeenCalledWith(undefined);
+    expect(screen.getByTestId('approvals-unscoped')).toHaveTextContent('2 items not shown');
   });
 
-  it('says how many run gates were hidden for having no project', () => {
-    mockUseProposals.mockReturnValue({
-      data: { proposals: [], total: 0 },
-      isLoading: false,
-    } as unknown as ReturnType<typeof useProposals>);
-    mockUseRuns.mockReturnValue({
-      data: {
-        runs: [
-          { id: 'run_gate', status: 'awaiting_approval', request: { goal: 'lift 2 kg' }, createdAt: 0, updatedAt: 0, history: [] },
-        ],
-        unscopedCount: 3,
-      },
-      isLoading: false,
-      isError: false,
-    } as unknown as ReturnType<typeof useRuns>);
+  it('queries decided items on the Audit tab and shows who, surface and verification', async () => {
+    const user = userEvent.setup();
+    mockUseApprovals.mockImplementation(((f: { status?: string }) =>
+      f.status === 'decided'
+        ? {
+            data: {
+              items: [
+                makeApproval({
+                  status: 'approved',
+                  decision: {
+                    decision: 'approve',
+                    reason: 'looks good',
+                    approver: 'ada',
+                    approver_verified: true,
+                    surface: 'agent',
+                    on_behalf_of: 'grace',
+                    decided_at: '2026-10-03T11:00:00Z',
+                  },
+                }),
+              ],
+              unscopedCount: 0,
+            },
+            isLoading: false,
+            isError: false,
+          }
+        : { data: { items: [], unscopedCount: 0 }, isLoading: false, isError: false }) as unknown as typeof useApprovals);
     render(<ApprovalsPage />);
-    const notes = screen.getAllByTestId('run-gates-unscoped');
-    expect(notes[0]).toHaveTextContent('3 runs not shown');
+    await user.click(screen.getByRole('tab', { name: 'AUDIT' }));
+    expect(mockUseApprovals).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'decided' }));
+    const row = screen.getByTestId('audit-row');
+    expect(row).toHaveTextContent('ada');
+    expect(row).toHaveTextContent('agent');
+    expect(row).toHaveTextContent('grace');
+    expect(row).toHaveTextContent('verified');
+    expect(row).toHaveTextContent('approve: looks good');
+  });
+
+  it('passes the kind filter to the query', async () => {
+    const user = userEvent.setup();
+    render(<ApprovalsPage />);
+    await user.selectOptions(screen.getByLabelText('Filter by kind'), 'tool_call');
+    expect(mockUseApprovals).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'tool_call' }));
   });
 });

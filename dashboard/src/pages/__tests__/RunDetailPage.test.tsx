@@ -10,7 +10,13 @@ vi.mock('react-router-dom', async () => {
 
 vi.mock('../../hooks/use-runs', () => ({
   useRun: vi.fn(),
-  useSubmitApproval: vi.fn(),
+}));
+
+// The gate dialog reads the gate through the unified approvals API and decides
+// through the shared ApprovalCard.
+vi.mock('../../hooks/use-approvals', () => ({
+  useApproval: vi.fn(),
+  useDecideApproval: vi.fn(),
 }));
 
 // FORGE-395: the page reads the flow's display name from the gateway's
@@ -40,10 +46,13 @@ vi.mock('../../hooks/use-design-flows', () => ({
 }));
 
 import { RunDetailPage } from '../RunDetailPage';
-import { useRun, useSubmitApproval } from '../../hooks/use-runs';
+import { useRun } from '../../hooks/use-runs';
+import { useApproval, useDecideApproval } from '../../hooks/use-approvals';
+import { makeApproval } from '../../test/approval-fixtures';
 
 const mockUseRun = vi.mocked(useRun);
-const mockUseSubmitApproval = vi.mocked(useSubmitApproval);
+const mockUseApproval = vi.mocked(useApproval);
+const mockUseDecide = vi.mocked(useDecideApproval);
 const mutate = vi.fn();
 
 const PAUSED: HarnessRun = {
@@ -62,12 +71,17 @@ function mockRun(value: Partial<ReturnType<typeof useRun>>) {
 
 beforeEach(() => {
   mutate.mockReset();
-  mockUseSubmitApproval.mockReturnValue({
+  mockUseDecide.mockReturnValue({
     mutate,
     reset: vi.fn(),
     isPending: false,
     isError: false,
-  } as unknown as ReturnType<typeof useSubmitApproval>);
+    error: null,
+  } as unknown as ReturnType<typeof useDecideApproval>);
+  mockUseApproval.mockReturnValue({
+    data: makeApproval({ id: 'gate:run_1' }),
+    isError: false,
+  } as unknown as ReturnType<typeof useApproval>);
 });
 
 describe('RunDetailPage', () => {
@@ -107,9 +121,14 @@ describe('RunDetailPage', () => {
     mockRun({ data: PAUSED, isLoading: false });
     render(<RunDetailPage />);
     await user.click(screen.getByRole('button', { name: 'Review approval' }));
-    expect(screen.getByText('Approve this gate?')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Approve & continue' }));
-    expect(mutate).toHaveBeenCalledWith({ id: 'run_1', decision: 'approve' }, expect.any(Object));
+    expect(screen.getByText('Review this gate')).toBeInTheDocument();
+    expect(mockUseApproval).toHaveBeenCalledWith('gate:run_1', true);
+    await user.click(screen.getByRole('button', { name: /approve/i }));
+    await user.click(screen.getByRole('button', { name: 'Confirm approve' }));
+    expect(mutate).toHaveBeenCalledWith(
+      { id: 'gate:run_1', body: { decision: 'approve' } },
+      expect.any(Object),
+    );
   });
 
   it('renders phase results from a completed run', () => {
