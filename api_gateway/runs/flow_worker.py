@@ -297,6 +297,13 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
     two engines run identical phase logic and a difference between them is a
     difference in durability only — not in what the agent does.
     """
+    # FORGE-503: point the route modules at the real project store and twin
+    # before the brain is built. The design handler's cad_model probe reads
+    # the project store while the phase runs; after a worker restart the first
+    # activity is a phase, not a gate, so without this the probe read the empty
+    # in-memory default, saw no cad_model, and ran the fallback over a design
+    # the phase had committed.
+    await ensure_gate_stores()
     from api_gateway.runs.routes import build_phase_brain
     from orchestrator.design_flow.executor import FlowContext
     from orchestrator.design_flow.spec import Phase
