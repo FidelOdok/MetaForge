@@ -150,6 +150,10 @@ class ApprovalWorkflow:
             proposals = [p for p in proposals if p.project_id == project_id]
         return proposals
 
+    def list_proposals(self) -> list[DesignChangeProposal]:
+        """Every proposal, whatever its status (the unified approvals audit view)."""
+        return list(self._proposals.values())
+
     def get_proposal(self, change_id: UUID) -> DesignChangeProposal | None:
         """Return a single proposal by *change_id*, or ``None``."""
         return self._proposals.get(change_id)
@@ -160,6 +164,10 @@ class ApprovalWorkflow:
         decision: ApprovalDecisionType,
         reason: str,
         reviewer: str,
+        *,
+        reviewer_verified: bool = False,
+        surface: str | None = None,
+        on_behalf_of: str | None = None,
     ) -> DesignChangeProposal | None:
         """Record an approval or rejection for the given proposal.
 
@@ -190,6 +198,9 @@ class ApprovalWorkflow:
         proposal.decided_at = now
         proposal.decision_reason = reason
         proposal.reviewer = reviewer
+        proposal.reviewer_verified = reviewer_verified
+        proposal.decision_surface = surface
+        proposal.decision_on_behalf_of = on_behalf_of
 
         logger.info(
             "proposal_decided",

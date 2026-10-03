@@ -32,6 +32,7 @@ from api_gateway.runs.schemas import (
     filter_by_project,
 )
 from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
+from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
 from orchestrator.design_flow.frozen import freeze_flow
@@ -1235,6 +1236,48 @@ async def _refuse_undeliverable_decision(
         )
 
 
+async def gate_snapshot(run: Run) -> dict[str, Any] | None:
+    """What the gate a design-flow run is parked at reports about itself (FORGE-507).
+
+    ``ready``, ``retries_left``, ``reworks_left``, ``phase`` and ``findings``
+    (structured text the workflow built; empty on the in-process engine, whose
+    findings only exist inside the approval reason). ``None`` when the run is
+    not a design flow or the gate's state cannot be read: the caller then falls
+    back to the reason text and the decision routes' own guards.
+    """
+    if not _is_design_flow(run.request):
+        return None
+    if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+        state = _gate_coordinator.gate_state(run.id)
+        return None if state is None else {**state, "findings": []}
+    if resolve_flow_engine() is not FlowEngine.TEMPORAL:
+        return None
+    try:
+        launcher = await get_flow_launcher()
+        state = await asyncio.wait_for(launcher.state(run.id), _RECONCILE_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - a read must not fail because the engine is away
+        logger.info("approval_gate_snapshot_unavailable", run_id=run.id, error=str(exc))
+        return None
+    return {
+        "ready": state.get("gate_ready", True),
+        "retries_left": state.get("retries_left"),
+        "phase": state.get("current_phase"),
+        "reworks_left": state.get("reworks_left"),
+        "attempt": state.get("attempt"),
+        "findings": [str(f) for f in state.get("gate_findings") or []],
+    }
+
+
+def run_phase_ids(run: Run) -> list[str]:
+    """The ids of the phases of the flow ``run`` is on, in order (empty if unreadable)."""
+    definition = _run_definition(run)
+    return [p.id for p in definition.phases] if definition is not None else []
+
+
+def is_design_flow_run(run: Run) -> bool:
+    return _is_design_flow(run.request)
+
+
 @router.post("/{run_id}/approval", response_model=RunResponse)
 async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) -> RunResponse:
     """Answer the gate this run is parked at.
@@ -1249,8 +1292,29 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
 
     The deciding human comes from the request, never the body (FORGE-393).
     """
-    approver = approver_from_request(request)
-    decision = ApprovalDecision(body.decision)
+    run = await decide_run_gate(
+        run_id,
+        ApprovalDecision(body.decision),
+        approver_from_request(request),
+        reason=body.reason,
+        to_phase=body.to_phase,
+    )
+    return RunResponse.from_run(run)
+
+
+async def decide_run_gate(
+    run_id: str,
+    decision: ApprovalDecision,
+    approver: Approver,
+    *,
+    reason: str = "",
+    to_phase: str = "",
+) -> Run:
+    """Answer a design-flow gate. Shared by ``/v1/runs`` and ``/v1/approvals``.
+
+    Every refusal (404, 409, 422, 503) is raised as an ``HTTPException`` so the
+    two surfaces enforce identical rules from one body of code (FORGE-507).
+    """
     # FORGE-485: the workflow decides whether a gate is open, not the local
     # record. After a restart that record says `queued` while the workflow
     # waits, and refusing on it leaves a gate nobody can answer.
@@ -1258,11 +1322,11 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
         reconciled = await _reconcile_run(_store.get(run_id))
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
-    await _refuse_undeliverable_decision(reconciled, decision, body.to_phase)
+    await _refuse_undeliverable_decision(reconciled, decision, to_phase)
     if decision is ApprovalDecision.RETRY:
-        _gate_coordinator.note_retry(run_id, body.reason)
+        _gate_coordinator.note_retry(run_id, reason)
     elif decision is ApprovalDecision.REWORK:
-        _gate_coordinator.note_rework(run_id, body.to_phase, body.reason)
+        _gate_coordinator.note_rework(run_id, to_phase, reason)
     try:
         run = _store.submit_approval(
             run_id,
@@ -1284,13 +1348,13 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
         try:
             launcher = await get_flow_launcher()
             extra: dict[str, Any] = (
-                {"rework_to": body.to_phase} if decision is ApprovalDecision.REWORK else {}
+                {"rework_to": to_phase} if decision is ApprovalDecision.REWORK else {}
             )
             await launcher.answer_gate(
                 run_id,
                 approved=approved,
                 decided_by=approver.label,
-                comment=body.reason,
+                comment=reason,
                 retry=decision is ApprovalDecision.RETRY,
                 **extra,
             )
@@ -1318,8 +1382,8 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
     logger.info(
         "run_api_approval",
         run_id=run_id,
-        decision=body.decision,
+        decision=decision.value,
         decided_by=approver.actor_id,
         approver_verified=approver.verified,
     )
-    return RunResponse.from_run(run)
+    return run

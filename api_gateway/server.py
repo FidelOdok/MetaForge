@@ -16,6 +16,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api_gateway.approvals.routes import router as approvals_router
 from api_gateway.assistant.routes import router as assistant_router
 from api_gateway.auth import (
     AuthConfigurationError,
@@ -2059,6 +2060,7 @@ def create_app(
     app.include_router(projects_router)
     app.include_router(runs_router)
     app.include_router(tool_approvals_router)
+    app.include_router(approvals_router)
     app.include_router(cad_router)
     app.include_router(cad_export_router)
     app.include_router(robot_loads_router)

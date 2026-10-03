@@ -116,10 +116,17 @@ class ApproveDesignLoopRequest(BaseModel):
 
 @router.post("/{loop_id}/approve")
 async def approve_design_loop(loop_id: str, payload: ApproveDesignLoopRequest) -> dict[str, Any]:
+    return await approve_loop(loop_id, payload.approvedBy)
+
+
+async def approve_loop(
+    loop_id: str, approved_by: str, audit: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Approve a loop's winner. Shared with ``/v1/approvals`` (FORGE-507)."""
     from api_gateway.twin.design_loop import make_design_loop_approver
 
     approve = make_design_loop_approver(_twin)
     try:
-        return await approve(loop_id=loop_id, approved_by=payload.approvedBy)
+        return await approve(loop_id=loop_id, approved_by=approved_by, audit=audit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

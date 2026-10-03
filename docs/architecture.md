@@ -909,6 +909,10 @@ The Digital Twin is the single source of design truth — a versioned work_produ
 | Constraints | Cross-domain constraint engine with rule evaluation |
 | API | CRUD, query, version, and constraint operations |
 
+Human approvals of every kind (design-flow gates, held tool calls, change
+proposals, design-loop winners, sketches and drawings) are listed and decided
+through one API; see [Unified approvals API](approvals.md).
+
 ---
 
 ## 6. Data Flow

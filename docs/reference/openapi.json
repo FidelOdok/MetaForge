@@ -85,6 +85,216 @@
         "title": "ApprovalDecisionType",
         "type": "string"
       },
+      "ApprovalItem": {
+        "description": "One normalized approval, whatever it is about.",
+        "properties": {
+          "allowed_decisions": {
+            "items": {
+              "enum": [
+                "approve",
+                "reject",
+                "retry",
+                "rework"
+              ],
+              "type": "string"
+            },
+            "title": "Allowed Decisions",
+            "type": "array"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "decidable": {
+            "default": false,
+            "title": "Decidable",
+            "type": "boolean"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/GateFinding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "gate",
+              "flow_proposal",
+              "flow_version",
+              "tool_call",
+              "human_authority",
+              "design_change",
+              "design_loop",
+              "sketch",
+              "drawing"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "not_decidable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Decidable Reason"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "reason_held": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Held"
+          },
+          "reason_required_for": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Required For",
+            "type": "array"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "rework_targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rework Targets",
+            "type": "array"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "enum": [
+                  "dashboard",
+                  "elicitation"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired",
+              "canceled",
+              "retried",
+              "reworked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "title"
+        ],
+        "title": "ApprovalItem",
+        "type": "object"
+      },
+      "ApprovalListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "unscoped_count": {
+            "default": 0,
+            "title": "Unscoped Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ApprovalListResponse",
+        "type": "object"
+      },
       "ApprovalRequest": {
         "description": "Body for ``POST /v1/runs/{id}/approval``.",
         "properties": {
@@ -2176,6 +2386,107 @@
         "title": "CreateThreadRequest",
         "type": "object"
       },
+      "DecisionRecord": {
+        "description": "Who decided, and through what (FORGE-507).",
+        "properties": {
+          "approver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approver"
+          },
+          "approver_verified": {
+            "default": false,
+            "title": "Approver Verified",
+            "type": "boolean"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "on_behalf_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Behalf Of"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "surface": {
+            "default": "unknown",
+            "enum": [
+              "dashboard",
+              "cli",
+              "agent",
+              "unknown"
+            ],
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "DecisionRecord",
+        "type": "object"
+      },
+      "DecisionRequest": {
+        "additionalProperties": true,
+        "description": "Body for ``POST /v1/approvals/{id}/decision``.\n\n``reviewer`` and ``approved_by`` are accepted (older clients send them) and\nignored: the deciding human is the authenticated principal.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject",
+              "retry",
+              "rework"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          },
+          "to_phase": {
+            "default": "",
+            "maxLength": 200,
+            "title": "To Phase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "DecisionRequest",
+        "type": "object"
+      },
       "DeltaTransform": {
         "description": "Delta of a dragged group: translation (mm), or \u2014 additively, MET-611 \u2014\na single-axis rotation or scale. Exactly one kind is populated per request,\nmatching whichever gizmo mode produced it on the client.",
         "properties": {
@@ -2262,6 +2573,18 @@
             "description": "When the proposal was approved or rejected",
             "title": "Decided At"
           },
+          "decision_on_behalf_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For an agent decision, the human it acted for (FORGE-507)",
+            "title": "Decision On Behalf Of"
+          },
           "decision_reason": {
             "anyOf": [
               {
@@ -2273,6 +2596,18 @@
             ],
             "description": "Reviewer's reason for the decision",
             "title": "Decision Reason"
+          },
+          "decision_surface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dashboard, cli or agent: where the decision was made (FORGE-507)",
+            "title": "Decision Surface"
           },
           "description": {
             "description": "Human-readable description of what the change does",
@@ -2315,6 +2650,12 @@
             ],
             "description": "Who approved or rejected the proposal",
             "title": "Reviewer"
+          },
+          "reviewer_verified": {
+            "default": false,
+            "description": "Whether the reviewer identity was verified (FORGE-507)",
+            "title": "Reviewer Verified",
+            "type": "boolean"
           },
           "session_id": {
             "description": "Session under which this proposal was created",
@@ -3645,6 +3986,43 @@
           "spec"
         ],
         "title": "FromTextResponse",
+        "type": "object"
+      },
+      "GateFinding": {
+        "description": "One thing a gate found, classified so a UI need not parse prose.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "missing_deliverable",
+              "ungrounded",
+              "constraint_violation",
+              "analysis",
+              "geometry",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "severity": {
+            "default": "error",
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ],
+        "title": "GateFinding",
         "type": "object"
       },
       "GateOpenedRequest": {
@@ -10992,6 +11370,193 @@
         "summary": "Health Check",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/approvals": {
+      "get": {
+        "description": "Every approval, normalized. ``status=decided`` and ``all`` are the audit views.",
+        "operationId": "list_approvals_v1_approvals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "pending",
+              "enum": [
+                "pending",
+                "decided",
+                "all"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "gate",
+                    "flow_proposal",
+                    "flow_version",
+                    "tool_call",
+                    "human_authority",
+                    "design_change",
+                    "design_loop",
+                    "sketch",
+                    "drawing"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Approvals",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/v1/approvals/{approval_id}": {
+      "get": {
+        "operationId": "get_approval_v1_approvals__approval_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "title": "Approval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Approval",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
+    "/v1/approvals/{approval_id}/decision": {
+      "post": {
+        "description": "Decide an approval of any kind.\n\nThe deciding human is the authenticated principal for every kind. A\n``reviewer`` or ``approved_by`` in the body is ignored and logged.",
+        "operationId": "decide_approval_v1_approvals__approval_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "title": "Approval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Approval",
+        "tags": [
+          "approvals"
         ]
       }
     },
