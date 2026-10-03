@@ -1133,6 +1133,15 @@ class ToolUnavailableError(McpError):
         )
 ```
 
+### Session edits persist; tool results (FORGE-512)
+
+A session is one live FreeCAD document, so an edit made in one call is visible to the next.
+
+- `freecad.transform_object` now returns the verified `placement` (`position` in mm, `rotation` as `axis` plus `angle_deg`) and the measured `volume_mm3`, `surface_area_mm2` and global `bounding_box`. It raises instead of reporting success if the placement did not stick.
+- `freecad.measure`, `describe_model` and the bounding box above are measured in the global frame (own placement plus parent `App::Part` placements), so moving an assembly container is visible when a child is measured, and the reverse.
+- `freecad.execute_code` returns the script's `result` variable as plain data under `result`: Vectors, Placements, bounding boxes and document objects are converted, anything else falls back to `repr`, and the value is capped at 20000 serialized characters (`result_truncated: true` when cut). When `result` is a document object it is still registered and returned as `obj_id`.
+- A script that assigns `obj.Shape` on a parametric object (for example a `Part::Box` primitive) used to lose the edit to the recompute that follows. The new shape is now pinned, and survives later `transform_object` calls.
+
 ### Mesh coordinate frame (FORGE-505)
 
 `freecad.generate_mesh` returns a mesh in the Digital Twin's coordinate frame: node coordinates equal the committed work product's `bounding_box` axes. If the STEP carries a Placement as an assembly transform (a part authored on a rotated plane), which gmsh's reader drops, the placement is baked into the geometry before meshing (`placement_baked: true`). The result also carries `surface_sets` (named surface set to `bbox_mm`, `centroid_mm`, `area_mm2`, `normal`), `mesh_bbox_mm` and `coordinate_frame: "twin"`, so a caller picks fixed and load faces by position. `calculix.run_fea`'s `load_force_n` is expressed in this same frame.

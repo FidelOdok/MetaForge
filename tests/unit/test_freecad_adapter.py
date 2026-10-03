@@ -612,7 +612,7 @@ class TestStatefulAuthoring:
         ops.mirror_feature.return_value = _FakeObj("mirror")
         ops.measure.return_value = {"volume_mm3": 1000.0, "edge_count": 12, "face_count": 6}
         ops.describe_model.return_value = {"dimensions_mm": {"x": 10, "y": 10, "z": 10}}
-        ops.execute_code.return_value = None  # script touched the doc, surfaced nothing
+        ops.execute_code.return_value = (None, None)  # script touched the doc, surfaced nothing
         ops.generate_enclosure.return_value = _FakeObj("enclosure")
         ops.fastener_hole.return_value = _FakeObj("body")
         ops.thread_insert.return_value = _FakeObj("body")
