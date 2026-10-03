@@ -3856,6 +3856,11 @@
             "title": "Changes",
             "type": "array"
           },
+          "context": {
+            "default": "",
+            "title": "Context",
+            "type": "string"
+          },
           "flow": {
             "$ref": "#/components/schemas/DesignFlowView"
           },

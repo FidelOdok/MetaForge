@@ -673,3 +673,11 @@ and a dedicated `forge design` CLI wrapper.
 | `api_gateway/runs/routes.py` | Per-flow handler routing; launches the executor on a design-flow `POST /v1/runs` |
 | `evals/run_scenarios.py`, `evals/*_rubric.py` | Eval flywheel: scenario runner + correctness rubrics |
 | `evals/run_chat_scenarios.py`, `evals/chat_*_rubric.py` | Chat context-engineering evals: multi-turn scenarios + trajectory rubrics (MET-570) |
+
+## Version view exposes the frozen context (FORGE-515)
+
+`GET /v1/design-flows/versions/{id}` returns `context`: the frozen flow context
+string (FORGE-491) that is part of the version's content hash, so a reviewer
+sees exactly what the phase brain will be handed. The G6 geometry-constraint
+check likewise considers only cad_models committed in the phase window, with
+superseded parts excluded, the same scoping as the FORGE-511 assembly check.

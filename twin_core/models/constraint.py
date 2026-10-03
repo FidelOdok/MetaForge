@@ -14,7 +14,7 @@ from twin_core.models.enums import (
     ConstraintStatus,
     NodeType,
 )
-from twin_core.models.quantity import is_valid_unit
+from twin_core.models.quantity import is_currency_code, is_valid_unit
 
 
 class Constraint(NodeBase):
@@ -87,7 +87,7 @@ class Constraint(NodeBase):
     @field_validator("unit")
     @classmethod
     def _validate_unit(cls, v: str) -> str:
-        if v and not is_valid_unit(v):
+        if v and not is_currency_code(v) and not is_valid_unit(v):
             raise ValueError(f"{v!r} is not a recognized unit")
         return v
 
