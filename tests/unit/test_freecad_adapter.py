@@ -598,6 +598,7 @@ class TestStatefulAuthoring:
             "bounding_box": {"min_x": 0, "max_x": 10},
         }
         ops.export_object_step_bytes.return_value = b"ISO-10303-21;\nfake-step\n"
+        ops.measure_step_bytes.return_value = ops.shape_props.return_value
         ops.create_assembly.return_value = _FakeObj("assembly")
         ops.add_part_to_assembly.return_value = _FakeObj("part")
         ops.pocket_sketch.return_value = _FakeObj("pocket")

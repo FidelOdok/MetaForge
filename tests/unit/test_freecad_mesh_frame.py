@@ -100,3 +100,28 @@ def test_mesh_bbox_equals_twin_bbox_for_rotated_asymmetric_part(tmp_path: Path) 
         assert all(
             twin["min"][i] - 0.05 <= lo[i] <= hi[i] <= twin["max"][i] + 0.05 for i in range(3)
         )
+
+
+@pytest.mark.skipif(not HAS_FREECAD, reason="needs FreeCAD")
+def test_export_round_trip_frame_matches_live_bbox_after_transform(tmp_path: Path) -> None:
+    """export -> stored bytes -> reload: the file's own frame equals the live,
+    placed bbox the twin records (FORGE-505, transform_object placements)."""
+    import FreeCAD
+    import Part
+
+    ops = FreecadOperations(work_dir=str(tmp_path))
+    doc = FreeCAD.newDocument("rt505")
+    try:
+        obj = doc.addObject("Part::Feature", "Gusset")
+        obj.Shape = Part.makeBox(220, 120, 12)
+        obj.Placement = FreeCAD.Placement(
+            FreeCAD.Vector(194, 0, -120), FreeCAD.Rotation(FreeCAD.Vector(1, 1, 1), 120)
+        )
+        doc.recompute()
+        live = ops.shape_props(obj)["bounding_box"]
+        step = ops.export_object_step_bytes(obj)
+    finally:
+        FreeCAD.closeDocument(doc.Name)
+    stored = ops.measure_step_bytes(step)["bounding_box"]
+    assert stored == live
+    assert stored["min_x"] == 194.0 and stored["max_y"] == 220.0 and stored["min_z"] == -120.0

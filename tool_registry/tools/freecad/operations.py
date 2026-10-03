@@ -2279,6 +2279,82 @@ class FreecadOperations:
             self._raise_empty_geometry(obj)
         return leaves[0] if len(leaves) == 1 else Part.makeCompound(leaves)
 
+    @staticmethod
+    def _baked_shape(shape: Any) -> Any:
+        """Copy of ``shape`` with its Placement applied to the geometry itself
+        (identity Placement), so a placement-blind STEP reader sees the global
+        frame (FORGE-505)."""
+        c = shape.copy()
+        m = c.Placement.toMatrix()
+        c.Placement = FreeCAD.Placement()
+        c.transformShape(m)
+        return c
+
+    def _leaf_objects(self, obj: Any, _seen: set[int] | None = None) -> list[Any]:
+        """Like ``_shape_leaves`` but returns the objects (keeps Labels)."""
+        _seen = _seen if _seen is not None else set()
+        if id(obj) in _seen:
+            return []
+        _seen.add(id(obj))
+        shape = getattr(obj, "Shape", None)
+        if shape is not None:
+            try:
+                if not shape.isNull():
+                    return [obj]
+            except Exception:  # noqa: BLE001
+                return [obj]
+        out: list[Any] = []
+        group = getattr(obj, "Group", None)
+        if group:
+            for child in group:
+                out.extend(self._leaf_objects(child, _seen))
+        elif getattr(obj, "LinkedObject", None) is not None:
+            out.extend(self._leaf_objects(obj.LinkedObject, _seen))
+        return out
+
+    @staticmethod
+    def _bb_dict(bb: Any) -> dict[str, list[float]]:
+        return {"min": [bb.XMin, bb.YMin, bb.ZMin], "max": [bb.XMax, bb.YMax, bb.ZMax]}
+
+    def _reexport_baked(self, obj: Any, tmp_path: str) -> None:
+        """Rewrite ``tmp_path`` from placement-baked copies of ``obj``'s leaves,
+        keeping each leaf's Label as its STEP PRODUCT name (FORGE-505)."""
+        doc = FreeCAD.newDocument("step_bake")
+        try:
+            feats = []
+            for leaf in self._leaf_objects(obj):
+                f = doc.addObject("Part::Feature", "Leaf")
+                f.Label = getattr(leaf, "Label", "Part")
+                f.Shape = self._baked_shape(leaf.Shape)
+                feats.append(f)
+            doc.recompute()
+            Import.export(feats, tmp_path)
+        finally:
+            FreeCAD.closeDocument(doc.Name)
+
+    def measure_step_bytes(self, step_bytes: bytes) -> dict[str, Any]:
+        """Volume/area/bbox of the STEP *as stored*, read the way every
+        placement-blind consumer reads it (FORGE-505)."""
+        self._require_freecad()
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tmp:
+            tmp.write(step_bytes)
+            path = tmp.name
+        try:
+            shape = Part.Shape()
+            shape.read(path)
+            return {
+                "volume_mm3": round(shape.Volume, 2),
+                "surface_area_mm2": round(shape.Area, 2),
+                "bounding_box": self._bbox_dict(shape.BoundBox),
+            }
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
     def _twin_frame_step(self, input_file: str) -> tuple[str, bool]:
         """Return a STEP path whose raw geometry is in the twin (global) frame (FORGE-505).
 
@@ -2314,13 +2390,7 @@ class FreecadOperations:
             blind = {"min": [rb.XMin, rb.YMin, rb.ZMin], "max": [rb.XMax, rb.YMax, rb.ZMax]}
             if _bboxes_match(expected, blind, _FRAME_TOL_MM):
                 return input_file, False
-            baked = []
-            for s in solids:
-                c = s.copy()
-                m = c.Placement.toMatrix()
-                c.Placement = FreeCAD.Placement()
-                c.transformShape(m)
-                baked.append(c)
+            baked = [self._baked_shape(s) for s in solids]
             out = baked[0] if len(baked) == 1 else Part.makeCompound(baked)
             ob = out.BoundBox
             got = {"min": [ob.XMin, ob.YMin, ob.ZMin], "max": [ob.XMax, ob.YMax, ob.ZMax]}
@@ -2460,6 +2530,26 @@ class FreecadOperations:
             if solid_count == 0:
                 self._log_export_geometry_gap(obj, step_bytes, reason="roundtrip_zero_solids")
                 self._raise_empty_geometry(obj)
+            # FORGE-505: the twin records the live object's bounding box, which
+            # includes its Placement (transform_object, a sketch on YZ, ...).
+            # Import.export stores that Placement as an assembly transform,
+            # which gmsh/Part.Shape.read drop, so the stored file's own frame
+            # differed from the recorded one (axes cycled). Make them agree.
+            expected = self._bb_dict(self._resolve_shape(obj).BoundBox)
+            raw = Part.Shape()
+            raw.read(tmp_path)
+            if not _bboxes_match(expected, self._bb_dict(raw.BoundBox), _FRAME_TOL_MM):
+                self._reexport_baked(obj, tmp_path)
+                step_bytes = Path(tmp_path).read_bytes()
+                raw = Part.Shape()
+                raw.read(tmp_path)
+                got = self._bb_dict(raw.BoundBox)
+                if not _bboxes_match(expected, got, _FRAME_TOL_MM):
+                    raise RuntimeError(
+                        f"STEP export frame mismatch after baking placements: "
+                        f"stored {got} != live {expected}"
+                    )
+                logger.warning("freecad_export_placement_baked", expected=expected)
         finally:
             try:
                 os.remove(tmp_path)

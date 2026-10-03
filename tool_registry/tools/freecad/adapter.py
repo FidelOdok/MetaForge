@@ -1917,7 +1917,9 @@ class FreecadServer(McpToolServer):
             "format": "step",
             "size_bytes": len(step_bytes),
             "step_base64": base64.b64encode(step_bytes).decode("ascii"),
-            **self._ops.shape_props(obj),
+            # FORGE-505: measured from the exported bytes, so the recorded
+            # bounding box is the stored file's own frame, not the session's.
+            **self._ops.measure_step_bytes(step_bytes),
         }
 
     # ---- assembly authoring (MET-530) ---------------------------------
