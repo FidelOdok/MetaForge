@@ -329,7 +329,9 @@ def make_design_loop_approver(twin: Any) -> Any:
     human's approval of the winning candidate. The "with a human approving
     at gates" half of this ticket's own yardstick line."""
 
-    async def approve(*, loop_id: str, approved_by: str) -> dict[str, Any]:
+    async def approve(
+        *, loop_id: str, approved_by: str, audit: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         with tracer.start_as_current_span("twin.approve_design_loop") as span:
             span.set_attribute("design_loop.loop_id", loop_id)
             iterations = await twin.list_design_loop_iterations(UUID(loop_id))
@@ -345,6 +347,15 @@ def make_design_loop_approver(twin: Any) -> Any:
                     "approved": True,
                     "approved_by": approved_by,
                     "approved_at": datetime.now(UTC),
+                    **(
+                        {
+                            "approver_verified": bool(audit.get("verified")),
+                            "approval_surface": audit.get("surface"),
+                            "approval_on_behalf_of": audit.get("on_behalf_of"),
+                        }
+                        if audit
+                        else {}
+                    ),
                 },
             )
             logger.info(

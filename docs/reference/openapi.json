@@ -2573,6 +2573,18 @@
             "description": "When the proposal was approved or rejected",
             "title": "Decided At"
           },
+          "decision_on_behalf_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For an agent decision, the human it acted for (FORGE-507)",
+            "title": "Decision On Behalf Of"
+          },
           "decision_reason": {
             "anyOf": [
               {
@@ -2584,6 +2596,18 @@
             ],
             "description": "Reviewer's reason for the decision",
             "title": "Decision Reason"
+          },
+          "decision_surface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dashboard, cli or agent: where the decision was made (FORGE-507)",
+            "title": "Decision Surface"
           },
           "description": {
             "description": "Human-readable description of what the change does",
@@ -2626,6 +2650,12 @@
             ],
             "description": "Who approved or rejected the proposal",
             "title": "Reviewer"
+          },
+          "reviewer_verified": {
+            "default": false,
+            "description": "Whether the reviewer identity was verified (FORGE-507)",
+            "title": "Reviewer Verified",
+            "type": "boolean"
           },
           "session_id": {
             "description": "Session under which this proposal was created",

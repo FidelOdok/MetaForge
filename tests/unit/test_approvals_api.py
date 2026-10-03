@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from api_gateway.approvals import service
 from api_gateway.approvals.findings import findings_from_reason
 from api_gateway.approvals.routes import router, set_metrics
 from api_gateway.assistant import routes as assistant_routes
@@ -22,6 +22,7 @@ from api_gateway.twin import routes as twin_routes
 from api_gateway.twin.design_sketch_recorder import make_design_sketch_approver
 from api_gateway.twin.technical_drawing_viewer import make_technical_drawing_approver
 from observability.metrics import MetricsCollector
+from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import RunStatus
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models.design_loop_iteration import DesignLoopIteration
@@ -66,7 +67,6 @@ def client(
     run_routes.reset_run_store()
     tool_approvals.reset_approval_store()
     assistant_routes.workflow.reset()
-    service.reset_audit()
     twin_routes.init_twin(twin)
     design_loop_routes.init_twin(twin)
     twin_routes.init_design_sketch_approver(make_design_sketch_approver(twin))
@@ -463,3 +463,79 @@ def test_old_routes_still_work(client: TestClient) -> None:
     items = {i["id"]: i for i in client.get("/v1/approvals?status=decided").json()["items"]}
     assert items[f"gate:{gate_id}"]["status"] == "approved"
     assert items[f"tool:{tool_id}"]["status"] == "rejected"
+
+
+# ── persistence of surface and on-behalf-of (FORGE-507 review) ────────────
+
+AGENT_HEADERS = {
+    "x-test-principal": "agent-7",
+    "X-MetaForge-Surface": "agent",
+    "X-MetaForge-On-Behalf-Of": "carol",
+}
+
+
+def test_tool_decision_survives_a_ledger_reload(client: TestClient, tmp_path: Path) -> None:
+    tool_approvals.init_approval_ledger(SqliteRunLedger(str(tmp_path / "tools.db")))
+    run_id = _tool()
+    resp = client.post(
+        f"/v1/approvals/tool:{run_id}/decision", json={"decision": "approve"}, headers=AGENT_HEADERS
+    )
+    assert resp.status_code == 200
+    # A restart: a fresh store rehydrated from the same ledger file.
+    tool_approvals.reset_approval_store()
+    tool_approvals.init_approval_ledger(SqliteRunLedger(str(tmp_path / "tools.db")))
+    record = client.get(f"/v1/approvals/tool:{run_id}").json()["decision"]
+    assert record["surface"] == "agent"
+    assert record["on_behalf_of"] == "carol"
+    assert record["approver"] == "agent-7@example.com"
+    assert record["approver_verified"] is True
+
+
+def test_gate_decision_survives_a_ledger_reload(client: TestClient, tmp_path: Path) -> None:
+    run_routes.init_run_ledger(SqliteRunLedger(str(tmp_path / "runs.db")))
+    gate_id = _gate()
+    resp = client.post(
+        f"/v1/approvals/gate:{gate_id}/decision",
+        json={"decision": "approve", "reason": "fine"},
+        headers=AGENT_HEADERS,
+    )
+    assert resp.status_code == 200
+    run_routes.reset_run_store()
+    run_routes.init_run_ledger(SqliteRunLedger(str(tmp_path / "runs.db")))
+    run = run_routes.get_run_store().get(gate_id)
+    logged = run.request["decisions"][-1]
+    assert (logged["surface"], logged["on_behalf_of"], logged["reason"]) == (
+        "agent",
+        "carol",
+        "fine",
+    )
+
+
+def test_refused_decision_leaves_no_decision_entry(client: TestClient) -> None:
+    gate_id = _gate(ready=False)
+    client.post(f"/v1/approvals/gate:{gate_id}/decision", json={"decision": "approve"})
+    assert "decisions" not in run_routes.get_run_store().get(gate_id).request
+
+
+def test_twin_and_proposal_records_carry_surface(client: TestClient, twin: InMemoryTwinAPI) -> None:
+    ids = _all_kinds(twin)
+    for kind in ("change", "design_loop", "sketch", "drawing"):
+        body = {"decision": "approve"}
+        resp = client.post(f"/v1/approvals/{ids[kind]}/decision", json=body, headers=AGENT_HEADERS)
+        assert resp.status_code == 200, resp.text
+    change = assistant_routes.workflow.get_proposal(UUID(ids["change"].split(":")[1]))
+    assert change is not None
+    assert (change.decision_surface, change.decision_on_behalf_of) == ("agent", "carol")
+    sketch = asyncio.run(twin.get_work_product(UUID(ids["sketch"].split(":")[1])))
+    assert sketch is not None
+    assert sketch.metadata["approval_surface"] == "agent"
+    assert sketch.metadata["approval_on_behalf_of"] == "carol"
+    iterations = asyncio.run(
+        twin.list_design_loop_iterations(UUID(ids["design_loop"].split(":")[1]))
+    )
+    assert iterations[0].approval_surface == "agent"
+    # A fresh read, with no state kept by the API itself, reports the same.
+    for kind in ("change", "design_loop", "sketch", "drawing"):
+        record = client.get(f"/v1/approvals/{ids[kind]}").json()["decision"]
+        assert (record["surface"], record["on_behalf_of"]) == ("agent", "carol"), kind
+        assert record["approver_verified"] is True

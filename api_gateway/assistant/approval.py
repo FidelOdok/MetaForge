@@ -164,6 +164,10 @@ class ApprovalWorkflow:
         decision: ApprovalDecisionType,
         reason: str,
         reviewer: str,
+        *,
+        reviewer_verified: bool = False,
+        surface: str | None = None,
+        on_behalf_of: str | None = None,
     ) -> DesignChangeProposal | None:
         """Record an approval or rejection for the given proposal.
 
@@ -194,6 +198,9 @@ class ApprovalWorkflow:
         proposal.decided_at = now
         proposal.decision_reason = reason
         proposal.reviewer = reviewer
+        proposal.reviewer_verified = reviewer_verified
+        proposal.decision_surface = surface
+        proposal.decision_on_behalf_of = on_behalf_of
 
         logger.info(
             "proposal_decided",

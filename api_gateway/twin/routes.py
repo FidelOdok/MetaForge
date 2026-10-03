@@ -1093,7 +1093,9 @@ async def approve_design_sketch(node_id: UUID, body: ApproveSketchRequest) -> Ap
     )
 
 
-async def approve_sketch_node(node_id: UUID, approved_by: str | None) -> dict[str, Any]:
+async def approve_sketch_node(
+    node_id: UUID, approved_by: str | None, audit: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Approve a design_sketch. Shared with ``/v1/approvals`` (FORGE-507)."""
     if _design_sketch_approver is None:
         raise HTTPException(status_code=503, detail="design-sketch approval is not configured")
@@ -1107,7 +1109,7 @@ async def approve_sketch_node(node_id: UUID, approved_by: str | None) -> dict[st
         )
     try:
         result: dict[str, Any] = await _design_sketch_approver(
-            str(node_id), approved_by=approved_by
+            str(node_id), approved_by=approved_by, **({"audit": audit} if audit else {})
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1131,7 +1133,9 @@ async def approve_technical_drawing(
     )
 
 
-async def approve_drawing_node(node_id: UUID, approved_by: str | None) -> dict[str, Any]:
+async def approve_drawing_node(
+    node_id: UUID, approved_by: str | None, audit: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Approve a technical_drawing. Shared with ``/v1/approvals`` (FORGE-507)."""
     if _technical_drawing_approver is None:
         raise HTTPException(status_code=503, detail="technical-drawing approval is not configured")
@@ -1145,7 +1149,7 @@ async def approve_drawing_node(node_id: UUID, approved_by: str | None) -> dict[s
         )
     try:
         result: dict[str, Any] = await _technical_drawing_approver(
-            str(node_id), approved_by=approved_by
+            str(node_id), approved_by=approved_by, **({"audit": audit} if audit else {})
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -49,24 +48,6 @@ logger = structlog.get_logger(__name__)
 
 #: Decisions that apply to each kind outside a gate's own readiness rules.
 
-#: In-process record of who decided through this API and through what. Bounded
-#: so a long-lived gateway does not grow it without limit; the decider is also
-#: written to the underlying record by the delegate, and every decision is
-#: logged, so this is the queryable copy and not the only one.
-_AUDIT_LIMIT = 5000
-_audit: OrderedDict[str, DecisionRecord] = OrderedDict()
-
-
-def reset_audit() -> None:
-    _audit.clear()
-
-
-def record_audit(item_id: str, record: DecisionRecord) -> None:
-    _audit[item_id] = record
-    _audit.move_to_end(item_id)
-    while len(_audit) > _AUDIT_LIMIT:
-        _audit.popitem(last=False)
-
 
 def _iso(value: Any) -> str | None:
     """ISO-8601 UTC from a ``datetime`` or an epoch-seconds float."""
@@ -77,8 +58,16 @@ def _iso(value: Any) -> str | None:
     return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
 
 
+_SURFACES = ("dashboard", "cli", "agent")
+
+
+def _surface(value: Any) -> Surface:
+    return value if value in _SURFACES else "unknown"
+
+
 def _record(item_id: str, fallback: DecisionRecord | None) -> DecisionRecord | None:
-    return _audit.get(item_id) or fallback
+    """The decision as persisted on the underlying record (FORGE-507)."""
+    return fallback
 
 
 _RUN_STATUS = {
@@ -100,7 +89,16 @@ def _run_status(run: Run, audited: DecisionRecord | None) -> str:
     return "approved"
 
 
+#: Where a run-backed approval keeps its decision log. ``Run.request`` is part
+#: of what the run ledger persists on every transition, so the surface and
+#: on-behalf-of survive a restart with the run (FORGE-507).
+DECISIONS_KEY = "decisions"
+
+
 def _run_fallback(run: Run) -> DecisionRecord | None:
+    logged = run.request.get(DECISIONS_KEY)
+    if isinstance(logged, list) and logged:
+        return DecisionRecord(**logged[-1])
     if not run.approved_by:
         return None
     return DecisionRecord(
@@ -190,7 +188,7 @@ async def gate_item(run: Run, *, snap: dict[str, Any] | None = None) -> Approval
             "retries_left": (snap or {}).get("retries_left"),
             "rework_cycles_left": (snap or {}).get("reworks_left"),
         },
-        decision=record,
+        decision=None if pending else record,
     )
 
 
@@ -277,6 +275,9 @@ def change_item(p: DesignChangeProposal) -> ApprovalItem:
             decision="approve" if p.status is not ChangeStatus.REJECTED else "reject",
             reason=p.decision_reason or "",
             approver=p.reviewer,
+            approver_verified=p.reviewer_verified,
+            surface=_surface(p.decision_surface),
+            on_behalf_of=p.decision_on_behalf_of,
             decided_at=_iso(p.decided_at),
         )
         if p.reviewer
@@ -321,7 +322,12 @@ def _loop_item(winner: Any) -> ApprovalItem:
     pending = not winner.approved
     fallback = (
         DecisionRecord(
-            decision="approve", approver=winner.approved_by, decided_at=_iso(winner.approved_at)
+            decision="approve",
+            approver=winner.approved_by,
+            approver_verified=winner.approver_verified,
+            surface=_surface(winner.approval_surface),
+            on_behalf_of=winner.approval_on_behalf_of,
+            decided_at=_iso(winner.approved_at),
         )
         if winner.approved
         else None
@@ -361,7 +367,14 @@ def _wp_item(kind: str, wp: Any) -> ApprovalItem:
     approved = bool(wp.metadata.get("approved"))
     label = "Design sketch" if kind == "sketch" else "Technical drawing"
     fallback = (
-        DecisionRecord(decision="approve", approver=wp.metadata.get("approved_by"))
+        DecisionRecord(
+            decision="approve",
+            approver=wp.metadata.get("approved_by"),
+            approver_verified=bool(wp.metadata.get("approver_verified")),
+            surface=_surface(wp.metadata.get("approval_surface")),
+            on_behalf_of=wp.metadata.get("approval_on_behalf_of"),
+            decided_at=wp.metadata.get("approved_at"),
+        )
         if approved
         else None
     )
@@ -543,37 +556,83 @@ async def decide(
         )
 
     label = approver.label
-    if kind == "gate":
-        await run_routes.decide_run_gate(
-            raw, ApprovalDecision(decision), approver, reason=reason, to_phase=to_phase
-        )
-    elif kind == "tool":
-        tool_approvals.decide_tool_approval(raw, decision, approver)
-    elif kind == "change":
-        await assistant_routes.decide_change(
-            app,
-            UUID(raw),
-            ApprovalDecisionType(decision),
-            reason=reason or f"{decision} via /v1/approvals",
-            reviewer=label,
-        )
-    elif kind == "design_loop":
-        await design_loop_routes.approve_loop(raw, label)
-    elif kind == "sketch":
-        await twin_routes.approve_sketch_node(UUID(raw), label)
-    else:
-        await twin_routes.approve_drawing_node(UUID(raw), label)
-
-    record_audit(
-        item_id,
-        DecisionRecord(
-            decision=decision,
-            reason=reason,
-            approver=label,
-            approver_verified=approver.verified,
-            surface=surface,
-            on_behalf_of=on_behalf_of,
-            decided_at=_iso(time.time()),
-        ),
+    audit = {
+        "verified": approver.verified,
+        "surface": surface,
+        "on_behalf_of": on_behalf_of,
+    }
+    staged = _stage_run_decision(
+        kind, raw, decision, reason, label, approver, surface, on_behalf_of
     )
+    try:
+        if kind == "gate":
+            await run_routes.decide_run_gate(
+                raw, ApprovalDecision(decision), approver, reason=reason, to_phase=to_phase
+            )
+        elif kind == "tool":
+            tool_approvals.decide_tool_approval(raw, decision, approver)
+        elif kind == "change":
+            await assistant_routes.decide_change(
+                app,
+                UUID(raw),
+                ApprovalDecisionType(decision),
+                reason=reason or f"{decision} via /v1/approvals",
+                reviewer=label,
+                reviewer_verified=approver.verified,
+                surface=surface,
+                on_behalf_of=on_behalf_of,
+            )
+        elif kind == "design_loop":
+            await design_loop_routes.approve_loop(raw, label, audit)
+        elif kind == "sketch":
+            await twin_routes.approve_sketch_node(UUID(raw), label, audit)
+        else:
+            await twin_routes.approve_drawing_node(UUID(raw), label, audit)
+    except Exception:
+        _unstage_run_decision(staged)
+        raise
     return await get_item(app, item_id)
+
+
+def _stage_run_decision(
+    kind: str,
+    raw: str,
+    decision: str,
+    reason: str,
+    label: str,
+    approver: Approver,
+    surface: str,
+    on_behalf_of: str | None,
+) -> dict[str, Any] | None:
+    """Write the decision into the run's request before the delegate moves it.
+
+    The delegate's transition is what the run ledger persists, so the entry has
+    to be on the record first. If the delegate refuses, the entry is removed
+    again, so a refused decision leaves nothing behind.
+    """
+    if kind not in ("gate", "tool"):
+        return None
+    store = run_routes.get_run_store() if kind == "gate" else tool_approvals.get_approval_store()
+    run = store.get(raw)
+    entry: dict[str, Any] = DecisionRecord(
+        decision=decision,
+        reason=reason,
+        approver=label,
+        approver_verified=approver.verified,
+        surface=surface,  # type: ignore[arg-type]
+        on_behalf_of=on_behalf_of,
+        decided_at=_iso(time.time()),
+    ).model_dump()
+    log = run.request.setdefault(DECISIONS_KEY, [])
+    log.append(entry)
+    return {"run": run, "entry": entry}
+
+
+def _unstage_run_decision(staged: dict[str, Any] | None) -> None:
+    if staged is None:
+        return
+    log = staged["run"].request.get(DECISIONS_KEY)
+    if isinstance(log, list) and staged["entry"] in log:
+        log.remove(staged["entry"])
+    if not log:
+        staged["run"].request.pop(DECISIONS_KEY, None)

@@ -169,6 +169,7 @@ def make_design_sketch_approver(twin: Any) -> Any:
         node_id: str,
         *,
         approved_by: str | None = None,
+        audit: dict[str, Any] | None = None,
         change_description: str = "sketch approved for build",
     ) -> dict[str, Any]:
         from uuid import UUID as _UUID
@@ -189,6 +190,11 @@ def make_design_sketch_approver(twin: Any) -> Any:
             updated_meta["approved_at"] = datetime.now(UTC).isoformat()
             if approved_by:
                 updated_meta["approved_by"] = approved_by
+            if audit:
+                # FORGE-507: how the approval was made, next to approved_by.
+                updated_meta["approver_verified"] = bool(audit.get("verified"))
+                updated_meta["approval_surface"] = audit.get("surface")
+                updated_meta["approval_on_behalf_of"] = audit.get("on_behalf_of")
 
             revision = VersionService.build_revision(
                 wp, change_description, snapshot_override=updated_meta

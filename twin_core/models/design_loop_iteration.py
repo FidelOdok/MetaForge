@@ -69,6 +69,10 @@ class DesignLoopIteration(NodeBase):
     is_winner: bool = False
     approved: bool = False
     approved_by: str | None = None
+    # FORGE-507: how the approval was made, persisted with approved_by.
+    approver_verified: bool = False
+    approval_surface: str | None = None
+    approval_on_behalf_of: str | None = None
     approved_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     # FORGE-291 (gap G-G5): sha256 of {work_product_id, **optimize_kwargs}

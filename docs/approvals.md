@@ -90,12 +90,21 @@ Clients say where the decision came from with headers:
   `agent`.
 
 The `decision` block on the item holds `decision`, `reason`, `approver`,
-`approver_verified`, `surface`, `on_behalf_of` and `decided_at`. The approver is
-also written to the underlying record by the existing handler. The surface and
-on-behalf-of values are kept in a bounded in-process log (and in the
-`approval_decided` log line), so they do not survive a gateway restart; an item
-decided through an older route, or before a restart, reports `surface:
-"unknown"`.
+`approver_verified`, `surface`, `on_behalf_of` and `decided_at`. All of it is
+persisted on the same record the existing handler writes, so it survives a
+restart:
+
+| Kind | Where it is stored |
+|------|--------------------|
+| `gate`, `tool` | The run's `request.decisions` log, written with the run ledger on the decision's transition. |
+| `change` | `reviewer`, `reviewer_verified`, `decision_surface`, `decision_on_behalf_of` on the proposal. |
+| `sketch`, `drawing` | `approved_by`, `approver_verified`, `approval_surface`, `approval_on_behalf_of` in the work product metadata. |
+| `design_loop` | The same four fields on the winning iteration node. |
+
+A decision made on an older route reports `surface: "unknown"`, because no
+surface was sent. A refused decision leaves no entry behind. A gate that was
+retried or reworked shows its decision only once the next gate resolves, since
+the item is pending again at that point.
 
 ## Observability
 
