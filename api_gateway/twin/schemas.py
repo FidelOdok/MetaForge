@@ -52,6 +52,9 @@ class TwinNodeResponse(BaseModel):
     # inspector could not show. None for every other node type, or a result
     # recorded without mesh stats.
     meshStats: dict[str, Any] | None = None  # noqa: N815
+    # FORGE-511: an assembly cad_model's part list ([{node_id, name, material,
+    # position_bbox_mm}]), from metadata.parts. None for every other node.
+    assemblyParts: list[dict[str, Any]] | None = None  # noqa: N815
     # FORGE-293: a technical_drawing node's own structured dimensions/GD&T/
     # surface-finish/inspection data and approval state (same "real data,
     # scalar-only properties loop drops it" shape as meshStats above).

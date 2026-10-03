@@ -20,7 +20,7 @@ class _Evaluator:
 
 
 class _Constraints:
-    async def check(self, project_id: str | None) -> SimpleNamespace:
+    async def check(self, project_id: str | None, since_ts: float = 0.0) -> SimpleNamespace:
         return SimpleNamespace(passed=True, checked=True, violations=[])
 
 

@@ -93,7 +93,13 @@ def deliverable_hints(pid: str) -> dict[str, str]:
             "author the geometry with the FreeCAD authoring tools, then PERSIST it "
             f"with the commit-geometry tool (project_id={pid}) so it becomes a "
             "viewable cad_model in the twin — a described-but-uncommitted model does "
-            "NOT count"
+            "NOT count. If the design has MORE THAN ONE part, commit each part as its own "
+            "named cad_model, then ALSO build ONE assembly: freecad.create_assembly, "
+            "freecad.add_part_to_assembly for every part by its name, export it with "
+            "freecad.export_model, and commit it as '<product> Assembly' with "
+            "twin.commit_geometry passing parts=[{node_id: the part cad_model's node id, "
+            "name, material, position_bbox_mm}, ...]; the gate fails a multi-part "
+            "design that has no assembly, or whose part boxes overlap"
         ),
         "prd": (
             "record the product requirements document with the record-document tool "

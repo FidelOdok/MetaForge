@@ -598,3 +598,79 @@ async def test_unconstrained_warning_paths() -> None:
     assert await _unconstrained_warning(None, "p-1") is None
     assert await _unconstrained_warning(_WarnBackend(None), "p-1") is None
     assert await _unconstrained_warning(_WarnBackend(["x"]), None) is None
+
+
+class _AssemblyTwin(_FakeTwin):
+    """FORGE-511: a twin that knows part nodes and records edges."""
+
+    def __init__(self, parts: dict) -> None:
+        super().__init__()
+        self.parts = parts
+        self.edges: list = []
+
+    async def get_work_product(self, node_id):  # type: ignore[no-untyped-def]
+        return self.parts.get(node_id)
+
+    async def add_edge(self, src, dst, edge_type):  # type: ignore[no-untyped-def]
+        self.edges.append((src, dst, edge_type))
+
+
+def _part_wp(project_id: str, name: str = "Board", wp_type: str = "cad_model"):  # type: ignore[no-untyped-def]
+    from twin_core.models.enums import WorkProductType
+    from twin_core.models.work_product import WorkProduct
+
+    return WorkProduct(
+        name=name,
+        type=WorkProductType(wp_type),
+        domain="mechanical",
+        file_path="",
+        content_hash="h",
+        format="step",
+        metadata={"material": "birch ply", "bbox_mm": {"min": [0, 0, 0], "max": [1, 1, 1]}},
+        created_by="t",
+        project_id=project_id,
+    )
+
+
+class TestAssemblyParts:
+    async def test_links_assembly_to_parts(self, patched_blob_store: dict) -> None:
+        from twin_core.models.enums import EdgeType
+
+        pid = "6f1b1c9e-0000-4000-8000-000000000001"
+        part = _part_wp(pid)
+        twin = _AssemblyTwin({part.id: part})
+        record = make_geometry_recorder(twin, _FakeProjectBackend())
+        await record(
+            step_base64=_STEP_B64,
+            name="Shelf Assembly",
+            project_id=pid,
+            parts=[{"node_id": str(part.id)}],
+        )
+        asm = twin.created[0]
+        assert asm.metadata["parts"][0]["node_id"] == str(part.id)
+        assert asm.metadata["parts"][0]["material"] == "birch ply"
+        assert twin.edges == [(asm.id, part.id, EdgeType.PARENT_OF)]
+
+    async def test_rejects_missing_part_and_creates_nothing(self, patched_blob_store: dict) -> None:
+        twin = _AssemblyTwin({})
+        record = make_geometry_recorder(twin, _FakeProjectBackend())
+        with pytest.raises(ValueError, match="does not exist"):
+            await record(
+                step_base64=_STEP_B64,
+                name="A",
+                project_id="6f1b1c9e-0000-4000-8000-000000000001",
+                parts=[{"node_id": "6f1b1c9e-0000-4000-8000-0000000000ff"}],
+            )
+        assert twin.created == []
+
+    async def test_rejects_part_from_another_project(self, patched_blob_store: dict) -> None:
+        part = _part_wp("6f1b1c9e-0000-4000-8000-000000000002")
+        twin = _AssemblyTwin({part.id: part})
+        record = make_geometry_recorder(twin, _FakeProjectBackend())
+        with pytest.raises(ValueError, match="different project"):
+            await record(
+                step_base64=_STEP_B64,
+                name="A",
+                project_id="6f1b1c9e-0000-4000-8000-000000000001",
+                parts=[{"node_id": str(part.id)}],
+            )

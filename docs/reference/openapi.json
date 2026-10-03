@@ -10406,6 +10406,21 @@
             ],
             "title": "Assembly"
           },
+          "assemblyParts": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assemblyparts"
+          },
           "domain": {
             "title": "Domain",
             "type": "string"

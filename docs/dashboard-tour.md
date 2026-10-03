@@ -255,6 +255,14 @@ with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
+An assembly `cad_model` (one with `metadata.parts`, FORGE-511) shows an
+**Assembly parts** tree in the inspector Overview and on the Assembly tab:
+each part with its material and dimensions (from its position box).
+Selecting a part highlights it in the tree and in the 3D viewer. The
+Explorer rail pins a **Latest assembly** shortcut for the project above the
+node list. The node's `assemblyParts` field in `GET /v1/twin/nodes` carries
+the list.
+
 Selecting a `simulation_result` node adds an **FEA result** panel to the
 inspector: max von Mises and max displacement with their units, the
 load case that produced them, and the mesh statistics. It links to

@@ -25,7 +25,7 @@ import hashlib
 import re
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -126,6 +126,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
         parameters: dict[str, Any] | None = None,
         properties: dict[str, Any] | None = None,
         require_blob_store: bool = False,
+        parts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -138,6 +139,10 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             raise ValueError("twin.commit_geometry: 'step_base64' is not valid base64") from exc
         if not content:
             raise ValueError("twin.commit_geometry: decoded geometry is empty")
+
+        # FORGE-511: validate the parts BEFORE any side effect, so a bad
+        # reference creates nothing.
+        resolved_parts = await _resolve_assembly_parts(twin, parts, project_id) if parts else []
 
         with tracer.start_as_current_span("twin.commit_geometry") as span:
             wp_id = uuid4()
@@ -229,6 +234,8 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                 metadata["session_id"] = session_id
             if extra_metadata:
                 metadata.update(extra_metadata)
+            if resolved_parts:
+                metadata["parts"] = resolved_parts
             # MET-630: structured, queryable geometry semantics — separate
             # from the git-versioned script text below. Parameters are the
             # values that drove generation (e.g. pad length, hole diameter);
@@ -360,6 +367,18 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                 except Exception as exc:  # noqa: BLE001 — provenance edge is best-effort
                     logger.warning("geometry_script_edge_failed", node_id=node_id, error=str(exc))
 
+            # FORGE-511: assembly -> part containment edges.
+            for part in resolved_parts:
+                try:
+                    await twin.add_edge(created.id, UUID(part["node_id"]), EdgeType.PARENT_OF)
+                except Exception as exc:  # noqa: BLE001 - containment edge is best-effort
+                    logger.warning(
+                        "geometry_assembly_edge_failed",
+                        node_id=node_id,
+                        part=part["node_id"],
+                        error=str(exc),
+                    )
+
             # 2. project junction link so it shows on the Projects page.
             linked = False
             if project_id and project_backend is not None:
@@ -403,6 +422,39 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             return out
 
     return record
+
+
+async def _resolve_assembly_parts(
+    twin: Any, parts: list[dict[str, Any]], project_id: str | None
+) -> list[dict[str, Any]]:
+    """Check each part is an existing cad_model in the project; build ``metadata.parts``."""
+    out: list[dict[str, Any]] = []
+    for part in parts:
+        raw = str(part.get("node_id") or "")
+        try:
+            part_id = UUID(raw)
+        except ValueError as exc:
+            raise ValueError(f"twin.commit_geometry: part node_id {raw!r} is not a UUID") from exc
+        node = await twin.get_work_product(part_id)
+        if node is None:
+            raise ValueError(f"twin.commit_geometry: part {raw} does not exist in the twin")
+        node_type = getattr(node.type, "value", node.type)
+        if str(node_type) != "cad_model":
+            raise ValueError(f"twin.commit_geometry: part {raw} is a {node_type}, not a cad_model")
+        node_project = getattr(node, "project_id", None)
+        if project_id and node_project is not None and str(node_project) != str(project_id):
+            raise ValueError(f"twin.commit_geometry: part {raw} belongs to a different project")
+        meta = getattr(node, "metadata", None) or {}
+        entry: dict[str, Any] = {
+            "node_id": str(part_id),
+            "name": part.get("name") or node.name,
+            "material": part.get("material") or meta.get("material"),
+        }
+        bbox = part.get("position_bbox_mm") or meta.get("bbox_mm")
+        if bbox:
+            entry["position_bbox_mm"] = bbox
+        out.append(entry)
+    return out
 
 
 async def _unconstrained_warning(project_backend: Any, project_id: str | None) -> str | None:

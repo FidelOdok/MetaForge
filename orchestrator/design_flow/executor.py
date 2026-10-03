@@ -149,7 +149,7 @@ class ConstraintChecker(Protocol):
     to the run's project where the constraint data allows it.
     """
 
-    async def check(self, project_id: str | None) -> ConstraintReport: ...
+    async def check(self, project_id: str | None, since_ts: float = 0.0) -> ConstraintReport: ...
 
 
 @dataclass
@@ -498,7 +498,7 @@ class DesignFlowExecutor:
         # recorded constraints. Surfaced in the gate reason at every gate;
         # gates with enforce_constraints block on ERROR violations, same
         # contract as missing deliverables.
-        constraints = await self._constraints(ctx)
+        constraints = await self._constraints(ctx, since_ts=phase_start)
         if constraints.checked and not constraints.passed:
             findings_c = (
                 f"{len(constraints.violations)} constraint violation(s): "
@@ -628,12 +628,12 @@ class DesignFlowExecutor:
             checked=True,
         )
 
-    async def _constraints(self, ctx: FlowContext) -> ConstraintReport:
+    async def _constraints(self, ctx: FlowContext, *, since_ts: float = 0.0) -> ConstraintReport:
         """Evaluate the project's constraints for gate review (best-effort)."""
         if self._constraint_checker is None:
             return ConstraintReport(checked=False)
         try:
-            return await self._constraint_checker.check(ctx.project_id)
+            return await self._constraint_checker.check(ctx.project_id, since_ts=since_ts)
         except Exception as exc:  # noqa: BLE001 - constraint state must not crash the run
             logger.warning("design_flow_constraint_check_error", error=str(exc))
             return ConstraintReport(checked=False)

@@ -274,6 +274,7 @@ _CAD_AUTHORING: frozenset[str] = frozenset(
         "freecad.boolean",
         "freecad.fillet",
         "freecad.transform_object",
+        "freecad.create_assembly",
         "freecad.add_part_to_assembly",
         "freecad.add_assembly_joint",
         "freecad.describe_session",

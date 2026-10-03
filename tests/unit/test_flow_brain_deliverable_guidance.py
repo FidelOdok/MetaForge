@@ -75,3 +75,12 @@ def test_hints_name_the_exact_tool_and_type() -> None:
         assert f"document_type='{t}'" in hints[t]
     assert "record-component-selection" in hints["bom"]
     assert all("project_id=p1" in hints[t] for t in ("prd", "constraint_set", "bom"))
+
+
+def test_cad_model_hint_asks_for_an_assembly_when_multi_part() -> None:
+    from api_gateway.runs.flow_brain import deliverable_hints
+
+    text = deliverable_hints("p1")["cad_model"]
+    assert "freecad.create_assembly" in text
+    assert "freecad.add_part_to_assembly" in text
+    assert "parts=[" in text

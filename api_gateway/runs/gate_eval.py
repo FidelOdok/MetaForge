@@ -22,7 +22,11 @@ from api_gateway.runs.analysis_constraints import (
     SimResult,
     check_analysis_constraints,
 )
-from api_gateway.runs.geometry_constraints import GeometryCheck, check_geometry_constraints
+from api_gateway.runs.geometry_constraints import (
+    GeometryCheck,
+    check_assembly,
+    check_geometry_constraints,
+)
 from orchestrator.design_flow.executor import ConsistencyGateReport, ConstraintReport
 from twin_core.consistency import (
     evaluate_g3_feasibility,
@@ -173,6 +177,18 @@ class TwinConstraintChecker:
 
     async def _current_cad_models(self, project_id: str) -> list[tuple[str, dict[str, Any]]]:
         """The latest cad_model per name for the project, as ``(name, metadata)``."""
+        return [(n, m) for _, n, m in await self._current_cad_entries(project_id)]
+
+    async def _current_cad_entries(
+        self, project_id: str, since_ts: float = 0.0, *, drop_superseded: bool = False
+    ) -> list[tuple[str, str, dict[str, Any]]]:
+        """Like ``_current_cad_models`` but ``(node_id, name, metadata)`` (FORGE-511).
+
+        ``since_ts`` keeps only cad_models recorded in that window (an
+        unparseable timestamp counts, as in ``present_types``); with
+        ``drop_superseded`` a node that another node's ``supersedes`` /
+        ``revision_of`` metadata or an incoming SUPERSEDES edge replaces is dropped.
+        """
         getter = getattr(self._twin, "get_work_product", None)
         if self._backend is None or getter is None:
             return []
@@ -184,11 +200,14 @@ class TwinConstraintChecker:
             wp_type = getattr(wp, "type", None)
             if str(getattr(wp_type, "value", wp_type)) != "cad_model":
                 continue
-            ts = _to_epoch(getattr(wp, "updated_at", None)) or 0.0
+            raw_ts = _to_epoch(getattr(wp, "updated_at", None))
+            if raw_ts is not None and raw_ts < since_ts:
+                continue
+            ts = raw_ts or 0.0
             name = str(getattr(wp, "name", "") or getattr(wp, "id", ""))
             if name not in latest or ts >= latest[name][0]:
                 latest[name] = (ts, wp)
-        models: list[tuple[str, dict[str, Any]]] = []
+        models: list[tuple[str, str, dict[str, Any]]] = []
         for name, (_, wp) in latest.items():
             try:
                 node = await getter(UUID(str(getattr(wp, "id", ""))))
@@ -196,16 +215,44 @@ class TwinConstraintChecker:
                 logger.warning("gate_eval_cad_read_failed", name=name, error=str(exc))
                 continue
             if node is not None:
-                models.append((name, dict(getattr(node, "metadata", None) or {})))
+                models.append(
+                    (str(getattr(wp, "id", "")), name, dict(getattr(node, "metadata", None) or {}))
+                )
+        if drop_superseded:
+            replaced: set[str] = set()
+            for _, _, meta in models:
+                for key in ("supersedes", "revision_of"):
+                    value = meta.get(key)
+                    values = value if isinstance(value, list) else [value]
+                    replaced.update(str(v) for v in values if v)
+            graph = getattr(self._twin, "graph", None)
+            if graph is not None:
+                from twin_core.models.enums import EdgeType
+
+                for node_id, _, _ in models:
+                    try:
+                        incoming = await graph.get_edges(
+                            UUID(node_id), direction="incoming", edge_type=EdgeType.SUPERSEDES
+                        )
+                    except Exception as exc:  # noqa: BLE001 - edge lookup is best-effort
+                        logger.warning(
+                            "gate_eval_supersedes_failed", node_id=node_id, error=str(exc)
+                        )
+                        continue
+                    if incoming:
+                        replaced.add(node_id)
+            models = [m for m in models if m[0] not in replaced]
         return models
 
-    async def _geometry_check(self, project_id: str | None) -> GeometryCheck:
+    async def _geometry_check(self, project_id: str | None, since_ts: float = 0.0) -> GeometryCheck:
         lister = getattr(self._twin, "list_constraints", None)
         if lister is None or not project_id:
             return GeometryCheck()
         try:
             constraints = await lister(project_id=UUID(project_id))
-            models = await self._current_cad_models(project_id)
+            entries = await self._current_cad_entries(project_id)
+            models = [(n, m) for _, n, m in entries]
+            window = await self._current_cad_entries(project_id, since_ts, drop_superseded=True)
         except Exception as exc:  # noqa: BLE001 - geometry comparison is best-effort
             logger.warning(
                 "gate_eval_geometry_constraints_failed",
@@ -215,6 +262,11 @@ class TwinConstraintChecker:
             )
             return GeometryCheck()
         outcome = check_geometry_constraints(constraints, models)
+        # FORGE-511: several parts with no assembly (or a badly placed one).
+        assembly = check_assembly(window)
+        outcome.violations += assembly.violations
+        outcome.warnings += assembly.warnings
+        outcome.evaluated += assembly.evaluated
         logger.info(
             "gate_eval_geometry_constraints",
             project_id=project_id,
@@ -292,7 +344,7 @@ class TwinConstraintChecker:
         name = str(getattr(wp, "name", "") or sim_id)
         return SimResult(id=sim_id, name=name, updated_at=ts, metadata=meta, cad_ids=cad_ids)
 
-    async def check(self, project_id: str | None) -> ConstraintReport:
+    async def check(self, project_id: str | None, since_ts: float = 0.0) -> ConstraintReport:
         evaluate = getattr(self._twin, "evaluate_constraints", None)
         if evaluate is None:
             return ConstraintReport(checked=False)
@@ -315,7 +367,7 @@ class TwinConstraintChecker:
         # FORGE-496: structured metric/limit constraints carry a placeholder
         # expression the engine can never fail, so compare them to the
         # committed cad_model here.
-        geometry = await self._geometry_check(project_id)
+        geometry = await self._geometry_check(project_id, since_ts)
         violations += geometry.violations
         warnings += geometry.warnings
         analysis = await self._analysis_check(project_id)

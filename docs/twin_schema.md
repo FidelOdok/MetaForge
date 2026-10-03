@@ -1139,7 +1139,7 @@ Edges are directed relationships between nodes. Each edge type has defined sourc
 | `CONSTRAINED_BY` | WorkProduct -> Constraint | Constraint applies to this work_product |
 | `PRODUCED_BY` | WorkProduct -> Agent | WorkProduct was produced or modified by this agent |
 | `USES_COMPONENT` | WorkProduct -> Component | WorkProduct references this component (e.g., BOM uses resistor) |
-| `PARENT_OF` | Version -> Version (also used for WorkProduct -> WorkProduct provenance, e.g. a robot_description's source cad_model parts) | Version lineage / source-artifact provenance |
+| `PARENT_OF` | Version -> Version (also used for WorkProduct -> WorkProduct provenance, e.g. a robot_description's source cad_model parts) | Version lineage / source-artifact provenance. FORGE-511: an assembly `cad_model` is `parent_of` each part `cad_model` it contains (`twin.commit_geometry` with `parts`); the assembly's `metadata.parts` is `[{node_id, name, material, position_bbox_mm}]` |
 | `CONFLICTS_WITH` | Constraint -> Constraint | Two constraints that cannot both be satisfied |
 | `REALIZED_BY` | HierarchyNode -> WorkProduct | FORGE-260: a hierarchy position's real cad_model/robot_description geometry |
 | `INSTANCE_OF` | HierarchyNode -> BOMItem, or DeviceInstance -> WorkProduct | FORGE-260: a COTS leaf position is an instance of one canonical component record. FORGE-321: a manufactured unit is an instance of the design revision it was built from |

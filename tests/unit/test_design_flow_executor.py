@@ -267,7 +267,7 @@ class FakeConstraintChecker:
         self._report = report or ConstraintReport(checked=True, passed=True, evaluated_count=2)
         self._boom = boom
 
-    async def check(self, project_id: str | None) -> ConstraintReport:
+    async def check(self, project_id: str | None, since_ts: float = 0.0) -> ConstraintReport:
         if self._boom:
             raise RuntimeError("constraint engine down")
         return self._report
