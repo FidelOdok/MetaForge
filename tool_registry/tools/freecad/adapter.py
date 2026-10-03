@@ -18,7 +18,7 @@ import structlog
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolHandler, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.freecad.config import FreecadConfig
-from tool_registry.tools.freecad.operations import FreecadOperations
+from tool_registry.tools.freecad.operations import FreecadOperations, capped_result
 from tool_registry.tools.freecad.session import FreecadSessionStore
 from tool_registry.tools.freecad.worker_pool import FreecadWorkerPool
 
@@ -960,7 +960,8 @@ class FreecadServer(McpToolServer):
             ),
             (
                 "transform_object",
-                "Move and/or rotate a session object (set its placement)",
+                "Move and/or rotate a session object (set its placement); returns the "
+                "verified placement and the measured global bounding box",
                 "cad_author",
                 obj_schema(
                     {
@@ -1248,7 +1249,8 @@ class FreecadServer(McpToolServer):
             (
                 "execute_code",
                 "Run a sandboxed FreeCAD Python script against the session doc "
-                "(escape hatch; assign `result` to surface an object). Namespace "
+                "(escape hatch; assign `result` to surface an object; any JSON-safe "
+                "`result` value is also returned as `result`, size-capped). Namespace "
                 "provides: FreeCAD (alias App), Part, math, doc, and the bare "
                 "geometry types Vector/Rotation/Placement/Matrix (no import needed, "
                 "no FreeCAD. prefix required). Blocked anywhere in the script: "
@@ -1649,7 +1651,18 @@ class FreecadServer(McpToolServer):
             arguments.get("position"),
             rotation if isinstance(rotation, dict) else None,
         )
-        return {"obj_id": obj_id, "transformed": True}
+        # FORGE-512: report what is now true (verified placement and the measured
+        # global bounding box), not just that the call returned.
+        out: dict[str, Any] = {
+            "obj_id": obj_id,
+            "transformed": True,
+            "placement": self._ops.placement_dict(obj),
+        }
+        try:
+            out.update(self._ops.shape_props(obj))
+        except Exception:  # noqa: BLE001 -- e.g. an empty body has no shape to measure
+            pass
+        return out
 
     async def _dress_up(
         self, arguments: dict[str, Any], op: str, param_key: str, sel_key: str
@@ -1890,18 +1903,25 @@ class FreecadServer(McpToolServer):
         session_id = self._require(arguments, "session_id")
         code = self._require(arguments, "code")
         session = self._sessions.get(session_id)
-        result = self._ops.execute_code(session.document, code)
+        result, raw = self._ops.execute_code(session.document, code, with_raw=True)
+        # FORGE-512: hand the script's ``result`` back as plain data.
+        plain, truncated = capped_result(raw)
+        extra: dict[str, Any] = {}
+        if raw is not None:
+            extra["result"] = plain
+            if truncated:
+                extra["result_truncated"] = True
         if result is not None and hasattr(result, "Shape"):
             obj_id = self._sessions.register_object(
                 session_id, result, "feature", getattr(result, "Name", "Result")
             )
-            out: dict[str, Any] = {"executed": True, "obj_id": obj_id}
+            out: dict[str, Any] = {"executed": True, "obj_id": obj_id, **extra}
             try:
                 out.update(self._ops.shape_props(result))
             except Exception:  # noqa: BLE001 — result may have no solid shape
                 pass
             return out
-        return {"executed": True, "session": self._sessions.describe(session_id)}
+        return {"executed": True, **extra, "session": self._sessions.describe(session_id)}
 
     async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")

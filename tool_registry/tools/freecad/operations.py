@@ -621,6 +621,65 @@ def _resolve_parameters(shape_type: str, parameters: dict[str, Any]) -> dict[str
     return resolved
 
 
+RESULT_MAX_CHARS = 20000
+
+
+def json_safe(value: Any, _depth: int = 0) -> Any:
+    """Plain-data form of an ``execute_code`` ``result`` (FORGE-512).
+
+    Vectors, placements, bounding boxes and document objects become dicts/lists;
+    anything unknown falls back to ``repr``. Depth-limited so a cyclic or huge
+    structure cannot run away; the caller caps the serialized size.
+    """
+    if value is None or isinstance(value, bool | int | str):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else repr(value)
+    if _depth > 6:
+        return repr(value)
+    if isinstance(value, dict):
+        return {str(k): json_safe(v, _depth + 1) for k, v in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [json_safe(v, _depth + 1) for v in value]
+    if isinstance(value, bytes):
+        return repr(value[:200])
+    # FreeCAD value types and objects, duck-typed so this needs no FreeCAD import.
+    if hasattr(value, "Base") and hasattr(value, "Rotation"):  # Placement
+        return {
+            "position": json_safe(value.Base, _depth + 1),
+            "rotation": {
+                "axis": json_safe(value.Rotation.Axis, _depth + 1),
+                "angle_deg": json_safe(math.degrees(value.Rotation.Angle), _depth + 1),
+            },
+        }
+    if hasattr(value, "XMin") and hasattr(value, "ZMax"):  # BoundBox
+        return {
+            "min": [value.XMin, value.YMin, value.ZMin],
+            "max": [value.XMax, value.YMax, value.ZMax],
+        }
+    if hasattr(value, "x") and hasattr(value, "y") and hasattr(value, "z"):  # Vector
+        return [
+            json_safe(value.x, _depth + 1),
+            json_safe(value.y, _depth + 1),
+            json_safe(value.z, _depth + 1),
+        ]
+    if hasattr(value, "Name") and hasattr(value, "TypeId"):  # document object
+        return {"name": value.Name, "label": getattr(value, "Label", value.Name)}
+    return repr(value)
+
+
+def capped_result(value: Any, max_chars: int = RESULT_MAX_CHARS) -> tuple[Any, bool]:
+    """``json_safe(value)`` capped to ``max_chars`` serialized; returns
+    ``(data, truncated)``. An oversize result becomes its truncated JSON text."""
+    import json
+
+    data = json_safe(value)
+    text = json.dumps(data, default=repr)
+    if len(text) <= max_chars:
+        return data, False
+    return text[:max_chars], True
+
+
 class FreecadOperations:
     """Core FreeCAD CAD operations.
 
@@ -632,6 +691,9 @@ class FreecadOperations:
     def __init__(self, work_dir: str = "/workspace", timeout: float = 60.0) -> None:
         self.work_dir = work_dir
         self.timeout = timeout
+        # FORGE-512: (document name, object name) -> shape a script assigned, kept
+        # so a later recompute of a parametric object cannot silently revert it.
+        self._pinned_shapes: dict[tuple[str, str], Any] = {}
 
     def _require_freecad(self) -> None:
         """Raise if FreeCAD is not available."""
@@ -1545,7 +1607,35 @@ class FreecadOperations:
             )
         obj.Placement = FC.Placement(pos, rot)
         document.recompute()
+        pinned = self._pinned_shapes.get((document.Name, obj.Name))
+        if pinned is not None:
+            # The object's shape was replaced by a script; the placement touch
+            # regenerated it from its own properties, so put the edit back.
+            shape = pinned.copy()
+            shape.Placement = FC.Placement(pos, rot)
+            self._repin(document, [(obj, shape)])
+        # FORGE-512: a recompute can regenerate a parametric object and drop the
+        # edit silently, so verify it stuck instead of reporting success blindly.
+        got = obj.Placement
+        if got.Base.distanceToPoint(pos) > 1e-6:
+            raise RuntimeError(
+                f"transform_object did not stick on {getattr(obj, 'Label', obj)!r}: "
+                f"requested position {tuple(pos)}, object is at {tuple(got.Base)}"
+            )
         return obj
+
+    @staticmethod
+    def placement_dict(obj: Any) -> dict[str, Any]:
+        """JSON-safe own placement: position (mm) plus axis/angle rotation."""
+        pl = obj.Placement
+        axis = pl.Rotation.Axis
+        return {
+            "position": [round(pl.Base.x, 4), round(pl.Base.y, 4), round(pl.Base.z, 4)],
+            "rotation": {
+                "axis": [round(axis.x, 6), round(axis.y, 6), round(axis.z, 6)],
+                "angle_deg": round(math.degrees(pl.Rotation.Angle), 4),
+            },
+        }
 
     # ------------------------------------------------------------------
     # Dress-up features (MET-527): fillet / chamfer / shell. They operate on a
@@ -1690,6 +1780,7 @@ class FreecadOperations:
         *,
         max_lines: int = 200,
         timeout: float = 30.0,
+        with_raw: bool = False,
     ) -> Any:
         """Run a sandboxed FreeCAD Python script against the session ``doc``.
 
@@ -1701,6 +1792,8 @@ class FreecadOperations:
         ``Rotation``, ``Placement``, ``Matrix`` (bare names -- not
         ``FreeCAD.Vector``, though that also works). Assign the object to
         surface to a variable named ``result`` (it gets registered + returned).
+        With ``with_raw=True`` the return is ``(resolved, raw_result)`` so the
+        caller can also hand back a plain-data ``result`` (FORGE-512).
         A script that instead assigns a dict describing the object (e.g.
         ``{'obj_id': model.Name}``) is tolerated -- ``document.Objects`` is
         searched by that name and the real object substituted (MET-687).
@@ -1781,6 +1874,15 @@ class FreecadOperations:
             namespace["Sketcher"] = Sketcher
             namespace["PartDesign"] = PartDesign
 
+        # FORGE-512: snapshot each object's Shape so an edit made by the script
+        # can be pinned across the recompute below.
+        before_shapes = {}
+        for o in getattr(document, "Objects", None) or []:
+            try:
+                before_shapes[o.Name] = o.Shape
+            except Exception:  # noqa: BLE001 -- not every object has a Shape
+                continue
+
         is_main = threading.current_thread() is threading.main_thread()
         old_handler = None
 
@@ -1810,8 +1912,53 @@ class FreecadOperations:
                     if old_handler is not None:
                         signal.signal(signal.SIGALRM, old_handler)
 
+        # FORGE-512: a script that assigns ``obj.Shape`` on a parametric object
+        # (Part::Box, a primitive, ...) touches it, and the recompute then
+        # regenerates it from its own properties, silently discarding the edit
+        # ("success", but the next call reads it unchanged). Pin the new shape:
+        # recompute, re-assert it, and clear the touched flag so no later
+        # recompute reverts it either.
+        pinned = []
+        for o in getattr(document, "Objects", None) or []:
+            old = before_shapes.get(o.Name)
+            if old is None:
+                continue
+            try:
+                new = o.Shape
+                if not new.isNull() and not new.isPartner(old):
+                    pinned.append((o, new))
+            except Exception:  # noqa: BLE001
+                continue
+        # A pinned object a script merely re-placed is regenerated too, so
+        # carry the edited shape (at its new placement) forward for those.
+        for o in getattr(document, "Objects", None) or []:
+            key = (getattr(document, "Name", ""), o.Name)
+            if key in self._pinned_shapes and all(o is not p for p, _ in pinned):
+                try:
+                    shape = self._pinned_shapes[key].copy()
+                    shape.Placement = o.Placement
+                    pinned.append((o, shape))
+                except Exception:  # noqa: BLE001
+                    continue
         document.recompute()
-        return self._resolve_execute_code_result(document, namespace.get("result"))
+        self._repin(document, pinned)
+        raw = namespace.get("result")
+        resolved = self._resolve_execute_code_result(document, raw)
+        return (resolved, raw) if with_raw else resolved
+
+    def _repin(self, document: Any, pinned: list[tuple[Any, Any]]) -> None:
+        """Re-assert script-edited shapes after a recompute and clear their
+        touched flag (FORGE-512); remembered so later transforms keep them."""
+        for o, new in pinned:
+            try:
+                if not o.Shape.isPartner(new):
+                    o.Shape = new
+                o.purgeTouched()
+                kept = new.copy()
+                kept.Placement = type(o.Placement)()
+                self._pinned_shapes[(document.Name, o.Name)] = kept
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("freecad_shape_pin_failed", obj=o.Name, error=str(exc))
 
     def shell_solid(
         self, document: Any, body: Any, thickness: float, faces: list[str] | None = None
@@ -2274,10 +2421,14 @@ class FreecadOperations:
         the compound this builds has no Label/PRODUCT identity, so it must
         NOT be used for STEP export (see ``export_object_step_bytes``)."""
         self._require_freecad()
-        leaves = self._shape_leaves(obj)
-        if not leaves:
+        # FORGE-512: leaves carry their GLOBAL placement (own plus parent
+        # ``App::Part`` placements). A bare ``leaf.Shape`` ignores the parent, so
+        # a transform on an assembly container looked like a no-op when a child
+        # was measured afterwards (and the reverse).
+        shapes = [self._global_shape(leaf) for leaf in self._leaf_objects(obj)]
+        if not shapes:
             self._raise_empty_geometry(obj)
-        return leaves[0] if len(leaves) == 1 else Part.makeCompound(leaves)
+        return shapes[0] if len(shapes) == 1 else Part.makeCompound(shapes)
 
     @staticmethod
     def _baked_shape(shape: Any) -> Any:
