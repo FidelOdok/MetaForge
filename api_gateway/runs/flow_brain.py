@@ -107,6 +107,9 @@ def deliverable_hints(pid: str) -> dict[str, str]:
             f"one entry), project_id={pid}; one call creates the constraint_set"
         ),
         "simulation_result": (
+            "stage each committed cad_model you analyse with the stage-work-product-file "
+            "tool (work_product_id=its node id) to get a local STEP file_path, mesh that "
+            "path with the freecad generate-mesh tool, "
             "run the analysis (calculix run-fea, then extract-results), then record the "
             "outcome with the record-document tool (document_type='simulation_result', "
             "name, content=the extract-results JSON summary, metadata=the same summary "

@@ -312,6 +312,9 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
             "calculix.check_mesh_convergence",
             "calculix.validate_mesh",
             "twin.record_document",
+            # FORGE-504: a committed cad_model lives in the blob store, not on
+            # disk; staging it is how the mesh tool gets a STEP path to load.
+            "twin.stage_work_product_file",
         }
     ),
     "robot_description": frozenset(
