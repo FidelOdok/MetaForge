@@ -155,6 +155,32 @@ router = APIRouter(prefix="/v1/twin", tags=["twin"])
 # ---------------------------------------------------------------------------
 
 
+def _entity_to_response(entity: Any) -> TwinNodeResponse:
+    """Map an EngineeringEntity to a TwinNodeResponse (FORGE-515)."""
+    properties: dict[str, str | int | float | bool] = {
+        "entity_type": entity.entity_type,
+        "status": entity.status,
+        "authority": entity.authority.value,
+        "created_by": entity.created_by,
+        "revision": entity.revision,
+    }
+    if entity.statement:
+        properties["statement"] = entity.statement
+    for key, value in entity.metadata.items():
+        if isinstance(value, (str, int, float, bool)):
+            properties.setdefault(key, value)
+    return TwinNodeResponse(
+        id=str(entity.id),
+        name=entity.title or entity.statement or entity.entity_type,
+        type=entity.entity_type,
+        domain=str(entity.metadata.get("domain", "")),
+        status=entity.status,
+        properties=properties,
+        updatedAt=entity.created_at.isoformat(),
+        projectId=str(entity.project_id) if getattr(entity, "project_id", None) else None,
+    )
+
+
 def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
     """Map a WorkProduct to a TwinNodeResponse."""
     properties: dict[str, str | int | float | bool] = {
@@ -317,7 +343,13 @@ async def get_twin_node(node_id: str) -> TwinNodeResponse:
             raise HTTPException(status_code=400, detail="Invalid node ID format")
         wp = await _twin.get_work_product(uid)
         if wp is None:
-            raise HTTPException(status_code=404, detail="Node not found")
+            # FORGE-515: engineering entities (intent, stakeholder_need, ...)
+            # are not work products but are real nodes reviewers open.
+            entity = await _twin.get_engineering_entity(uid)
+            if entity is None:
+                raise HTTPException(status_code=404, detail="Node not found")
+            logger.info("twin_entity_retrieved", node_id=node_id)
+            return _entity_to_response(entity)
         logger.info("twin_node_retrieved", node_id=node_id)
         return _wp_to_response(wp)
 

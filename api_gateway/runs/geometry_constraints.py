@@ -37,6 +37,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from twin_core.models.quantity import is_currency_code, same_currency
+
 _OPS: dict[str, Callable[[float, float], bool]] = {
     "<=": _op.le,
     "<": _op.lt,
@@ -198,6 +200,41 @@ def _required_material(constraint: Any) -> str:
     )
 
 
+def _check_cost(
+    constraint: Any, models: list[tuple[str, dict[str, Any]]], result: GeometryCheck
+) -> None:
+    """FORGE-515: a currency limit is compared only with a cost in the same currency.
+
+    A model recording no cost, or a cost in another currency, is reported as
+    not evaluated with the reason (no exchange rate is ever assumed).
+    """
+    limit = getattr(constraint, "limit", None)
+    severity = str(getattr(getattr(constraint, "severity", ""), "value", "") or "error")
+    compare = _OPS.get(str(getattr(constraint, "operator", "") or "<="))
+    if limit is None or compare is None or severity == "info":
+        return
+    sink = result.violations if severity == "error" else result.warnings
+    label = _label(constraint)
+    unit = str(constraint.unit).strip()
+    for model_name, meta in models:
+        cost = _num(meta.get("cost"))
+        currency = str(meta.get("cost_currency") or "")
+        if cost is None:
+            result.not_evaluated.append(f"{label}: '{model_name}' records no cost")
+        elif not same_currency(unit, currency):
+            result.not_evaluated.append(
+                f"{label}: limit is in {unit} but '{model_name}' cost is in "
+                f"{currency or 'an unknown currency'} (no exchange rate)"
+            )
+        else:
+            result.evaluated += 1
+            if not compare(cost, float(limit)):
+                sink.append(
+                    f"{label}: cad_model '{model_name}' cost {cost:g} {unit} "
+                    f"breaks {constraint.operator} {float(limit):g} {unit}"
+                )
+
+
 def check_geometry_constraints(
     constraints: Iterable[Any], cad_models: Iterable[tuple[str, dict[str, Any]]]
 ) -> GeometryCheck:
@@ -205,6 +242,10 @@ def check_geometry_constraints(
     result = GeometryCheck()
     models = list(cad_models)
     for constraint in constraints:
+        unit = str(getattr(constraint, "unit", "") or "")
+        if is_currency_code(unit):
+            _check_cost(constraint, models, result)
+            continue
         kind = classify(str(getattr(constraint, "metric", "") or ""))
         limit = getattr(constraint, "limit", None)
         severity = str(getattr(getattr(constraint, "severity", ""), "value", "") or "error")

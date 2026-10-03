@@ -666,6 +666,8 @@ class FlowVersionView(BaseModel):
     origin: str
     changes: list[str] = Field(default_factory=list)
     flow: DesignFlowView
+    # FORGE-515: the frozen flow context (FORGE-491), part of the content hash.
+    context: str = ""
     valid: bool
     violations: list[str] = Field(default_factory=list)
 
@@ -797,6 +799,7 @@ def _version_view(version: FlowVersion) -> FlowVersionView:
         status=version.status.value,
         origin=version.origin,
         changes=version.changes,
+        context=version.frozen.context,
         valid=result.ok,
         violations=[str(v) for v in result.violations],
         flow=DesignFlowView(

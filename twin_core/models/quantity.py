@@ -66,6 +66,21 @@ class IncompatibleUnitsError(ValueError):
         super().__init__(message)
 
 
+def is_currency_code(unit: str) -> bool:
+    """Whether ``unit`` is an ISO 4217 style currency code (``GBP``, ``USD``).
+
+    Currency is a label, not a pint unit (FORGE-515): there is no exchange
+    rate, so values are only comparable within one code (see ``same_currency``).
+    """
+    code = unit.strip() if unit else ""
+    return len(code) == 3 and code.isascii() and code.isalpha() and code.isupper()
+
+
+def same_currency(a: str, b: str) -> bool:
+    """Whether two currency codes name the same currency."""
+    return is_currency_code(a) and is_currency_code(b) and a.strip() == b.strip()
+
+
 def is_valid_unit(unit: str) -> bool:
     """Whether ``unit`` is a real, parseable pint unit string (e.g. ``"kg"``,
     ``"mm"``, ``"N*m"``) -- never raises. An empty/whitespace-only string is

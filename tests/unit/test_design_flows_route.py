@@ -435,6 +435,21 @@ class TestSavingAnEdit:
         assert fetched["versionId"] == saved["versionId"]
         assert fetched["changes"] == saved["changes"]
 
+    def test_a_saved_version_exposes_its_frozen_context(self, client: TestClient) -> None:
+        """FORGE-515: the frozen context (part of the content hash) is in the view."""
+        from orchestrator.design_flow.spec import get_flow
+        from orchestrator.design_flow.versions import get_version_store
+
+        version = get_version_store().save(
+            get_flow("hardware_v1"),
+            base_template_id="hardware_v1",
+            base_version="builtin",
+            changes=["ctx"],
+            context="Route: laser cut",
+        )
+        fetched = client.get(f"/v1/design-flows/versions/{version.id}").json()
+        assert fetched["context"] == "Route: laser cut"
+
     def test_an_unknown_version_is_a_404(self, client: TestClient) -> None:
         assert client.get("/v1/design-flows/versions/flowv_nope").status_code == 404
 

@@ -118,6 +118,17 @@ class Quantity(BaseModel):
     def from_dict(cls, data: dict) -> "Quantity": ...
 ```
 
+Currency (FORGE-515): a `Constraint.unit` that is an ISO 4217 code (`GBP`,
+`USD`, `EUR`) is accepted as a currency label, not a pint unit
+(`is_currency_code`). A currency limit is compared only with a value in the
+same currency (`same_currency`); a different or unknown currency is reported
+as not evaluated with a reason, never converted.
+
+`GET /v1/twin/nodes/{id}` also resolves engineering entities (intent,
+stakeholder_need, objective, ...) when no work product has that id: `type` is
+the entity type and `properties` carries `entity_type`, `status`, `authority`,
+`statement` and scalar metadata. It stays 404 when neither exists.
+
 Not a new node type -- a conversion+validation primitive for values already
 stored as plain `float`/`str` pairs in `Constraint.metadata`/
 `EngineeringEntity.metadata` (a Budget's `system_total`/`unit`, an

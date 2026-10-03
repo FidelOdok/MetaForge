@@ -250,9 +250,10 @@ class TwinConstraintChecker:
             return GeometryCheck()
         try:
             constraints = await lister(project_id=UUID(project_id))
-            entries = await self._current_cad_entries(project_id)
-            models = [(n, m) for _, n, m in entries]
+            # FORGE-515: only this phase window's current parts (not every
+            # cad_model name ever used in the project).
             window = await self._current_cad_entries(project_id, since_ts, drop_superseded=True)
+            models = [(n, m) for _, n, m in window]
         except Exception as exc:  # noqa: BLE001 - geometry comparison is best-effort
             logger.warning(
                 "gate_eval_geometry_constraints_failed",
