@@ -187,6 +187,36 @@ def _patch_brain(monkeypatch: pytest.MonkeyPatch, brain: _ScopeRecordingBrain) -
 
 
 class TestRunPhase:
+    async def test_stores_are_ready_before_the_brain_is_built(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """FORGE-503: after a worker restart the first activity can be a phase.
+
+        The design handler's cad_model probe reads the project store during the
+        phase, so the real store must be wired before the brain exists. Live,
+        it read the empty in-memory default and ran the fallback over a design
+        the phase had committed.
+        """
+        order: list[str] = []
+
+        async def stores() -> None:
+            order.append("stores")
+
+        brain = _ScopeRecordingBrain()
+        _patch_brain(monkeypatch, brain)
+        real_build = __import__("api_gateway.runs.routes", fromlist=["x"]).build_phase_brain
+
+        async def build(*args: Any, **kwargs: Any) -> Any:
+            order.append("brain")
+            return await real_build(*args, **kwargs)
+
+        monkeypatch.setattr(flow_worker, "ensure_gate_stores", stores)
+        monkeypatch.setattr("api_gateway.runs.routes.build_phase_brain", build)
+
+        await flow_worker._run_phase(_request())
+
+        assert order[:2] == ["stores", "brain"]
+
     async def test_tool_calls_are_scoped_to_the_runs_project(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
