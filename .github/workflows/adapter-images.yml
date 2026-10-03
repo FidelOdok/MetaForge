@@ -1,0 +1,63 @@
+name: adapter-images
+
+# Builds and publishes the tool-adapter images that bake code in (FORGE-513).
+#
+# The freecad and calculix adapters copy mcp_core/, tool_registry/ and
+# observability/ into the image, so a fix in those packages only reaches the
+# adapter after a rebuild. Building them on fidel-dev took the box offline
+# twice (SSH and ICMP); building here keeps that load off the dev host, which
+# then only pulls.
+#
+# Images: ghcr.io/fidelodok/metaforge-<adapter>:latest and :<commit sha>.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mcp_core/**"
+      - "tool_registry/**"
+      - "observability/**"
+      - ".github/workflows/adapter-images.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: adapter-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: publish ${{ matrix.adapter }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        adapter: [freecad, calculix]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tool_registry/tools/${{ matrix.adapter }}/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter:latest
+            ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter:${{ github.sha }}
+          build-args: |
+            METAFORGE_BUILD_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.adapter }}-adapter
+          cache-to: type=gha,mode=max,scope=${{ matrix.adapter }}-adapter
