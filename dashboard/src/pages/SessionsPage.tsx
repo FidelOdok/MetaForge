@@ -407,8 +407,13 @@ function ExecutionLogPanel({ sessions }: { sessions: AgentSession[] }) {
 
 // --- Pending Approval card ---
 
-function PendingApprovalCard() {
-  const { data } = useProposals();
+function PendingApprovalCard({ projectId }: { projectId?: string }) {
+  // Scoped like the Approvals page, which already passed the project to this
+  // same hook. Unscoped here, the card rendered the first pending proposal
+  // from *any* project -- so while reading one project's sessions you could
+  // be shown, and approve, a change belonging to another, with nothing on the
+  // card naming which.
+  const { data } = useProposals(projectId);
   const decide = useDecideProposal();
   const pending = (data?.proposals ?? []).filter((p) => p.status === 'pending');
   const proposal = pending[0];
@@ -706,7 +711,12 @@ function SessionRow({ session }: { session: AgentSession }) {
 
 export function SessionsPage() {
   const { activeProjectId } = useActiveProject();
-  const { data: sessions, isLoading } = useSessions(activeProjectId ?? undefined);
+  const { data, isLoading } = useSessions(activeProjectId ?? undefined);
+  const sessions = data?.sessions;
+  // Internal workflow runs carry no project and are excluded once one is
+  // selected. Said out loud: otherwise the page just gets shorter, which
+  // reads as "nothing ran here".
+  const unscopedSessions = data?.unscopedCount ?? 0;
 
   if (isLoading) {
     return (
@@ -762,6 +772,21 @@ export function SessionsPage() {
             >
               DAG executor · {runningCount} workflow{runningCount !== 1 ? 's' : ''} running
             </span>
+            {unscopedSessions > 0 && (
+              <span
+                data-testid="sessions-unscoped"
+                style={{
+                  display: 'block',
+                  fontFamily: 'Roboto Mono, monospace',
+                  fontSize: 11,
+                  color: KC.onSurfaceVariant,
+                  marginTop: 2,
+                }}
+              >
+                {unscopedSessions} internal workflow run
+                {unscopedSessions === 1 ? '' : 's'} not shown: no project recorded.
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
             <span
@@ -815,7 +840,7 @@ export function SessionsPage() {
 
           {/* Right column */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <PendingApprovalCard />
+            <PendingApprovalCard projectId={activeProjectId ?? undefined} />
             <AgentRosterPanel />
           </div>
         </div>

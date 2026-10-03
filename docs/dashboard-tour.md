@@ -136,9 +136,18 @@ artifact updates, newest first.
 Each row is one captured agent session: status, owning agent, project,
 last activity.
 
-- **Backed by:** `GET /v1/sessions`.
+- **Backed by:** `GET /v1/sessions?project_id=…`.
 - **Use it to:** find the session you want to dig into. Same data as
   `python -m cli.forge_cli status <id>` but in a clickable list.
+- **Internal workflow runs carry no project**, so they drop out once one
+  is selected. The page says "N internal workflow runs not shown: no
+  project recorded" rather than just getting shorter — otherwise an empty
+  page means both "nothing ran" and "everything that ran was internal",
+  with no way to tell which.
+- **The pending-approval card is scoped too.** It used to read proposals
+  unscoped while `/approvals` read the same hook scoped, so reading one
+  project's sessions could surface — and let you approve — a proposal
+  belonging to another.
 
 ## `/sessions/:id`: session detail
 

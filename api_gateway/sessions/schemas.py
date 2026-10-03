@@ -44,6 +44,14 @@ class SessionListResponse(BaseModel):
 
     sessions: list[SessionResponse]
     total: int
+    #: Internal workflow runs left out because they carry no project, when
+    #: the list was scoped to one. Zero on an unscoped listing.
+    #:
+    #: Reported rather than simply absent, for the reason the runs list
+    #: carries the same field: a shorter list with no explanation reads as
+    #: "there are none" instead of "these are hidden", and the reader has no
+    #: way to tell which.
+    unscoped_count: int = 0
 
 
 # ── Write API (MET-493): external agents record their own sessions ──────
