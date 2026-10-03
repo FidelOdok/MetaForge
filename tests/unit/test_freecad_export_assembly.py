@@ -38,6 +38,9 @@ class _Shape:
     def isNull(self) -> bool:
         return self._null
 
+    def copy(self) -> _Shape:
+        return self
+
 
 def _leaf(shape: _Shape) -> SimpleNamespace:
     """A shape-bearing object (Part::Feature / primitive / body with a feature)."""
