@@ -52,6 +52,21 @@ export interface TwinNode {
   // recorded without them. Like geometryParameters above, this is here
   // because `properties` is scalar-only and silently drops objects.
   meshStats?: Record<string, unknown>;
+  // FORGE-511: an assembly cad_model's part list (metadata.parts) — undefined
+  // for every other node.
+  assemblyParts?: AssemblyPart[];
+}
+
+export interface AssemblyPartBox {
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
+export interface AssemblyPart {
+  node_id: string;
+  name: string;
+  material?: string | null;
+  position_bbox_mm?: AssemblyPartBox | null;
 }
 
 export interface TwinRelationship {

@@ -146,7 +146,22 @@ dimensions in `extra_metadata` on the commit. If the phase ends with no loadable
 `cad_model` (or the native turn fails), `GoalDrivenMechanicalHandler` runs as a
 backstop. It is given the flow context and the project's constraint set,
 re-asks once if its spec breaks a stated limit, and the phase summary starts
-with `FALLBACK:`. `design_v1` and `hardware_v1` routing is unchanged. Where a real analysis needs a
+with `FALLBACK:`. `design_v1` and `hardware_v1` routing is unchanged.
+
+**Multi-part designs commit an assembly (FORGE-511).** When a design has more
+than one part, the `cad_model` hint tells the agent to commit each part as its
+own named `cad_model`, then build one assembly (`freecad.create_assembly`, then
+`freecad.add_part_to_assembly` for each part by name), export it and commit it
+as `<product> Assembly` with `twin.commit_geometry` and
+`parts=[{node_id, name, material, position_bbox_mm}]` (or `part_node_ids`). The
+recorder checks every part is an existing `cad_model` in the same project before
+creating anything, records the list as `metadata.parts`, and links the assembly
+to each part with a `parent_of` edge. The geometry check at the gate
+(`check_assembly` in `api_gateway/runs/geometry_constraints.py`) then fails a
+project that has more than one part `cad_model` and no assembly referencing
+them (`multi-part design has no assembly`), and, when an assembly exists, fails
+part position boxes that overlap by more than 0.01 mm or an assembly bounding
+box that does not enclose its parts. Where a real analysis needs a
 capability MetaForge doesn't have in Phase 1 (ERC/DRC on an authored schematic,
 Gerber export), the handler records the result **honestly as deferred** rather
 than asserting a compliance the tools never established.

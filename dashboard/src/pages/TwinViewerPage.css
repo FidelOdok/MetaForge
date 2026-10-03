@@ -767,6 +767,50 @@
   display: flex;
   gap: 10px;
 }
+.tw-assembly-tree button {
+  cursor: pointer;
+  color: var(--tw-ink);
+  text-align: left;
+  align-items: center;
+}
+.tw-assembly-tree button[data-selected="true"] {
+  border-color: #ff5a0a;
+  background: rgba(255, 90, 10, 0.15);
+}
+.tw-latest-assembly {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--tw-line);
+  border-radius: 6px;
+  background: var(--tw-panel);
+  color: var(--tw-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.tw-latest-assembly[aria-current="true"] {
+  border-color: #ff5a0a;
+}
+.tw-latest-assembly > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+.tw-latest-assembly small,
+.tw-latest-assembly em {
+  color: var(--tw-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+.tw-latest-assembly em {
+  margin-left: auto;
+}
+.tw-latest-assembly strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tw-assembly-tree small {
   margin-left: auto;
   color: var(--tw-muted);

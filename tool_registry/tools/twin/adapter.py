@@ -2247,6 +2247,27 @@ class TwinServer(McpToolServer):
                                 "trusted."
                             ),
                         },
+                        "parts": {
+                            "type": "array",
+                            "description": (
+                                "FORGE-511. Commit an ASSEMBLY: the part cad_models it is "
+                                "made of, as [{node_id, name?, material?, "
+                                "position_bbox_mm?}]. Each node_id must be an existing "
+                                "cad_model in the same project; the assembly is linked to "
+                                "each with a parent_of edge and records them as "
+                                "metadata.parts. position_bbox_mm is the part's box in the "
+                                "assembly frame ({min:[x,y,z], max:[x,y,z]})."
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "part_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-511. Shorthand for 'parts' when only the ids are "
+                                "known; name and material are read from each part node."
+                            ),
+                        },
                         "source_tool": {
                             "type": "string",
                             "description": (
@@ -2516,6 +2537,15 @@ class TwinServer(McpToolServer):
                 assembly_info.get("parts") or assembly_info.get("joints")
             ):
                 extra_metadata["assembly"] = assembly_info
+        # FORGE-511: an assembly names the part cad_models it contains.
+        assembly_parts: list[dict[str, Any]] = []
+        raw_parts = arguments.get("parts")
+        if isinstance(raw_parts, list):
+            assembly_parts = [p for p in raw_parts if isinstance(p, dict) and p.get("node_id")]
+        raw_ids = arguments.get("part_node_ids")
+        if isinstance(raw_ids, list):
+            known = {str(p["node_id"]) for p in assembly_parts}
+            assembly_parts += [{"node_id": str(i)} for i in raw_ids if i and str(i) not in known]
         return await self._geometry_recorder(
             step_base64=step_base64,
             name=name,
@@ -2528,6 +2558,7 @@ class TwinServer(McpToolServer):
             properties=properties if isinstance(properties, dict) else None,
             **({"source_tool": source_tool} if source_tool else {}),
             **({"extra_metadata": extra_metadata} if extra_metadata else {}),
+            **({"parts": assembly_parts} if assembly_parts else {}),
         )
 
     # ------------------------------------------------------------------

@@ -264,3 +264,93 @@ def check_geometry_constraints(
                         f"requirement is {op_name} {target:g} mm"
                     )
     return result
+
+
+# FORGE-511: multi-part designs must commit an assembly.
+
+#: Boxes that overlap by no more than this (mm) are touching, not interfering.
+TOUCH_TOLERANCE_MM = 0.01
+
+
+def _bounds(bbox: Any) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+    """``(min, max)`` corners of a bbox in either recorded shape, or ``None``."""
+    if not isinstance(bbox, dict):
+        return None
+    keys = ("min_x", "min_y", "min_z", "max_x", "max_y", "max_z")
+    if all(k in bbox for k in keys):
+        v = [_num(bbox[k]) for k in keys]
+        if any(x is None for x in v):
+            return None
+        return (v[0], v[1], v[2]), (v[3], v[4], v[5])  # type: ignore[return-value]
+    lo, hi = bbox.get("min"), bbox.get("max")
+    if isinstance(lo, list | tuple) and isinstance(hi, list | tuple) and len(lo) == len(hi) == 3:
+        low = [_num(x) for x in lo]
+        high = [_num(x) for x in hi]
+        if any(x is None for x in low + high):
+            return None
+        return tuple(low), tuple(high)  # type: ignore[return-value]
+    return None
+
+
+def assembly_parts(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """The ``metadata.parts`` entries of an assembly cad_model (empty when not one)."""
+    parts = metadata.get("parts")
+    if not isinstance(parts, list):
+        return []
+    return [p for p in parts if isinstance(p, dict)]
+
+
+def check_assembly(models: Iterable[tuple[str, str, dict[str, Any]]]) -> GeometryCheck:
+    """FORGE-511: a design with several parts needs an assembly that places them sanely.
+
+    ``models`` are ``(node_id, name, metadata)`` for the project's current
+    cad_models. A model is an assembly when ``metadata.parts`` lists parts.
+    Violations: more than one part but no assembly referencing them all;
+    overlapping part position boxes; an assembly box that does not enclose
+    its parts.
+    """
+    result = GeometryCheck()
+    entries = list(models)
+    assemblies = [(i, n, m) for i, n, m in entries if assembly_parts(m)]
+    parts = [(i, n, m) for i, n, m in entries if not assembly_parts(m)]
+    if len(parts) > 1 and not assemblies:
+        result.evaluated += 1
+        names = ", ".join(sorted(n for _, n, _ in parts))
+        result.violations.append(f"multi-part design has no assembly (parts: {names})")
+        return result
+    if not assemblies:
+        return result
+    for _, aname, ameta in assemblies:
+        refs = assembly_parts(ameta)
+        ref_ids = {str(p.get("node_id")) for p in refs}
+        ref_names = {str(p.get("name")) for p in refs}
+        missing = [n for i, n, _ in parts if i not in ref_ids and n not in ref_names]
+        result.evaluated += 1
+        if missing and len(parts) > 1 and aname == assemblies[-1][1]:
+            result.violations.append(
+                f"multi-part design has no assembly covering: {', '.join(sorted(missing))}"
+            )
+        boxes: list[tuple[str, Any]] = []
+        for p in refs:
+            b = _bounds(p.get("position_bbox_mm"))
+            if b is not None:
+                boxes.append((str(p.get("name") or p.get("node_id") or "part"), b))
+        for a in range(len(boxes)):
+            for c in range(a + 1, len(boxes)):
+                (na, (alo, ahi)), (nc, (clo, chi)) = boxes[a], boxes[c]
+                depth = [min(ahi[k], chi[k]) - max(alo[k], clo[k]) for k in range(3)]
+                if all(d > TOUCH_TOLERANCE_MM for d in depth):
+                    result.violations.append(
+                        f"assembly '{aname}': parts '{na}' and '{nc}' overlap "
+                        f"({depth[0]:g} x {depth[1]:g} x {depth[2]:g} mm)"
+                    )
+        outer = _bounds(ameta.get("bbox_mm"))
+        if outer is not None and boxes:
+            lo = [min(b[0][k] for _, b in boxes) for k in range(3)]
+            hi = [max(b[1][k] for _, b in boxes) for k in range(3)]
+            tol = TOUCH_TOLERANCE_MM
+            if any(outer[0][k] > lo[k] + tol or outer[1][k] < hi[k] - tol for k in range(3)):
+                result.violations.append(
+                    f"assembly '{aname}': its bounding box does not enclose its parts"
+                )
+    return result

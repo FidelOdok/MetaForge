@@ -22,7 +22,11 @@ from api_gateway.runs.analysis_constraints import (
     SimResult,
     check_analysis_constraints,
 )
-from api_gateway.runs.geometry_constraints import GeometryCheck, check_geometry_constraints
+from api_gateway.runs.geometry_constraints import (
+    GeometryCheck,
+    check_assembly,
+    check_geometry_constraints,
+)
 from orchestrator.design_flow.executor import ConsistencyGateReport, ConstraintReport
 from twin_core.consistency import (
     evaluate_g3_feasibility,
@@ -173,6 +177,10 @@ class TwinConstraintChecker:
 
     async def _current_cad_models(self, project_id: str) -> list[tuple[str, dict[str, Any]]]:
         """The latest cad_model per name for the project, as ``(name, metadata)``."""
+        return [(n, m) for _, n, m in await self._current_cad_entries(project_id)]
+
+    async def _current_cad_entries(self, project_id: str) -> list[tuple[str, str, dict[str, Any]]]:
+        """Like ``_current_cad_models`` but ``(node_id, name, metadata)`` (FORGE-511)."""
         getter = getattr(self._twin, "get_work_product", None)
         if self._backend is None or getter is None:
             return []
@@ -188,7 +196,7 @@ class TwinConstraintChecker:
             name = str(getattr(wp, "name", "") or getattr(wp, "id", ""))
             if name not in latest or ts >= latest[name][0]:
                 latest[name] = (ts, wp)
-        models: list[tuple[str, dict[str, Any]]] = []
+        models: list[tuple[str, str, dict[str, Any]]] = []
         for name, (_, wp) in latest.items():
             try:
                 node = await getter(UUID(str(getattr(wp, "id", ""))))
@@ -196,7 +204,9 @@ class TwinConstraintChecker:
                 logger.warning("gate_eval_cad_read_failed", name=name, error=str(exc))
                 continue
             if node is not None:
-                models.append((name, dict(getattr(node, "metadata", None) or {})))
+                models.append(
+                    (str(getattr(wp, "id", "")), name, dict(getattr(node, "metadata", None) or {}))
+                )
         return models
 
     async def _geometry_check(self, project_id: str | None) -> GeometryCheck:
@@ -205,7 +215,8 @@ class TwinConstraintChecker:
             return GeometryCheck()
         try:
             constraints = await lister(project_id=UUID(project_id))
-            models = await self._current_cad_models(project_id)
+            entries = await self._current_cad_entries(project_id)
+            models = [(n, m) for _, n, m in entries]
         except Exception as exc:  # noqa: BLE001 - geometry comparison is best-effort
             logger.warning(
                 "gate_eval_geometry_constraints_failed",
@@ -215,6 +226,11 @@ class TwinConstraintChecker:
             )
             return GeometryCheck()
         outcome = check_geometry_constraints(constraints, models)
+        # FORGE-511: several parts with no assembly (or a badly placed one).
+        assembly = check_assembly(entries)
+        outcome.violations += assembly.violations
+        outcome.warnings += assembly.warnings
+        outcome.evaluated += assembly.evaluated
         logger.info(
             "gate_eval_geometry_constraints",
             project_id=project_id,

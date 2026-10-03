@@ -202,6 +202,12 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
             if isinstance(wp.metadata.get("mesh_stats"), dict)
             else None
         ),
+        # FORGE-511: an assembly cad_model's part list (metadata.parts).
+        assemblyParts=(
+            [p for p in wp.metadata["parts"] if isinstance(p, dict)]
+            if isinstance(wp.metadata.get("parts"), list)
+            else None
+        ),
         # FORGE-293: a technical_drawing node's own structured dimensions/
         # GD&T/surface-finish/inspection data and approval state, keyed by
         # wp.type rather than a shape-sniff (unlike `assembly` above, there's

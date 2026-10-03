@@ -33,6 +33,7 @@ import { useFeatureDiff } from '../hooks/use-features';
 import { useActiveProject } from '../hooks/use-active-project';
 import { R3FViewer } from '../components/viewer/R3FViewer';
 import { ComponentTree } from '../components/viewer/ComponentTree';
+import { AssemblyPartTree } from '../components/viewer/AssemblyPartTree';
 import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
 import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
@@ -494,6 +495,16 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
         {/* Export for robotics sim (MET-720) */}
         {isCAD && exportOpen && (
           <ExportForSimSection node={node} onClose={() => setExportOpen(false)} />
+        )}
+
+        {/* FORGE-511: an assembly's part tree with per-part material/size */}
+        {node.assemblyParts && node.assemblyParts.length > 0 && (
+          <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
+            <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+              Assembly parts ({node.assemblyParts.length})
+            </div>
+            <AssemblyPartTree parts={node.assemblyParts} />
+          </div>
         )}
 
         {/* View a saved robot description directly -- no export form, no
@@ -1292,6 +1303,10 @@ export function TwinViewerPage() {
     .filter((n) => n.updatedAt)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, 12);
+  // FORGE-511: the project's most recently updated assembly cad_model.
+  const latestAssembly = [...items]
+    .filter((n) => (n.assemblyParts?.length ?? 0) > 0)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   const robotNodes = items.filter((n) => n.properties.wp_type === 'robot_description');
   const is3d = tab === 'model' || tab === 'sim';
 
@@ -1425,7 +1440,12 @@ export function TwinViewerPage() {
                 <h2>Assembly</h2>
                 <button onClick={() => setAssemblyExportOpen((v) => !v)}>Configure export</button>
               </div>
-              {node?.assembly ? (
+              {node?.assemblyParts?.length ? (
+                <>
+                  <h3>{node.name}</h3>
+                  <AssemblyPartTree parts={node.assemblyParts} onOpenPart={selectNode} />
+                </>
+              ) : node?.assembly ? (
                 <>
                   <h3>{node.name}</h3>
                   <div className="tw-assembly-tree">
@@ -1551,6 +1571,21 @@ export function TwinViewerPage() {
                   Needs attention
                 </button>
               </div>
+              {latestAssembly && (
+                <button
+                  className="tw-latest-assembly"
+                  aria-label={`Open latest assembly ${latestAssembly.name}`}
+                  aria-current={latestAssembly.id === selectedId ? 'true' : undefined}
+                  onClick={() => selectNode(latestAssembly.id)}
+                >
+                  <span className="material-symbols-outlined">deployed_code</span>
+                  <span>
+                    <small>Latest assembly</small>
+                    <strong>{latestAssembly.name}</strong>
+                  </span>
+                  <em>{latestAssembly.assemblyParts?.length ?? 0} parts</em>
+                </button>
+              )}
               <div className="tw-node-list">
                 {!visible.length && <p className="tw-muted">{search ? 'No matching work products' : 'No work products'}</p>}
                 {domains.map((d) => (
