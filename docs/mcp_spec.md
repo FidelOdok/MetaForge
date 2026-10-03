@@ -915,10 +915,29 @@ ENTRYPOINT ["python", "server.py"]
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge/freecad-adapter` |
+| Docker Image | `metaforge/freecad-adapter` locally; published by CI as `ghcr.io/fidelodok/metaforge-freecad-adapter` (see below) |
 | Base Image | Debian system Python 3 (FreeCAD's compiled extension requires it, not a python.org image) |
 | Transport | stdio |
 | Tools | Stateful session API (`open_session`, `create_body`, `create_sketch`, `pad_sketch`, `execute_code`, `measure`, `export_model`, assembly joints, and more — 27 tools) plus a separate stateless legacy file-based surface (`export_geometry`, `generate_mesh`, `boolean_operation`, `get_properties`, `describe_step_file`, `create_parametric` — 6 tools) |
+
+#### Adapter images are built in CI (FORGE-513)
+
+The freecad and calculix adapters copy `mcp_core/`, `tool_registry/` and
+`observability/` into their images, so a fix in those packages reaches an
+adapter only after a rebuild. The `adapter-images` workflow builds both on
+every push to `main` that touches those paths (and on manual dispatch) and
+publishes `ghcr.io/fidelodok/metaforge-<freecad|calculix>-adapter:latest` and
+`:<commit sha>`. To deploy on a dev host without building there:
+
+```bash
+docker pull ghcr.io/fidelodok/metaforge-freecad-adapter:latest
+docker tag ghcr.io/fidelodok/metaforge-freecad-adapter:latest metaforge/freecad-adapter:latest
+docker compose up -d --no-build freecad-adapter
+docker compose restart mcp-http
+```
+
+(the same for `calculix`). Building these images on the dev host itself has
+taken it offline, so prefer the published images.
 
 Corrected from a stale table that listed `freecad.export_mesh`/`freecad.export_step`/`freecad.measure` — those tool ids don't exist in the current adapter. See [`capability-matrix.md`](capability-matrix.md#cad-kernel-capability-contract) for the 5-capability contract shared with CadQuery, and `tool_registry/tools/freecad/adapter.py` for the full tool list; it's large enough (33 tools across both surfaces) that duplicating it here would drift again.
 
