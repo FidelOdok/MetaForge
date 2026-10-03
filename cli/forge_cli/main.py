@@ -22,6 +22,8 @@ import os
 import sys
 from typing import Any
 
+from cli.forge_cli.approvals import decide, handle_approvals
+from cli.forge_cli.approvals import register_subparser as register_approvals_subparser
 from cli.forge_cli.auth import handle_auth
 from cli.forge_cli.auth import register_subparser as register_auth_subparser
 from cli.forge_cli.cad import handle_cad
@@ -156,6 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
     reject_parser.add_argument("--reason", required=True, help="Rejection reason")
     reject_parser.add_argument("--reviewer", default="cli-user", help="Reviewer identity")
 
+    # -- approvals (unified /v1/approvals) --------------------------------
+    register_approvals_subparser(subparsers)
+
     # -- runs (harness) ----------------------------------------------------
     runs_parser = subparsers.add_parser("runs", help="Drive harness runs (/v1/runs)")
     runs_sub = runs_parser.add_subparsers(dest="runs_command", help="Runs subcommands")
@@ -174,9 +179,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     runs_approve = runs_sub.add_parser("approve", help="Approve a paused run")
     runs_approve.add_argument("run_id", help="Run id")
+    runs_approve.add_argument("--reason", default=None, help="Reason (audit trail)")
 
     runs_reject = runs_sub.add_parser("reject", help="Reject a paused run")
     runs_reject.add_argument("run_id", help="Run id")
+    runs_reject.add_argument("--reason", default=None, help="Reason (required by most gates)")
 
     runs_watch = runs_sub.add_parser("watch", help="Stream a run's status (SSE)")
     runs_watch.add_argument("run_id", help="Run id")
@@ -455,22 +462,19 @@ def handle_proposals(args: argparse.Namespace, client: ForgeClient) -> Any:
     return client.list_proposals()
 
 
+def _change_approval_id(change_id: str) -> str:
+    """Map a bare change id onto the unified approvals id space."""
+    return change_id if ":" in change_id else f"change:{change_id}"
+
+
 def handle_approve(args: argparse.Namespace, client: ForgeClient) -> Any:
     """Handle ``forge approve <change_id>``."""
-    return client.approve_proposal(
-        change_id=args.change_id,
-        reason=args.reason,
-        reviewer=args.reviewer,
-    )
+    decide(client, _change_approval_id(args.change_id), "approve", reason=args.reason)
 
 
 def handle_reject(args: argparse.Namespace, client: ForgeClient) -> Any:
     """Handle ``forge reject <change_id>``."""
-    return client.reject_proposal(
-        change_id=args.change_id,
-        reason=args.reason,
-        reviewer=args.reviewer,
-    )
+    decide(client, _change_approval_id(args.change_id), "reject", reason=args.reason)
 
 
 # ---------------------------------------------------------------------------
@@ -591,6 +595,7 @@ _HANDLERS = {
     "knowledge": handle_knowledge,
     "memory": handle_memory,
     "runs": handle_runs,
+    "approvals": handle_approvals,
     "projects": handle_projects,
     "cad": handle_cad,
     "design": handle_design,

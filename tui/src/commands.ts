@@ -7,7 +7,12 @@
  */
 import { writeSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { GatewayClient, GatewayError } from "./api/client.js";
+import {
+  GatewayClient,
+  GatewayError,
+  type ApprovalDecision,
+  type ApprovalItem,
+} from "./api/client.js";
 import { isTerminal, streamRunStatus } from "./api/runs.js";
 import { loginChatGPT } from "./auth/oauth.js";
 import { CLI_QUICKSTART, MISSION, plainBanner } from "./banner.js";
@@ -118,6 +123,10 @@ function printHelp(): void {
       "",
       "All commands (scriptable; add --json for machine output)",
       "  forge runs list|get <id>|create|approve <id>|reject <id>|watch <id>",
+      "  forge approvals list [--project id] [--kind k] [--all|--decided]   pending decisions",
+      "  forge approvals show <id>     full card: findings, allowed decisions, rework targets",
+      "  forge approvals approve <id> [--reason t] | reject|retry <id> --reason t",
+      "  forge approvals rework <id> --to <phase> --reason t",
       '  forge chat -m "message" [--project <id|name>]   one-shot assistant turn',
       "  forge projects                list projects",
       "  forge twin list               list twin nodes",
@@ -173,12 +182,10 @@ async function runsCmd(
     }
     case "approve":
     case "reject": {
+      // Alias for `forge approvals approve|reject gate:<run_id>` (FORGE-509).
       const id = rest[0];
-      if (!id) return usage(`forge runs ${sub} <id>`);
-      const run = await client.submitApproval(id, sub === "approve" ? "approve" : "reject");
-      if (json) out(run);
-      else line(`${run.id} ${run.status}`);
-      return 0;
+      if (!id) return usage(`forge runs ${sub} <id> [--reason text]`);
+      return decideCmd(client, id.includes(":") ? id : `gate:${id}`, sub, flags, json);
     }
     case "watch": {
       const id = rest[0];
@@ -196,6 +203,204 @@ async function runsCmd(
     }
     default:
       return usage(`unknown: forge runs ${sub}`);
+  }
+}
+
+/** Exit codes for `forge approvals` (documented in docs/cli-reference.md). */
+export const EXIT_ERROR = 1;
+export const EXIT_USAGE = 2;
+export const EXIT_NOT_FOUND = 3;
+export const EXIT_CONFLICT = 4;
+export const EXIT_INVALID = 5;
+export const EXIT_AUTH = 6;
+
+/** Map a gateway status to an approvals exit code. */
+export function approvalExitCode(status: number | undefined): number {
+  switch (status) {
+    case 404:
+      return EXIT_NOT_FOUND;
+    case 409:
+      return EXIT_CONFLICT;
+    case 422:
+      return EXIT_INVALID;
+    case 401:
+    case 403:
+      return EXIT_AUTH;
+    default:
+      return EXIT_ERROR;
+  }
+}
+
+/** Local pre-flight against the item's own policy; returns an error or null. */
+export function validateDecision(
+  item: ApprovalItem,
+  decision: ApprovalDecision,
+  reason: string | undefined,
+  toPhase: string | undefined,
+): string | null {
+  const allowed = item.allowed_decisions ?? [];
+  if (!allowed.includes(decision)) {
+    return `${decision} is not allowed for ${item.id} (allowed: ${allowed.join(", ") || "none"})`;
+  }
+  if ((item.reason_required_for ?? []).includes(decision) && !(reason ?? "").trim()) {
+    return `${decision} requires --reason`;
+  }
+  if (decision === "rework") {
+    const targets = item.rework_targets ?? [];
+    if (!toPhase) return `rework requires --to <phase> (one of: ${targets.join(", ") || "none"})`;
+    if (!targets.includes(toPhase)) {
+      return `--to ${toPhase} is not a rework target (one of: ${targets.join(", ") || "none"})`;
+    }
+  }
+  return null;
+}
+
+/** Human-readable card with every ApprovalItem field. */
+export function formatApproval(item: ApprovalItem): string {
+  const lines = [
+    item.title,
+    `  id:           ${item.id}`,
+    `  kind:         ${item.kind}`,
+    `  status:       ${item.status}`,
+    `  project:      ${item.project_id ?? "-"}`,
+    `  created:      ${item.created_at}`,
+    `  deadline:     ${item.deadline ?? "-"}`,
+    `  route:        ${item.route ?? "-"}`,
+    `  requested by: ${item.requested_by ?? "-"}`,
+  ];
+  if (item.summary) lines.push(`  summary:      ${item.summary}`);
+  if (item.reason_held) lines.push(`  held because: ${item.reason_held}`);
+  const findings = item.findings ?? [];
+  lines.push(`  findings:     ${findings.length || "none"}`);
+  for (const f of findings) lines.push(`    [${f.severity}] ${f.kind}: ${f.message}`);
+  lines.push(`  allowed:      ${(item.allowed_decisions ?? []).join(", ") || "none"}`);
+  lines.push(`  reason needed for: ${(item.reason_required_for ?? []).join(", ") || "-"}`);
+  lines.push(`  rework targets:    ${(item.rework_targets ?? []).join(", ") || "-"}`);
+  lines.push(
+    `  decidable:    ${item.decidable ? "yes" : `no (${item.not_decidable_reason ?? "?"})`}`,
+  );
+  const detail = Object.entries(item.detail ?? {});
+  if (detail.length) {
+    lines.push("  detail:");
+    for (const [k, v] of detail) lines.push(`    ${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`);
+  }
+  if (item.decision) {
+    lines.push("  decision:");
+    for (const [k, v] of Object.entries(item.decision)) lines.push(`    ${k}: ${String(v)}`);
+  }
+  return lines.join("\n");
+}
+
+function fail(code: number, message: string, json: boolean): number {
+  if (json) out({ error: message, exit_code: code });
+  else writeAllSync(2, `error: ${message}\n`);
+  return code;
+}
+
+/** Fetch, validate locally, post a decision, print. Returns an exit code. */
+async function decideCmd(
+  client: GatewayClient,
+  id: string,
+  decision: ApprovalDecision,
+  flags: Record<string, string | boolean>,
+  json: boolean,
+): Promise<number> {
+  const reason = typeof flags.reason === "string" ? flags.reason : undefined;
+  const toPhase = typeof flags.to === "string" ? flags.to : undefined;
+  try {
+    const item = await client.getApproval(id);
+    if (item.decidable === false) {
+      return fail(EXIT_CONFLICT, `not decidable right now: ${item.not_decidable_reason ?? "unknown"}`, json);
+    }
+    const problem = validateDecision(item, decision, reason, toPhase);
+    if (problem) return fail(EXIT_INVALID, problem, json);
+    const updated = await client.decideApproval(
+      id,
+      decision,
+      reason,
+      decision === "rework" ? toPhase : undefined,
+    );
+    if (json) out(updated);
+    else line(`${updated.id ?? id} -> ${updated.status}`);
+    return 0;
+  } catch (e) {
+    if (!(e instanceof GatewayError)) throw e;
+    const code = approvalExitCode(e.status);
+    const msg =
+      code === EXIT_NOT_FOUND
+        ? `no approval with id ${id}`
+        : code === EXIT_CONFLICT
+          ? `not decidable right now: ${e.message}`
+          : code === EXIT_AUTH
+            ? `not authorized (${e.message}); set METAFORGE_AUTH_TOKEN`
+            : e.message;
+    return fail(code, msg, json);
+  }
+}
+
+async function approvalsCmd(
+  client: GatewayClient,
+  sub: string | undefined,
+  rest: string[],
+  flags: Record<string, string | boolean>,
+  json: boolean,
+): Promise<number> {
+  switch (sub) {
+    case undefined:
+    case "list": {
+      const status = flags.all === true ? "all" : flags.decided === true ? "decided" : "pending";
+      try {
+        const res = await client.listApprovals({
+          status,
+          project: typeof flags.project === "string" ? flags.project : undefined,
+          kind: typeof flags.kind === "string" ? flags.kind : undefined,
+        });
+        if (json) out(res);
+        else {
+          if (!res.items.length) line("(no approvals)");
+          for (const i of res.items) {
+            line(`${i.id.padEnd(34)} ${i.kind.padEnd(14)} ${i.status.padEnd(9)} ${i.title}`);
+          }
+          if (res.unscoped_count) {
+            line(`(${res.unscoped_count} approval(s) have no project and are not matched by --project)`);
+          }
+        }
+        return 0;
+      } catch (e) {
+        if (!(e instanceof GatewayError)) throw e;
+        return fail(approvalExitCode(e.status), e.message, json);
+      }
+    }
+    case "show": {
+      const id = rest[0];
+      if (!id) return usage("forge approvals show <id> [--json]");
+      try {
+        const item = await client.getApproval(id);
+        if (json) out(item);
+        else line(formatApproval(item));
+        return 0;
+      } catch (e) {
+        if (!(e instanceof GatewayError)) throw e;
+        const code = approvalExitCode(e.status);
+        return fail(code, code === EXIT_NOT_FOUND ? `no approval with id ${id}` : e.message, json);
+      }
+    }
+    case "approve":
+    case "reject":
+    case "retry":
+    case "rework": {
+      const id = rest[0];
+      if (!id) {
+        return usage(
+          sub === "rework"
+            ? "forge approvals rework <id> --to <phase> --reason text"
+            : `forge approvals ${sub} <id>${sub === "approve" ? " [--reason text]" : " --reason text"}`,
+        );
+      }
+      return decideCmd(client, id, sub, flags, json);
+    }
+    default:
+      return usage(`unknown: forge approvals ${sub}`);
   }
 }
 
@@ -283,13 +488,10 @@ async function proposalsCmd(
     }
     case "approve":
     case "reject": {
+      // Alias for `forge approvals approve|reject change:<id>` (FORGE-509).
       const id = rest[0];
-      if (!id) return usage(`forge proposals ${sub} <change_id>`);
-      const reason = typeof flags.reason === "string" ? flags.reason : undefined;
-      const r = await client.decideProposal(id, sub === "approve" ? "approve" : "reject", reason);
-      if (json) out(r);
-      else line(`${id} ${sub}d`);
-      return 0;
+      if (!id) return usage(`forge proposals ${sub} <change_id> [--reason text]`);
+      return decideCmd(client, id.includes(":") ? id : `change:${id}`, sub, flags, json);
     }
     default:
       return usage(`unknown: forge proposals ${sub}`);
@@ -506,6 +708,8 @@ export async function runCommand(argv: string[]): Promise<number> {
       }
       case "memory":
         return await memoryCmd(client, sub, rest, flags, json);
+      case "approvals":
+        return await approvalsCmd(client, sub, rest, flags, json);
       case "proposals":
         return await proposalsCmd(client, sub, rest, flags, json);
       case "config":

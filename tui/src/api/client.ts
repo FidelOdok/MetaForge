@@ -117,6 +117,64 @@ export interface Run {
   history?: string[];
 }
 
+// ---- unified approvals (FORGE-506/509): /v1/approvals ----
+
+export type ApprovalDecision = "approve" | "reject" | "retry" | "rework";
+
+export interface ApprovalFinding {
+  kind: string;
+  severity: string;
+  message: string;
+}
+
+export interface ApprovalItem {
+  id: string;
+  kind: string;
+  status: string;
+  title: string;
+  summary: string;
+  project_id: string | null;
+  created_at: string;
+  deadline: string | null;
+  route: string | null;
+  requested_by: string | null;
+  reason_held: string | null;
+  findings: ApprovalFinding[];
+  allowed_decisions: ApprovalDecision[];
+  rework_targets: string[];
+  reason_required_for: ApprovalDecision[];
+  decidable: boolean;
+  not_decidable_reason: string | null;
+  detail: Record<string, unknown>;
+  decision: Record<string, unknown> | null;
+}
+
+export interface ApprovalList {
+  items: ApprovalItem[];
+  unscoped_count: number;
+}
+
+export type ApprovalStatusFilter = "pending" | "decided" | "all";
+
+/**
+ * Identity headers for the approvals API. `cli` surface by default; `agent`
+ * plus the on-behalf-of user when both METAFORGE_APPROVAL_AGENT and
+ * METAFORGE_APPROVAL_ON_BEHALF_OF are set; a bearer token from
+ * METAFORGE_AUTH_TOKEN when configured.
+ */
+export function approvalHeaders(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const headers: Record<string, string> = { "X-MetaForge-Surface": "cli" };
+  const agent = (env.METAFORGE_APPROVAL_AGENT ?? "").trim();
+  const onBehalf = (env.METAFORGE_APPROVAL_ON_BEHALF_OF ?? "").trim();
+  if (agent && onBehalf) {
+    headers["X-MetaForge-Surface"] = "agent";
+    headers["X-MetaForge-On-Behalf-Of"] = onBehalf;
+  }
+  const token = (env.METAFORGE_AUTH_TOKEN ?? "").trim();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
 export class GatewayError extends Error {
   constructor(
     message: string,
@@ -247,12 +305,69 @@ export class GatewayClient {
     return d.proposals ?? [];
   }
 
+  /** Decide a change proposal through the unified approvals API (FORGE-509). */
   async decideProposal(
     changeId: string,
     decision: "approve" | "reject",
     reason?: string,
-  ): Promise<unknown> {
-    return this.post(`/v1/assistant/proposals/${changeId}/decide`, { decision, reason });
+  ): Promise<ApprovalItem> {
+    const id = changeId.includes(":") ? changeId : `change:${changeId}`;
+    return this.decideApproval(id, decision, reason);
+  }
+
+  private async approvalRequest<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+    const res = await fetch(`${this.base()}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", ...approvalHeaders() },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) {
+      let detail: string | undefined;
+      try {
+        const b = (await res.clone().json()) as { detail?: unknown };
+        if (typeof b?.detail === "string") detail = b.detail;
+        else if (Array.isArray(b?.detail)) {
+          detail = b.detail
+            .map((d) => (d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg) : String(d)))
+            .join("; ");
+        }
+      } catch {
+        /* non-JSON body: fall back to the status */
+      }
+      throw new GatewayError(detail ?? `${method} ${path} -> ${res.status}`, res.status);
+    }
+    return (await res.json()) as T;
+  }
+
+  async listApprovals(
+    opts: { status?: ApprovalStatusFilter; project?: string; kind?: string } = {},
+  ): Promise<ApprovalList> {
+    const q = new URLSearchParams({ status: opts.status ?? "pending" });
+    if (opts.project) q.set("project_id", opts.project);
+    if (opts.kind) q.set("kind", opts.kind);
+    const d = await this.approvalRequest<Partial<ApprovalList>>("GET", `/v1/approvals?${q}`);
+    return { items: d.items ?? [], unscoped_count: d.unscoped_count ?? 0 };
+  }
+
+  async getApproval(id: string): Promise<ApprovalItem> {
+    return this.approvalRequest<ApprovalItem>("GET", `/v1/approvals/${encodeURIComponent(id).replace(/%3A/gi, ":")}`);
+  }
+
+  async decideApproval(
+    id: string,
+    decision: ApprovalDecision,
+    reason?: string,
+    toPhase?: string,
+  ): Promise<ApprovalItem> {
+    const body: Record<string, string> = { decision };
+    if (reason) body.reason = reason;
+    if (toPhase) body.to_phase = toPhase;
+    return this.approvalRequest<ApprovalItem>(
+      "POST",
+      `/v1/approvals/${encodeURIComponent(id).replace(/%3A/gi, ":")}/decision`,
+      body,
+    );
   }
 
   baseUrl(): string {

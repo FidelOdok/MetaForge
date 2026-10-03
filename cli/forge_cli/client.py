@@ -222,6 +222,97 @@ class ForgeClient:
             return resp.json()
 
     # ------------------------------------------------------------------
+    # Unified approvals (FORGE-506/509) -- served at /v1/approvals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _approval_headers() -> dict[str, str]:
+        """Identity headers for the approvals API.
+
+        Always ``X-MetaForge-Surface: cli``.  When ``METAFORGE_APPROVAL_AGENT``
+        and ``METAFORGE_APPROVAL_ON_BEHALF_OF`` are both set, the surface is
+        ``agent`` and the on-behalf-of user is attached.  A bearer token from
+        ``METAFORGE_AUTH_TOKEN`` is sent when configured.
+        """
+        headers = {"X-MetaForge-Surface": "cli"}
+        agent = os.environ.get("METAFORGE_APPROVAL_AGENT", "").strip()
+        on_behalf = os.environ.get("METAFORGE_APPROVAL_ON_BEHALF_OF", "").strip()
+        if agent and on_behalf:
+            headers["X-MetaForge-Surface"] = "agent"
+            headers["X-MetaForge-On-Behalf-Of"] = on_behalf
+        token = os.environ.get("METAFORGE_AUTH_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    @staticmethod
+    def _raise_for_approval(resp: httpx.Response) -> None:
+        if resp.is_success:
+            return
+        detail: Any = None
+        try:
+            body = resp.json()
+            detail = body.get("detail") if isinstance(body, dict) else None
+        except ValueError:
+            pass
+        if isinstance(detail, list):
+            detail = "; ".join(
+                str(d.get("msg", d)) if isinstance(d, dict) else str(d) for d in detail
+            )
+        raise ForgeClientError(
+            str(detail) if detail else f"HTTP {resp.status_code}", resp.status_code
+        )
+
+    def list_approvals(
+        self,
+        *,
+        status: str = "pending",
+        project_id: str | None = None,
+        kind: str | None = None,
+    ) -> dict[str, Any]:
+        """``GET /v1/approvals`` -> ``{"items": [...], "unscoped_count": int}``."""
+        params: dict[str, str] = {"status": status}
+        if project_id:
+            params["project_id"] = project_id
+        if kind:
+            params["kind"] = kind
+        with self._client() as client:
+            resp = client.get("/v1/approvals", params=params, headers=self._approval_headers())
+            self._raise_for_approval(resp)
+            return resp.json()
+
+    def get_approval(self, approval_id: str) -> dict[str, Any]:
+        """``GET /v1/approvals/{id}`` -> one ApprovalItem."""
+        with self._client() as client:
+            resp = client.get(
+                f"/v1/approvals/{quote(approval_id, safe=':')}", headers=self._approval_headers()
+            )
+            self._raise_for_approval(resp)
+            return resp.json()
+
+    def decide_approval(
+        self,
+        approval_id: str,
+        decision: str,
+        reason: str | None = None,
+        to_phase: str | None = None,
+    ) -> dict[str, Any]:
+        """``POST /v1/approvals/{id}/decision`` -> the updated ApprovalItem."""
+        payload: dict[str, Any] = {"decision": decision}
+        if reason:
+            payload["reason"] = reason
+        if to_phase:
+            payload["to_phase"] = to_phase
+        with self._client() as client:
+            resp = client.post(
+                f"/v1/approvals/{quote(approval_id, safe=':')}/decision",
+                json=payload,
+                headers=self._approval_headers(),
+            )
+            self._raise_for_approval(resp)
+            return resp.json()
+
+    # ------------------------------------------------------------------
     # Knowledge ingestion (MET-336)
     # ------------------------------------------------------------------
 

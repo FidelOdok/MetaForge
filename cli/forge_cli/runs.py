@@ -12,6 +12,7 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
+from cli.forge_cli.approvals import decide
 from cli.forge_cli.client import ForgeClient, ForgeClientError, ForgeClientNotFound
 from cli.forge_cli.formatters import format_output
 
@@ -110,16 +111,10 @@ def _get(args: argparse.Namespace, client: ForgeClient) -> Any:
 
 
 def _approval(args: argparse.Namespace, client: ForgeClient, decision: str) -> Any:
-    try:
-        run = client.submit_run_approval(args.run_id, decision)
-    except ForgeClientNotFound as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return None
-    except ForgeClientError as exc:
-        # 409 (run not awaiting approval) surfaces here.
-        print(f"Error: could not {decision} run: {exc}", file=sys.stderr)
-        return None
-    print(f"Run {run['id']} -> {run['status']}")
+    """Alias for ``forge approvals approve|reject gate:<run_id>`` (FORGE-509)."""
+    run_id = args.run_id
+    approval_id = run_id if ":" in run_id else f"gate:{run_id}"
+    decide(client, approval_id, decision, reason=getattr(args, "reason", None))
     return None
 
 
