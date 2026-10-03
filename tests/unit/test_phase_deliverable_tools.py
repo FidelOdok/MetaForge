@@ -149,3 +149,77 @@ def test_simulation_phase_can_stage_committed_geometry() -> None:
     tools = profiles.tools_for_phase(("mechanical",), ("simulation_result",))
     assert "twin.stage_work_product_file" in tools
     assert "freecad.generate_mesh" in tools
+
+
+_REAL_CATALOG = [
+    "freecad.create_assembly",
+    "freecad.add_part_to_assembly",
+    "freecad.create_body",
+    "cadquery.create_assembly",
+    "cadquery.create_parametric",
+    "calculix.run_fea",
+    "project.delete",
+]
+
+
+def _search_fixture(max_total: int | None = 40) -> tuple[Any, Any]:
+    from api_gateway.chat.harness_backend import make_search_tools_tool
+    from orchestrator.harness.tools import ToolRegistry
+
+    class Bridge:
+        async def list_tools(self) -> list[dict[str, Any]]:
+            return [
+                {"tool_id": t, "capability": t.split(".")[1].replace("_", " ")}
+                for t in _REAL_CATALOG
+            ]
+
+        async def invoke(self, tid: str, args: dict[str, Any]) -> Any:
+            return {}
+
+    registry = ToolRegistry()
+    cell: dict[str, Any] = {"runtime": type("R", (), {"tools": registry})()}
+    return make_search_tools_tool(Bridge(), None, cell, max_total_tools=max_total), registry  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_search_finds_freecad_assembly_tools_by_multiword_query() -> None:
+    tool, registry = _search_fixture()
+    out = await tool.handler({"query": "freecad assembly create assembly"})
+    ids = {m["id"] for m in out["matches"]}
+    assert "freecad.create_assembly" in ids
+    assert all(not i.startswith("cadquery.") for i in ids)
+    assert len(out["registered"]) == len(out["matches"]) >= 1
+    assert all(m["description"] for m in out["matches"])
+    assert {t.name for t in registry.all_tools()} >= set(out["registered"])
+
+    out2 = await tool.handler({"query": "freecad assembly"})
+    assert {m["id"] for m in out2["matches"]} == {
+        "freecad.create_assembly",
+        "freecad.add_part_to_assembly",
+    }
+
+
+@pytest.mark.asyncio
+async def test_search_finds_cadquery_assembly() -> None:
+    tool, _ = _search_fixture()
+    out = await tool.handler({"query": "cadquery assembly"})
+    assert [m["id"] for m in out["matches"]] == ["cadquery.create_assembly"]
+    assert len(out["registered"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_reports_service_refused_tool_as_unavailable() -> None:
+    tool, registry = _search_fixture()
+    out = await tool.handler({"query": "project delete"})
+    assert out["unavailable"] == ["project.delete"]
+    assert out["registered"] == []
+    assert registry.all_tools() == []
+    assert "unavailable" in out["instruction"]
+
+
+@pytest.mark.asyncio
+async def test_search_no_match_says_so() -> None:
+    tool, _ = _search_fixture()
+    out = await tool.handler({"query": "nonexistent widget"})
+    assert out["matches"] == []
+    assert "No tool matched" in out["instruction"]
