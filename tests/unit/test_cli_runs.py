@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from cli.forge_cli.client import ForgeClientError, ForgeClientNotFound
+from cli.forge_cli.client import ForgeClientNotFound
 from cli.forge_cli.runs import handle_runs
 
 
