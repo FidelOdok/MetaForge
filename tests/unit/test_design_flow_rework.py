@@ -41,7 +41,7 @@ class RecordingBrain:
 class ViolatingChecker:
     """A constraint checker that reports one violation at every gate."""
 
-    async def check(self, project_id: str | None):  # type: ignore[no-untyped-def]
+    async def check(self, project_id: str | None, since_ts: float = 0.0):  # type: ignore[no-untyped-def]
         from orchestrator.design_flow.executor import ConstraintReport
 
         return ConstraintReport(

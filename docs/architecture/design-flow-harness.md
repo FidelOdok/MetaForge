@@ -158,8 +158,9 @@ recorder checks every part is an existing `cad_model` in the same project before
 creating anything, records the list as `metadata.parts`, and links the assembly
 to each part with a `parent_of` edge. The geometry check at the gate
 (`check_assembly` in `api_gateway/runs/geometry_constraints.py`) then fails a
-project that has more than one part `cad_model` and no assembly referencing
-them (`multi-part design has no assembly`), and, when an assembly exists, fails
+phase window (the same `since_ts` window the deliverable check uses) that
+committed more than one part `cad_model` and no assembly referencing them
+(superseded nodes, and parts from earlier phases, are ignored) (`multi-part design has no assembly`), and, when an assembly exists, fails
 part position boxes that overlap by more than 0.01 mm or an assembly bounding
 box that does not enclose its parts. Where a real analysis needs a
 capability MetaForge doesn't have in Phase 1 (ERC/DRC on an authored schematic,
