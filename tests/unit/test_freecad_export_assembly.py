@@ -30,6 +30,8 @@ from tool_registry.tools.freecad.operations import FreecadNotAvailableError, Fre
 class _Shape:
     """Stand-in for a Part shape; only `isNull()` is used by the traversal."""
 
+    BoundBox = SimpleNamespace(XMin=0.0, YMin=0.0, ZMin=0.0, XMax=1.0, YMax=1.0, ZMax=1.0)
+
     def __init__(self, null: bool = False) -> None:
         self._null = null
 
@@ -124,13 +126,16 @@ class _FakeReadShape:
 
     def __init__(self, solid_count: int) -> None:
         self.Solids = [object()] * solid_count
+        self.BoundBox = _Shape.BoundBox
 
     def read(self, path: str) -> None:  # noqa: ARG002 -- path unused, path presence is the point
         pass
 
 
 def _fake_part(solid_count: int) -> SimpleNamespace:
-    return SimpleNamespace(Shape=lambda: _FakeReadShape(solid_count))
+    return SimpleNamespace(
+        Shape=lambda: _FakeReadShape(solid_count), makeCompound=lambda shapes: _Shape()
+    )
 
 
 class TestExportObjectStepBytes:

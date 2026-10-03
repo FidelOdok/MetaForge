@@ -1453,3 +1453,67 @@ class TestSerialiseSubgraph:
         assert out["depth"] == 2
         # UUID became a string (mode="json").
         assert isinstance(out["root_id"], str)
+
+
+class TestCommitGeometryPrefersStoredProperties:
+    """FORGE-505: the commit describes the STEP that was written (measured by
+    freecad.export_model), not the live session object."""
+
+    _STORED = {
+        "volume_mm3": 1800.0,
+        "surface_area_mm2": 900.0,
+        "center_of_mass": [200.0, 110.0, -60.0],
+        "bounding_box": {
+            "min_x": 194.0,
+            "min_y": 0.0,
+            "min_z": -120.0,
+            "max_x": 206.0,
+            "max_y": 220.0,
+            "max_z": 0.0,
+        },
+    }
+
+    async def _commit(self, measured: dict[str, Any] | None) -> dict[str, Any]:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        async def measure_tool(session_id: str, obj_id: str) -> dict[str, Any]:
+            return measured or {}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder, measure_tool=measure_tool)
+        await srv.handle_request(
+            _request(
+                "twin.commit_geometry",
+                {
+                    "session_id": "s1",
+                    "obj_id": "body_1",
+                    "name": "Gusset",
+                    "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+                    "stored_properties": self._STORED,
+                },
+            )
+        )
+        return received
+
+    async def test_records_stored_measurement_and_centre_of_mass(self) -> None:
+        received = await self._commit(measured=None)
+        meta = received["extra_metadata"]
+        assert meta["bbox_mm"] == self._STORED["bounding_box"]
+        assert meta["center_of_mass_mm"] == [200.0, 110.0, -60.0]
+        assert meta["volume_mm3"] == 1800.0
+        assert "session_properties" not in meta
+        assert "measured_properties_missing" not in meta
+
+    async def test_divergent_session_bbox_is_logged_and_both_recorded(self) -> None:
+        session = {
+            "volume_mm3": 1800.0,
+            "bounding_box": {"min_x": 0.0, "max_x": 220.0, "min_y": -120.0},
+        }
+        received = await self._commit(measured=session)
+        meta = received["extra_metadata"]
+        assert meta["bbox_mm"] == self._STORED["bounding_box"]
+        assert meta["session_properties"]["bbox_mm"] == session["bounding_box"]
+        assert received["properties"]["bounding_box"] == self._STORED["bounding_box"]

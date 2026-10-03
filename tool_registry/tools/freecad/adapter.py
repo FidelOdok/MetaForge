@@ -228,6 +228,30 @@ class FreecadServer(McpToolServer):
                                 "vector -- 'a' normal, not verified outward)."
                             ),
                         },
+                        "surface_sets": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-505. Same data as 'faces' keyed by set name "
+                                "(bbox_mm, centroid_mm, area_mm2, normal), in the "
+                                "mesh frame = the twin frame, so fixed and load "
+                                "faces can be picked by position."
+                            ),
+                        },
+                        "mesh_bbox_mm": {
+                            "type": "object",
+                            "description": "Bounding box {min,max} of all mesh nodes (twin frame).",
+                        },
+                        "coordinate_frame": {
+                            "type": "string",
+                            "description": "Always 'twin': mesh coordinates equal the twin's.",
+                        },
+                        "placement_baked": {
+                            "type": "boolean",
+                            "description": (
+                                "True when the STEP carried a Placement that the mesher "
+                                "would have dropped and it was baked in first."
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -1884,6 +1908,7 @@ class FreecadServer(McpToolServer):
         obj_id = self._require(arguments, "obj_id")
         obj = self._sessions.get_object(session_id, obj_id)
         step_bytes = self._ops.export_object_step_bytes(obj)
+        stored = self._ops.measure_step_bytes(step_bytes)
         return {
             # MET-650: echoed back so a later twin.commit_geometry call (by
             # reference) can be built directly from this result even if the
@@ -1893,7 +1918,12 @@ class FreecadServer(McpToolServer):
             "format": "step",
             "size_bytes": len(step_bytes),
             "step_base64": base64.b64encode(step_bytes).decode("ascii"),
-            **self._ops.shape_props(obj),
+            # FORGE-505: measured from the exported bytes, so the recorded
+            # bounding box is the stored file's own frame, not the session's.
+            **stored,
+            # FORGE-505: the commit records this (the file that was written),
+            # not the session object's own measurement.
+            "stored_properties": stored,
         }
 
     # ---- assembly authoring (MET-530) ---------------------------------

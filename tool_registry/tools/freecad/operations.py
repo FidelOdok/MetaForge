@@ -308,6 +308,9 @@ _MESH_ALGORITHMS = ("gmsh", "netgen", "mefisto")
 
 _MESH_TIMEOUT_SECONDS = 180
 
+# FORGE-505: tolerance when comparing a mesh/STEP bounding box to the twin's.
+_FRAME_TOL_MM = 0.01
+
 # CalculiX/Abaqus element-type prefixes that are real *volumetric* solid
 # elements (what a structural FEA solve actually needs) -- distinct from the
 # lower-dimensional boundary elements (T3D2 edges, CPS3/CPS4 surface facets)
@@ -504,6 +507,56 @@ def _parse_inp_face_table(inp_path: str) -> list[dict[str, Any]]:
             }
         )
     return faces
+
+
+def _inp_node_bbox(inp_path: str) -> dict[str, list[float]]:
+    """Bounding box of every ``*NODE`` coordinate in a ``.inp`` mesh (FORGE-505).
+
+    This is the box an FEA load/BC is actually applied in, so it is what a
+    caller must compare against the twin's committed ``bounding_box``.
+    """
+    lo = [math.inf] * 3
+    hi = [-math.inf] * 3
+    in_nodes = False
+    with open(inp_path, encoding="utf-8", errors="replace") as f:  # noqa: PTH123
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("*"):
+                in_nodes = stripped.upper().startswith("*NODE")
+                continue
+            if in_nodes:
+                parts = stripped.split(",")
+                for i in range(3):
+                    v = float(parts[i + 1])
+                    lo[i] = min(lo[i], v)
+                    hi[i] = max(hi[i], v)
+    if lo[0] is math.inf:
+        return {"min": [0.0, 0.0, 0.0], "max": [0.0, 0.0, 0.0]}
+    return {"min": [round(v, 6) for v in lo], "max": [round(v, 6) for v in hi]}
+
+
+def _bboxes_match(a: dict[str, Any], b: dict[str, Any], tol_mm: float) -> bool:
+    """True when two ``{"min": [x,y,z], "max": [x,y,z]}`` boxes agree per axis."""
+    return all(abs(a[k][i] - b[k][i]) <= tol_mm for k in ("min", "max") for i in range(3))
+
+
+def _surface_sets_from_faces(faces: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Name -> bounding box / centroid / normal of each named surface set (FORGE-505).
+
+    A name-keyed view of the ``faces`` table, in the mesh frame (which is the
+    twin frame), so a caller can pick the fixed and load faces by position.
+    """
+    return {
+        f["name"]: {
+            "bbox_mm": f["bbox_mm"],
+            "centroid_mm": f["centroid_mm"],
+            "area_mm2": f["area_mm2"],
+            "normal": f["normal"],
+        }
+        for f in faces
+    }
 
 
 # Shape dimension defaults per shape type
@@ -934,13 +987,17 @@ class FreecadOperations:
 
             start = time.monotonic()
 
+            # FORGE-505: mesh in the twin frame, not the STEP's raw local frame.
+            mesh_input, frame_baked = self._twin_frame_step(input_file)
+            span.set_attribute("mesh.placement_baked", frame_baked)
+
             stem = Path(input_file).stem
             output_path = os.path.join(self.work_dir, f"{stem}.{output_format}")
             self._ensure_output_dir(output_path)
 
             cmd = [
                 gmsh_binary,
-                input_file,
+                mesh_input,
                 "-3",
                 "-clmax",
                 str(element_size),
@@ -982,9 +1039,11 @@ class FreecadOperations:
             # .inp format this system's FEA pipeline actually consumes
             # (calculix.validate_mesh / calculix.run_fea both require .inp) --
             # .unv/.stl use different, unparsed formats here.
+            mesh_bbox: dict[str, list[float]] | None = None
             if output_format == "inp":
                 num_nodes, counts_by_type = _parse_inp_mesh_counts(output_path)
                 faces = _parse_inp_face_table(output_path)
+                mesh_bbox = _inp_node_bbox(output_path)
             else:
                 num_nodes, counts_by_type = 0, {}
                 faces = []
@@ -1042,6 +1101,13 @@ class FreecadOperations:
                 # bug this fixes (a wrongly-picked face silently gave an
                 # FEA result ~10x too stiff).
                 "faces": faces,
+                # FORGE-505: name -> bbox in the mesh frame, which is the twin
+                # frame (placements baked above), so fixed/load faces can be
+                # picked by position and run_fea load_force_n shares this frame.
+                "surface_sets": _surface_sets_from_faces(faces),
+                "mesh_bbox_mm": mesh_bbox,
+                "coordinate_frame": "twin",
+                "placement_baked": frame_baked,
             }
 
     def list_named_faces(self, mesh_file: str) -> dict[str, Any]:
@@ -2214,6 +2280,139 @@ class FreecadOperations:
         return leaves[0] if len(leaves) == 1 else Part.makeCompound(leaves)
 
     @staticmethod
+    def _baked_shape(shape: Any) -> Any:
+        """Copy of ``shape`` with its Placement applied to the geometry itself
+        (identity Placement), so a placement-blind STEP reader sees the global
+        frame (FORGE-505)."""
+        c = shape.copy()
+        m = c.Placement.toMatrix()
+        c.Placement = FreeCAD.Placement()
+        c.transformShape(m)
+        return c
+
+    def _leaf_objects(self, obj: Any, _seen: set[int] | None = None) -> list[Any]:
+        """Like ``_shape_leaves`` but returns the objects (keeps Labels)."""
+        _seen = _seen if _seen is not None else set()
+        if id(obj) in _seen:
+            return []
+        _seen.add(id(obj))
+        shape = getattr(obj, "Shape", None)
+        if shape is not None:
+            try:
+                if not shape.isNull():
+                    return [obj]
+            except Exception:  # noqa: BLE001
+                return [obj]
+        out: list[Any] = []
+        group = getattr(obj, "Group", None)
+        if group:
+            for child in group:
+                out.extend(self._leaf_objects(child, _seen))
+        elif getattr(obj, "LinkedObject", None) is not None:
+            out.extend(self._leaf_objects(obj.LinkedObject, _seen))
+        return out
+
+    @staticmethod
+    def _bb_dict(bb: Any) -> dict[str, list[float]]:
+        return {"min": [bb.XMin, bb.YMin, bb.ZMin], "max": [bb.XMax, bb.YMax, bb.ZMax]}
+
+    def _reexport_baked(self, obj: Any, tmp_path: str) -> None:
+        """Rewrite ``tmp_path`` from placement-baked copies of ``obj``'s leaves,
+        keeping each leaf's Label as its STEP PRODUCT name (FORGE-505)."""
+        doc = FreeCAD.newDocument("step_bake")
+        try:
+            feats = []
+            for leaf in self._leaf_objects(obj):
+                f = doc.addObject("Part::Feature", "Leaf")
+                f.Label = getattr(leaf, "Label", "Part")
+                f.Shape = self._baked_shape(leaf.Shape)
+                feats.append(f)
+            doc.recompute()
+            Import.export(feats, tmp_path)
+        finally:
+            FreeCAD.closeDocument(doc.Name)
+
+    def measure_step_bytes(self, step_bytes: bytes) -> dict[str, Any]:
+        """Volume/area/bbox of the STEP *as stored*, read the way every
+        placement-blind consumer reads it (FORGE-505)."""
+        self._require_freecad()
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tmp:
+            tmp.write(step_bytes)
+            path = tmp.name
+        try:
+            shape = Part.Shape()
+            shape.read(path)
+            cog = shape.CenterOfGravity
+            return {
+                "volume_mm3": round(shape.Volume, 2),
+                "surface_area_mm2": round(shape.Area, 2),
+                "center_of_mass": [round(cog.x, 3), round(cog.y, 3), round(cog.z, 3)],
+                "bounding_box": self._bbox_dict(shape.BoundBox),
+            }
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def _twin_frame_step(self, input_file: str) -> tuple[str, bool]:
+        """Return a STEP path whose raw geometry is in the twin (global) frame (FORGE-505).
+
+        ``Import.export`` writes an object's ``Placement`` as an assembly
+        transform on top of placement-free geometry. ``Shape.BoundBox`` (what
+        the twin records) includes it, but gmsh's STEP reader (and
+        ``Part.Shape.read``) take the raw geometry and drop the transform, so a
+        part authored on a rotated plane (e.g. a sketch on YZ) was meshed in
+        its local frame, axes permuted relative to the twin. This reads the
+        file through ``Import.insert`` (placement-aware) and compares with the
+        placement-blind read; when they disagree it bakes the placements into
+        the geometry and writes a new STEP to mesh instead.
+
+        Returns ``(path, rewritten)``.
+        """
+        self._require_freecad()
+        raw = Part.Shape()
+        raw.read(input_file)
+        doc = FreeCAD.newDocument()
+        try:
+            Import.insert(input_file, doc.Name)
+            doc.recompute()
+            leaves = [s for root in doc.RootObjects for s in self._shape_leaves(root)]
+            solids = [s for s in leaves if s.Solids]
+            if not solids:
+                return input_file, False
+            placed = solids[0] if len(solids) == 1 else Part.makeCompound(solids)
+            pb, rb = placed.BoundBox, raw.BoundBox
+            expected = {
+                "min": [pb.XMin, pb.YMin, pb.ZMin],
+                "max": [pb.XMax, pb.YMax, pb.ZMax],
+            }
+            blind = {"min": [rb.XMin, rb.YMin, rb.ZMin], "max": [rb.XMax, rb.YMax, rb.ZMax]}
+            if _bboxes_match(expected, blind, _FRAME_TOL_MM):
+                return input_file, False
+            baked = [self._baked_shape(s) for s in solids]
+            out = baked[0] if len(baked) == 1 else Part.makeCompound(baked)
+            ob = out.BoundBox
+            got = {"min": [ob.XMin, ob.YMin, ob.ZMin], "max": [ob.XMax, ob.YMax, ob.ZMax]}
+            if not _bboxes_match(expected, got, _FRAME_TOL_MM):
+                raise RuntimeError(
+                    f"could not bake placement into {input_file}: baked bbox {got} != {expected}"
+                )
+            out_path = os.path.join(self.work_dir, f"{Path(input_file).stem}_twinframe.step")
+            out.exportStep(out_path)
+            logger.warning(
+                "freecad_mesh_input_placement_baked",
+                input_file=input_file,
+                raw_bbox=blind,
+                twin_bbox=expected,
+            )
+            return out_path, True
+        finally:
+            FreeCAD.closeDocument(doc.Name)
+
+    @staticmethod
     def _raise_empty_geometry(obj: Any) -> None:
         label = getattr(obj, "Label", getattr(obj, "Name", obj))
         raise ValueError(
@@ -2333,6 +2532,26 @@ class FreecadOperations:
             if solid_count == 0:
                 self._log_export_geometry_gap(obj, step_bytes, reason="roundtrip_zero_solids")
                 self._raise_empty_geometry(obj)
+            # FORGE-505: the twin records the live object's bounding box, which
+            # includes its Placement (transform_object, a sketch on YZ, ...).
+            # Import.export stores that Placement as an assembly transform,
+            # which gmsh/Part.Shape.read drop, so the stored file's own frame
+            # differed from the recorded one (axes cycled). Make them agree.
+            expected = self._bb_dict(self._resolve_shape(obj).BoundBox)
+            raw = Part.Shape()
+            raw.read(tmp_path)
+            if not _bboxes_match(expected, self._bb_dict(raw.BoundBox), _FRAME_TOL_MM):
+                self._reexport_baked(obj, tmp_path)
+                step_bytes = Path(tmp_path).read_bytes()
+                raw = Part.Shape()
+                raw.read(tmp_path)
+                got = self._bb_dict(raw.BoundBox)
+                if not _bboxes_match(expected, got, _FRAME_TOL_MM):
+                    raise RuntimeError(
+                        f"STEP export frame mismatch after baking placements: "
+                        f"stored {got} != live {expected}"
+                    )
+                logger.warning("freecad_export_placement_baked", expected=expected)
         finally:
             try:
                 os.remove(tmp_path)
