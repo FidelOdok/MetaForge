@@ -2218,6 +2218,15 @@ class TwinServer(McpToolServer):
                                 "hole_diameter) — stored on the node as queryable metadata."
                             ),
                         },
+                        "stored_properties": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-505. Measurement of the exact STEP freecad.export_model "
+                                "wrote (volume_mm3, surface_area_mm2, center_of_mass, "
+                                "bounding_box). Filled in automatically from the export result "
+                                "on commit-by-reference; preferred over session properties."
+                            ),
+                        },
                         "properties": {
                             "type": "object",
                             "description": (
@@ -2438,6 +2447,49 @@ class TwinServer(McpToolServer):
                     extra_metadata.update(flattened)
                     if not isinstance(properties, dict):
                         properties = measured
+        # FORGE-505: freecad.export_model measured the exact STEP it wrote
+        # (threaded in by the geometry stash). Record that, not the session
+        # object's properties, so the commit describes the stored file.
+        stored_props = arguments.get("stored_properties")
+        if isinstance(stored_props, dict) and stored_props:
+            session_view = {k: extra_metadata[k] for k in _MEASURED_KEYS if k in extra_metadata}
+            stored_flat = {
+                key: stored_props[key]
+                for key in ("volume_mm3", "surface_area_mm2")
+                if key in stored_props
+            }
+            stored_bbox = stored_props.get("bounding_box")
+            if isinstance(stored_bbox, dict):
+                stored_flat["bbox_mm"] = stored_bbox
+            if stored_props.get("center_of_mass") is not None:
+                stored_flat["center_of_mass_mm"] = stored_props["center_of_mass"]
+            session_bbox = session_view.get("bbox_mm")
+            if isinstance(session_bbox, dict) and isinstance(stored_bbox, dict):
+                diffs = {
+                    k: abs(float(session_bbox[k]) - float(stored_bbox[k]))
+                    for k in stored_bbox
+                    if k in session_bbox
+                }
+                if diffs and max(diffs.values()) > 0.01:
+                    logger.warning(
+                        "commit_geometry_session_stored_bbox_diverge",
+                        session_id=session_id,
+                        name=name,
+                        session_bbox=session_bbox,
+                        stored_bbox=stored_bbox,
+                    )
+                    extra_metadata["session_properties"] = session_view
+            extra_metadata.update(stored_flat)
+            merged = dict(properties) if isinstance(properties, dict) else {}
+            merged.update(
+                {
+                    k: v
+                    for k, v in stored_props.items()
+                    if k in (*_MEASURED_KEYS, "bounding_box", "center_of_mass")
+                }
+            )
+            properties = merged
+            extra_metadata.pop("measured_properties_missing", None)
         # Same "unobserved, not vacuous" flag as before (FORGE-105 tracks
         # making the constraint evaluator itself honest about it) -- now
         # only reached when derivation above wasn't available or found

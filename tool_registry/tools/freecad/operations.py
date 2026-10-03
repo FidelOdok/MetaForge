@@ -2344,9 +2344,11 @@ class FreecadOperations:
         try:
             shape = Part.Shape()
             shape.read(path)
+            cog = shape.CenterOfGravity
             return {
                 "volume_mm3": round(shape.Volume, 2),
                 "surface_area_mm2": round(shape.Area, 2),
+                "center_of_mass": [round(cog.x, 3), round(cog.y, 3), round(cog.z, 3)],
                 "bounding_box": self._bbox_dict(shape.BoundBox),
             }
         finally:

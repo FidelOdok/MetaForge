@@ -1908,6 +1908,7 @@ class FreecadServer(McpToolServer):
         obj_id = self._require(arguments, "obj_id")
         obj = self._sessions.get_object(session_id, obj_id)
         step_bytes = self._ops.export_object_step_bytes(obj)
+        stored = self._ops.measure_step_bytes(step_bytes)
         return {
             # MET-650: echoed back so a later twin.commit_geometry call (by
             # reference) can be built directly from this result even if the
@@ -1919,7 +1920,10 @@ class FreecadServer(McpToolServer):
             "step_base64": base64.b64encode(step_bytes).decode("ascii"),
             # FORGE-505: measured from the exported bytes, so the recorded
             # bounding box is the stored file's own frame, not the session's.
-            **self._ops.measure_step_bytes(step_bytes),
+            **stored,
+            # FORGE-505: the commit records this (the file that was written),
+            # not the session object's own measurement.
+            "stored_properties": stored,
         }
 
     # ---- assembly authoring (MET-530) ---------------------------------

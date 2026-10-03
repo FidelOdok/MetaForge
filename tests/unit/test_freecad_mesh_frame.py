@@ -124,4 +124,9 @@ def test_export_round_trip_frame_matches_live_bbox_after_transform(tmp_path: Pat
         FreeCAD.closeDocument(doc.Name)
     stored = ops.measure_step_bytes(step)["bounding_box"]
     assert stored == live
+    # the figures the commit records come from the written file, incl. CoM
+    props = ops.measure_step_bytes(step)
+    assert props["bounding_box"] == live
+    com = props["center_of_mass"]
+    assert 194.0 <= com[0] <= 206.0 and 0.0 <= com[1] <= 220.0 and -120.0 <= com[2] <= 0.0
     assert stored["min_x"] == 194.0 and stored["max_y"] == 220.0 and stored["min_z"] == -120.0
