@@ -437,8 +437,13 @@ a `cad_model` with no stored geometry. The optional path is unchanged:
 the node and log `geometry_blob_store_skipped` when storage is down.
 
 **Tool visibility.** Every `search_tools` call logs `search_tools_query` with the
-query and the tools it registered, found already available, or could not
-register, so a phase hunting for a missing tool shows up in the logs.
+query and the tools it matched, registered, found already available, could not
+register (phase cap) or found unavailable (service-refused), so a phase hunting
+for a missing tool shows up in the logs. The search (FORGE-502) covers the whole
+MCP catalog and matches each query word against a tool's id, name and
+description, so a multi-word query such as `freecad assembly` finds
+`freecad.create_assembly`; the result lists every match with a one-line
+description and says plainly when a match exists but cannot be registered.
 `freecad.create_body` and `freecad.create_sketch` now return the body or sketch
 id, its label, and the next call to make, so a phase does not re-create the body.
 

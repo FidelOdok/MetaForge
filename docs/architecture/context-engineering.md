@@ -405,11 +405,16 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   discipline a deliverable depends on when `set_disciplines` is applied
   (`DELIVERABLE_CORE_DISCIPLINES`). A test fails if any template phase,
   before or after a live-style tailoring, lacks a tool its deliverables need.
-- **`search_tools` is a bounded escape hatch, not unlimited.** It can register
-  a catalog tool outside the phase set on demand (the sidecar guardrails still
-  decide every call), but only while the registry is below the 40-tool cap.
-  When the cap is reached it answers that the tool exists but is not available
-  to this phase, instead of implying the tool is missing.
+- **`search_tools` is a bounded escape hatch, not unlimited.** It searches the
+  whole MCP catalog from the bridge (not just the phase set), splitting the
+  query into words that must each appear in a tool's id, name or description,
+  so `freecad assembly` finds `freecad.create_assembly` and
+  `freecad.add_part_to_assembly`. It returns the matching ids with one-line
+  descriptions and registers them while the registry is below the 40-tool cap
+  (the sidecar guardrails still decide every call). Tools the design-flow
+  service caller is always refused are reported as `unavailable` and never
+  registered. When the cap is reached it answers that the tool exists but is
+  not available to this phase, instead of implying the tool is missing.
 
 Measurement: `tests/unit/test_context_budget.py::test_phase_prompt_tokens_before_and_after`
 scripts one 3-call phase (two large reads, then an answer) against a 121-tool

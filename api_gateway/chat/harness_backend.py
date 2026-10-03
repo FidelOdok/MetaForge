@@ -397,6 +397,40 @@ async def mcp_tools_from_bridge(
 _MAX_TOOL_SEARCH_RESULTS = 8
 
 
+_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _query_tokens(query: str) -> list[str]:
+    """Lower-case alphanumeric words of a search query, without duplicates."""
+    return list(dict.fromkeys(t for t in _TOKEN_SPLIT.split(query.lower()) if t))
+
+
+def _match_score(tokens: list[str], server: str, tdef: NativeToolDef) -> int:
+    """How many query tokens hit a tool's id, name or description (0 unless all do).
+
+    FORGE-502: the old check was one substring of the whole query against
+    ``name + description``, so 'freecad assembly' never matched
+    ``freecad.create_assembly`` (the words are not adjacent in any field).
+    Every token must now appear somewhere in the id/name/description; tokens
+    found in the id rank a tool higher.
+    """
+    tool_id = f"{server}.{tdef.name}".lower()
+    haystack = f"{tool_id} {tdef.name} {tdef.description}".lower()
+    if not all(t in haystack for t in tokens):
+        return 0
+    return len(tokens) + sum(1 for t in tokens if t in tool_id)
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split())[:160]
+
+
+def _service_refused(tool_id: str) -> bool:
+    from mcp_core.profiles import _service_refused as refused
+
+    return refused(tool_id)
+
+
 def make_search_tools_tool(
     bridge: McpBridge,
     enabled: set[str] | None,
@@ -431,33 +465,49 @@ def make_search_tools_tool(
 
     async def handler(arguments: dict[str, Any]) -> dict[str, Any]:
         query = str(arguments.get("query", "")).strip().lower()
-        if not query:
+        tokens = _query_tokens(query)
+        if not tokens:
             raise ValueError("search_tools: 'query' is required (non-empty string)")
         runtime = runtime_cell.get("runtime")
         if runtime is None:
             raise RuntimeError("search_tools: runtime not ready yet")
+        # FORGE-502: the whole MCP catalog from the bridge, never the phase
+        # allowlist (that is what the phase already has).
         catalog = await mcp_tools_from_bridge(bridge, enabled)
         known = {t.name for t in runtime.tools.all_tools()}
+        matches: list[dict[str, str]] = []
         registered: list[str] = []
         already: list[str] = []
         over_budget: list[str] = []
-        for server, tdef in catalog:
-            haystack = f"{tdef.name} {tdef.description}".lower()
-            if query not in haystack:
-                continue
+        unavailable: list[str] = []
+        ranked = sorted(
+            (
+                (hits, server, tdef)
+                for server, tdef in catalog
+                if (hits := _match_score(tokens, server, tdef)) > 0
+            ),
+            key=lambda item: -item[0],
+        )
+        for _hits, server, tdef in ranked:
+            tool_id = f"{server}.{tdef.name}"
             full_name = ToolRegistry.mcp_name(server, tdef.name)
+            if len(matches) >= _MAX_TOOL_SEARCH_RESULTS and full_name not in known:
+                continue
+            matches.append({"id": tool_id, "description": _one_line(tdef.description)})
             if full_name in known:
                 # FORGE-94: "registered" only means present in the
                 # ToolRegistry, NOT present in the schema array a provider
                 # actually receives -- `_select_tools` (native_tools.py)
                 # truncates that array separately, per turn, against the
-                # provider's tools-array cap. A tool reported here as
-                # "already available" that the round-robin then drops again
-                # next turn is a promise the model has no way to detect is
-                # false. Pinning closes the gap: once pinned, `_select_tools`
-                # keeps it unconditionally, so the promise is actually true.
+                # provider's tools-array cap. Pinning closes the gap: once
+                # pinned, `_select_tools` keeps it unconditionally.
                 runtime.tools.pin(full_name)
                 already.append(full_name)
+                continue
+            if max_total_tools is not None and _service_refused(tool_id):
+                # The sidecar always refuses these for the design-flow service
+                # caller, so registering them would only produce a failing call.
+                unavailable.append(tool_id)
                 continue
             if len(registered) >= _MAX_TOOL_SEARCH_RESULTS:
                 continue
@@ -486,34 +536,47 @@ def make_search_tools_tool(
         logger.info(
             "search_tools_query",
             query=query,
+            matched=[m["id"] for m in matches],
             registered=registered,
             already_available=already,
             not_registered=over_budget[:_MAX_TOOL_SEARCH_RESULTS],
+            unavailable=unavailable,
         )
-        if over_budget and not registered and not already:
-            return {
-                "registered": [],
-                "already_available": [],
-                "not_registered": over_budget[:_MAX_TOOL_SEARCH_RESULTS],
-                "instruction": (
-                    "These tools EXIST in the catalog but are NOT available to this phase: "
-                    f"it is capped at {max_total_tools} tools and they are all in use, so "
-                    "they were NOT registered and calling them will fail. Work with the "
-                    "tools you have, and say in your summary which capability was missing."
-                ),
-            }
+        result: dict[str, Any] = {
+            "matches": matches,
+            "registered": registered,
+            "already_available": already,
+        }
+        if over_budget:
+            result["not_registered"] = over_budget[:_MAX_TOOL_SEARCH_RESULTS]
+        if unavailable:
+            result["unavailable"] = unavailable
+        if not matches:
+            result["instruction"] = f"No tool matched '{query}'. Try a different keyword."
+            return result
+        parts: list[str] = []
+        if registered:
+            parts.append(f"Registered {len(registered)} tool(s); call them directly by name now.")
+        if already:
+            parts.append("Already available (call directly): " + ", ".join(already) + ".")
+        if over_budget:
+            parts.append(
+                "These tools EXIST in the catalog but are NOT available to this phase: "
+                f"it is capped at {max_total_tools} tools and they are all in use, so "
+                f"they were NOT registered and calling them will fail: {', '.join(over_budget)}."
+            )
+        if unavailable:
+            parts.append(
+                "These tools EXIST but are unavailable: the design-flow service caller is "
+                f"always refused them, so they were NOT registered: {', '.join(unavailable)}."
+            )
         if not registered and not already:
-            return {
-                "registered": [],
-                "already_available": [],
-                "instruction": f"No tool matched '{query}'. Try a different keyword.",
-            }
-        instruction = (
-            f"Registered {len(registered)} tool(s) — call them directly by name now."
-            if registered
-            else "All matching tools were already available — call them directly by name."
-        )
-        return {"registered": registered, "already_available": already, "instruction": instruction}
+            parts.append(
+                "Work with the tools you have, and say in your summary which capability "
+                "was missing."
+            )
+        result["instruction"] = " ".join(parts)
+        return result
 
     return NativeToolDef(
         name="search_tools",
