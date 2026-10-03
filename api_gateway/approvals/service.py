@@ -10,6 +10,7 @@ identical on both surfaces.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
 from datetime import UTC, datetime
@@ -278,6 +279,7 @@ def change_item(p: DesignChangeProposal) -> ApprovalItem:
             approver_verified=p.reviewer_verified,
             surface=_surface(p.decision_surface),
             on_behalf_of=p.decision_on_behalf_of,
+            agent=p.decision_agent,
             decided_at=_iso(p.decided_at),
         )
         if p.reviewer
@@ -327,6 +329,7 @@ def _loop_item(winner: Any) -> ApprovalItem:
             approver_verified=winner.approver_verified,
             surface=_surface(winner.approval_surface),
             on_behalf_of=winner.approval_on_behalf_of,
+            agent=winner.approval_agent,
             decided_at=_iso(winner.approved_at),
         )
         if winner.approved
@@ -373,6 +376,7 @@ def _wp_item(kind: str, wp: Any) -> ApprovalItem:
             approver_verified=bool(wp.metadata.get("approver_verified")),
             surface=_surface(wp.metadata.get("approval_surface")),
             on_behalf_of=wp.metadata.get("approval_on_behalf_of"),
+            agent=wp.metadata.get("approval_agent"),
             decided_at=wp.metadata.get("approved_at"),
         )
         if approved
@@ -423,6 +427,45 @@ async def _twin_items(app: Any) -> list[ApprovalItem]:
 
 
 # ── list / get ───────────────────────────────────────────────────────────
+
+
+#: Kinds only a person may decide, unless the owner delegates them (FORGE-510).
+HUMAN_AUTHORITY_KINDS: tuple[str, ...] = ("human_authority", "design_loop")
+ALLOW_AGENT_HUMAN_AUTHORITY_ENV = "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY"
+AGENT_HUMAN_AUTHORITY_REASON = (
+    "this approval needs a human decision; agents may not decide it unless the gateway "
+    f"owner sets {ALLOW_AGENT_HUMAN_AUTHORITY_ENV}=true"
+)
+
+
+def agent_may_decide_human_authority() -> bool:
+    return os.environ.get(ALLOW_AGENT_HUMAN_AUTHORITY_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def for_caller(item: ApprovalItem, surface: str) -> ApprovalItem:
+    """The item as an agent caller may act on it: human-authority kinds are not decidable."""
+    if (
+        surface != "agent"
+        or item.kind not in HUMAN_AUTHORITY_KINDS
+        or agent_may_decide_human_authority()
+    ):
+        return item
+    return item.model_copy(
+        update={
+            "allowed_decisions": [],
+            "decidable": False,
+            "not_decidable_reason": (
+                item.not_decidable_reason
+                if item.status != "pending" and item.not_decidable_reason
+                else AGENT_HUMAN_AUTHORITY_REASON
+            ),
+        }
+    )
 
 
 async def list_items(app: Any) -> list[ApprovalItem]:
@@ -532,10 +575,17 @@ async def decide(
     approver: Approver,
     surface: Surface,
     on_behalf_of: str | None,
+    agent: str | None = None,
 ) -> ApprovalItem:
     """Apply a decision through the same function the kind's old route uses."""
     kind, raw = split_id(item_id)
     current = await get_item(app, item_id)  # 404 first, and the not-decidable check
+    if (
+        surface == "agent"
+        and current.kind in HUMAN_AUTHORITY_KINDS
+        and not agent_may_decide_human_authority()
+    ):
+        raise HTTPException(status_code=403, detail=AGENT_HUMAN_AUTHORITY_REASON)
     if current.status != "pending":
         raise HTTPException(
             status_code=409,
@@ -560,9 +610,10 @@ async def decide(
         "verified": approver.verified,
         "surface": surface,
         "on_behalf_of": on_behalf_of,
+        "agent": agent,
     }
     staged = _stage_run_decision(
-        kind, raw, decision, reason, label, approver, surface, on_behalf_of
+        kind, raw, decision, reason, label, approver, surface, on_behalf_of, agent
     )
     try:
         if kind == "gate":
@@ -581,6 +632,7 @@ async def decide(
                 reviewer_verified=approver.verified,
                 surface=surface,
                 on_behalf_of=on_behalf_of,
+                agent=agent,
             )
         elif kind == "design_loop":
             await design_loop_routes.approve_loop(raw, label, audit)
@@ -603,6 +655,7 @@ def _stage_run_decision(
     approver: Approver,
     surface: str,
     on_behalf_of: str | None,
+    agent: str | None = None,
 ) -> dict[str, Any] | None:
     """Write the decision into the run's request before the delegate moves it.
 
@@ -621,6 +674,7 @@ def _stage_run_decision(
         approver_verified=approver.verified,
         surface=surface,  # type: ignore[arg-type]
         on_behalf_of=on_behalf_of,
+        agent=agent,
         decided_at=_iso(time.time()),
     ).model_dump()
     log = run.request.setdefault(DECISIONS_KEY, [])

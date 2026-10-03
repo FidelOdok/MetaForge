@@ -240,6 +240,7 @@ class ForgeClient:
         if agent and on_behalf:
             headers["X-MetaForge-Surface"] = "agent"
             headers["X-MetaForge-On-Behalf-Of"] = on_behalf
+            headers["X-MetaForge-Agent"] = agent
         token = os.environ.get("METAFORGE_AUTH_TOKEN", "").strip()
         if token:
             headers["Authorization"] = f"Bearer {token}"

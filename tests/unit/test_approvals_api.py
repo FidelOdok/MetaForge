@@ -409,7 +409,7 @@ def test_surface_and_on_behalf_of_recorded(client: TestClient, metrics: _Recorde
         f"/v1/approvals/gate:{gate_id}/decision",
         json={"decision": "approve"},
         headers={
-            "x-test-principal": "agent-7",
+            "x-test-principal": "carol",
             "X-MetaForge-Surface": "agent",
             "X-MetaForge-On-Behalf-Of": "carol",
         },
@@ -417,7 +417,7 @@ def test_surface_and_on_behalf_of_recorded(client: TestClient, metrics: _Recorde
     record = resp.json()["decision"]
     assert record["surface"] == "agent"
     assert record["on_behalf_of"] == "carol"
-    assert record["approver"] == "agent-7@example.com"
+    assert record["approver"] == "carol@example.com"
     assert record["approver_verified"] is True
     assert ("gate", "approve", "agent", "ok") in metrics.calls
     detail = client.get(f"/v1/approvals/gate:{gate_id}").json()
@@ -468,9 +468,10 @@ def test_old_routes_still_work(client: TestClient) -> None:
 # ── persistence of surface and on-behalf-of (FORGE-507 review) ────────────
 
 AGENT_HEADERS = {
-    "x-test-principal": "agent-7",
+    "x-test-principal": "carol",
     "X-MetaForge-Surface": "agent",
     "X-MetaForge-On-Behalf-Of": "carol",
+    "X-MetaForge-Agent": "claude-code",
 }
 
 
@@ -487,7 +488,7 @@ def test_tool_decision_survives_a_ledger_reload(client: TestClient, tmp_path: Pa
     record = client.get(f"/v1/approvals/tool:{run_id}").json()["decision"]
     assert record["surface"] == "agent"
     assert record["on_behalf_of"] == "carol"
-    assert record["approver"] == "agent-7@example.com"
+    assert record["approver"] == "carol@example.com"
     assert record["approver_verified"] is True
 
 
@@ -517,7 +518,10 @@ def test_refused_decision_leaves_no_decision_entry(client: TestClient) -> None:
     assert "decisions" not in run_routes.get_run_store().get(gate_id).request
 
 
-def test_twin_and_proposal_records_carry_surface(client: TestClient, twin: InMemoryTwinAPI) -> None:
+def test_twin_and_proposal_records_carry_surface(
+    client: TestClient, twin: InMemoryTwinAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY", "true")
     ids = _all_kinds(twin)
     for kind in ("change", "design_loop", "sketch", "drawing"):
         body = {"decision": "approve"}
@@ -539,3 +543,125 @@ def test_twin_and_proposal_records_carry_surface(client: TestClient, twin: InMem
         record = client.get(f"/v1/approvals/{ids[kind]}").json()["decision"]
         assert (record["surface"], record["on_behalf_of"]) == ("agent", "carol"), kind
         assert record["approver_verified"] is True
+
+
+# ── agent identity and human authority (FORGE-510) ───────────────────────
+
+
+def _agent(on_behalf: str | None = "carol", **extra: str) -> dict[str, str]:
+    headers = {"X-MetaForge-Surface": "agent", "X-MetaForge-Agent": "claude-code", **extra}
+    if on_behalf:
+        headers["X-MetaForge-On-Behalf-Of"] = on_behalf
+    return headers
+
+
+def test_agent_name_recorded_everywhere(
+    client: TestClient, twin: InMemoryTwinAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY", "true")
+    ids = _all_kinds(twin)
+    for kind, item_id in ids.items():
+        resp = client.post(
+            f"/v1/approvals/{item_id}/decision", json={"decision": "approve"}, headers=AGENT_HEADERS
+        )
+        assert resp.status_code == 200, (kind, resp.text)
+    for kind, item_id in ids.items():
+        record = client.get(f"/v1/approvals/{item_id}").json()["decision"]
+        assert record["agent"] == "claude-code", kind
+        assert record["approver"] == "carol@example.com", kind
+
+
+def test_authenticated_agent_must_act_for_the_principal(client: TestClient) -> None:
+    resp = client.post(
+        f"/v1/approvals/gate:{_gate()}/decision",
+        json={"decision": "approve"},
+        headers={"x-test-principal": "carol", **_agent("mallory")},
+    )
+    assert resp.status_code == 403
+    gate_id = _gate()
+    for who in ("user:carol", "carol", "carol@example.com"):
+        ok = client.post(
+            f"/v1/approvals/gate:{gate_id}/decision",
+            json={"decision": "approve"},
+            headers={"x-test-principal": "carol", **_agent(who)},
+        )
+        assert ok.status_code == 200, who
+        break
+
+
+def test_unauthenticated_agent_is_recorded_as_the_named_user_unverified(
+    client: TestClient,
+) -> None:
+    resp = client.post(
+        f"/v1/approvals/gate:{_gate()}/decision", json={"decision": "approve"}, headers=_agent()
+    )
+    record = resp.json()["decision"]
+    assert (record["approver"], record["approver_verified"]) == ("carol", False)
+    assert (record["surface"], record["agent"], record["on_behalf_of"]) == (
+        "agent",
+        "claude-code",
+        "carol",
+    )
+
+
+def test_agent_without_on_behalf_of_is_422(client: TestClient) -> None:
+    resp = client.post(
+        f"/v1/approvals/gate:{_gate()}/decision",
+        json={"decision": "approve"},
+        headers=_agent(None),
+    )
+    assert resp.status_code == 422
+
+
+def test_agent_header_needs_agent_surface(client: TestClient) -> None:
+    resp = client.post(
+        f"/v1/approvals/gate:{_gate()}/decision",
+        json={"decision": "approve"},
+        headers={"X-MetaForge-Surface": "cli", "X-MetaForge-Agent": "claude-code"},
+    )
+    assert resp.status_code == 422
+
+
+def _authority_tool() -> str:
+    store = tool_approvals.get_approval_store()
+    run = store.create({"tool": "twin.attempt_promotion", "arguments": {}, "route": "dashboard"})
+    store.start(run.id)
+    store.request_approval(run.id, reason="human authority")
+    return f"tool:{run.id}"
+
+
+def test_human_authority_not_decidable_by_agent(client: TestClient, twin: InMemoryTwinAPI) -> None:
+    for item_id in (_authority_tool(), f"design_loop:{_loop(twin)}"):
+        item = client.get(f"/v1/approvals/{item_id}", headers=_agent()).json()
+        assert item["decidable"] is False and item["allowed_decisions"] == []
+        assert "human decision" in item["not_decidable_reason"]
+        human = client.get(f"/v1/approvals/{item_id}").json()
+        assert human["decidable"] is True
+        resp = client.post(
+            f"/v1/approvals/{item_id}/decision", json={"decision": "approve"}, headers=_agent()
+        )
+        assert resp.status_code == 403
+        assert "METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY" in resp.json()["detail"]
+        listed = client.get("/v1/approvals", headers=_agent()).json()["items"]
+        assert next(i for i in listed if i["id"] == item_id)["decidable"] is False
+        still = client.get(f"/v1/approvals/{item_id}").json()
+        assert still["status"] == "pending"
+
+
+def test_human_authority_flag_lets_an_agent_decide(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("METAFORGE_ALLOW_AGENT_HUMAN_AUTHORITY", "true")
+    item_id = _authority_tool()
+    assert client.get(f"/v1/approvals/{item_id}", headers=_agent()).json()["decidable"] is True
+    resp = client.post(
+        f"/v1/approvals/{item_id}/decision", json={"decision": "approve"}, headers=_agent()
+    )
+    assert resp.status_code == 200
+
+
+def test_agent_can_still_decide_ordinary_kinds(client: TestClient) -> None:
+    resp = client.post(
+        f"/v1/approvals/tool:{_tool()}/decision", json={"decision": "approve"}, headers=_agent()
+    )
+    assert resp.status_code == 200

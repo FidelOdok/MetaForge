@@ -56,6 +56,8 @@ class DecisionRecord(BaseModel):
     surface: Surface = "unknown"
     #: For ``surface=agent``: the human the agent says it acts for.
     on_behalf_of: str | None = None
+    #: For ``surface=agent``: the agent itself, e.g. ``claude-code`` (FORGE-510).
+    agent: str | None = None
     decided_at: str | None = None
 
 

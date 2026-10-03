@@ -47,6 +47,7 @@ test("approvalHeaders: agent surface needs both env vars", () => {
   const h = approvalHeaders({ METAFORGE_APPROVAL_AGENT: "bot", METAFORGE_APPROVAL_ON_BEHALF_OF: "alice" });
   assert.equal(h["X-MetaForge-Surface"], "agent");
   assert.equal(h["X-MetaForge-On-Behalf-Of"], "alice");
+  assert.equal(h["X-MetaForge-Agent"], "bot");
 });
 
 test("approvalExitCode maps statuses", () => {

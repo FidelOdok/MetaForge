@@ -240,6 +240,7 @@ async def decide_change(
     reviewer_verified: bool = False,
     surface: str | None = None,
     on_behalf_of: str | None = None,
+    agent: str | None = None,
 ) -> DesignChangeProposal:
     """Decide a proposal and apply it on approval. Shared with ``/v1/approvals`` (FORGE-507)."""
     proposal = await workflow.decide(
@@ -250,6 +251,7 @@ async def decide_change(
         reviewer_verified=reviewer_verified,
         surface=surface,
         on_behalf_of=on_behalf_of,
+        agent=agent,
     )
     if proposal is None:
         raise HTTPException(status_code=404, detail="Proposal not found")

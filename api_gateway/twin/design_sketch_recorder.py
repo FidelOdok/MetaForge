@@ -195,6 +195,7 @@ def make_design_sketch_approver(twin: Any) -> Any:
                 updated_meta["approver_verified"] = bool(audit.get("verified"))
                 updated_meta["approval_surface"] = audit.get("surface")
                 updated_meta["approval_on_behalf_of"] = audit.get("on_behalf_of")
+                updated_meta["approval_agent"] = audit.get("agent")
 
             revision = VersionService.build_revision(
                 wp, change_description, snapshot_override=updated_meta
