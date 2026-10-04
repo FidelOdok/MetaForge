@@ -37,6 +37,7 @@ tracer = get_tracer("orchestrator.design_flow.launcher")
 __all__ = [
     "DesignFlowLauncher",
     "TemporalUnavailableError",
+    "WorkflowNotFoundError",
     "WorkflowHandleLike",
     "connect_temporal",
     "workflow_id_for",
@@ -59,6 +60,30 @@ class TemporalUnavailableError(RuntimeError):
             "try again. There is no in-process fallback on purpose: a run that is not "
             "durable must not look like one that is."
         )
+
+
+class WorkflowNotFoundError(RuntimeError):
+    """The engine answers, but the run's workflow no longer exists (FORGE-516).
+
+    Distinct from :class:`TemporalUnavailableError`: nothing is down, the
+    workflow was purged, reset or never survived a Temporal wipe. The run
+    cannot continue, so a decision that would resume it can never be delivered.
+    """
+
+    def __init__(self, run_id: str, detail: str = "") -> None:
+        self.run_id = run_id
+        super().__init__(
+            f"the workflow for run '{run_id}' no longer exists" + (f" ({detail})" if detail else "")
+        )
+
+
+def _is_not_found(exc: BaseException) -> bool:
+    """True for a Temporal RPC ``NOT_FOUND``; temporalio stays an optional import."""
+    try:
+        from temporalio.service import RPCError, RPCStatusCode
+    except ImportError:  # pragma: no cover - dependency is declared
+        return False
+    return isinstance(exc, RPCError) and exc.status == RPCStatusCode.NOT_FOUND
 
 
 def workflow_id_for(run_id: str) -> str:
@@ -207,16 +232,21 @@ class DesignFlowLauncher:
         not a name supplied by whatever is calling this.
         """
         handle = self.client.get_workflow_handle(workflow_id_for(run_id))
-        await handle.signal(
-            "submit_gate_decision",
-            GateAnswer(
-                approved=approved,
-                decided_by=decided_by,
-                comment=comment,
-                retry=retry,
-                rework_to=rework_to,
-            ),
-        )
+        try:
+            await handle.signal(
+                "submit_gate_decision",
+                GateAnswer(
+                    approved=approved,
+                    decided_by=decided_by,
+                    comment=comment,
+                    retry=retry,
+                    rework_to=rework_to,
+                ),
+            )
+        except Exception as exc:
+            if _is_not_found(exc):
+                raise WorkflowNotFoundError(run_id, str(exc)) from exc
+            raise
         logger.info(
             "design_flow_gate_answered",
             run_id=run_id,
@@ -241,7 +271,12 @@ class DesignFlowLauncher:
     async def state(self, run_id: str) -> dict[str, Any]:
         """Current state, read from the workflow rather than a cache of it."""
         handle = self.client.get_workflow_handle(workflow_id_for(run_id))
-        result: dict[str, Any] = await handle.query("state")
+        try:
+            result: dict[str, Any] = await handle.query("state")
+        except Exception as exc:
+            if _is_not_found(exc):
+                raise WorkflowNotFoundError(run_id, str(exc)) from exc
+            raise
         return result
 
     async def events(self, run_id: str) -> list[dict[str, Any]]:

@@ -136,7 +136,11 @@ async def gate_item(run: Run, *, snap: dict[str, Any] | None = None) -> Approval
     findings: list[GateFinding] = []
     allowed: list[str] = []
     targets: list[str] = []
-    if pending:
+    missing = bool((snap or {}).get("workflow_missing"))
+    if pending and missing:
+        # FORGE-516: the workflow is gone, so nothing can resume the run.
+        allowed = ["reject"]
+    elif pending:
         lines = [str(f) for f in (snap or {}).get("findings") or []]
         findings = (
             findings_from_lines(lines) if lines else findings_from_reason(run.approval_reason)
@@ -163,6 +167,11 @@ async def gate_item(run: Run, *, snap: dict[str, Any] | None = None) -> Approval
                 targets = []
     record = _record(item_id, _run_fallback(run))
     decidable, why = _decidable(pending, allowed)
+    if pending and missing:
+        why = (
+            "the run's workflow no longer exists; approve, retry and rework cannot "
+            "continue it, only reject is available"
+        )
     return ApprovalItem(
         id=item_id,
         kind="gate",
@@ -591,7 +600,7 @@ async def decide(
             status_code=409,
             detail=f"approval '{item_id}' is already {current.status}; nothing was recorded",
         )
-    if current.not_decidable_reason:
+    if current.not_decidable_reason and not current.decidable:
         raise HTTPException(status_code=409, detail=current.not_decidable_reason)
     if decision in REASON_REQUIRED_FOR and not reason.strip():
         raise HTTPException(status_code=422, detail=f"'{decision}' needs a reason")
