@@ -71,8 +71,9 @@ gets the answer.
 | Status | When |
 |--------|------|
 | 404 | Unknown id. |
-| 409 | Not decidable now: already decided, expired or canceled, elicitation route, gate not ready for approve, retries or reworks used up. |
+| 409 | Not decidable now: already decided, expired or canceled, elicitation route, gate not ready for approve, retries or reworks used up, or the run's workflow no longer exists (only `reject` is offered then). |
 | 422 | Decision not offered for this kind, invalid `to_phase`, or no `reason` for `reject`, `retry` or `rework`. |
+| 200 | `reject` on a gate whose workflow no longer exists: the decision is saved and there is no run left to signal. |
 | 503 | A gate decision was recorded but could not be delivered to the workflow. |
 
 ### Identity and surface

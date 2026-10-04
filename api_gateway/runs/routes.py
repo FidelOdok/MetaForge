@@ -41,6 +41,7 @@ from orchestrator.design_flow.launcher import (
     DesignFlowLauncher,
     DesignFlowWorkerUnavailableError,
     TemporalUnavailableError,
+    WorkflowNotFoundError,
     connect_temporal,
 )
 from orchestrator.design_flow.rework import rework_target_error
@@ -1162,6 +1163,11 @@ async def _note_gate_in_session(request: Request, run: Run, gate: str) -> None:
         logger.info("design_flow_gate_session_note_skipped", run_id=run.id, error=str(exc))
 
 
+WORKFLOW_MISSING_DETAIL = (
+    "the run's workflow no longer exists; it cannot continue; reject it instead"
+)
+
+
 async def _refuse_undeliverable_decision(
     run: Run, decision: ApprovalDecision, to_phase: str = ""
 ) -> None:
@@ -1203,6 +1209,12 @@ async def _refuse_undeliverable_decision(
                 "phase": state.get("current_phase"),
                 "reworks_left": state.get("reworks_left"),
             }
+        except WorkflowNotFoundError as exc:
+            # FORGE-516: nothing can resume this run, so only reject is honest.
+            # Refused before the store moves, or the saved decision would claim
+            # a run was resumed that never will be.
+            logger.info("design_flow_gate_workflow_missing", run_id=run.id, error=str(exc))
+            raise HTTPException(status_code=409, detail=WORKFLOW_MISSING_DETAIL) from exc
         except Exception as exc:  # noqa: BLE001 - the workflow's own guard still applies
             logger.info("approval_gate_state_unavailable", run_id=run.id, error=str(exc))
     if gate is None:
@@ -1255,6 +1267,8 @@ async def gate_snapshot(run: Run) -> dict[str, Any] | None:
     try:
         launcher = await get_flow_launcher()
         state = await asyncio.wait_for(launcher.state(run.id), _RECONCILE_TIMEOUT_SECONDS)
+    except WorkflowNotFoundError:
+        return {"workflow_missing": True, "findings": []}
     except Exception as exc:  # noqa: BLE001 - a read must not fail because the engine is away
         logger.info("approval_gate_snapshot_unavailable", run_id=run.id, error=str(exc))
         return None
@@ -1358,6 +1372,18 @@ async def decide_run_gate(
                 retry=decision is ApprovalDecision.RETRY,
                 **extra,
             )
+        except WorkflowNotFoundError as exc:
+            # FORGE-516: only reject reaches here (the others were refused
+            # above). The decision is saved and the run is closed; there is no
+            # workflow left to tell, which is not a failure of the request.
+            logger.warning(
+                "design_flow_gate_workflow_missing",
+                run_id=run_id,
+                decision=decision.value,
+                error=str(exc),
+            )
+            if decision is not ApprovalDecision.REJECT:
+                raise HTTPException(status_code=409, detail=WORKFLOW_MISSING_DETAIL) from exc
         except TemporalUnavailableError as exc:
             # The store already moved, but the run itself did not hear the
             # decision. Saying so is the only honest answer: reporting 200

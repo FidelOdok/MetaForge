@@ -22,6 +22,7 @@ from api_gateway.twin import routes as twin_routes
 from api_gateway.twin.design_sketch_recorder import make_design_sketch_approver
 from api_gateway.twin.technical_drawing_viewer import make_technical_drawing_approver
 from observability.metrics import MetricsCollector
+from orchestrator.design_flow.launcher import WorkflowNotFoundError
 from orchestrator.harness.ledger import SqliteRunLedger
 from orchestrator.harness.runs import RunStatus
 from twin_core.api import InMemoryTwinAPI
@@ -665,3 +666,113 @@ def test_agent_can_still_decide_ordinary_kinds(client: TestClient) -> None:
         f"/v1/approvals/tool:{_tool()}/decision", json={"decision": "approve"}, headers=_agent()
     )
     assert resp.status_code == 200
+
+
+# ── FORGE-516: the run's Temporal workflow no longer exists ──────────────
+
+
+class _GoneLauncher:
+    """A launcher whose workflow was purged: every call is a missing workflow."""
+
+    def __init__(self) -> None:
+        self.answered: list[dict[str, object]] = []
+
+    async def state(self, run_id: str) -> dict[str, object]:
+        raise WorkflowNotFoundError(run_id, "sql: no rows in result set")
+
+    async def answer_gate(self, run_id: str, **kwargs: object) -> None:
+        self.answered.append(kwargs)
+        raise WorkflowNotFoundError(run_id, "sql: no rows in result set")
+
+
+@pytest.fixture
+def gone(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> _GoneLauncher:
+    launcher = _GoneLauncher()
+
+    async def _get() -> _GoneLauncher:
+        return launcher
+
+    monkeypatch.setenv("METAFORGE_FLOW_ENGINE", "temporal")
+    monkeypatch.setattr(run_routes, "get_flow_launcher", _get)
+    return launcher
+
+
+def test_gate_with_missing_workflow_is_decidable_for_reject_only(
+    client: TestClient, gone: _GoneLauncher
+) -> None:
+    gate_id = _gate(flow_engine="temporal")
+    item = client.get(f"/v1/approvals/gate:{gate_id}").json()
+    assert item["allowed_decisions"] == ["reject"]
+    assert item["decidable"] is True
+    assert "no longer exists" in item["not_decidable_reason"]
+    listed = next(i for i in client.get("/v1/approvals").json()["items"] if i["id"] == item["id"])
+    assert listed["allowed_decisions"] == ["reject"]
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_status"),
+    [
+        ({"decision": "approve"}, 409),
+        ({"decision": "retry", "reason": "again"}, 409),
+        ({"decision": "rework", "reason": "back", "to_phase": "needs"}, 409),
+    ],
+)
+def test_missing_workflow_refuses_resuming_decisions_before_store_moves(
+    client: TestClient, gone: _GoneLauncher, body: dict[str, str], expected_status: int
+) -> None:
+    gate_id = _gate(flow_engine="temporal")
+    resp = client.post(f"/v1/approvals/gate:{gate_id}/decision", json=body)
+    assert resp.status_code == expected_status
+    assert "reject it instead" in resp.json()["detail"]
+    assert gone.answered == []
+    assert run_routes.get_run_store().get(gate_id).status is RunStatus.AWAITING_APPROVAL
+
+
+def test_missing_workflow_refuses_on_the_run_route_too(
+    client: TestClient, gone: _GoneLauncher
+) -> None:
+    gate_id = _gate(flow_engine="temporal")
+    run_routes.get_run_store()  # same store the route reads
+    app = FastAPI()
+    app.include_router(run_routes.router)
+    resp = TestClient(app).post(f"/v1/runs/{gate_id}/approval", json={"decision": "approve"})
+    assert resp.status_code == 409
+    assert run_routes.get_run_store().get(gate_id).status is RunStatus.AWAITING_APPROVAL
+
+
+def test_missing_workflow_reject_keeps_the_decision_and_returns_200(
+    client: TestClient, gone: _GoneLauncher
+) -> None:
+    gate_id = _gate(flow_engine="temporal")
+    resp = client.post(
+        f"/v1/approvals/gate:{gate_id}/decision", json={"decision": "reject", "reason": "stale"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "rejected"
+    assert len(gone.answered) == 1  # the signal was attempted, then the miss tolerated
+    assert run_routes.get_run_store().get(gate_id).status is RunStatus.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_launcher_turns_rpc_not_found_into_workflow_not_found() -> None:
+    from temporalio.service import RPCError, RPCStatusCode
+
+    from orchestrator.design_flow.launcher import DesignFlowLauncher
+
+    class _Handle:
+        async def query(self, *_a: object) -> None:
+            raise RPCError("sql: no rows in result set", RPCStatusCode.NOT_FOUND, b"")
+
+        async def signal(self, *_a: object) -> None:
+            raise RPCError("other", RPCStatusCode.INTERNAL, b"")
+
+    class _Client:
+        def get_workflow_handle(self, _id: str) -> _Handle:
+            return _Handle()
+
+    launcher = DesignFlowLauncher.__new__(DesignFlowLauncher)
+    launcher.client = _Client()  # type: ignore[assignment]
+    with pytest.raises(WorkflowNotFoundError):
+        await launcher.state("r1")
+    with pytest.raises(RPCError):  # a non-NOT_FOUND failure is not swallowed
+        await launcher.answer_gate("r1", approved=True, decided_by="x")
