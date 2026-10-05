@@ -1,7 +1,7 @@
+import { VIEWER_COLOR_MANAGEMENT } from './viewerColor';
 import { Suspense, lazy, useCallback, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
-import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
@@ -362,8 +362,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
         camera={{ position: [80, 60, 80], fov: 45, near: 0.1, far: 10000 }}
         gl={{
           preserveDrawingBuffer: true,
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.1,
+          ...VIEWER_COLOR_MANAGEMENT,
         }}
         // MET-747: enables the renderer's shadow map -- without this prop
         // castShadow/receiveShadow on the light and meshes below are no-ops.
