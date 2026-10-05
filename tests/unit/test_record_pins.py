@@ -515,3 +515,41 @@ class TestPhaseSummary:
             goal="g", phase=phase, context=ctx
         )
         assert outcome.summary == "Chose the LDO."
+
+
+class TestBrief:
+    async def test_the_brief_reads_the_same_stale_flag_as_the_gate(self, twin) -> None:
+        """A result on the current geometry that a named requirement set made
+        stale reads as stale in the agent's brief, not ok (FORGE-530 seam)."""
+        from api_gateway.projects.baseline_brief import read_baseline
+
+        constraints = make_constraint_recorder(twin, None)
+        c = [{"name": "stress", "expression": "True"}]
+        cs = await constraints(title="Bracket reqs", constraints=c, project_id=PROJECT)
+        cad = await _cad(twin, "a")
+        record = make_document_recorder(twin, None)
+        await record(
+            content="{}",
+            name="Bracket FEA",
+            wp_type="simulation_result",
+            domain="mechanical",
+            fmt="json",
+            link_type="simulation_result",
+            source_tool="twin.record_document",
+            project_id=PROJECT,
+            analysis={"geometry_node_id": cad["node_id"]},
+            depends_on=[cs["item_ref"]],
+        )
+
+        async def _evidence() -> str | None:
+            baseline = await read_baseline(twin, PROJECT)
+            assert baseline is not None
+            return next(e.evidence for e in baseline.entries if e.ref == "CAD-BRACKET@1")
+
+        assert "ok" in (await _evidence() or "")
+        await constraints(
+            title="Bracket reqs",
+            constraints=[{"name": "stress", "expression": "True", "message": "tighter"}],
+            project_id=PROJECT,
+        )
+        assert (await _evidence() or "").endswith("@1 stale")

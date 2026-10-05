@@ -30,6 +30,7 @@ from uuid import UUID
 import structlog
 
 from observability.tracing import get_tracer
+from twin_core.consistency.record_pins import is_valid_evidence, record_staleness
 from twin_core.items.facts import (
     cad_facts,
     constraint_nodes,
@@ -170,6 +171,9 @@ async def evidence_state(twin: Any, views: list[Any], current: Any) -> str | Non
     if on_current:
         newest = max(on_current, key=lambda n: str(getattr(n, "created_at", "")))
         meta = dict(getattr(newest, "metadata", None) or {})
+        # FORGE-527: the same flag the gate reads (e.g. a named requirement set moved).
+        if not is_valid_evidence(meta):
+            return f"{_sim_label(meta)} @{current.revision} {record_staleness(meta)}"
         return f"{_sim_label(meta)} @{current.revision} {_sim_outcome(meta)}"
     for view in reversed([v for v in views if v.revision < current.revision]):
         older = await _simulations_for(twin, view.node_id)
