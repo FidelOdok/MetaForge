@@ -363,3 +363,40 @@ def test_on_truncate_defaults_to_none_unaffected() -> None:
     reg = _registry(natives=12, mcp_per_server=10, servers=12)
     runtime = HarnessRuntime.build(None, tools=reg)
     assert len(_tool_schemas(runtime, max_tools=128)) == 128
+
+
+# ---------------------------------------------------------------------------
+# FORGE-518: companion tools survive the cap together
+# ---------------------------------------------------------------------------
+
+
+def _forge518_registry() -> ToolRegistry:
+    reg = _registry(natives=5, mcp_per_server=40, servers=6)
+    loose = {"type": "object", "properties": {}}
+    for tool in ("stage_work_product_file", "commit_geometry"):
+        reg.register_mcp("twin", tool, description="d", input_schema=loose, handler=_echo)
+    for tool in ("import_step", "describe_step_file", "export_model", "close_session"):
+        reg.register_mcp("freecad", tool, description="d", input_schema=loose, handler=_echo)
+    for niche in ("gazebo", "isaac_sim", "omniverse_usd"):
+        for i in range(10):
+            reg.register_mcp(niche, f"t{i}", description="d", input_schema=loose, handler=_echo)
+    return reg
+
+
+def test_import_step_kept_whenever_stage_tool_is_selected_under_cap() -> None:
+    reg = _forge518_registry()
+    kept, dropped = _select_tools(reg.all_tools(), 128)
+    names = {s.name for s in kept}
+    assert "mcp_twin_stage_work_product_file" in names
+    assert "mcp_freecad_import_step" in names
+    assert "mcp_freecad_describe_step_file" in names
+    assert "mcp_freecad_export_model" in names
+    assert "mcp_twin_commit_geometry" in names
+    assert "mcp_freecad_import_step" not in dropped
+
+
+def test_niche_families_are_dropped_before_others() -> None:
+    reg = _forge518_registry()
+    kept, dropped = _select_tools(reg.all_tools(), 128)
+    niche_dropped = [d for d in dropped if d.startswith(("mcp_gazebo", "mcp_isaac", "mcp_omni"))]
+    assert len(niche_dropped) == 30

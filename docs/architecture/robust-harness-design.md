@@ -459,10 +459,19 @@ is exactly backwards. Instead:
   added, still sorted into the same dropped tail (a large adapter's own
   alphabetical tail is exactly where the round-robin's global budget ran
   out);
+- **companion groups** (FORGE-518) are kept together: if any of
+  `twin.stage_work_product_file`, `freecad.import_step`,
+  `freecad.export_model`, `twin.commit_geometry`, `freecad.open_session` or
+  `freecad.close_session` is kept, so are the rest of its group
+  (`describe_step_file` rides with the stage/import pair), so the cap can never
+  split a stage -> import or export -> commit round trip;
 - the remaining budget is filled **round-robin across MCP origins**, so each
-  adapter keeps a share and no capability vanishes wholesale;
+  adapter keeps a share and no capability vanishes wholesale; niche families
+  (`gazebo`, `isaac_sim`, `omniverse_usd`) only receive what the other
+  adapters leave over, so the cap bites them first;
 - the drop is **loud** — `tool_schemas_truncated` logs the limit, counts, and
-  the dropped tool names.
+  the dropped tool names, and `chat_tools_dropped` repeats them at info,
+  once per distinct drop set within a turn (FORGE-518).
 
 Capping is a safety net, not a substitute for choosing. A deployment near the
 limit should narrow the tool set deliberately (the dashboard's tool selector

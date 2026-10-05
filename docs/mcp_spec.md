@@ -399,6 +399,15 @@ is not something the model can fix by changing its arguments, and the
 unknown-tool error already carries a did-you-mean. The split is "did the
 tool run?", not "was there a problem".
 
+#### 4.4.2 Next-step hints and missing-field errors (FORGE-518)
+
+`twin.stage_work_product_file` returns its staged `file_path` plus a
+`next_step` string naming `freecad.import_step` (with that `file_path`) and
+`freecad.describe_step_file`, so a model loads the stored part instead of
+recreating it. `twin.commit_geometry` called with no geometry fails with
+`Missing: session_id, obj_id, step_base64` listing exactly the absent fields
+and what to pass.
+
 ### 4.5 `health/check` — Adapter Health
 
 **Request**:

@@ -98,6 +98,36 @@ _SESSION_CRITICAL_VERBS = frozenset(
 )
 
 
+# FORGE-518: tools that only work as a group. If any trigger is kept, every
+# companion present in the registry is kept too, so a cap can never split a
+# round trip (stage a part, then have no way to load it).
+_COMPANION_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("twin_stage_work_product_file", "freecad_import_step"),
+        (
+            "twin_stage_work_product_file",
+            "freecad_import_step",
+            "freecad_describe_step_file",
+            "freecad_open_session",
+            "freecad_close_session",
+            "freecad_export_model",
+            "twin_commit_geometry",
+        ),
+    ),
+    (
+        ("freecad_export_model", "twin_commit_geometry"),
+        ("freecad_export_model", "twin_commit_geometry"),
+    ),
+    (
+        ("freecad_open_session", "freecad_close_session"),
+        ("freecad_open_session", "freecad_close_session"),
+    ),
+)
+
+# Families that lose to the FreeCAD authoring set when the cap bites.
+_NICHE_ORIGINS = ("gazebo", "isaac_sim", "omniverse_usd")
+
+
 def _select_tools(
     specs: list[Any], max_tools: int, *, pinned: frozenset[str] = frozenset()
 ) -> tuple[list[Any], list[str]]:
@@ -159,6 +189,18 @@ def _select_tools(
     natives = [s for s in specs if s.origin == NATIVE]
     rest = [s for s in specs if s.origin != NATIVE]
     protected_mcp = [s for s in rest if _protected(s)]
+    # FORGE-518: a trigger that is protected or merely present pulls in its
+    # whole group before the round-robin runs.
+    wanted: set[str] = set()
+    for spec in rest:
+        for triggers, companions in _COMPANION_GROUPS:
+            if any(spec.name.endswith(t) for t in triggers):
+                wanted.update(companions)
+    have = {id(s) for s in protected_mcp}
+    for spec in rest:
+        if id(spec) not in have and any(spec.name.endswith(w) for w in wanted):
+            protected_mcp.append(spec)
+            have.add(id(spec))
     protected_ids = {id(s) for s in protected_mcp}
     mcp = [s for s in rest if id(s) not in protected_ids]
 
@@ -172,18 +214,22 @@ def _select_tools(
     by_origin: dict[str, list[Any]] = {}
     for spec in mcp:
         by_origin.setdefault(spec.origin, []).append(spec)
-
     budget = max_tools - len(always_kept)
     chosen: list[Any] = []
-    queues = list(by_origin.values())
-    while budget > 0 and any(queues):
-        for queue in queues:
-            if not queue:
-                continue
-            chosen.append(queue.pop(0))
-            budget -= 1
-            if budget == 0:
-                break
+    # Niche families only get what the other adapters leave over, so the cap
+    # bites them first.
+    for tier in (
+        [q for o, q in by_origin.items() if o.lower() not in _NICHE_ORIGINS],
+        [q for o, q in by_origin.items() if o.lower() in _NICHE_ORIGINS],
+    ):
+        while budget > 0 and any(tier):
+            for queue in tier:
+                if not queue:
+                    continue
+                chosen.append(queue.pop(0))
+                budget -= 1
+                if budget == 0:
+                    break
 
     kept_set = {id(s) for s in always_kept} | {id(s) for s in chosen}
     kept = [s for s in specs if id(s) in kept_set]
@@ -216,6 +262,11 @@ def _tool_schemas(
     dropped: list[str] = []
     if max_tools is not None and len(specs) > max_tools:
         specs, dropped = _select_tools(specs, max_tools, pinned=runtime.tools.pinned_names())
+        # FORGE-518: say what was dropped, once per turn (the registry lives
+        # for the turn; this runs every model round).
+        if getattr(runtime.tools, "_drops_logged", None) != dropped:
+            runtime.tools._drops_logged = list(dropped)  # type: ignore[attr-defined]
+            logger.info("chat_tools_dropped", limit=max_tools, dropped_tools=dropped)
         logger.warning(
             "tool_schemas_truncated",
             limit=max_tools,

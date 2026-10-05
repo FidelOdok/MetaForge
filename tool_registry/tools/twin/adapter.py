@@ -2352,9 +2352,21 @@ class TwinServer(McpToolServer):
                     "alone is not unique across sessions). Re-call with the same "
                     "session_id you used for export_model, or pass step_base64 directly."
                 )
+            missing = [
+                field
+                for field, value in (
+                    ("session_id", given_session_id),
+                    ("obj_id", given_obj_id),
+                    ("step_base64", None),
+                )
+                if not value
+            ]
             raise ValueError(
-                "twin.commit_geometry: no geometry to commit — call freecad.export_model "
-                "first, then commit with the same session_id + obj_id (or pass step_base64)."
+                "twin.commit_geometry: no geometry to commit. Missing: "
+                + ", ".join(missing)
+                + ". Pass session_id + obj_id (exactly as given to the freecad.export_model "
+                "call that produced them), or step_base64, or file_path. If you have not "
+                "exported yet, call freecad.export_model first."
             )
         if not name or not isinstance(name, str):
             raise ValueError("twin.commit_geometry: 'name' is required (non-empty string)")
@@ -3305,7 +3317,17 @@ class TwinServer(McpToolServer):
             raise ValueError(
                 "twin.stage_work_product_file: 'node_id' is required (non-empty string)"
             )
-        return await self._blob_stager(node_id)
+        result = dict(await self._blob_stager(node_id))
+        # FORGE-518: a staged file is useless until it is loaded; name the next
+        # step so a model does not recreate the geometry instead.
+        staged_path = result.get("file_path")
+        if staged_path:
+            result["next_step"] = (
+                "To edit or re-export this part, call freecad.import_step with "
+                f"session_id (from freecad.open_session) and file_path={staged_path!r}. "
+                "To only inspect it, call freecad.describe_step_file with that file_path."
+            )
+        return result
 
     # ------------------------------------------------------------------
     # twin.record_evidence (FORGE-64, epic FORGE-35)

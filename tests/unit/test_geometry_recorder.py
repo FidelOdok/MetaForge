@@ -234,7 +234,7 @@ class TestCommitGeometryAdapter:
 
         twin = InMemoryTwinAPI.create()
         server = TwinServer(twin=twin, geometry_recorder=make_geometry_recorder(twin, None))
-        with pytest.raises(ValueError, match="step_base64"):
+        with pytest.raises(ValueError, match=r"Missing: session_id, obj_id, step_base64"):
             await server.commit_geometry({"name": "x"})
         with pytest.raises(ValueError, match="name"):
             await server.commit_geometry({"step_base64": _STEP_B64})
