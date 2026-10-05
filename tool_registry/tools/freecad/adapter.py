@@ -18,6 +18,11 @@ import structlog
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolHandler, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.freecad.config import FreecadConfig
+from tool_registry.tools.freecad.materials_appearance import (
+    apply_step_colours,
+    lookup_material_rgb,
+    resolve_rgb,
+)
 from tool_registry.tools.freecad.operations import FreecadOperations, capped_result
 from tool_registry.tools.freecad.session import FreecadSessionStore
 from tool_registry.tools.freecad.worker_pool import FreecadWorkerPool
@@ -1273,10 +1278,25 @@ class FreecadServer(McpToolServer):
                 "Export a session object to STEP and return the bytes (base64). "
                 "Returned bytes are NOT persisted anywhere — call "
                 "twin.commit_geometry (session_id + obj_id) afterward to add it "
-                "to the project/Twin as a cad_model work product.",
+                "to the project/Twin as a cad_model work product. Optional "
+                "'material' (e.g. '18 mm birch plywood', 'PETG') or 'color' "
+                "([r,g,b], 0-1 or 0-255) writes that appearance into the STEP so "
+                "the viewer shows it; 'part_materials' maps an assembly part "
+                "Label to its material for per-part colours. Unknown materials "
+                "stay uncoloured (nothing is invented).",
                 "cad_export",
                 obj_schema(
-                    {"session_id": sid, "obj_id": {"type": "string"}}, ["session_id", "obj_id"]
+                    {
+                        "session_id": sid,
+                        "obj_id": {"type": "string"},
+                        "material": {"type": "string"},
+                        "color": {"type": "array", "items": {"type": "number"}},
+                        "part_materials": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                    },
+                    ["session_id", "obj_id"],
                 ),
                 self.export_model,
             ),
@@ -1928,6 +1948,17 @@ class FreecadServer(McpToolServer):
         obj_id = self._require(arguments, "obj_id")
         obj = self._sessions.get_object(session_id, obj_id)
         step_bytes = self._ops.export_object_step_bytes(obj)
+        # FORGE-517: author the part colour into the STEP (viewer colours come
+        # only from STEP). Applied to the final bytes so it survives the
+        # FORGE-505 placement-bake round trip, which drops colours.
+        default_rgb = resolve_rgb(arguments.get("color"), arguments.get("material"))
+        part_materials = arguments.get("part_materials") or {}
+        part_rgb = {
+            str(label): rgb
+            for label, mat in part_materials.items()
+            if (rgb := lookup_material_rgb(mat)) is not None
+        }
+        step_bytes = apply_step_colours(step_bytes, default_rgb, part_rgb)
         stored = self._ops.measure_step_bytes(step_bytes)
         return {
             # MET-650: echoed back so a later twin.commit_geometry call (by
