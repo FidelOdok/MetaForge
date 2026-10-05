@@ -10,6 +10,7 @@ address prior objects by a stable ``obj_id`` held in the session store.
 from __future__ import annotations
 
 import base64
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +20,10 @@ from tool_registry.mcp_server.handlers import ResourceLimits, ToolHandler, ToolM
 from tool_registry.mcp_server.server import McpToolServer
 from tool_registry.tools.freecad.config import FreecadConfig
 from tool_registry.tools.freecad.materials_appearance import (
+    RGB,
     apply_step_colours,
     lookup_material_rgb,
+    read_step_colours,
     resolve_rgb,
 )
 from tool_registry.tools.freecad.operations import FreecadOperations, capped_result
@@ -871,7 +874,8 @@ class FreecadServer(McpToolServer):
                 "Load a STEP file into this session so it can be assembled (add_part_to_"
                 "assembly / add_assembly_joint) -- e.g. a part previously committed and "
                 "staged via twin.stage_work_product_file. Returns one obj_id per top-level "
-                "solid component the file contains (a multipart STEP yields several).",
+                "solid component the file contains (a multipart STEP yields several). "
+                "Each part's STEP colour is kept and written back by export_model.",
                 "cad_author",
                 obj_schema(
                     {
@@ -1282,8 +1286,9 @@ class FreecadServer(McpToolServer):
                 "'material' (e.g. '18 mm birch plywood', 'PETG') or 'color' "
                 "([r,g,b], 0-1 or 0-255) writes that appearance into the STEP so "
                 "the viewer shows it; 'part_materials' maps an assembly part "
-                "Label to its material for per-part colours. Unknown materials "
-                "stay uncoloured (nothing is invented).",
+                "Label to its material for per-part colours. With none of these, "
+                "parts loaded by import_step keep their imported colour. Unknown "
+                "materials stay uncoloured (nothing is invented).",
                 "cad_export",
                 obj_schema(
                     {
@@ -1546,11 +1551,17 @@ class FreecadServer(McpToolServer):
         # names -- a multipart STEP keeps each component's own STEP-authored
         # label instead (see the tool's own schema description).
         override_name = arguments.get("name") if len(components) == 1 else None
+        # FORGE-519: headless Import.insert drops colours, so read them from
+        # the source STEP and keep each with its session object; export_model
+        # writes them back unless an explicit colour/material overrides them.
+        colours = _read_file_colours(file_path)
         parts = []
         for obj in components:
+            rgb = _imported_colour(str(obj.Label), colours, single=len(components) == 1)
             name = override_name or obj.Label
-            obj_id = self._sessions.register_object(session_id, obj, "part", name)
-            parts.append({"obj_id": obj_id, "name": name})
+            meta = {"color": list(rgb), "color_source": "imported_step"} if rgb else None
+            obj_id = self._sessions.register_object(session_id, obj, "part", name, metadata=meta)
+            parts.append({"obj_id": obj_id, "name": name, "color": list(rgb) if rgb else None})
         return {"obj_ids": [p["obj_id"] for p in parts], "parts": parts}
 
     async def create_sketch(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1943,14 +1954,27 @@ class FreecadServer(McpToolServer):
             return out
         return {"executed": True, **extra, "session": self._sessions.describe(session_id)}
 
+    def _imported_part_colours(self, session_id: str) -> dict[str, RGB]:
+        """Live Label -> colour recorded at import, for every session object."""
+        out: dict[str, RGB] = {}
+        for e in self._sessions.get(session_id).objects.values():
+            rgb = e.metadata.get("color") if e.kind == "part" else None
+            label = getattr(e.obj, "Label", None)
+            if rgb and isinstance(label, str):
+                out[label] = (float(rgb[0]), float(rgb[1]), float(rgb[2]))
+        return out
+
     async def export_model(self, arguments: dict[str, Any]) -> dict[str, Any]:
         session_id = self._require(arguments, "session_id")
         obj_id = self._require(arguments, "obj_id")
-        obj = self._sessions.get_object(session_id, obj_id)
+        entry = self._sessions.get_entry(session_id, obj_id)
+        obj = entry.obj
         step_bytes = self._ops.export_object_step_bytes(obj)
         # FORGE-517: author the part colour into the STEP (viewer colours come
         # only from STEP). Applied to the final bytes so it survives the
         # FORGE-505 placement-bake round trip, which drops colours.
+        # Priority: part_materials, then color/material, then (FORGE-519) the
+        # colour each part was imported with.
         default_rgb = resolve_rgb(arguments.get("color"), arguments.get("material"))
         part_materials = arguments.get("part_materials") or {}
         part_rgb = {
@@ -1958,7 +1982,12 @@ class FreecadServer(McpToolServer):
             for label, mat in part_materials.items()
             if (rgb := lookup_material_rgb(mat)) is not None
         }
-        step_bytes = apply_step_colours(step_bytes, default_rgb, part_rgb)
+        imported_rgb = self._imported_part_colours(session_id)
+        if default_rgb is None and (own := entry.metadata.get("color")):
+            default_rgb = (float(own[0]), float(own[1]), float(own[2]))
+        step_bytes = apply_step_colours(
+            step_bytes, default_rgb, part_rgb, fallback_part_rgb=imported_rgb
+        )
         stored = self._ops.measure_step_bytes(step_bytes)
         return {
             # MET-650: echoed back so a later twin.commit_geometry call (by
@@ -2115,3 +2144,31 @@ class FreecadServer(McpToolServer):
         if not value:
             raise ValueError(f"{key} is required")
         return str(value)
+
+
+_FREECAD_SUFFIX_RE = re.compile(r"\d{3}$")
+
+
+def _read_file_colours(file_path: str) -> dict[str, RGB]:
+    """Per-product colours of a STEP on disk; best-effort, empty on failure."""
+    try:
+        colours = read_step_colours(Path(file_path).read_bytes())
+    except OSError as exc:
+        logger.warning("freecad_import_colours_unreadable", file_path=file_path, error=str(exc))
+        return {}
+    logger.info("freecad_import_colours_read", file_path=file_path, products=len(colours))
+    return colours
+
+
+def _imported_colour(label: str, colours: dict[str, RGB], *, single: bool) -> RGB | None:
+    """Colour of an imported component: by its Label (the STEP product name,
+    allowing FreeCAD's ``001`` de-duplication suffix); a single-component
+    import whose file has exactly one colour takes that colour."""
+    if label in colours:
+        return colours[label]
+    base = _FREECAD_SUFFIX_RE.sub("", label)
+    if base != label and base in colours:
+        return colours[base]
+    if single and len(set(colours.values())) == 1:
+        return next(iter(colours.values()))
+    return None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -682,7 +683,7 @@ class TestStatefulAuthoring:
             {"session_id": sid, "file_path": "/workspace/_staged_work_products/disc.step"}
         )
 
-        assert result["parts"] == [{"obj_id": "part_1", "name": "Turntable Disc"}]
+        assert result["parts"] == [{"obj_id": "part_1", "name": "Turntable Disc", "color": None}]
         assert result["obj_ids"] == ["part_1"]
         s._ops.import_step.assert_called_once_with(
             s._sessions.get(sid).document, "/workspace/_staged_work_products/disc.step"
@@ -708,7 +709,7 @@ class TestStatefulAuthoring:
             }
         )
 
-        assert result["parts"] == [{"obj_id": "part_1", "name": "Renamed Disc"}]
+        assert result["parts"] == [{"obj_id": "part_1", "name": "Renamed Disc", "color": None}]
 
     async def test_import_step_multipart_keeps_each_step_label_ignoring_rename_hint(
         self, authoring_server: FreecadServer
@@ -727,8 +728,8 @@ class TestStatefulAuthoring:
         )
 
         assert result["parts"] == [
-            {"obj_id": "part_1", "name": "LegA"},
-            {"obj_id": "part_2", "name": "LegB"},
+            {"obj_id": "part_1", "name": "LegA", "color": None},
+            {"obj_id": "part_2", "name": "LegB", "color": None},
         ]
 
     async def test_export_model_returns_base64_step(self, authoring_server: FreecadServer) -> None:
@@ -761,7 +762,7 @@ class TestStatefulAuthoring:
         base = {"session_id": sid, "obj_id": prim["obj_id"]}
         with patch(
             "tool_registry.tools.freecad.adapter.apply_step_colours",
-            side_effect=lambda b, d, p: b + repr((d, p)).encode(),
+            side_effect=lambda b, d, p, **_kw: b + repr((d, p)).encode(),
         ):
             r = await s.export_model({**base, "material": "18 mm birch plywood"})
             assert b"0.87" in base64.b64decode(r["step_base64"])
@@ -774,6 +775,107 @@ class TestStatefulAuthoring:
             assert b"'Board'" in body and b"Odd" not in body
         r = await s.export_model({**base, "material": "unobtainium"})
         assert base64.b64decode(r["step_base64"]) == b"ISO-10303-21;\nfake-step\n"
+
+    async def test_import_step_keeps_the_source_colour_and_export_writes_it_back(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """FORGE-519: headless Import.insert drops colours, so import_step reads
+        them from the file and export_model (no colour args) writes them back."""
+        import base64
+
+        from tests.unit.test_freecad_material_colour import (
+            _BIRCH_BOX,
+            _colour_of,
+            strip_step_colours,
+        )
+
+        s = authoring_server
+        s._ops.import_step.return_value = [_FakeObj("part", label="Board")]
+        s._ops.export_object_step_bytes.return_value = strip_step_colours(_BIRCH_BOX.read_bytes())
+        sid = (await s.open_session({"name": "box"}))["session_id"]
+        result = await s.import_step({"session_id": sid, "file_path": str(_BIRCH_BOX)})
+
+        tan = (0.87, 0.74, 0.54)
+        assert result["parts"] == [{"obj_id": "part_1", "name": "Board", "color": list(tan)}]
+        entry = s._sessions.get_entry(sid, "part_1")
+        assert entry.metadata == {"color": list(tan), "color_source": "imported_step"}
+
+        base = {"session_id": sid, "obj_id": "part_1"}
+        out = base64.b64decode((await s.export_model(base))["step_base64"])
+        assert _colour_of(out, 15) == tan
+        # Explicit colour / material override the imported one.
+        out = base64.b64decode(
+            (await s.export_model({**base, "color": [255, 0, 0]}))["step_base64"]
+        )
+        assert _colour_of(out, 15) == (1.0, 0.0, 0.0)
+        out = base64.b64decode((await s.export_model({**base, "material": "PETG"}))["step_base64"])
+        assert _colour_of(out, 15) == (0.30, 0.55, 0.80)
+        out = base64.b64decode(
+            (await s.export_model({**base, "part_materials": {"Board": "steel"}}))["step_base64"]
+        )
+        assert _colour_of(out, 15) == (0.35, 0.36, 0.38)
+
+    async def test_single_component_takes_the_files_only_colour_despite_rename(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        from tests.unit.test_freecad_material_colour import _BIRCH_BOX
+
+        s = authoring_server
+        s._ops.import_step.return_value = [_FakeObj("part", label="Imported Shape")]
+        sid = (await s.open_session({}))["session_id"]
+        result = await s.import_step(
+            {"session_id": sid, "file_path": str(_BIRCH_BOX), "name": "Lid"}
+        )
+        assert result["parts"][0]["color"] == [0.87, 0.74, 0.54]
+
+    async def test_assembly_of_imported_parts_keeps_each_part_colour(
+        self, authoring_server: FreecadServer, tmp_path: Path
+    ) -> None:
+        """FORGE-519: the live shelf case. Parts imported from a coloured
+        multi-product STEP, assembled, exported with no colour args."""
+        import base64
+
+        from tests.unit.test_freecad_material_colour import _STEP, _colour_of
+        from tool_registry.tools.freecad.materials_appearance import apply_step_colours
+
+        tan, grey = (0.87, 0.74, 0.54), (0.78, 0.79, 0.81)
+        src = tmp_path / "shelf.step"
+        src.write_bytes(apply_step_colours(_STEP.encode(), None, {"Board": tan, "Bracket": grey}))
+
+        s = authoring_server
+        board, bracket = _FakeObj("part", label="Board"), _FakeObj("part", label="Bracket")
+        s._ops.import_step.return_value = [board, bracket]
+        s._ops.export_object_step_bytes.return_value = _STEP.encode()  # FreeCAD: no colours
+        sid = (await s.open_session({"name": "shelf"}))["session_id"]
+        result = await s.import_step({"session_id": sid, "file_path": str(src)})
+        assert [p["color"] for p in result["parts"]] == [list(tan), list(grey)]
+        asm = await s.create_assembly({"session_id": sid, "name": "Shelf"})
+        for part_id in result["obj_ids"]:
+            await s.add_part_to_assembly(
+                {"session_id": sid, "assembly_id": asm["obj_id"], "part_id": part_id}
+            )
+
+        base = {"session_id": sid, "obj_id": asm["obj_id"]}
+        out = base64.b64decode((await s.export_model(base))["step_base64"])
+        assert (_colour_of(out, 11), _colour_of(out, 26)) == (tan, grey)
+        # part_materials overrides one part; the other keeps its imported colour.
+        out = base64.b64decode(
+            (await s.export_model({**base, "part_materials": {"Board": "PETG"}}))["step_base64"]
+        )
+        assert (_colour_of(out, 11), _colour_of(out, 26)) == ((0.30, 0.55, 0.80), grey)
+        # An explicit assembly colour beats every imported colour.
+        out = base64.b64decode(
+            (await s.export_model({**base, "color": [0, 0, 255]}))["step_base64"]
+        )
+        assert (_colour_of(out, 11), _colour_of(out, 26)) == ((0.0, 0.0, 1.0), (0.0, 0.0, 1.0))
+
+    async def test_import_of_an_unreadable_file_records_no_colour(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        await s.import_step({"session_id": sid, "file_path": "/nonexistent/x.step"})
+        assert s._sessions.get_entry(sid, "part_1").metadata == {}
 
     async def test_create_primitive_passes_document_and_kind(
         self, authoring_server: FreecadServer

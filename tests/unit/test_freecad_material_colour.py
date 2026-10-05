@@ -15,6 +15,7 @@ import pytest
 from tool_registry.tools.freecad.materials_appearance import (
     apply_step_colours,
     lookup_material_rgb,
+    read_step_colours,
     resolve_rgb,
 )
 from tool_registry.tools.freecad.operations import HAS_FREECAD, FreecadOperations
@@ -208,3 +209,100 @@ def test_freecad_single_part_material_colour_survives_bake(tmp_path: Path) -> No
     out = apply_step_colours(step, rgb)
     assert b"COLOUR_RGB('',0.870000,0.740000,0.540000)" in out
     assert apply_step_colours(step, lookup_material_rgb("unobtainium")) == step
+
+
+_BIRCH_BOX = Path(__file__).resolve().parents[2] / "tools/occt-converter/samples/birch_box.step"
+_STYLE_TYPES = (
+    "COLOUR_RGB",
+    "FILL_AREA_STYLE",
+    "SURFACE_STYLE",
+    "SURFACE_SIDE_STYLE",
+    "PRESENTATION_STYLE",
+    "STYLED_ITEM",
+    "MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION",
+)
+
+
+def strip_step_colours(step: bytes) -> bytes:
+    """The STEP as headless FreeCAD would export it: no colour entities."""
+    keep = [
+        ln
+        for ln in step.decode().splitlines()
+        if not re.match(rf"#\d+ = ({'|'.join(_STYLE_TYPES)})", ln)
+    ]
+    return ("\n".join(keep) + "\n").encode()
+
+
+class TestReadStepColours:
+    """FORGE-519: per-product colours read back out of a STEP."""
+
+    def test_reads_the_birch_box_sample_colour(self) -> None:
+        assert read_step_colours(_BIRCH_BOX.read_bytes()) == {"Board": (0.87, 0.74, 0.54)}
+
+    def test_uncoloured_step_reads_empty(self) -> None:
+        assert read_step_colours(_STEP) == {}
+        assert read_step_colours(strip_step_colours(_BIRCH_BOX.read_bytes())) == {}
+
+    def test_garbage_reads_empty(self) -> None:
+        assert read_step_colours(b"not a step file") == {}
+        assert read_step_colours("") == {}
+
+    def test_multi_product_round_trips_per_part_colours(self) -> None:
+        tan, grey = (0.87, 0.74, 0.54), (0.78, 0.79, 0.81)
+        out = apply_step_colours(_STEP.encode(), None, {"Board": tan, "Bracket": grey})
+        assert read_step_colours(out) == {"Board": tan, "Bracket": grey}
+
+    def test_only_coloured_products_are_returned(self) -> None:
+        out = apply_step_colours(_STEP.encode(), None, {"Bracket": (0.3, 0.55, 0.8)})
+        assert read_step_colours(out) == {"Bracket": (0.3, 0.55, 0.8)}
+
+    def test_colour_on_the_shape_representation_counts(self) -> None:
+        """Some exporters style the representation, not the solid."""
+        styled = _STEP.replace(
+            "ENDSEC;\nEND-ISO",
+            "#50 = COLOUR_RGB('',0.2,0.4,0.6);\n"
+            "#51 = FILL_AREA_STYLE_COLOUR('',#50);\n"
+            "#52 = FILL_AREA_STYLE('',(#51));\n"
+            "#53 = SURFACE_STYLE_FILL_AREA(#52);\n"
+            "#54 = SURFACE_SIDE_STYLE('',(#53));\n"
+            "#55 = SURFACE_STYLE_USAGE(.BOTH.,#54);\n"
+            "#56 = PRESENTATION_STYLE_ASSIGNMENT((#55));\n"
+            "#57 = STYLED_ITEM('color',(#56),#25);\n"
+            "ENDSEC;\nEND-ISO",
+        )
+        assert read_step_colours(styled) == {"Bracket": (0.2, 0.4, 0.6)}
+
+    def test_curve_style_colour_is_not_the_part_colour(self) -> None:
+        styled = _STEP.replace(
+            "ENDSEC;\nEND-ISO",
+            "#50 = COLOUR_RGB('',1.,0.,0.);\n"
+            "#51 = CURVE_STYLE('',#52,POSITIVE_LENGTH_MEASURE(0.1),#50);\n"
+            "#52 = DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');\n"
+            "#56 = PRESENTATION_STYLE_ASSIGNMENT((#51));\n"
+            "#57 = STYLED_ITEM('color',(#56),#11);\n"
+            "ENDSEC;\nEND-ISO",
+        )
+        assert read_step_colours(styled) == {}
+
+
+class TestFallbackPartColours:
+    """FORGE-519: imported colours are the lowest-priority source."""
+
+    def test_fallback_colours_its_part(self) -> None:
+        out = apply_step_colours(_STEP.encode(), fallback_part_rgb={"Board": (0.1, 0.2, 0.3)})
+        assert _colour_of(out, 11) == (0.1, 0.2, 0.3)
+        assert _colour_of(out, 26) is None
+
+    def test_default_and_part_beat_fallback(self) -> None:
+        out = apply_step_colours(
+            _STEP.encode(),
+            (0.5, 0.5, 0.5),
+            {"Bracket": (0.9, 0.9, 0.9)},
+            fallback_part_rgb={"Board": (0.1, 0.2, 0.3), "Bracket": (0.1, 0.2, 0.3)},
+        )
+        assert _colour_of(out, 11) == (0.5, 0.5, 0.5)
+        assert _colour_of(out, 26) == (0.9, 0.9, 0.9)
+
+    def test_fallback_naming_parts_not_in_this_step_is_a_noop(self) -> None:
+        data = _STEP.encode()
+        assert apply_step_colours(data, fallback_part_rgb={"Elsewhere": (1.0, 0.0, 0.0)}) == data
