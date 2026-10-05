@@ -785,15 +785,17 @@ id cannot. So the same deliverable in the same project has the same key in
 every version, and a part a run before slots already recorded as
 `CAD-LEFT-BRACKET` is the slot's item from the first slotted run.
 
-**Frozen at save.** `FlowVersionStore.save` binds the slots
-(`slots.bind_slots`) before freezing, so declared and default slots and their
-keys are part of the version's content hash and an approval approves them. A
-flow with no slots (a template run, a version saved before FORGE-524) gets the
-same slots derived at run time (`slots.effective_slots`), and its hash is
-unchanged because an empty `slots` list is left out of the hash, like an unset
-`model`. `diff_flows` reports declared items (`phase 'design' declares
-cad_model 'left bracket' (item CAD-LEFT-BRACKET)`), never the materialised
-defaults.
+**Frozen at save.** `FlowVersionStore.save` binds the *declared* slots
+(`slots.bind_slots` fills in their keys) before freezing, so they and their
+keys are part of the version's content hash and an approval approves them.
+Default slots are never stored: they are a pure function of the frozen phase,
+derived at run time (`slots.effective_slots`), and shown in the API with
+`derived: true`. A flow that declares no slots (every built-in template, a
+version saved before FORGE-524) therefore hashes exactly as before, because an
+empty `slots` list is left out of the hash like an unset `model`: an approved
+version still verifies, and a new version of the same content gets the same
+hash. `diff_flows` reports declared items (`phase 'design' declares cad_model
+'left bracket' (item CAD-LEFT-BRACKET)`), never the derived defaults.
 
 **During a run.** The phase brain puts the phase's slots on the MCP call
 context (`McpCallContext.item_slots`, carried to the sidecar in the
@@ -828,5 +830,8 @@ counter: an undeclared item is a review item, and the reviewer already sees it.
 
 **API.** Every phase in `GET /v1/design-flows`, `GET /v1/design-flows/{id}`
 and `GET /v1/design-flows/versions/{id}` carries `slots`
-(`[{itemType, name, itemKey}]`), and `POST /v1/design-flows/versions` accepts
-`slots` per phase (`itemKey` optional).
+(`[{itemType, name, itemKey, derived}]`, `derived` for a default slot that is
+computed rather than stored), and `POST /v1/design-flows/versions` accepts
+`slots` per phase (`itemKey` optional). A slot the editor sends back with
+`derived: true` is dropped rather than turned into a declared one, so
+round-tripping a flow through the editor does not change its hash.

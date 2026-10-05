@@ -2939,6 +2939,11 @@
       },
       "EditSlot": {
         "properties": {
+          "derived": {
+            "default": false,
+            "title": "Derived",
+            "type": "boolean"
+          },
           "itemKey": {
             "default": "",
             "title": "Itemkey",
@@ -9882,6 +9887,11 @@
       "SlotView": {
         "description": "A deliverable slot: one item the phase writes (FORGE-524).",
         "properties": {
+          "derived": {
+            "default": false,
+            "title": "Derived",
+            "type": "boolean"
+          },
           "itemKey": {
             "title": "Itemkey",
             "type": "string"

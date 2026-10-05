@@ -246,6 +246,54 @@ class TestSlotsInTheFlow:
         assert keys(restored) == keys(first)
         assert restored.frozen.content_hash == first.frozen.content_hash
 
+    def test_default_slots_are_derived_not_stored(self) -> None:
+        # A flow that declares nothing hashes exactly as before slots existed.
+        base = get_flow("hardware_v1")
+        assert all(p.slots == () for p in bind_slots(base).phases)
+        version = FlowVersionStore().save(
+            base, base_template_id="hardware_v1", base_version="1", changes=["x"]
+        )
+        assert all(p.slots == [] for p in version.frozen.phases)
+        assert (
+            version.frozen.content_hash
+            == freeze_flow(base, version=version.frozen.version).content_hash
+        )
+        # ...and still gets its default slots at run time.
+        requirements = _phase(definition_from_frozen(version.frozen), "requirements")
+        assert [s.item_key for s in effective_slots(requirements)] == ["CS-REQUIREMENTS"]
+
+    def test_a_stored_pre_change_version_still_verifies(self, tmp_path) -> None:
+        import json
+        from dataclasses import asdict
+
+        path = str(tmp_path / "versions.db")
+        store = FlowVersionStore(path)  # creates the table
+        flow = get_flow("mech_v1")
+        definition = asdict(flow)
+        for phase in definition["phases"]:
+            phase.pop("slots")  # the row shape written before FORGE-524
+        frozen = freeze_flow(flow, version="1+flowv_old")
+        assert store._conn is not None
+        store._conn.execute(
+            "INSERT INTO flow_versions (id, status, definition, frozen_version, content_hash, "
+            "base_template_id, base_version, changes, origin, intent, created_at, decided_by, "
+            "decided_at, approval_id, flow_context) VALUES "
+            "(?, 'approved', ?, ?, ?, 'mech_v1', '1', '[]', 'edited', '', ?, 'user:x', '', '', '')",
+            (
+                "flowv_old",
+                json.dumps(definition, sort_keys=True),
+                frozen.version,
+                frozen.content_hash,
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        store._conn.commit()
+
+        restored = FlowVersionStore(path).get("flowv_old")
+        restored.frozen.verify()
+        assert restored.frozen.content_hash == frozen.content_hash
+        assert restored.startable
+
     def test_diff_names_declared_items_but_not_materialised_defaults(self) -> None:
         base = get_flow("hardware_v1")
         assert diff_flows(base, bind_slots(base)) == []
@@ -491,10 +539,23 @@ class TestVersionRouteShowsSlots:
         body = client.get(f"/v1/design-flows/versions/{version.id}").json()
         phases = {p["id"]: p for p in body["flow"]["phases"]}
         assert phases["design"]["slots"] == [
-            {"itemType": "cad_model", "name": "left bracket", "itemKey": "CAD-LEFT-BRACKET"},
-            {"itemType": "cad_model", "name": "right bracket", "itemKey": "CAD-RIGHT-BRACKET"},
+            {
+                "itemType": "cad_model",
+                "name": "left bracket",
+                "itemKey": "CAD-LEFT-BRACKET",
+                "derived": False,
+            },
+            {
+                "itemType": "cad_model",
+                "name": "right bracket",
+                "itemKey": "CAD-RIGHT-BRACKET",
+                "derived": False,
+            },
         ]
-        assert phases["intent"]["slots"][0]["itemKey"] == "INT-INTENT"
+        # Default slots are shown, marked derived: computed, not stored.
+        assert phases["intent"]["slots"] == [
+            {"itemType": "intent", "name": "intent", "itemKey": "INT-INTENT", "derived": True}
+        ]
 
     def test_edited_version_can_declare_slots(self) -> None:
         from api_gateway.server import create_app
@@ -513,5 +574,8 @@ class TestVersionRouteShowsSlots:
         assert "phase 'design' declares cad_model 'cleat' (item CAD-CLEAT)" in body["changes"]
         design = next(p for p in body["flow"]["phases"] if p["id"] == "design")
         assert design["slots"] == [
-            {"itemType": "cad_model", "name": "cleat", "itemKey": "CAD-CLEAT"}
+            {"itemType": "cad_model", "name": "cleat", "itemKey": "CAD-CLEAT", "derived": False}
         ]
+        # The derived slots the editor echoed back were not stored as declared.
+        stored = get_version_store().get(body["versionId"])
+        assert [s.item_key for p in stored.frozen.phases for s in p.slots] == ["CAD-CLEAT"]

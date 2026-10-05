@@ -37,7 +37,7 @@ from orchestrator.design_flow.context import (
 )
 from orchestrator.design_flow.generator import FlowProposal, TailoringError
 from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
-from orchestrator.design_flow.slots import effective_slots
+from orchestrator.design_flow.slots import effective_slots, is_derived
 from orchestrator.design_flow.spec import (
     DEFAULT_FLOW_ID,
     FLOWS,
@@ -77,6 +77,9 @@ class SlotView(BaseModel):
     name: str
     #: The item every write of this deliverable lands on during a run.
     itemKey: str  # noqa: N815
+    #: A default slot, derived from the phase at run time and not stored in
+    #: the version (so it is not part of its hash).
+    derived: bool = False
 
 
 class PhaseView(BaseModel):
@@ -151,7 +154,12 @@ def _phase_view(phase: object) -> PhaseView:
         disciplines=list(phase.disciplines),
         model=phase.model,
         slots=[
-            SlotView(itemType=s.item_type, name=s.name, itemKey=s.item_key)
+            SlotView(
+                itemType=s.item_type,
+                name=s.name,
+                itemKey=s.item_key,
+                derived=is_derived(phase, s),  # type: ignore[arg-type]
+            )
             for s in effective_slots(phase)  # type: ignore[arg-type]
         ],
         gate=(
@@ -648,6 +656,8 @@ class EditSlot(BaseModel):
     itemType: str  # noqa: N815
     name: str
     itemKey: str = ""  # noqa: N815
+    #: Echoed back from a view; a derived slot is not declared, so it is dropped.
+    derived: bool = False
 
 
 class EditPhase(BaseModel):
@@ -716,6 +726,7 @@ def _definition_from(body: EditFlowRequest) -> FlowDefinition:
                 slots=tuple(
                     DeliverableSlot(item_type=s.itemType, name=s.name, item_key=s.itemKey)
                     for s in p.slots
+                    if not s.derived
                 ),
                 gate=(
                     None

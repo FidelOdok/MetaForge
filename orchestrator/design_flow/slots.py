@@ -25,10 +25,13 @@ project, a key cannot contain ``/`` (it sits in a URL path), and a project's
 name can change between versions while its id cannot. The same deliverable in
 the same project therefore always gets the same key, in every version.
 
-:func:`bind_slots` materialises slots and keys when a version is saved, so
-they are frozen with it. :func:`effective_slots` gives the same answer at run
-time for a flow that was never bound (a template run, a version saved before
-slots existed). :func:`match_slot` decides which slot a write belongs to.
+:func:`bind_slots` fills in the keys of the *declared* slots when a version
+is saved, so they are frozen with it. Default slots are never stored: they are
+a pure function of the frozen phase, so :func:`effective_slots` derives them
+at run time, and a flow that declares nothing hashes exactly as it did before
+slots existed (a version approved earlier still verifies, and a new version
+of the same content gets the same hash). :func:`match_slot` decides which
+slot a write belongs to.
 
 Pure functions, no I/O.
 """
@@ -51,9 +54,11 @@ __all__ = [
     "SlotLike",
     "SlotMatch",
     "bind_slots",
+    "declared_slots",
     "default_slots",
     "definition_deliverables",
     "effective_slots",
+    "is_derived",
     "match_slot",
     "slot_key",
     "slots_brief",
@@ -105,8 +110,8 @@ def default_slots(phase: Phase) -> tuple[DeliverableSlot, ...]:
     )
 
 
-def effective_slots(phase: Phase) -> tuple[DeliverableSlot, ...]:
-    """Declared slots with their keys, then the default ones. Deterministic."""
+def declared_slots(phase: Phase) -> tuple[DeliverableSlot, ...]:
+    """The phase's declared slots, each with its key, duplicates dropped."""
     declared: list[DeliverableSlot] = []
     seen: set[str] = set()
     for slot in phase.slots:
@@ -115,16 +120,29 @@ def effective_slots(phase: Phase) -> tuple[DeliverableSlot, ...]:
             continue
         seen.add(key)
         declared.append(slot if slot.item_key == key else replace(slot, item_key=key))
+    return tuple(declared)
+
+
+def effective_slots(phase: Phase) -> tuple[DeliverableSlot, ...]:
+    """Declared slots with their keys, then the derived default ones. Deterministic."""
+    declared = declared_slots(phase)
+    seen = {s.item_key for s in declared}
     return (*declared, *(s for s in default_slots(phase) if s.item_key not in seen))
 
 
-def bind_slots(definition: FlowDefinition) -> FlowDefinition:
-    """``definition`` with every phase's slots materialised and keyed.
+def is_derived(phase: Phase, slot: DeliverableSlot) -> bool:
+    """True for a default slot: derived at run time, not stored in the version."""
+    return all((s.item_type, s.name) != (slot.item_type, slot.name) for s in phase.slots)
 
-    Called when a version is saved, so the keys are part of its frozen,
-    hashed content. Idempotent: binding a bound flow changes nothing.
+
+def bind_slots(definition: FlowDefinition) -> FlowDefinition:
+    """``definition`` with every *declared* slot keyed.
+
+    Called when a version is saved, so declared slots and their keys are part
+    of its frozen, hashed content. Default slots are not added (see the module
+    docstring). Idempotent: binding a bound flow changes nothing.
     """
-    phases = tuple(replace(p, slots=effective_slots(p)) for p in definition.phases)
+    phases = tuple(replace(p, slots=declared_slots(p)) for p in definition.phases)
     bound = replace(definition, phases=phases)
     logger.info(
         "flow_slots_bound",
