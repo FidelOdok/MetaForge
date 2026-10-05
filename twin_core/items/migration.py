@@ -30,13 +30,23 @@ Grouping, per definition type, strongest evidence first:
    version words ignored).
 5. ``name_similarity``: names whose meaningful words contain one another
    (``Left PETG Gusset Bracket`` and ``Left Vertical Triangular PETG Gusset
-   Bracket - 220 x 120 x 12 mm``), never across opposite side words
-   (``left`` / ``right``), checked against the bounding boxes when both have
-   one. A grouping that is not a clean containment, or whose boxes disagree,
-   is flagged for review.
+   Bracket - 220 x 120 x 12 mm``) with enough overlap overall (jaccard), never
+   across opposite side words (``left`` / ``right``). Geometry is evidence:
+   ``metadata.bbox_mm`` (any recorded shape) and ``metadata.volume_mm3``; a
+   box more than 2x off on any edge, or a volume more than 10 percent off,
+   blocks the merge. A member that joined by name similarity is a weak link:
+   another node reaches its group through it only on a full containment.
+   A partial match is grouped and flagged; a near miss (blocked by geometry,
+   too little overlap, or only through a weak link) is not grouped and both
+   sides are flagged for review.
 6. ``one_per_project``: the types a project has one of (intent, constraint
    set, prd, bom) are folded into a single item.
 7. ``new_item``: anything left is its own item.
+
+A ``cad_model`` with ``metadata.parts``, or with an assembly-like name
+(``assembly``, ``assy``, ``asm``) and no parts, is an ``assembly``: never a
+revision of a single part. A ``SUPERSEDES`` chain that crosses ``cad_model`` /
+``assembly`` is still one item, typed by its existing item or its newest node.
 
 Revisions are ordered by ``created_at``. The newest node whose run was
 approved (or simply the newest, when the run is unknown) becomes HEAD; older
@@ -183,10 +193,18 @@ _OPPOSITES = (
 )
 #: Name containment needed to group by similarity.
 SIMILARITY_THRESHOLD = 0.75
+#: Jaccard overlap needed too: containment alone lets a short name
+#: (``wall_shelf_board``) match any long name that happens to include it.
+JACCARD_THRESHOLD = 0.5
 #: Bounding boxes whose sorted dimensions are all within this ratio agree.
 BBOX_SIMILAR_RATIO = 1.35
 #: Any dimension further apart than this ratio means the boxes disagree.
 BBOX_DISSIMILAR_RATIO = 2.0
+#: Volumes further apart than this ratio (about 10 percent) disagree.
+VOLUME_SIMILAR_RATIO = 1.1
+#: Name words that mark an assembly when a node carries no ``parts``.
+_ASSEMBLY_WORDS = frozenset({"assembly", "assy", "asm"})
+_CAD_TYPES = ("assembly", "cad_model")
 _EVIDENCE_EDGES = (EdgeType.DERIVES_FROM, EdgeType.PARENT_OF, EdgeType.VALIDATES)
 
 _metrics: Any = None
@@ -375,7 +393,11 @@ def _definition_type(node: Any) -> str | None:
             if meta.get("item_type") in {"assembly", "cad_model"}:
                 return str(meta["item_type"])
             parts = meta.get("parts")
-            return "assembly" if isinstance(parts, list) and parts else "cad_model"
+            if isinstance(parts, list) and parts:
+                return "assembly"
+            # No parts recorded: an assembly-like name is still an assembly,
+            # never a revision of a single part.
+            return "assembly" if name_tokens(_name(node)) & _ASSEMBLY_WORDS else "cad_model"
         if wp_type in {"constraint_set", "bom", "prd"}:
             return wp_type
         return None
@@ -436,29 +458,101 @@ def _conflict(a: frozenset[str], b: frozenset[str]) -> str | None:
     return None
 
 
-def _bbox_dims(node: Any) -> list[float] | None:
-    bbox = cad_facts(dict(getattr(node, "metadata", None) or {})).get("bbox")
+_AXIS_KEYS = ("{a}", "{a}_mm", "{a}_length", "{a}length", "{a}_size", "size_{a}", "d{a}")
+_AXIS_RANGES = (("{a}min", "{a}max"), ("{a}_min", "{a}_max"), ("min_{a}", "max_{a}"))
+_NESTED_KEYS = ("size", "dimensions", "dims", "extent", "size_mm")
+
+
+def _extent(raw: Any) -> list[float | None]:
+    """The three edge lengths of a bbox, in any of the shapes recorders store."""
+    if isinstance(raw, list | tuple):
+        if len(raw) == 3 and not any(isinstance(v, list | tuple | dict) for v in raw):
+            return [num(v) for v in raw]
+        if len(raw) == 6:
+            lo, hi = [num(v) for v in raw[:3]], [num(v) for v in raw[3:]]
+            return [h - x if h is not None and x is not None else None for x, h in zip(lo, hi)]
+        if len(raw) == 2 and all(isinstance(v, list | tuple) and len(v) == 3 for v in raw):
+            return _extent([*raw[0], *raw[1]])
+        return []
+    if not isinstance(raw, dict):
+        return []
+    lower = {str(k).lower(): v for k, v in raw.items()}
     dims: list[float | None] = []
-    if isinstance(bbox, list | tuple) and len(bbox) == 3:
-        dims = [num(v) for v in bbox]
-    elif isinstance(bbox, list | tuple) and len(bbox) == 6:
-        lo, hi = [num(v) for v in bbox[:3]], [num(v) for v in bbox[3:]]
-        dims = [(h - lo_) if h is not None and lo_ is not None else None for lo_, h in zip(lo, hi)]
-    elif isinstance(bbox, dict):
-        lower = {str(k).lower(): v for k, v in bbox.items()}
-        for axis in ("x", "y", "z"):
-            value = num(lower.get(axis))
-            if value is None and f"{axis}min" in lower and f"{axis}max" in lower:
-                hi_, lo_ = num(lower[f"{axis}max"]), num(lower[f"{axis}min"])
+    for axis in ("x", "y", "z"):
+        value = next(
+            (num(lower[k.format(a=axis)]) for k in _AXIS_KEYS if k.format(a=axis) in lower), None
+        )
+        for lo_key, hi_key in _AXIS_RANGES:
+            lo_k, hi_k = lo_key.format(a=axis), hi_key.format(a=axis)
+            if value is None and lo_k in lower and hi_k in lower:
+                lo_, hi_ = num(lower[lo_k]), num(lower[hi_k])
                 value = hi_ - lo_ if hi_ is not None and lo_ is not None else None
-            dims.append(value)
-    if len(dims) != 3 or any(d is None or d <= 0 for d in dims):
-        return None
-    return sorted(float(d) for d in dims if d is not None)
+        dims.append(value)
+    if any(d is not None for d in dims):
+        return dims
+    if "min" in lower and "max" in lower:
+        lo_raw, hi_raw = lower["min"], lower["max"]
+        if isinstance(lo_raw, dict) and isinstance(hi_raw, dict):
+            lo_raw = [lo_raw.get(a) for a in ("x", "y", "z")]
+            hi_raw = [hi_raw.get(a) for a in ("x", "y", "z")]
+        if isinstance(lo_raw, list | tuple) and isinstance(hi_raw, list | tuple):
+            return _extent([*lo_raw, *hi_raw])
+    for key in _NESTED_KEYS:
+        if key in lower:
+            return _extent(lower[key])
+    return []
+
+
+def _geometry_props(meta: dict[str, Any]) -> dict[str, Any]:
+    features = meta.get("geometry_features")
+    props = features.get("properties") if isinstance(features, dict) else None
+    return props if isinstance(props, dict) else {}
+
+
+def _bbox_dims(node: Any) -> list[float] | None:
+    """Sorted bbox edge lengths in mm (``metadata.bbox_mm`` and friends), or ``None``."""
+    meta = dict(getattr(node, "metadata", None) or {})
+    props = _geometry_props(meta)
+    candidates = (
+        meta.get("bbox_mm"),
+        meta.get("bounding_box"),
+        meta.get("bbox"),
+        cad_facts(meta).get("bbox"),
+        props.get("bbox_mm"),
+        props.get("bounding_box"),
+    )
+    for raw in candidates:
+        if raw is None:
+            continue
+        dims = _extent(raw)
+        if len(dims) == 3 and all(d is not None and d > 0 for d in dims):
+            return sorted(float(d) for d in dims if d is not None)
+    return None
+
+
+def _volume(node: Any) -> float | None:
+    """``metadata.volume_mm3`` (or the recorded geometry properties' volume), if positive."""
+    meta = dict(getattr(node, "metadata", None) or {})
+    props = _geometry_props(meta)
+    for raw in (
+        meta.get("volume_mm3"),
+        meta.get("volume"),
+        props.get("volume_mm3"),
+        props.get("volume"),
+    ):
+        value = num(raw)
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _parts(node: Any) -> int:
+    parts = (getattr(node, "metadata", None) or {}).get("parts")
+    return len(parts) if isinstance(parts, list) else 0
 
 
 def _bbox_verdict(a: list[float] | None, b: list[float] | None) -> str:
-    """``similar``, ``dissimilar`` or ``unknown``."""
+    """``similar``, ``dissimilar``, ``uncertain`` (between the ratios) or ``unknown``."""
     if a is None or b is None:
         return "unknown"
     ratios = [max(x, y) / min(x, y) for x, y in zip(a, b)]
@@ -466,11 +560,38 @@ def _bbox_verdict(a: list[float] | None, b: list[float] | None) -> str:
         return "similar"
     if any(r > BBOX_DISSIMILAR_RATIO for r in ratios):
         return "dissimilar"
+    return "uncertain"
+
+
+def _volume_verdict(a: float | None, b: float | None) -> str:
+    if a is None or b is None:
+        return "unknown"
+    return "similar" if max(a, b) / min(a, b) <= VOLUME_SIMILAR_RATIO else "dissimilar"
+
+
+def _geometry_verdict(
+    box_a: list[float] | None,
+    box_b: list[float] | None,
+    vol_a: float | None,
+    vol_b: float | None,
+) -> str:
+    """Bbox and volume together: any clear difference is ``dissimilar``."""
+    box, vol = _bbox_verdict(box_a, box_b), _volume_verdict(vol_a, vol_b)
+    if "dissimilar" in (box, vol):
+        return "dissimilar"
+    if box == "uncertain":
+        return "uncertain"
+    if "similar" in (box, vol):
+        return "similar"
     return "unknown"
 
 
 def _fmt_dims(d: list[float] | None) -> str:
     return "x".join(f"{v:.4g}" for v in d) + " mm" if d else "no bbox"
+
+
+def _fmt_volume(v: float | None) -> str:
+    return f"volume {v:.4g} mm3" if v is not None else "no volume"
 
 
 # ---------------------------------------------------------------------------
@@ -487,8 +608,43 @@ class _Member:
     bbox: list[float] | None
     run_id: str | None
     phase: str | None
+    volume: float | None = None
     rule: str = "new_item"
     evidence: str = "no other node matched"
+
+    def ref(self) -> _Ref:
+        # A member that joined only by name similarity is a weak link: others
+        # may reach the group through it only on a strong match.
+        return _Ref(self.name, self.tokens, self.bbox, self.volume, self.rule != "name_similarity")
+
+
+@dataclass(frozen=True)
+class _Ref:
+    """One name a group can be matched by, with its geometry."""
+
+    name: str
+    tokens: frozenset[str]
+    bbox: list[float] | None
+    volume: float | None
+    #: False for a member that joined by name similarity (a weak link).
+    core: bool = True
+
+
+@dataclass(frozen=True)
+class _Match:
+    """How two names compare, and what the comparison allows."""
+
+    containment: float
+    jaccard: float
+    geometry: str
+    evidence: str
+    #: ``merge``, or why not: ``near_miss`` (names overlap too little),
+    #: ``weak_link`` (only through a weakly joined member) or ``geometry``.
+    decision: str
+
+    @property
+    def score(self) -> tuple[float, float]:
+        return (self.containment, self.jaccard)
 
 
 @dataclass
@@ -496,14 +652,20 @@ class _Group:
     item_type: str
     members: list[_Member] = field(default_factory=list)
     item: Item | None = None
-    #: Names and boxes of an existing item's revisions (for matching only).
-    anchor_names: list[tuple[str, frozenset[str], list[float] | None]] = field(default_factory=list)
+    #: Names and geometry of an existing item's revisions (for matching only).
+    anchor_names: list[_Ref] = field(default_factory=list)
     slot_key: str | None = None
     rules: set[str] = field(default_factory=set)
     review: list[str] = field(default_factory=list)
 
-    def names(self) -> list[tuple[str, frozenset[str], list[float] | None]]:
-        return [*self.anchor_names, *((m.name, m.tokens, m.bbox) for m in self.members)]
+    def names(self) -> list[_Ref]:
+        return [*self.anchor_names, *(m.ref() for m in self.members)]
+
+    def label(self) -> str:
+        if self.item is not None:
+            return self.item.key
+        newest = max(self.members, key=lambda m: (_created(m.node), str(m.node.id)))
+        return f"'{newest.name}'"
 
     def first_created(self) -> datetime:
         times = [_created(m.node) for m in self.members]
@@ -528,31 +690,57 @@ def _compatible(a: _Group, b: _Group) -> bool:
     return not (a.slot_key and b.slot_key and a.slot_key != b.slot_key)
 
 
-def _similarity(a: _Group, b: _Group) -> tuple[float, float, str, str] | None:
-    """Best name match between two groups: (containment, jaccard, bbox verdict, evidence)."""
-    best: tuple[float, float, str, str] | None = None
-    for name_a, tok_a, box_a in a.names():
-        for name_b, tok_b, box_b in b.names():
-            if not tok_a or not tok_b:
+def _judge(a: _Ref, b: _Ref) -> _Match | None:
+    """Compare two names (and their geometry); ``None`` when they do not overlap enough."""
+    if not a.tokens or not b.tokens or _conflict(a.tokens, b.tokens):
+        return None
+    inter = len(a.tokens & b.tokens)
+    if inter == 0:
+        return None
+    containment = inter / min(len(a.tokens), len(b.tokens))
+    if containment < SIMILARITY_THRESHOLD:
+        return None
+    jaccard = inter / len(a.tokens | b.tokens)
+    geometry = _geometry_verdict(a.bbox, b.bbox, a.volume, b.volume)
+    evidence = (
+        f"'{a.name}' ~ '{b.name}': {inter} shared words "
+        f"(containment {containment:.2f}, jaccard {jaccard:.2f}); "
+        f"bbox {_fmt_dims(a.bbox)} vs {_fmt_dims(b.bbox)}, "
+        f"{_fmt_volume(a.volume)} vs {_fmt_volume(b.volume)} ({geometry})"
+    )
+    if geometry == "dissimilar":
+        decision = "geometry"
+    elif jaccard < JACCARD_THRESHOLD:
+        decision = "near_miss"
+    elif not (a.core and b.core) and containment < 1.0:
+        decision = "weak_link"
+    else:
+        decision = "merge"
+    return _Match(containment, jaccard, geometry, evidence, decision)
+
+
+def _similarity(a: _Group, b: _Group) -> tuple[_Match | None, _Match | None]:
+    """The best mergeable match between two groups, and the best one that is not."""
+    best: _Match | None = None
+    blocked: _Match | None = None
+    for ref_a in a.names():
+        for ref_b in b.names():
+            match = _judge(ref_a, ref_b)
+            if match is None:
                 continue
-            clash = _conflict(tok_a, tok_b)
-            if clash:
-                continue
-            inter = len(tok_a & tok_b)
-            if inter == 0:
-                continue
-            containment = inter / min(len(tok_a), len(tok_b))
-            jaccard = inter / len(tok_a | tok_b)
-            verdict = _bbox_verdict(box_a, box_b)
-            evidence = (
-                f"'{name_a}' ~ '{name_b}': {inter} shared words "
-                f"(containment {containment:.2f}, jaccard {jaccard:.2f}); "
-                f"bbox {_fmt_dims(box_a)} vs {_fmt_dims(box_b)} ({verdict})"
-            )
-            candidate = (containment, jaccard, verdict, evidence)
-            if best is None or candidate[:2] > best[:2]:
-                best = candidate
-    return best
+            if match.decision == "merge":
+                if best is None or match.score > best.score:
+                    best = match
+            elif blocked is None or match.score > blocked.score:
+                blocked = match
+    return best, blocked
+
+
+_BLOCKED_REASON = {
+    "geometry": "names match but the geometry clearly differs",
+    "near_miss": "names overlap but too little to group",
+    "weak_link": "names match only through a member that itself joined by name similarity",
+}
 
 
 def _union_by(groups: list[_Group], key_of: Callable[[_Group], str | None], rule: str) -> None:
@@ -681,6 +869,7 @@ class ItemMigration:
                     found = await item_for_node(self.twin, node.id)
                     if found is not None:
                         linked[node.id] = (found[0], found[1], "committed")
+        await self._unify_cad_chains(definitions, linked)
         digest = hashlib.sha256()
         for node in sorted(nodes, key=lambda n: str(n.id)):
             meta = getattr(node, "metadata", None) or {}
@@ -712,6 +901,56 @@ class ItemMigration:
             fingerprint=digest.hexdigest(),
             counts={},
         )
+
+    async def _unify_cad_chains(
+        self, definitions: dict[str, list[Any]], linked: dict[UUID, tuple[Item, int, str]]
+    ) -> None:
+        """Give a SUPERSEDES chain that crosses ``cad_model`` / ``assembly`` one type.
+
+        A part re-recorded with ``parts`` (or the reverse) is still one item:
+        the whole chain takes its existing item's type when it has one, else
+        its newest node's type.
+        """
+        nodes = {n.id: (n, t) for t in _CAD_TYPES for n in definitions[t]}
+        parent = {node_id: node_id for node_id in nodes}
+
+        def find(node_id: UUID) -> UUID:
+            while parent[node_id] != node_id:
+                parent[node_id] = parent[parent[node_id]]
+                node_id = parent[node_id]
+            return node_id
+
+        for node_id in nodes:
+            edges = await self.twin.graph.get_edges(
+                node_id, direction="outgoing", edge_type=EdgeType.SUPERSEDES
+            )
+            for edge in edges:
+                if edge.target_id in parent:
+                    parent[find(node_id)] = find(edge.target_id)
+        chains: dict[UUID, list[UUID]] = {}
+        for node_id in nodes:
+            chains.setdefault(find(node_id), []).append(node_id)
+        for chain in chains.values():
+            types = {nodes[node_id][1] for node_id in chain}
+            if len(types) < 2:
+                continue
+            newest = sorted(chain, key=lambda i: (_created(nodes[i][0]), str(i)))
+            existing = [
+                linked[i][0].item_type
+                for i in newest
+                if i in linked and linked[i][0].item_type in _CAD_TYPES
+            ]
+            target = existing[-1] if existing else nodes[newest[-1]][1]
+            for node_id in chain:
+                node, kind = nodes[node_id]
+                if kind != target:
+                    definitions[kind].remove(node)
+                    definitions[target].append(node)
+            logger.info(
+                "item_migration_chain_retyped",
+                item_type=target,
+                nodes=[str(i) for i in newest],
+            )
 
     async def _run(self, run_id: str | None, cache: dict[str, RunInfo | None]) -> RunInfo | None:
         if not run_id or self.run_lookup is None:
@@ -814,7 +1053,9 @@ class ItemMigration:
                 continue
             node = await self.twin.graph.get_node(node_id)
             if node is not None:
-                found.anchor_names.append((_name(node), name_tokens(_name(node)), _bbox_dims(node)))
+                found.anchor_names.append(
+                    _Ref(_name(node), name_tokens(_name(node)), _bbox_dims(node), _volume(node))
+                )
         for node in sorted(nodes, key=lambda n: (_created(n), str(n.id))):
             if node.id in snap.linked:
                 continue
@@ -837,6 +1078,7 @@ class ItemMigration:
                 bbox=_bbox_dims(node),
                 run_id=run_id,
                 phase=phase,
+                volume=_volume(node),
             )
             group = _Group(item_type=item_type, members=[member])
             by_id[node.id] = group
@@ -912,9 +1154,11 @@ class ItemMigration:
                     groups.remove(group)
         _union_by(groups, norm, "same_name")
 
-        # 5. name similarity, best pair first.
+        # 5. name similarity, best pair first. Geometry (bbox, volume) that
+        # clearly differs blocks a merge; so does a short name merely contained
+        # in a long one (low jaccard), and a chain through a weakly joined member.
         while True:
-            best: tuple[tuple[float, float], _Group, _Group, str, str] | None = None
+            best: tuple[tuple[float, float], _Group, _Group, _Match] | None = None
             ordered = sorted(
                 groups, key=lambda g: (g.first_created(), g.item.key if g.item else "")
             )
@@ -922,26 +1166,31 @@ class ItemMigration:
                 for b in ordered[i + 1 :]:
                     if not _compatible(a, b) or (a.item is not None and b.item is not None):
                         continue
-                    sim = _similarity(a, b)
-                    if sim is None:
-                        continue
-                    containment, jaccard, verdict, evidence = sim
-                    if containment < SIMILARITY_THRESHOLD:
-                        continue
-                    if containment < 1.0 and verdict == "dissimilar":
-                        continue
-                    if best is None or (containment, jaccard) > best[0]:
-                        best = ((containment, jaccard), a, b, verdict, evidence)
+                    pair, _blocked = _similarity(a, b)
+                    if pair is not None and (best is None or pair.score > best[0]):
+                        best = (pair.score, a, b, pair)
             if best is None:
                 break
-            (containment, _jac), a, b, verdict, evidence = best
+            _score, a, b, pair = best
             keep, drop = (b, a) if b.item is not None else (a, b)
-            _absorb(keep, drop, "name_similarity", evidence)
+            _absorb(keep, drop, "name_similarity", pair.evidence)
             groups.remove(drop)
-            if containment < 1.0:
-                keep.review.append(f"names only partly match: {evidence}")
-            elif verdict == "dissimilar":
-                keep.review.append(f"names match but boxes disagree: {evidence}")
+            if pair.containment < 1.0:
+                keep.review.append(f"names only partly match: {pair.evidence}")
+            if pair.geometry == "uncertain":
+                keep.review.append(f"names match but boxes differ somewhat: {pair.evidence}")
+        # What was not grouped but came close is flagged on both sides.
+        ordered = sorted(groups, key=lambda g: (g.first_created(), g.item.key if g.item else ""))
+        for i, a in enumerate(ordered):
+            for b in ordered[i + 1 :]:
+                if not (a.members or b.members) or not _compatible(a, b):
+                    continue
+                _pair, blocked = _similarity(a, b)
+                if blocked is None:
+                    continue
+                reason = _BLOCKED_REASON[blocked.decision]
+                a.review.append(f"not grouped with {b.label()}: {reason}: {blocked.evidence}")
+                b.review.append(f"not grouped with {a.label()}: {reason}: {blocked.evidence}")
 
         # 6. one item per project for singleton types.
         if item_type in ONE_PER_PROJECT and len([g for g in groups if g.item is not None]) <= 1:

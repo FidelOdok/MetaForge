@@ -1387,7 +1387,7 @@ A project written before items existed (FORGE-523) holds unlinked copies: the li
 
 #### How nodes are grouped
 
-Per definition type (`intent`, `stakeholder_need`, `objective`, `prd`, `constraint_set`, `bom`, `assembly`, `cad_model`; a `cad_model` with `parts` is an `assembly`), strongest evidence first:
+Per definition type (`intent`, `stakeholder_need`, `objective`, `prd`, `constraint_set`, `bom`, `assembly`, `cad_model`), strongest evidence first. A `cad_model` with `metadata.parts` is an `assembly`, and so is one with no parts whose name is assembly-like (`assembly`, `assy`, `asm`): an assembly is never a revision of a single part. A `SUPERSEDES` chain that crosses `cad_model` and `assembly` is still one item, typed by its existing item when it has one, else by its newest node.
 
 | Rule | Groups |
 |------|--------|
@@ -1395,9 +1395,22 @@ Per definition type (`intent`, `stakeholder_need`, `objective`, `prd`, `constrai
 | `supersedes` | nodes joined by a `SUPERSEDES` edge |
 | `flow_slot` | a node carrying its run and phase (`metadata.run_id` or `change_set`, and `phase`) lands on the slot key that run's flow declared for that phase ([FORGE-524](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys-forge-524)) |
 | `same_name` | the same normalised name: case, punctuation, dimensions (`220 x 120 x 12 mm`) and version words ignored, or a name that derives an existing item's key |
-| `name_similarity` | one name's meaningful words contained in the other's (`Left PETG Gusset Bracket` and `Left Vertical Triangular PETG Gusset Bracket - 220 x 120 x 12 mm`), at least 75%. Never across opposite side words (`left` / `right`, `top` / `bottom`, ...). Bounding boxes are the geometry evidence: a partial match whose boxes disagree (a dimension more than 2x off) is not grouped, and a partial match, or a full one whose boxes disagree, is flagged for review |
+| `name_similarity` | one name's meaningful words contained in the other's (`Left PETG Gusset Bracket` and `Left Vertical Triangular PETG Gusset Bracket - 220 x 120 x 12 mm`), at least 75%, **and** a jaccard overlap of at least 0.5, so a short name merely contained in a long unrelated one (`wall_shelf_board` in `Wall Shelf Assembly - plywood board with two PETG brackets`, jaccard 0.38) is not grouped. Never across opposite side words (`left` / `right`, `top` / `bottom`, ...). See [geometry evidence](#migration-geometry-evidence) below |
 | `one_per_project` | intent, constraint set, prd and bom: a project has one, so their remaining groups fold into one item (unless the project already has two or more items of that type) |
 | `new_item` | anything left is its own item; its key is the slot key when it has one, else derived from the head's name |
+
+#### Geometry evidence {#migration-geometry-evidence}
+
+A name match between cad nodes is checked against their geometry before it groups them. The migration reads the bounding box from `metadata.bbox_mm` (or `bounding_box`, or `geometry_features.properties`) in any shape the recorders store: `[x, y, z]`, `[xmin, ymin, zmin, xmax, ymax, zmax]`, `{min_x, ..., max_x, ...}`, `{xmin, xmax, ...}`, `{x, y, z}` or `{min: [...], max: [...]}`, compared as sorted edge lengths; and the volume from `metadata.volume_mm3`.
+
+| Evidence | Effect on a `name_similarity` match |
+|----------|--------------------------------------|
+| every edge within 1.35x, or volumes within 10% | `similar`: grouped |
+| any edge more than 2x off (`800 x 250 x 18` vs `800 x 250 x 138`), or volumes more than 10% apart | `dissimilar`: **not grouped**, both sides flagged for review |
+| edges between 1.35x and 2x | grouped and flagged for review |
+| no bbox or volume on one side | names decide |
+
+Similarity does not chain through a weak link: a member that joined its group by name similarity can bring another node in only on a full containment, so a node is compared with the group's anchor members, not carried in by a chain of partial matches. A partial match that is grouped is flagged for review; a near miss that is not grouped (geometry differs, overlap below 0.5, or reachable only through a weak link) flags both sides with the reason and the evidence.
 
 `component_selection` (`BOMItem`) is not migrated: its nodes have no `created_at` to order revisions by, and its write path already gives new selections items.
 
