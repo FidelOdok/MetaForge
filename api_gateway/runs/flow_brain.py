@@ -400,24 +400,26 @@ class ReActPhaseBrain:
         )
 
     async def _backstop_decision(self, phase: Phase, context: FlowContext, summary: str) -> None:
-        """Guarantee a phase's ``design_decision`` deliverable.
+        """Keep the phase summary on the run record, never as a decision (FORGE-527).
 
-        A native phase sometimes ends without recording a decision (e.g. an
-        electronics phase runs ERC checks but never records the design). Record
-        the phase summary as a decision so the deliverable can't be silently
-        skipped — an extra summary ADR is harmless, and it strengthens the
-        digital thread. Best-effort: never fails the phase.
+        This used to record ``"<phase> - phase summary"`` as a
+        ``design_decision`` whenever a phase required one, which filled the
+        twin with decisions nobody made (14 of 32 in one live project) and let
+        a phase pass its decision deliverable without deciding anything. The
+        summary already lives on the run record: it is this phase's
+        ``PhaseOutcome.summary``, stored by both engines with the phase
+        (``completed[].summary``, shown as ``phases[].summary`` by the run
+        status). So nothing is written here; a phase that owes a decision and
+        records none now shows it as a missing deliverable at its gate.
+        Existing phase-summary decisions are left in place (FORGE-529
+        migrates them).
         """
-        if "design_decision" not in phase.required_deliverables or self._bridge is None:
+        if "design_decision" not in phase.required_deliverables:
             return
-        try:
-            args: dict[str, str] = {
-                "title": f"{phase.title} — phase summary",
-                "rationale": summary,
-            }
-            if context.project_id:
-                args["project_id"] = context.project_id
-            await self._bridge.invoke("twin.record_decision", args)
-            logger.info("phase_decision_backstop_recorded", phase=phase.id)
-        except Exception as exc:  # noqa: BLE001 - backstop must never break the phase
-            logger.warning("phase_decision_backstop_failed", phase=phase.id, error=str(exc))
+        logger.info(
+            "phase_summary_kept_on_run",
+            phase=phase.id,
+            project_id=context.project_id,
+            summary_chars=len(summary),
+            note="no design_decision is recorded from the phase summary",
+        )

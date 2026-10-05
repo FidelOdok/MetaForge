@@ -7926,6 +7926,94 @@
         "title": "RealizeHierarchyNodeResponse",
         "type": "object"
       },
+      "RecordPinResponse": {
+        "description": "One item revision a record depends on (FORGE-527).",
+        "properties": {
+          "itemKey": {
+            "title": "Itemkey",
+            "type": "string"
+          },
+          "itemRef": {
+            "title": "Itemref",
+            "type": "string"
+          },
+          "itemType": {
+            "default": "",
+            "title": "Itemtype",
+            "type": "string"
+          },
+          "nodeId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nodeid"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "itemKey",
+          "revision",
+          "itemRef"
+        ],
+        "title": "RecordPinResponse",
+        "type": "object"
+      },
+      "RecordStalenessResponse": {
+        "description": "Whether a record is still valid evidence (FORGE-527, spec section 20).",
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "staleFor": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stalefor"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "supersededBy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersededby"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RecordStalenessResponse",
+        "type": "object"
+      },
       "ReleaseDiff": {
         "properties": {
           "bom_delta": {
@@ -11117,6 +11205,20 @@
             ],
             "title": "Assemblyparts"
           },
+          "dependsOn": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RecordPinResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependson"
+          },
           "domain": {
             "title": "Domain",
             "type": "string"
@@ -11205,6 +11307,16 @@
             },
             "title": "Properties",
             "type": "object"
+          },
+          "staleness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordStalenessResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
             "title": "Status",

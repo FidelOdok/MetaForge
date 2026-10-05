@@ -174,9 +174,16 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
         evidence_node_id: str | None = None,
         field_blob: bytes | None = None,
         analysis: dict[str, Any] | None = None,
+        depends_on: list[str] | None = None,
     ) -> dict[str, Any]:
         from uuid import UUID
 
+        from api_gateway.twin.record_pins import (
+            is_record_type,
+            link_record,
+            pin_metadata,
+            resolve_record_pins,
+        )
         from twin_core.models.enums import EdgeType
         from twin_core.models.work_product import WorkProduct
 
@@ -205,6 +212,29 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
             span.set_attribute("document.type", str(getattr(wp_type, "value", wp_type)))
             span.set_attribute("document.size_bytes", len(blob))
 
+            # FORGE-527: a record (simulation_result) is pinned to the
+            # revisions it is about, resolved before anything is written.
+            type_name = str(getattr(wp_type, "value", wp_type))
+            record = is_record_type(type_name)
+            pins: list[Any] = []
+            if record:
+                # FORGE-532's analysed_geometry is the primary pin: it is the
+                # exact node the analysis meshed and solved.
+                analysed = (analysis or {}).get("geometry_node_id")
+                sources = [analysed] if isinstance(analysed, str) and analysed else []
+                sources += list(source_part_node_ids or [])
+                if extra_metadata and extra_metadata.get("source_cad_model_id"):
+                    sources.append(extra_metadata["source_cad_model_id"])
+                pins = await resolve_record_pins(
+                    twin,
+                    depends_on=depends_on,
+                    node_ids=sources,
+                    project_id=project_id,
+                    # A result's numbers do not depend on requirement values,
+                    # so constraint sets are pinned only when depends_on names
+                    # them (KEY@n, or the requirement ids it verifies).
+                )
+
             minio_object_key: str | None = None
             try:
                 from digital_twin.storage.work_product_blobs import store_work_product_blob
@@ -229,6 +259,8 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["session_id"] = session_id
             if extra_metadata:
                 metadata.update(extra_metadata)
+            if record:
+                metadata.update(pin_metadata(pins))
 
             source_ids = list(source_part_node_ids or [])
             if analysis or field_payload is not None:
@@ -238,6 +270,12 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
                     pinned = await _analysed_geometry(
                         twin, geometry_id, analysis.get("geometry_revision")
                     )
+                    # FORGE-527: the same geometry as an item revision.
+                    for pin in pins:
+                        if str(pin.node_id) == geometry_id:
+                            pinned["item_ref"] = pin.ref
+                            pinned["item_key"] = pin.item_key
+                            pinned["item_revision"] = pin.revision
                     metadata["analysed_geometry"] = pinned
                     # Flat copies: the node's scalar properties carry them.
                     metadata["analysed_geometry_node_id"] = geometry_id
@@ -354,6 +392,14 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
                         error=str(exc),
                     )
 
+            pin_result = (
+                await link_record(
+                    twin, created.id, pins, record_type=type_name, name=name, metadata=metadata
+                )
+                if record
+                else None
+            )
+
             linked = False
             if project_id and project_backend is not None:
                 try:
@@ -384,6 +430,8 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
                 out["field_stored"] = bool(metadata.get("field_stored"))
                 out["field_object_key"] = metadata.get("field_object_key")
                 out["field_content_hash"] = metadata.get("field_content_hash")
+            if pin_result is not None:
+                out.update(pin_result.as_result())
             return out
 
     async def record(**kwargs: Any) -> dict[str, Any]:

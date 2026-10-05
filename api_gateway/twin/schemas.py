@@ -7,6 +7,27 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class RecordPinResponse(BaseModel):
+    """One item revision a record depends on (FORGE-527)."""
+
+    itemKey: str  # noqa: N815
+    revision: int
+    itemRef: str  # noqa: N815 - KEY@n
+    itemType: str = ""  # noqa: N815
+    nodeId: str | None = None  # noqa: N815 - the pinned revision's node
+
+
+class RecordStalenessResponse(BaseModel):
+    """Whether a record is still valid evidence (FORGE-527, spec section 20)."""
+
+    #: ``current``, ``stale``, ``invalid``, ``superseded`` or ``revalidated``.
+    status: str
+    reason: str | None = None
+    #: For a stale record: ``{item_key: {pinned, current}}``.
+    staleFor: dict[str, Any] | None = None  # noqa: N815
+    supersededBy: str | None = None  # noqa: N815
+
+
 class TwinNodeResponse(BaseModel):
     """Single node in the Digital Twin graph, shaped for the dashboard."""
 
@@ -60,6 +81,10 @@ class TwinNodeResponse(BaseModel):
     # scalar-only properties loop drops it" shape as meshStats above).
     # None for every other node type.
     technicalDrawing: dict[str, Any] | None = None  # noqa: N815
+    # FORGE-527: a record's (simulation_result, design_decision, evidence)
+    # revision pins and staleness. None for definitions and other nodes.
+    dependsOn: list[RecordPinResponse] | None = None  # noqa: N815
+    staleness: RecordStalenessResponse | None = None
 
 
 class AssemblyJoint(BaseModel):

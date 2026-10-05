@@ -36,6 +36,7 @@ from twin_core.consistency import (
     evaluate_g7_verification_readiness,
     evaluate_g8_release,
 )
+from twin_core.consistency.record_pins import is_valid_evidence
 from twin_core.models.enums import EdgeType
 
 logger = structlog.get_logger(__name__)
@@ -74,6 +75,26 @@ async def _is_loadable(twin: object, wp_id: object) -> bool:
     return bool(
         meta.get("minio_object_key") or meta.get("file_path") or getattr(wp, "content_hash", None)
     )
+
+
+#: Deliverables that are evidence about other revisions (FORGE-527).
+_EVIDENCE_DELIVERABLES = frozenset({"simulation_result", "verification_report"})
+
+
+async def _is_valid_evidence(twin: object, wp_id: object) -> bool:
+    """Whether an evidence record is still current (not stale, superseded, invalid).
+
+    Fail-open when it cannot be read: loadability and the analysis check are
+    the fail-closed paths; this one only removes records known to be stale.
+    """
+    getter = getattr(twin, "get_work_product", None)
+    if getter is None or wp_id is None:
+        return True
+    try:
+        wp = await getter(UUID(str(wp_id)))
+    except Exception:  # noqa: BLE001 - unreadable here is not "stale"
+        return True
+    return wp is None or is_valid_evidence(getattr(wp, "metadata", None))
 
 
 def _to_epoch(value: object) -> float | None:
@@ -126,6 +147,18 @@ class ProjectGateEvaluator:
                     "gate_eval_cad_not_loadable",
                     project_id=project_id,
                     wp_id=getattr(wp, "id", None),
+                )
+                continue
+            # FORGE-527: a stale analysis or verification record is not a
+            # deliverable; it was for a revision that is no longer current.
+            if type_str in _EVIDENCE_DELIVERABLES and not await _is_valid_evidence(
+                self._twin, getattr(wp, "id", None)
+            ):
+                logger.info(
+                    "gate_eval_stale_evidence_skipped",
+                    project_id=project_id,
+                    wp_id=getattr(wp, "id", None),
+                    wp_type=type_str,
                 )
                 continue
             present.add(type_str)
@@ -301,6 +334,7 @@ class TwinConstraintChecker:
                     if name not in latest or ts >= latest[name][0]:
                         latest[name] = (ts, str(getattr(wp, "id", "")))
             sims = [await self._read_sim(wp, getter) for wp in sim_wps]
+            model_keys = await self._item_keys([cad_id for _, cad_id in latest.values()], getter)
         except Exception as exc:  # noqa: BLE001 - analysis comparison is best-effort
             logger.warning(
                 "gate_eval_analysis_constraints_failed",
@@ -310,7 +344,9 @@ class TwinConstraintChecker:
             )
             return AnalysisCheck()
         models = [(cad_id, name) for name, (_, cad_id) in latest.items()]
-        outcome = check_analysis_constraints(constraints, models, [s for s in sims if s])
+        outcome = check_analysis_constraints(
+            constraints, models, [s for s in sims if s], model_keys=model_keys
+        )
         logger.info(
             "gate_eval_analysis_constraints",
             project_id=project_id,
@@ -319,6 +355,20 @@ class TwinConstraintChecker:
             not_evaluated=outcome.not_evaluated,
         )
         return outcome
+
+    @staticmethod
+    async def _item_keys(cad_ids: list[str], getter: Any) -> dict[str, str]:
+        """``cad_id -> item key`` from each model's FORGE-523 stamp (FORGE-527)."""
+        keys: dict[str, str] = {}
+        for cad_id in cad_ids:
+            try:
+                node = await getter(UUID(cad_id))
+            except Exception:  # noqa: BLE001 - a missing key only loses the pin link
+                continue
+            key = (getattr(node, "metadata", None) or {}).get("item_key") if node else None
+            if key:
+                keys[cad_id] = str(key)
+        return keys
 
     async def _read_sim(self, wp: Any, getter: Any) -> SimResult | None:
         """A simulation_result with the cad_models it derives from, or None if unreadable."""

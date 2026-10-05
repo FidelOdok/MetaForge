@@ -505,6 +505,48 @@ work products, so two runs on one project at the same time can each count the
 other's drafts as present; the check at approval still refuses a commit whose
 base moved.
 
+## Stale evidence at the gate (FORGE-527)
+
+A `simulation_result`, a `design_decision` and an `evidence` entity are pinned,
+when they are written, to the item revisions they are about: a simulation to the
+geometry it analysed (`CAD-BRACKET@1`), and to a constraint set
+(`CS-BRACKET-REQS@1`) only when the call names it or the requirements it
+verifies; evidence also to the project's constraint sets. See
+[records pinned to revisions](../twin_schema.md#records-pinned-to-revisions-forge-527).
+When an item's head moves (a write outside any run, or this run's gate approving
+its drafts), every record pinned to an older revision of that item becomes
+`stale`. An open draft stales nothing: a gate that rejects or abandons it leaves
+the old records current, and marks records made on the draft itself `invalid`.
+
+The gate reads the same flag the agent does, so stale evidence never satisfies
+a criterion:
+
+- **Analysis constraints.** The analysis check finds a model's results by the
+  `derives_from` link or by the model's item key in the result's pins, so a
+  result recorded on an older revision of the same part is found even though it
+  names the old node. The latest *current* result is used. When only a stale one
+  exists, every analysis constraint on that model gets a finding (a violation at
+  error severity) naming the record and the revision it was for, for example
+  `max stress: 'Bracket FEA' is stale: it was for CAD-BRACKET@1, and CAD-BRACKET is now @2; re-run it on the current revision`.
+- **Deliverables.** A stale, superseded or invalid `simulation_result` or
+  `verification_report` does not count toward `required_deliverables`.
+- **G8 release.** "Stale evidence resolved" now covers `simulation_result`
+  work products as well as evidence entities, and its detail names each stale
+  record with the same text.
+
+A re-run on the new revision is `current`, and it marks the older run of the
+same analysis `superseded` (when its gate approves, for a re-run made inside a
+run), so the gate passes once the analysis is redone. Nothing extra is asked of
+the agent: the pins are inferred from what the record already names.
+
+**Phase summaries are not decisions.** When a phase that requires a
+`design_decision` ended without recording one, the native brain used to record
+its own phase summary as `"<phase> - phase summary"`. It no longer does: the
+summary is kept on the run record (`completed[].summary`, shown as
+`phases[].summary` in the run status), and a phase that decided nothing shows a
+missing `design_decision` at its gate. Existing phase-summary decisions are left
+in place for FORGE-529 to migrate.
+
 ## Phase step budget, blob storage and tool visibility (FORGE-501)
 
 **Step budget.** Each native phase has its own tool-use budget instead of one
@@ -746,7 +788,7 @@ and a dedicated `forge design` CLI wrapper.
 | `orchestrator/design_flow/spec.py` | `Phase` / `Gate` / `FlowDefinition` / `DeliverableSlot`, built-in flows |
 | `orchestrator/design_flow/slots.py` | Deliverable slots: default slots, key binding, write-to-slot matching (FORGE-524) |
 | `orchestrator/design_flow/executor.py` | `DesignFlowExecutor`, `GateCoordinator`, `PhaseBrain` |
-| `api_gateway/runs/flow_brain.py` | `ReActPhaseBrain` fallback + the decision backstop |
+| `api_gateway/runs/flow_brain.py` | `ReActPhaseBrain` fallback; keeps the phase summary on the run record (FORGE-527) |
 | `api_gateway/runs/{req,arch,mech,elec,fw,vv,mfg}_handlers.py` | Goal-driven deterministic phase handlers |
 | `api_gateway/twin/{geometry,bom,document}_recorder.py` | Persist typed artifacts loadably (blob + `content_hash` + project link) |
 | `api_gateway/runs/gate_eval.py` | `ProjectGateEvaluator` — deliverable enforcement (loadable `cad_model`) |

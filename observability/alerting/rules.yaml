@@ -472,6 +472,23 @@ groups:
             hour. Search the gateway logs for project_brief_composed with
             capped=true to see which project and how many items it lists.
 
+      # FORGE-527 - a record was saved but its revision pin edge was not, or a
+      # head move could not mark the records pinned to the old revision stale.
+      # Either way a stale simulation or evidence record can read as current
+      # and satisfy a gate it no longer should, and nothing else would say so.
+      - alert: TwinRecordStalenessFailures
+        expr: increase(metaforge_twin_record_staleness_total{status=~"pin_failed|propagation_failed"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Record revision pins or staleness marking are failing"
+          description: >-
+            {{ $value }} {{ $labels.record_type }} records in 15m hit {{ $labels.status }}.
+            Search the gateway logs for record_pin_edge_failed and
+            record_staleness_failed for the record and item ids.
+
       # MET-455 — Consolidation contradiction rate. The BACKGROUND
       # synthesis pass flags newly-synthesized insights that conflict
       # with the existing corpus. A sustained nonzero rate means the

@@ -1,4 +1,4 @@
-"""Native phase brain guarantees its design_decision deliverable (MET-10)."""
+"""Native phase brain fallback: the phase summary is not a decision (MET-10, FORGE-527)."""
 
 from __future__ import annotations
 
@@ -21,7 +21,8 @@ class _Bridge:
 
 
 @pytest.mark.asyncio
-async def test_backstop_records_decision_when_phase_requires_one() -> None:
+async def test_backstop_no_longer_records_the_summary_as_a_decision() -> None:
+    """FORGE-527: the summary stays on the run record, not in the twin."""
     bridge = _Bridge()
     brain = ReActPhaseBrain(mcp_bridge=bridge)
     # hardware_v1's electronics phase requires a design_decision.
@@ -30,11 +31,7 @@ async def test_backstop_records_decision_when_phase_requires_one() -> None:
 
     await brain._backstop_decision(phase, ctx, "Designed 3.3V LDO + I2C IMU topology.")
 
-    assert bridge.calls, "a decision should be recorded"
-    tool, args = bridge.calls[0]
-    assert tool == "twin.record_decision"
-    assert args["rationale"] == "Designed 3.3V LDO + I2C IMU topology."
-    assert args["project_id"] == "p1"
+    assert bridge.calls == []
 
 
 @pytest.mark.asyncio

@@ -151,7 +151,10 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
         replay: dict[str, Any] | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
+        depends_on: list[str] | None = None,
     ) -> dict[str, Any]:
+        from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
+
         if evidence_type not in _EVIDENCE_TYPES:
             raise ValueError(
                 f"evidence recorder: 'evidence_type' must be one of {sorted(_EVIDENCE_TYPES)}, "
@@ -195,6 +198,17 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                         "not an 'evidence' EngineeringEntity"
                     )
 
+            # FORGE-527: pin the item revisions this evidence was produced
+            # against (explicit depends_on, any valid_against work product
+            # that is an item revision, the project's constraint sets).
+            pins = await resolve_record_pins(
+                twin,
+                depends_on=depends_on,
+                node_ids=[d.entity_id for d in dependencies if d.entity_kind == "work_product"],
+                project_id=project_id,
+                include_constraint_sets=True,
+            )
+
             now = datetime.now(UTC)
             metadata: dict[str, Any] = {
                 "evidence_type": evidence_type,
@@ -205,6 +219,7 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "execution_timestamp": now.isoformat(),
                 "staleness": StalenessStatus.CURRENT.value,
             }
+            metadata.update(pin_metadata(pins))
             if session_id:
                 metadata["session_id"] = session_id
             if replay:
@@ -259,6 +274,15 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                     "engineering_entity", superseded_id, StalenessStatus.SUPERSEDED
                 )
 
+            pinned = await link_record(
+                twin,
+                created.id,
+                pins,
+                record_type="evidence",
+                name=entity.statement or "evidence",
+                metadata=metadata,
+            )
+
             linked = False
             if project_id and project_backend is not None:
                 try:
@@ -290,6 +314,7 @@ def make_evidence_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "valid_against_count": len(dependencies),
                 "superseded": str(superseded_id) if superseded_id else None,
                 "project_linked": linked,
+                **pinned.as_result(),
             }
 
     return record

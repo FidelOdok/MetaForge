@@ -23,6 +23,15 @@ Which result: the latest ``simulation_result`` linked to each current
 ``cad_model`` (``metadata.source_cad_model_id`` or a ``derives_from`` edge). A
 current model with no linked result is reported as not evaluated; a result for
 a superseded revision is never used.
+
+Stale evidence (FORGE-527). A result is also linked to a current model through
+its revision pins (``metadata.depends_on_items``, the model's item key), so a
+result recorded on an older revision of the same part is found even though it
+names the old node. A result whose ``staleness`` is not ``current`` /
+``revalidated`` never satisfies a constraint: when it is the only result for a
+model, every analysis constraint on that model gets a finding naming the record
+and the revision it was for (a violation at error severity), so the gate cannot
+pass on it.
 """
 
 from __future__ import annotations
@@ -33,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from api_gateway.runs.geometry_constraints import _OPS, _TO_MM
+from twin_core.consistency.record_pins import describe_staleness, is_valid_evidence, record_pins
 
 _STRESS_TO_MPA = {
     "": 1.0,
@@ -69,6 +79,19 @@ class SimResult:
     updated_at: float
     metadata: dict[str, Any]
     cad_ids: set[str] = field(default_factory=set)
+
+    @property
+    def item_keys(self) -> set[str]:
+        """The item keys this result is pinned to (FORGE-527)."""
+        return {str(p["item_key"]) for p in record_pins(self.metadata)}
+
+    @property
+    def valid(self) -> bool:
+        return is_valid_evidence(self.metadata)
+
+    @property
+    def stale_finding(self) -> str | None:
+        return describe_staleness(self.name, self.metadata)
 
 
 @dataclass
@@ -246,17 +269,27 @@ def check_analysis_constraints(
     constraints: Iterable[Any],
     cad_models: Iterable[tuple[str, str]],
     results: Iterable[SimResult],
+    model_keys: dict[str, str] | None = None,
 ) -> AnalysisCheck:
-    """Evaluate analysis constraints against ``(cad_id, name)`` models and results."""
+    """Evaluate analysis constraints against ``(cad_id, name)`` models and results.
+
+    ``model_keys`` maps a cad_id to its item key (FORGE-527), so a result pinned
+    to an older revision of the same item is found and reported as stale.
+    """
     out = AnalysisCheck()
     models = list(cad_models)
     sims = list(results)
-    # Latest result per current cad_model.
+    keys = model_keys or {}
+    # Latest valid result per current cad_model; a stale one only when no
+    # valid result exists, so the gate can name it instead of passing on it.
     chosen: list[tuple[str, SimResult]] = []
     for cad_id, cad_name in models:
-        linked = [s for s in sims if cad_id in s.cad_ids]
-        if linked:
-            chosen.append((cad_name, max(linked, key=lambda s: s.updated_at)))
+        key = keys.get(cad_id)
+        linked = [s for s in sims if cad_id in s.cad_ids or (key and key in s.item_keys)]
+        if not linked:
+            continue
+        valid = [s for s in linked if s.valid]
+        chosen.append((cad_name, max(valid or linked, key=lambda s: s.updated_at)))
     seen_assumptions: set[str] = set()
 
     for constraint in constraints:
@@ -290,6 +323,10 @@ def check_analysis_constraints(
         shown_unit = {"deflection": "mm", "stress": "MPa", "safety_factor": ""}[kind]
         for cad_name, sim in chosen:
             where = f"'{sim.name}' (analysis of '{cad_name}')"
+            stale = sim.stale_finding
+            if stale:
+                sink.append(f"{label}: {stale}")
+                continue
             found = _result_value(kind, sim.metadata)
             if found is None:
                 out.not_evaluated.append(f"{label}: {where} records no {kind.replace('_', ' ')}")
@@ -322,6 +359,8 @@ def check_analysis_constraints(
                 out.assumptions.append(f"{sim.name}: {assumed}")
     # Surface assumptions of every chosen result, even with no analysis constraint.
     for _cad_name, sim in chosen:
+        if not sim.valid:
+            continue
         assumed = _assumptions(sim.metadata)
         if assumed and sim.id not in seen_assumptions:
             seen_assumptions.add(sim.id)

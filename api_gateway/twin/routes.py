@@ -42,6 +42,7 @@ from api_gateway.twin.import_service import (
     infer_domain,
     infer_wp_type,
 )
+from api_gateway.twin.record_pins import record_view
 from api_gateway.twin.schemas import (
     ApproveSketchRequest,
     ApproveSketchResponse,
@@ -178,6 +179,7 @@ def _entity_to_response(entity: Any) -> TwinNodeResponse:
         properties=properties,
         updatedAt=entity.created_at.isoformat(),
         projectId=str(entity.project_id) if getattr(entity, "project_id", None) else None,
+        **record_view(entity.entity_type, entity.metadata),
     )
 
 
@@ -250,6 +252,8 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
             if wp.type == WorkProductType.TECHNICAL_DRAWING
             else None
         ),
+        # FORGE-527: what a record was for and whether it is still current.
+        **record_view(wp.type.value, wp.metadata),
     )
 
 

@@ -129,6 +129,36 @@ def _item_kwargs(arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _depends_on_property(inferred: str, extra: str = "") -> dict[str, Any]:
+    """FORGE-527: the optional ``depends_on`` input of a record tool."""
+    return {
+        "type": ["array", "null"],
+        "items": {"type": "string"},
+        "description": (
+            "Optional: the item revisions this record is about, as 'KEY@n' (or a bare "
+            "'KEY' for the current revision, a revision's node id, or a requirement "
+            "id, which pins its constraint set revision). Usually not "
+            f"needed: {inferred} are pinned automatically. A newer revision of a "
+            "pinned item marks this record stale." + extra
+        ),
+    }
+
+
+def _string_list(value: Any, tool: str) -> list[str]:
+    """FORGE-527: an optional ``depends_on``; null or absent means none."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{tool}: 'depends_on' must be an array of item references")
+    return [str(v).strip() for v in value if isinstance(v, str) and v.strip()]
+
+
+def _depends_on_kwarg(arguments: dict[str, Any], tool: str) -> dict[str, Any]:
+    """``{"depends_on": [...]}`` when the caller gave any, else ``{}``."""
+    refs = _string_list(arguments.get("depends_on"), tool)
+    return {"depends_on": refs} if refs else {}
+
+
 class TwinServer(McpToolServer):
     """MCP adapter wrapping ``TwinAPI`` for harness consumption."""
 
@@ -1179,11 +1209,15 @@ class TwinServer(McpToolServer):
                             "items": {"type": "string"},
                             "description": (
                                 "FORGE-528: item revisions this decision rests on, as "
-                                "'KEY@n' (or a bare 'KEY' for the current revision), "
-                                "e.g. the constraint set's item_ref. Linked with a "
-                                "depends_on edge and pinned to the exact revision, so "
-                                "the rationale can name the choice without restating "
-                                "requirement values."
+                                "'KEY@n' (or a bare 'KEY' for the current revision, a "
+                                "revision's node id, or a requirement id, which pins "
+                                "its constraint set revision), e.g. the constraint "
+                                "set's item_ref. Linked with a depends_on edge and "
+                                "pinned to the exact revision, so the rationale can "
+                                "name the choice without restating requirement values. "
+                                "FORGE-527: parent_refs that are item revisions are "
+                                "pinned too, and a newer revision of a pinned item "
+                                "marks this decision stale."
                             ),
                         },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
@@ -1229,9 +1263,6 @@ class TwinServer(McpToolServer):
         evidence_refs = arguments.get("evidence_refs")
         if evidence_refs is not None and not isinstance(evidence_refs, list):
             raise ValueError("twin.record_decision: 'evidence_refs' must be an array")
-        depends_on = arguments.get("depends_on")
-        if depends_on is not None and not isinstance(depends_on, list):
-            raise ValueError("twin.record_decision: 'depends_on' must be an array")
         relation = arguments.get("relation")
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
@@ -1248,8 +1279,9 @@ class TwinServer(McpToolServer):
         }
         if isinstance(relation, str) and relation:
             kwargs["relation"] = relation
+        depends_on = _string_list(arguments.get("depends_on"), "twin.record_decision")
         if depends_on:
-            kwargs["depends_on"] = [str(d) for d in depends_on]
+            kwargs["depends_on"] = depends_on
         return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------
@@ -2181,6 +2213,15 @@ class TwinServer(McpToolServer):
                                 "field's own markers when omitted."
                             ),
                         },
+                        "depends_on": _depends_on_property(
+                            "for a simulation_result, analysed_geometry_node_id and "
+                            "source_part_node_ids",
+                            extra=(
+                                " Requirements are not pinned automatically: name the "
+                                "constraint set (CS-KEY@n) or the requirement ids this "
+                                "result verifies to pin them."
+                            ),
+                        ),
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                     },
@@ -2261,6 +2302,7 @@ class TwinServer(McpToolServer):
                 evidence_node_id if isinstance(evidence_node_id, str) and evidence_node_id else None
             ),
             **result_kwargs,
+            **_depends_on_kwarg(arguments, "twin.record_document"),
         )
 
     _FIELD_ARGS = (
@@ -3712,6 +3754,9 @@ class TwinServer(McpToolServer):
                                 "fresh run replaces -- flips that evidence to SUPERSEDED."
                             ),
                         },
+                        "depends_on": _depends_on_property(
+                            "valid_against work products and the project's constraint sets"
+                        ),
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                     },
@@ -3774,6 +3819,7 @@ class TwinServer(McpToolServer):
             supersedes=supersedes if isinstance(supersedes, str) else None,
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            **_depends_on_kwarg(arguments, "twin.record_evidence"),
         )
 
     # ------------------------------------------------------------------

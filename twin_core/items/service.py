@@ -674,7 +674,12 @@ async def commit_revision(
         _collector().record_twin_item_revision(
             plan.item_type, "drafted" if plan.draft else "created", plan.resolved_by
         )
-        return item
+    if not plan.draft and plan.prior_node_id is not None and item is not None:
+        # FORGE-527: records pinned to the replaced revision are now stale.
+        from twin_core.consistency.record_pins import on_head_moved
+
+        await on_head_moved(twin, item, plan.revision, node_id)
+    return item
 
 
 async def _adopt_appeared_item(

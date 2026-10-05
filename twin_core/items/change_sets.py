@@ -285,8 +285,14 @@ async def commit_change_set(
                     f"committing this run's drafts failed ({exc}); no head was left moved. "
                     "Approve again to retry."
                 ) from exc
+        from twin_core.consistency.record_pins import on_head_moved
+
         for item, entry in moved:
             await _propagate_staleness(twin, item, _to_uuid(entry.get("base_node_id")))
+            # FORGE-527: records pinned to an older revision are now stale.
+            await on_head_moved(
+                twin, item, int(entry.get("revision") or 0), _to_uuid(entry.get("node_id"))
+            )
         span.set_attribute("change_set.outcome", "committed")
         span.set_attribute("change_set.items", len(result.items))
         logger.info(
@@ -345,9 +351,19 @@ async def close_change_set(
         async with _lock():
             for item in await open_drafts(twin, change_set, project_id):
                 entry = item.drafts[change_set]
+                from twin_core.consistency.record_pins import invalidate_closed_draft
+
                 for edge in await _draft_edges(twin, item, change_set):
                     await _restamp(
                         twin, edge, {"status": status, "status_reason": note, "closed_at": now}
+                    )
+                    # FORGE-527: a record about a draft that never became current.
+                    await invalidate_closed_draft(
+                        twin,
+                        item,
+                        int((edge.metadata or {}).get("revision") or 0),
+                        edge.source_id,
+                        status,
                     )
                 await twin.graph.update_node(
                     item.id,
