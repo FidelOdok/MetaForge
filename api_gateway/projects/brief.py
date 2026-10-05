@@ -12,6 +12,11 @@ lose and expensive to re-learn:
   named. A list of filenames is not context.
 * **MET-584** — a project with no recorded intent gets told to elicit one
   rather than being left to assume.
+* **FORGE-530**: a project that has items is briefed from its baseline: one
+  line per item at its current revision (``KEY@n``, key facts, evidence
+  state), then recent real decisions, then the open run's own drafts. The
+  newest-work-products list (and the FORGE-244 ordering) is kept for projects
+  with no items. See ``baseline_brief.py``.
 
 The second copy is always the one that drifts, and here it would drift in
 the direction of an agent confidently describing the wrong design.
@@ -22,6 +27,10 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable
 from typing import Any
+
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 #: Most work products listed in the brief.
 PROJECT_WP_LIMIT = 30
@@ -74,12 +83,107 @@ def cap_brief(text: str, project_id: str, limit: int | None = None) -> str:
     return f"{head}{note}{tail}"
 
 
-async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt, full: bool = False) -> str:
+def _call_run_id() -> str | None:
+    """The design-flow run of the current MCP call, if any."""
+    try:
+        from api_gateway.twin.item_revisions import revision_run_id
+    except ImportError:  # pragma: no cover -- ships with the gateway
+        return None
+    return revision_run_id()
+
+
+def _record_brief(mode: str, *, project_id: str, items: int, drafts: int, text: str) -> None:
+    capped = len(text) > brief_char_limit()
+    logger.info(
+        "project_brief_composed",
+        project_id=project_id,
+        mode=mode,
+        items=items,
+        drafts=drafts,
+        chars=len(text),
+        capped=capped,
+    )
+    try:
+        from observability.metrics import collector_for
+
+        collector_for("metaforge-gateway").record_project_brief(mode, len(text), capped)
+    except Exception as exc:  # noqa: BLE001 -- metrics never break the brief
+        logger.debug("project_brief_metric_failed", error=str(exc))
+
+
+async def _baseline_lines(
+    project: Any, twin: Any, run_id: str | None, doc_excerpt: DocExcerpt
+) -> tuple[list[str], int, int] | None:
+    """The item-baseline section of the brief, or ``None`` for a legacy project."""
+    from api_gateway.projects.baseline_brief import (
+        other_record_counts,
+        read_baseline,
+        recent_decisions,
+    )
+
+    try:
+        baseline = await read_baseline(twin, project.id, run_id)
+    except Exception as exc:  # noqa: BLE001 -- fall back to the legacy list
+        logger.warning("project_brief_baseline_failed", project_id=str(project.id), error=str(exc))
+        return None
+    if baseline is None or not (baseline.entries or baseline.drafts):
+        return None
+    lines = [
+        f"\nCurrent design baseline ({len(baseline.entries)} items, one line each at its "
+        "current revision, KEY@n). Older, superseded and rejected revisions are not "
+        "listed; `twin.item_history` with the key shows them:"
+    ]
+    lines.extend(entry.line() for entry in baseline.entries)
+    if baseline.drafts:
+        lines.append(
+            f"\nDrafts written by this run ({len(baseline.drafts)}). They are not part of "
+            "the baseline until the phase gate approves them:"
+        )
+        lines.extend(entry.line() for entry in baseline.drafts)
+    if baseline.lessons:
+        lines.append("\nAlready tried and rejected (do not repeat these unchanged):")
+        lines.extend(f"- {lesson}" for lesson in baseline.lessons)
+    decisions = await recent_decisions(project, twin)
+    if decisions:
+        lines.append("\nRecent design decisions (newest first):")
+        lines.extend(decisions)
+    item_node_ids = {str(wp.id) for wp in project.work_products if _is_item_type(wp)}
+    others = other_record_counts(project, item_node_ids)
+    if others:
+        lines.append(f"\nOther records in this project: {others}.")
+    # FORGE-86, now from the current revision only: the old newest-first pick
+    # inlined three revisions of the same constraint set.
+    for node_id, label in baseline.docs[:BRIEF_DOC_LIMIT]:
+        excerpt = await doc_excerpt(node_id)
+        if excerpt:
+            lines.append(f"\n### {label}\n{excerpt}")
+    return lines, len(baseline.entries), len(baseline.drafts)
+
+
+def _is_item_type(wp: Any) -> bool:
+    from twin_core.items import is_definition
+
+    return is_definition(str(getattr(wp.type, "value", wp.type)))
+
+
+async def build_project_brief(
+    project: Any,
+    *,
+    doc_excerpt: DocExcerpt,
+    full: bool = False,
+    twin: Any = None,
+    run_id: str | None = None,
+) -> str:
     """Render ``project`` as the brief an agent is given before it works.
 
     ``doc_excerpt`` fetches the text of a work product by id. Injected so
     this module stays free of storage concerns and can be exercised without
     one.
+
+    With a ``twin`` that holds items for this project (FORGE-530) the brief
+    lists the item baseline instead of the newest work products; ``run_id``
+    (default: the design-flow run of the current MCP call) adds that run's
+    own drafts. Without either, the brief is exactly the legacy one.
 
     The brief is capped at :func:`brief_char_limit` characters (FORGE-479)
     with a pointer to the ``metaforge://twin/brief/<id>`` resource; the
@@ -92,6 +196,30 @@ async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt, full: bo
     if project.description:
         lines.append(f"Project intent: {project.description}")
 
+    baseline = None
+    if twin is not None:
+        baseline = await _baseline_lines(project, twin, run_id or _call_run_id(), doc_excerpt)
+    if baseline is not None:
+        lines.extend(baseline[0])
+    else:
+        await _legacy_work_product_lines(project, lines, doc_excerpt)
+
+    _closing_lines(project, lines)
+    text = "\n".join(lines)
+    _record_brief(
+        "baseline" if baseline is not None else "legacy",
+        project_id=str(project.id),
+        items=baseline[1] if baseline is not None else 0,
+        drafts=baseline[2] if baseline is not None else 0,
+        text=text,
+    )
+    return text if full else cap_brief(text, str(project.id))
+
+
+async def _legacy_work_product_lines(
+    project: Any, lines: list[str], doc_excerpt: DocExcerpt
+) -> None:
+    """The pre-item brief body: newest work products and requirement excerpts."""
     # FORGE-244: work_products is insertion order (oldest first) -- a busy
     # project's newest, most-relevant work (live-observed: 14 AR4 robot-arm
     # parts + its robot description, all at positions 38-52) sorted straight
@@ -131,6 +259,9 @@ async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt, full: bo
         if excerpt:
             lines.append(f"\n### {wp.name} ({wp.type})\n{excerpt}")
 
+
+def _closing_lines(project: Any, lines: list[str]) -> None:
+    """Directives every brief ends with, whatever its body."""
     # MET-584: requirements-discovery directive. Chat has no gates, so the
     # elicitation nudge lives in the brief — the enforcement twin of this is
     # the design-flow Requirements gate (MET-582/583), and — for intent/needs
@@ -189,8 +320,6 @@ async def build_project_brief(project: Any, *, doc_excerpt: DocExcerpt, full: bo
         f"this project's gate checks (e.g. a waiver recorded with no project_id never "
         f"counts toward the G8 release gate, FORGE-78)."
     )
-    text = "\n".join(lines)
-    return text if full else cap_brief(text, str(project.id))
 
 
 # ---------------------------------------------------------------------------

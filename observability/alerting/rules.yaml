@@ -455,6 +455,23 @@ groups:
             matching requirement in the current constraint set. Search the gateway
             logs for prd_stray_requirement_values for the projects and values.
 
+      # FORGE-530 - the baseline brief lists one line per current item, so it
+      # should fit the char cap with room to spare. Baseline briefs being cut
+      # means the item lines grew (or a project has far more items than
+      # expected) and the agent is losing the tail of its baseline.
+      - alert: ProjectBriefBaselineCapped
+        expr: sum(increase(metaforge_project_brief_total{mode="baseline", capped="true"}[1h])) > 5
+        for: 15m
+        labels:
+          severity: info
+          sev: "4"
+        annotations:
+          summary: "Baseline project briefs are hitting the char cap"
+          description: >-
+            {{ $value }} baseline-mode project briefs were shortened in the last
+            hour. Search the gateway logs for project_brief_composed with
+            capped=true to see which project and how many items it lists.
+
       # MET-455 — Consolidation contradiction rate. The BACKGROUND
       # synthesis pass flags newly-synthesized insights that conflict
       # with the existing corpus. A sustained nonzero rate means the

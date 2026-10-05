@@ -418,6 +418,23 @@ class MetricsRegistry:
         ),
         labels=["agent_id", "source_kind"],
     )
+    #: One sample per project brief composed (FORGE-530). ``mode`` is
+    #: ``baseline`` (one line per current item) or ``legacy`` (newest work
+    #: products, for a project with no items); ``capped`` is ``true`` when
+    #: the brief hit ``METAFORGE_BRIEF_CHAR_LIMIT`` and was shortened.
+    PROJECT_BRIEF_TOTAL = MetricDefinition(
+        name="metaforge_project_brief_total",
+        type="counter",
+        description="Project briefs composed, by mode and whether the char cap cut them",
+        labels=["mode", "capped"],
+    )
+    PROJECT_BRIEF_CHARS = MetricDefinition(
+        name="metaforge_project_brief_chars",
+        type="histogram",
+        description="Characters in a composed project brief (before the cap), by mode",
+        labels=["mode"],
+        buckets=[500, 1000, 2000, 4000, 6000, 8000, 10000, 15000, 25000, 50000],
+    )
 
     # ── Knowledge service latency (MET-401 / L1-A7) ───────────────────
     #
@@ -820,6 +837,8 @@ class MetricsRegistry:
             cls.RETRIEVAL_MRR,
             cls.RETRIEVAL_NDCG_AT_K,
             cls.CONTEXT_TRUNCATED_TOTAL,
+            cls.PROJECT_BRIEF_TOTAL,
+            cls.PROJECT_BRIEF_CHARS,
         ]
 
     @classmethod
@@ -1275,6 +1294,15 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CONTEXT_TRUNCATED_TOTAL.name)
         if counter is not None:
             counter.add(count, attributes={"agent_id": agent_id, "source_kind": source_kind})
+
+    def record_project_brief(self, mode: str, chars: int, capped: bool) -> None:
+        """Record one composed project brief (FORGE-530)."""
+        counter = self._instruments.get(MetricsRegistry.PROJECT_BRIEF_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"mode": mode, "capped": "true" if capped else "false"})
+        hist = self._instruments.get(MetricsRegistry.PROJECT_BRIEF_CHARS.name)
+        if hist is not None:
+            hist.record(chars, attributes={"mode": mode})
 
     # ── Knowledge service latency (MET-401 / L1-A7) ───────────────────
 

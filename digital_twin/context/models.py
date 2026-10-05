@@ -310,6 +310,20 @@ class ContextAssemblyRequest(BaseModel):
             "0.2 ≈ freshness-only."
         ),
     )
+    include_rejected_lessons: bool = Field(
+        default=False,
+        description=(
+            "Keep rejected item revisions (FORGE-530) as 'already tried, failed "
+            "because' lessons instead of scoring them fully stale."
+        ),
+    )
+    run_id: str | None = Field(
+        default=None,
+        description=(
+            "The design-flow run asking (FORGE-530). Only that run's own draft "
+            "revisions score as fresh; every other run's drafts score 1.0."
+        ),
+    )
     filters: dict[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary metadata filters forwarded to the knowledge service",

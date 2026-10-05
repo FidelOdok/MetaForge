@@ -5202,7 +5202,10 @@ class TwinServer(McpToolServer):
                     "with revision number, node id, change_reason, run_id and author. "
                     "Pass the item_key a write returned ('CAD-BRACKET'), or any revision's "
                     "node_id. Use for 'what changed on this part' or 'which revision was "
-                    "current before'. Reads only."
+                    "current before'. Each revision carries its status (committed, approved, "
+                    "draft, rejected or abandoned); 'lessons' lists rejected revisions as "
+                    "'already tried, failed because' so a new attempt does not repeat them. "
+                    "Reads only."
                 ),
                 capability="twin_inspect",
                 input_schema={
@@ -5227,6 +5230,7 @@ class TwinServer(McpToolServer):
                     "properties": {
                         "item": {"type": "object"},
                         "revisions": {"type": "array"},
+                        "lessons": {"type": "array"},
                     },
                 },
                 phase=1,

@@ -5456,6 +5456,14 @@
           "item": {
             "$ref": "#/components/schemas/ItemResponse"
           },
+          "lessons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ItemLessonResponse"
+            },
+            "title": "Lessons",
+            "type": "array"
+          },
           "revisions": {
             "items": {
               "$ref": "#/components/schemas/ItemRevisionResponse"
@@ -5469,6 +5477,52 @@
           "revisions"
         ],
         "title": "ItemHistoryResponse",
+        "type": "object"
+      },
+      "ItemLessonResponse": {
+        "description": "A rejected revision, kept as \"already tried, failed because\" (FORGE-530).",
+        "properties": {
+          "lesson": {
+            "title": "Lesson",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "ref",
+          "node_id",
+          "lesson"
+        ],
+        "title": "ItemLessonResponse",
         "type": "object"
       },
       "ItemListResponse": {

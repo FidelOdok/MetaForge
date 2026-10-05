@@ -52,7 +52,9 @@ def make_brief_provider(twin: Any, project_backend: Any) -> BriefProvider:
             return None
 
         if kind == "brief":
-            return await build_project_brief(project, doc_excerpt=_brief_doc_excerpt, full=True)
+            return await build_project_brief(
+                project, doc_excerpt=_brief_doc_excerpt, full=True, twin=twin
+            )
 
         try:
             pid = UUID(str(project_id))

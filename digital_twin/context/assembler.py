@@ -52,6 +52,7 @@ from digital_twin.context.models import (
 from digital_twin.context.role_scope import get_role_knowledge_types
 from digital_twin.context.staleness import (
     annotate_cross_fragment_staleness,
+    annotate_revision_state,
     compute_staleness,
 )
 from digital_twin.knowledge.service import KnowledgeService, SearchHit
@@ -140,11 +141,16 @@ class ContextAssembler:
             # MET-323: staleness annotation + threshold filtering runs
             # *before* ranking so the budget pass works on a fresh-only
             # set when the caller asked for one.
+            await annotate_revision_state(collected, self._twin)
             annotate_cross_fragment_staleness(collected)
             stale_dropped: list[ContextFragment] = []
             after_staleness: list[ContextFragment] = []
             for fragment in collected:
-                fragment.staleness_score = compute_staleness(fragment.metadata)
+                fragment.staleness_score = compute_staleness(
+                    fragment.metadata,
+                    include_lessons=request.include_rejected_lessons,
+                    run_id=request.run_id,
+                )
                 if fragment.staleness_score > request.staleness_threshold:
                     stale_dropped.append(fragment)
                 else:

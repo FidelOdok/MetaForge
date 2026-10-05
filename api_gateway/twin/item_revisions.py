@@ -341,6 +341,38 @@ def revision_to_dict(revision: Any) -> dict[str, Any]:
     return out
 
 
+def lesson_text(ref: str, reason: str | None, change_reason: str | None = None) -> str:
+    """``already tried CAD-X@3 (thinner flange), failed because: SF 0.8 < 1.5``."""
+    tried = f"already tried {ref}" + (f" ({change_reason})" if change_reason else "")
+    return f"{tried}, failed because: {reason}" if reason else f"{tried}, rejected at its gate"
+
+
+def lessons_from_rows(key: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rejected revisions of an item history, as lessons (FORGE-530).
+
+    A rejected revision is not deleted; it is what a later run must not
+    repeat. Reads the ``status``/``status_reason`` FORGE-525 puts on every
+    history row; ``abandoned`` drafts (a failed or cancelled run) are history
+    but not a verdict, so they are not lessons.
+    """
+    lessons: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row.get("status") or "") != "rejected":
+            continue
+        ref = f"{key}@{row.get('revision')}"
+        reason = row.get("status_reason")
+        lessons.append(
+            {
+                "ref": ref,
+                "node_id": str(row.get("node_id")),
+                "run_id": row.get("change_set") or row.get("run_id"),
+                "reason": reason,
+                "lesson": lesson_text(ref, reason, row.get("change_reason")),
+            }
+        )
+    return lessons
+
+
 def make_item_history_reader(twin: Any) -> Any:
     """Return the async ``read(...)`` behind ``twin.item_history`` (FORGE-523)."""
     from twin_core.items import (
@@ -381,16 +413,26 @@ def make_item_history_reader(twin: Any) -> Any:
             raise ValueError("twin.item_history: pass 'item_key' or 'node_id'")
         revisions = await item_history(twin, item, run_id=run_id)
         seen = visible_head(item, run_id)
-        logger.info("item_history_read", item_key=item.key, revisions=len(revisions), run_id=run_id)
+        rows = [revision_to_dict(r) for r in revisions]
+        lessons = lessons_from_rows(item.key, rows)
+        logger.info(
+            "item_history_read",
+            item_key=item.key,
+            revisions=len(revisions),
+            run_id=run_id,
+            lessons=len(lessons),
+        )
         return {
             "item": item_to_dict(item, run_id),
-            "revisions": [revision_to_dict(r) for r in revisions],
+            "revisions": rows,
             # What this caller reads as current: its run's draft, else the head.
             "current": (
                 {"revision": seen[0], "node_id": str(seen[1]), "ref": f"{item.key}@{seen[0]}"}
                 if seen is not None
                 else None
             ),
+            # FORGE-530: rejected revisions, as "already tried, failed because".
+            "lessons": lessons,
         }
 
     return read

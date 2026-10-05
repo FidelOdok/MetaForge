@@ -21,6 +21,8 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 
+from orchestrator.design_flow.rework_context import RevisionNote, revision_note_lines
+
 __all__ = [
     "DEFAULT_MAX_REWORK_CYCLES",
     "MAX_REWORK_CYCLES_ENV",
@@ -79,6 +81,7 @@ def build_rework_feedback(
     reason: str,
     from_summary: str,
     cycle: int,
+    revisions: Sequence[RevisionNote] = (),
 ) -> str:
     """The block handed to the target phase's brain as the first thing in its prompt."""
     lines = [
@@ -103,5 +106,6 @@ def build_rework_feedback(
         f"What '{from_phase}' recorded in the twin since the last approved gate was "
         f"discarded; '{to_phase}' revises the current, approved revisions."
     )
+    lines.extend(revision_note_lines(revisions))  # FORGE-530: rejected refs, reasons, diffs
     lines.append("Change the work so these problems are resolved before you reply.")
     return "\n".join(lines)

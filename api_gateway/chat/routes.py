@@ -300,7 +300,7 @@ async def _project_brief(thread: ChatThreadRecord) -> str | None:
     if project is None:
         return None
 
-    return await build_project_brief(project, doc_excerpt=_brief_doc_excerpt)
+    return await build_project_brief(project, doc_excerpt=_brief_doc_excerpt, twin=_twin)
 
 
 # FORGE-300: work-product types that unambiguously identify a discipline

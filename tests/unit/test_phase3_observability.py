@@ -105,7 +105,8 @@ class TestTelemetryMetricsGroupAccess:
         # + 1 design-flow item slots (FORGE-524)
         # + 3 simulation result field payload/store (FORGE-532)
         # + 1 prd requirement values (FORGE-528)
-        assert len(MetricsRegistry.all_metrics()) == 78
+        # + 2 project brief count/size (FORGE-530)
+        assert len(MetricsRegistry.all_metrics()) == 80
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
