@@ -261,3 +261,37 @@ class TestCLIArgs:
         assert result.returncode == 0
         assert "--quality" in result.stdout
         assert "--output-dir" in result.stdout
+
+
+class TestColourChain:
+    """FORGE-517: table RGB -> STEP COLOUR_RGB (sRGB) -> GLB baseColorFactor
+    (linear, per the glTF spec) -> viewer output (sRGB) must round-trip, so a
+    0.87 table value displays as about 0.87.
+
+    The sample STEP carries the birch plywood table colour (0.87, 0.74, 0.54).
+    OCCT reads STEP colours as sRGB and hands back linear values, so the GLB
+    factor is ~0.73 for 0.87; that is the CORRECT glTF value, not a darkening.
+    Needs pythonocc + trimesh (the converter image); skipped elsewhere.
+    """
+
+    TABLE_SRGB = (0.87, 0.74, 0.54)
+
+    @staticmethod
+    def _linear_to_srgb(c: float) -> float:
+        return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+
+    def test_step_colour_survives_to_displayed_srgb(self, tmp_path):
+        pytest.importorskip("OCC")
+        trimesh = pytest.importorskip("trimesh")
+        from convert import convert
+
+        sample = Path(__file__).parent / "samples" / "birch_box.step"
+        convert(str(sample), "standard", str(tmp_path))
+        scene = trimesh.load(str(tmp_path / "model.glb"))
+        factor = next(iter(scene.geometry.values())).visual.material.baseColorFactor
+        linear = [c / 255.0 for c in factor[:3]]
+        # the glTF factor is linear: darker than the sRGB table value
+        assert linear[0] < self.TABLE_SRGB[0] - 0.05
+        displayed = [self._linear_to_srgb(c) for c in linear]
+        for got, want in zip(displayed, self.TABLE_SRGB, strict=True):
+            assert got == pytest.approx(want, abs=0.01)

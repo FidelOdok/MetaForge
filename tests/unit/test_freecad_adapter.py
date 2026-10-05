@@ -747,6 +747,34 @@ class TestStatefulAuthoring:
         # arguments this call was originally made with.
         assert result["session_id"] == sid
 
+    async def test_export_model_material_colours_the_step(
+        self, authoring_server: FreecadServer
+    ) -> None:
+        """FORGE-517: a known material/colour is written into the exported STEP;
+        an unknown material leaves the bytes untouched."""
+        import base64
+        from unittest.mock import patch
+
+        s = authoring_server
+        sid = (await s.open_session({}))["session_id"]
+        prim = await s.create_primitive({"session_id": sid, "kind": "box", "parameters": {}})
+        base = {"session_id": sid, "obj_id": prim["obj_id"]}
+        with patch(
+            "tool_registry.tools.freecad.adapter.apply_step_colours",
+            side_effect=lambda b, d, p: b + repr((d, p)).encode(),
+        ):
+            r = await s.export_model({**base, "material": "18 mm birch plywood"})
+            assert b"0.87" in base64.b64decode(r["step_base64"])
+            r = await s.export_model({**base, "color": [255, 0, 0]})
+            assert b"(1.0, 0.0, 0.0)" in base64.b64decode(r["step_base64"])
+            r = await s.export_model(
+                {**base, "part_materials": {"Board": "PETG", "Odd": "unobtainium"}}
+            )
+            body = base64.b64decode(r["step_base64"])
+            assert b"'Board'" in body and b"Odd" not in body
+        r = await s.export_model({**base, "material": "unobtainium"})
+        assert base64.b64decode(r["step_base64"]) == b"ISO-10303-21;\nfake-step\n"
+
     async def test_create_primitive_passes_document_and_kind(
         self, authoring_server: FreecadServer
     ) -> None:
