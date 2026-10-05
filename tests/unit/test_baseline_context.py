@@ -285,6 +285,37 @@ class TestShelfBrief:
         assert f"metaforge://twin/brief/{PROJECT}" in brief
         assert f'project_id="{PROJECT}"' in brief
 
+    async def test_prd_prose_is_one_item_and_its_current_revision_is_inlined(self, twin) -> None:
+        """FORGE-528: the prd's prose is an item; the brief lists and inlines its head only."""
+        from api_gateway.twin.document_recorder import make_document_recorder
+
+        await _shelf(twin)
+        record = make_document_recorder(twin, None)
+        for body in ("Background: a wall shelf.", "Background: a wall shelf for books."):
+            await record(
+                content=body,
+                name="Shelf PRD",
+                wp_type="prd",
+                domain="requirements",
+                fmt="md",
+                link_type="prd",
+                source_tool="twin.record_document",
+                project_id=PROJECT,
+            )
+        (prd,) = await list_items(twin, project_id=PROJECT, item_type="prd")
+        seen: list[str] = []
+
+        async def excerpt(node_id: str) -> str | None:
+            seen.append(node_id)
+            return "prose"
+
+        brief = await build_project_brief(await _project(twin), doc_excerpt=excerpt, twin=twin)
+        lines = [ln for ln in _item_lines(brief) if " prd " in ln]
+        assert lines == [ln for ln in lines if ln.startswith(f"- {prd.key}@2 prd")]
+        assert len(lines) == 1
+        assert str(prd.head_node_id) in seen
+        assert brief.count(f"### Shelf PRD ({prd.key}@2)") == 1
+
     async def test_current_requirement_doc_is_inlined_once(self, twin) -> None:
         await _shelf(twin)
         seen: list[str] = []

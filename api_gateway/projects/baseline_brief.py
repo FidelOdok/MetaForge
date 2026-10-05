@@ -58,6 +58,7 @@ _TYPE_ORDER = (
     "intent",
     "stakeholder_need",
     "objective",
+    "prd",
     "constraint_set",
     "assembly",
     "cad_model",
@@ -256,7 +257,9 @@ async def read_baseline(twin: Any, project_id: Any, run_id: str | None = None) -
             if current is not None:
                 entry = await _entry_for(twin, current, views, draft=False)
                 entries.append(entry)
-                if item.item_type == "constraint_set":
+                # FORGE-86 from the current revision only. FORGE-528 made the
+                # prd's prose an item too, so it is inlined the same way.
+                if item.item_type in {"constraint_set", "prd"}:
                     docs.append(
                         (item.updated_at, str(current.node_id), f"{entry.name} ({entry.ref})")
                     )

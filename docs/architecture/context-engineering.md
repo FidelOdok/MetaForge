@@ -317,8 +317,10 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   abandoned or other run's draft revision never appears. Then: rejected revisions as "already tried, failed because" lessons
   (up to 5), recent real design decisions (up to 5, de-duplicated by title,
   never the design-flow "phase summary" backstops), a one-line count of other
-  records, and an excerpt of the *current* constraint set (FORGE-86 picked the
-  three newest, which on the shelf project were three revisions of one set).
+  records, and an excerpt of the *current* constraint set and prd prose
+  (FORGE-86 picked the three newest, which on the shelf project were three
+  revisions of one set; FORGE-528 made the prd prose an item, so it has one
+  line and one excerpt like any other).
   When the call belongs to a design-flow run (`run_id` from the MCP call
   context, or passed explicitly), that run's own draft revisions are listed
   under "Drafts written by this run", labelled as not yet approved. The
