@@ -2,21 +2,31 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from api_gateway.chat.backend import InMemoryChatBackend
 from api_gateway.chat.harness_backend import (
     _build_context,
     _flag_if_unfounded_completion_claim,
+    _turn_evidence_text,
     chat_harness_enabled,
     make_set_project_scope_tool,
     provider_config_from_env,
     run_chat_turn,
 )
+from api_gateway.chat.skill_tools import GATE_TWIN_WRITE
 from api_gateway.projects.schemas import ProjectResponse
+from orchestrator.design_flow.grounding import (
+    NO_TWIN_COMMIT_BANNER,
+    UNGROUNDED_BANNER,
+    UNVERIFIED_NODE_ID_BANNER,
+)
 from orchestrator.harness.providers import CredentialStore, ProviderSpec
 from orchestrator.harness.providers.auth_store import AuthStore, Selection
 from orchestrator.harness.react import ReActStep, ToolCall
+from orchestrator.harness.tools import ToolRegistry
 
 
 def test_flag_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,6 +183,168 @@ class TestFlagUnfoundedCompletionClaim:
         assert flagged.startswith("⚠")
 
 
+# --- FORGE-520: claim-specific grounding ----------------------------------
+# Live repro: a turn made many successful FreeCAD session calls, never called
+# twin.commit_geometry, then said the assembly was saved with node id
+# "assembly_4" (a FreeCAD session obj_id).
+
+_COMMITTED_NODE_ID = "3f2b8c1e-9a4d-4e7b-8c2a-1d5e6f7a8b9c"
+_PROJECT_ID = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
+
+
+def _ok(name: str, observation: object, arguments: dict | None = None) -> ReActStep:
+    return ReActStep(
+        thought="",
+        tool_call=ToolCall(name=name, arguments=arguments or {}),
+        observation=observation,
+    )
+
+
+def _freecad_session_steps() -> list[ReActStep]:
+    return [
+        _ok("mcp_freecad_import_step", {"status": "ok", "data": {"obj_id": "part_1"}}),
+        _ok("mcp_freecad_import_step", {"status": "ok", "data": {"obj_id": "part_2"}}),
+        _ok("mcp_freecad_create_assembly", {"status": "ok", "data": {"obj_id": "assembly_4"}}),
+        _ok("mcp_freecad_export_model", {"status": "ok", "data": {"path": "/tmp/shelf.step"}}),
+    ]
+
+
+class TestClaimSpecificGrounding:
+    def test_live_case_freecad_calls_but_no_commit_is_flagged(self) -> None:
+        answer = "The shelf assembly has been saved to the digital twin.\nNode ID: assembly_4"
+        flagged = _flag_if_unfounded_completion_claim(answer, _freecad_session_steps())
+        assert NO_TWIN_COMMIT_BANNER in flagged
+        assert UNVERIFIED_NODE_ID_BANNER + "assembly_4" in flagged
+        assert UNGROUNDED_BANNER not in flagged
+        assert flagged.endswith(answer)
+
+    def test_real_commit_with_returned_node_id_is_not_flagged(self) -> None:
+        steps = [
+            *_freecad_session_steps(),
+            _ok(
+                "mcp_twin_commit_geometry",
+                {"status": "ok", "data": {"node_id": _COMMITTED_NODE_ID}},
+            ),
+        ]
+        answer = f"Committed the shelf assembly to the twin. Node ID: `{_COMMITTED_NODE_ID}`."
+        assert _flag_if_unfounded_completion_claim(answer, steps) == answer
+
+    def test_commit_but_a_different_node_id_quoted_is_flagged(self) -> None:
+        steps = [_ok("twin.commit_geometry", {"node_id": _COMMITTED_NODE_ID})]
+        invented = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        answer = f"Committed it to the twin as node {invented}."
+        flagged = _flag_if_unfounded_completion_claim(answer, steps)
+        assert NO_TWIN_COMMIT_BANNER not in flagged
+        assert invented in flagged.split("\n\n")[0]
+
+    def test_session_obj_id_as_node_id_is_flagged_even_after_a_commit(self) -> None:
+        steps = [
+            *_freecad_session_steps(),
+            _ok("twin.commit_geometry", {"node_id": _COMMITTED_NODE_ID}),
+        ]
+        answer = "Committed the assembly to the twin, node id assembly_4."
+        flagged = _flag_if_unfounded_completion_claim(answer, steps)
+        assert flagged.startswith(UNVERIFIED_NODE_ID_BANNER + "assembly_4")
+
+    def test_failed_commit_envelope_does_not_count_as_a_write(self) -> None:
+        steps = [_ok("twin.commit_geometry", {"status": "error", "error": "no blob"})]
+        flagged = _flag_if_unfounded_completion_claim("Committed the bracket.", steps)
+        assert NO_TWIN_COMMIT_BANNER in flagged
+
+    def test_saved_step_file_without_twin_mention_is_not_flagged(self) -> None:
+        answer = "Exported the assembly and saved it to /tmp/shelf.step."
+        assert _flag_if_unfounded_completion_claim(answer, _freecad_session_steps()) == answer
+
+    def test_negated_or_offered_commit_is_not_flagged(self) -> None:
+        answer = (
+            "The assembly is built in the FreeCAD session but has not been committed "
+            "to the twin yet. Want me to commit it?"
+        )
+        assert _flag_if_unfounded_completion_claim(answer, _freecad_session_steps()) == answer
+
+    def test_node_id_the_user_supplied_is_grounded(self) -> None:
+        answer = f"Node ID {_COMMITTED_NODE_ID} has 3 children."
+        steps = [_ok("twin.get_node", {"children": 3})]
+        assert (
+            _flag_if_unfounded_completion_claim(
+                answer, steps, context_text=f"look at {_COMMITTED_NODE_ID}"
+            )
+            == answer
+        )
+
+    def test_node_id_from_the_project_brief_is_grounded(self) -> None:
+        brief = f"Project: shelf (id {_PROJECT_ID})\nWork products:\n- Shelf: {_COMMITTED_NODE_ID}"
+        context = _turn_evidence_text(
+            "what is in this project?",
+            system=f"You are MetaForge.\n\n{brief}",
+            project_brief=brief,
+            project_id=_PROJECT_ID,
+        )
+        answer = f"Project {_PROJECT_ID} has one work product, node id {_COMMITTED_NODE_ID}."
+        steps = [_ok("twin.get_node", {"children": 3})]
+        assert _flag_if_unfounded_completion_claim(answer, steps, context_text=context) == answer
+
+    def test_node_id_from_a_prior_turns_tool_result_is_grounded(self) -> None:
+        history = [
+            {"role": "user", "content": "commit the shelf"},
+            {
+                "role": "tool",
+                "name": "twin.commit_geometry",
+                "content": {"status": "ok", "data": {"node_id": _COMMITTED_NODE_ID}},
+            },
+            {"role": "assistant", "content": "Committed."},
+        ]
+        context = _turn_evidence_text("what was the node id?", history=history)
+        answer = f"The shelf's node id is {_COMMITTED_NODE_ID}."
+        assert _flag_if_unfounded_completion_claim(answer, [], context_text=context) == answer
+
+    def test_live_case_still_flagged_with_brief_and_history(self) -> None:
+        history = [{"role": "assistant", "content": "Imported part_1 and built assembly_4."}]
+        context = _turn_evidence_text(
+            "save the shelf",
+            system="You are MetaForge.",
+            history=history,
+            project_brief=f"Work products:\n- Shelf: {_COMMITTED_NODE_ID}",
+            project_id=_PROJECT_ID,
+        )
+        answer = "The shelf assembly has been saved to the digital twin.\nNode ID: assembly_4"
+        flagged = _flag_if_unfounded_completion_claim(
+            answer, _freecad_session_steps(), context_text=context
+        )
+        assert NO_TWIN_COMMIT_BANNER in flagged
+        assert UNVERIFIED_NODE_ID_BANNER + "assembly_4" in flagged
+
+    def test_registry_classification_counts_a_committing_skill(self) -> None:
+        tools = ToolRegistry()
+
+        async def handler(arguments: dict) -> dict:
+            return {}
+
+        tools.register_native(
+            "skill_mechanical_create_assembly",
+            description="",
+            input_schema={"type": "object"},
+            handler=handler,
+            required_gates=(GATE_TWIN_WRITE,),
+        )
+        answer = "Committed the assembly to the twin."
+        committed = [_ok("skill_mechanical_create_assembly", {"success": True}, {"commit": True})]
+        assert _flag_if_unfounded_completion_claim(answer, committed, tools=tools) == answer
+        dry = [_ok("skill_mechanical_create_assembly", {"success": True}, {"commit": False})]
+        assert NO_TWIN_COMMIT_BANNER in _flag_if_unfounded_completion_claim(
+            answer, dry, tools=tools
+        )
+
+    def test_each_flag_kind_is_counted(self) -> None:
+        metrics = MagicMock()
+        _flag_if_unfounded_completion_claim(
+            "Saved to the twin. Node ID: assembly_4", _freecad_session_steps(), metrics=metrics
+        )
+        _flag_if_unfounded_completion_claim("Assembled the gripper.", [], metrics=metrics)
+        kinds = [c.args[0] for c in metrics.record_chat_ungrounded_claim.call_args_list]
+        assert kinds == ["twin_write", "node_id", "no_tool_call"]
+
+
 @pytest.mark.asyncio
 async def test_run_chat_turn_flags_a_zero_tool_call_completion_claim(
     monkeypatch: pytest.MonkeyPatch,
@@ -192,6 +364,28 @@ async def test_run_chat_turn_flags_a_zero_tool_call_completion_claim(
     out = await run_chat_turn("assemble the gripper", invoke=fake_invoke)
     assert out.startswith("⚠")
     assert "Assembled the gripper" in out
+
+
+@pytest.mark.asyncio
+async def test_run_chat_turn_treats_the_project_brief_as_node_id_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # ReAct JSON-final path
+
+    async def fake_invoke(spec: ProviderSpec, request: object) -> dict:
+        return {
+            "text": f'{{"thought": "from brief", "final": "Project {_PROJECT_ID} is active."}}',
+            "model": spec.model,
+        }
+
+    out = await run_chat_turn(
+        "which project is this?",
+        invoke=fake_invoke,
+        project_brief=f"Project id: {_PROJECT_ID}",
+        project_id=_PROJECT_ID,
+    )
+    assert out == f"Project {_PROJECT_ID} is active."
 
 
 @pytest.mark.asyncio

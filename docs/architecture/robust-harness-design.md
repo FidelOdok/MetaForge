@@ -761,6 +761,55 @@ transcript dimension into a live per-turn check would catch that class too,
 at the cost of an extra judged model call per turn — tracked separately
 (FORGE-104), not folded in here.
 
+### Claim-specific grounding (FORGE-520)
+
+The FORGE-98 check passes any turn with one successful tool call, so it
+missed a live failure: a turn made many successful FreeCAD session calls
+(`import_step`, `create_assembly`, `export_model`), never called
+`twin.commit_geometry`, then replied that the assembly was saved and quoted
+`assembly_4` (a FreeCAD session object id) as its node id. The same function
+now runs two more deterministic checks after the FORGE-98 one, each with its
+own banner from `orchestrator/design_flow/grounding.py`. Neither adds a model
+call.
+
+| Check | Fires when | Banner |
+|-------|-----------|--------|
+| No tool call (FORGE-98) | a completion verb and no successful tool call at all | `UNGROUNDED_BANNER` (the reply gets only this one) |
+| Twin write | the reply claims a twin write and no twin write call succeeded this turn | `NO_TWIN_COMMIT_BANNER`: "No twin commit happened this turn..." |
+| Node id | the reply quotes a node id no successful tool call this turn returned | `UNVERIFIED_NODE_ID_BANNER` plus the ids |
+
+A **twin write claim** is a sentence with `committed` or `persisted`, or with
+`saved`/`stored`/`recorded`/`written` when the reply also mentions the twin, a
+node id or a work product, so "saved it to /tmp/shelf.step" alone is not one.
+A sentence that is a question or carries a negation, plan or offer ("not
+committed yet", "I will save it", "want me to commit it?") is skipped.
+
+A **twin write call** is read from the gate classification: a tool whose
+registry spec carries `GATE_TWIN_WRITE`, which covers the twin tools in
+`_GATED_TOOL_IDS` and every commit-capable skill (one called with
+`commit: false` does not count). When no registry is passed, the static
+`_GATED_TOOL_IDS` set is used. A call only succeeds if it raised no error and
+its result is not an error envelope (`status: "error"`, `success: false`).
+
+A **node id** is any UUID in the reply, or an id-shaped token after `node id`,
+`node_id`, `work product id` or `wp id`. It is grounded when it appears in the
+arguments or result of a successful call this turn, or in anything the model
+was given before the turn ran (`_turn_evidence_text`): the user's message, the
+system prompt (which carries the project brief on the native path), the
+conversation history (prior user and assistant messages, prior tool results,
+and the brief pair on the ReAct path), the project brief itself and the
+active `project_id`. So in `forge chat --project` an id quoted from the brief
+or from an earlier turn is not flagged. A FreeCAD session object id (`part_N`,
+`assembly_N`, `body_N`, and similar) presented as a node id is never grounded,
+whatever returned it or wherever it appeared before.
+
+Only `UNGROUNDED_BANNER` changes a design-flow phase status (`is_ungrounded`);
+the two new banners are chat-only. Each flag logs a `chat_ungrounded_claim`
+warning with its `kind` and increments
+`metaforge_chat_ungrounded_claim_total{kind="no_tool_call"|"twin_write"|"node_id"}`;
+the `ChatUngroundedClaimsSustained` alert fires when one kind passes 5 in 30
+minutes.
+
 ## Prompt caching (FORGE-478)
 
 Providers cache by exact prefix, so every harness request is laid out as a

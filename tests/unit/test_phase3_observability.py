@@ -99,7 +99,8 @@ class TestTelemetryMetricsGroupAccess:
         # +1 iteration gate without approval workflow in FORGE-470.
         # +1 design-flow tool refusal in FORGE-492.
         # + 1 unified approval decision (FORGE-507)
-        assert len(MetricsRegistry.all_metrics()) == 70
+        # + 1 chat ungrounded claim (FORGE-520)
+        assert len(MetricsRegistry.all_metrics()) == 71
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

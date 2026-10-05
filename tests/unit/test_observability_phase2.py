@@ -273,7 +273,8 @@ class TestAllMetricsCombined:
         # + 1 design-flow tool refusal (FORGE-492)
         # + 1 unreachable approval hold (FORGE-490)
         # + 1 unified approval decision (FORGE-507)
-        assert len(MetricsRegistry.all_metrics()) == 70
+        # + 1 chat ungrounded claim (FORGE-520)
+        assert len(MetricsRegistry.all_metrics()) == 71
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

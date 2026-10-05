@@ -31,7 +31,12 @@ from api_gateway.chat.skill_tools import GATE_TWIN_WRITE, skill_tools_from_regis
 from api_gateway.chat.tool_approvals import approver_reachable, get_approval_store
 from mcp_core.profiles import MAX_TOOLS as PHASE_TOOL_CAP
 from observability.metrics import MetricsCollector
-from orchestrator.design_flow.grounding import UNGROUNDED_BANNER
+from orchestrator.design_flow.grounding import (
+    NO_TWIN_COMMIT_BANNER,
+    UNGROUNDED_BANNER,
+    UNVERIFIED_NODE_ID_BANNER,
+    UNVERIFIED_NODE_ID_NOTE,
+)
 from orchestrator.harness import AgentContext, NativeToolDef, build_agent_runtime
 from orchestrator.harness.compression import default_token_count, summarize_trajectory
 from orchestrator.harness.native_tools import NATIVE_SYSTEM, run_native_tools
@@ -63,7 +68,7 @@ from orchestrator.harness.providers.registry import (
 )
 from orchestrator.harness.providers.routing import resolve_route, routing_scope
 from orchestrator.harness.providers.usage import usage_scope
-from orchestrator.harness.react import ReActStep, run_react
+from orchestrator.harness.react import ReActStep, ToolCall, run_react
 from orchestrator.harness.result_handles import READER_INPUT_SCHEMA, READER_TOOL_NAME
 from orchestrator.harness.runtime import OnApprovalRequest
 from orchestrator.harness.tools import DuplicateToolError, Handler, ToolRegistry
@@ -1333,9 +1338,170 @@ def _has_successful_tool_call(steps: list[ReActStep]) -> bool:
     return any(s.tool_call is not None and s.error is None for s in steps)
 
 
-def _flag_if_unfounded_completion_claim(answer: str, steps: list[ReActStep]) -> str:
-    """Prepend a visible warning when ``answer`` claims a completed design
-    action but the turn made no successful tool call at all.
+# FORGE-520: the coarse check above passes any turn with one successful tool
+# call. Live, a turn made many successful FreeCAD session calls (import_step,
+# create_assembly, export_model), never called twin.commit_geometry, then said
+# the assembly was saved and quoted "assembly_4" (a FreeCAD session obj_id) as
+# its node id. So two claim-specific checks run as well, still deterministic
+# and with no extra model call:
+#   * a reply that claims a twin write needs a successful twin write call;
+#   * a node id the reply quotes must come back from a tool this turn.
+# The twin write set is the tool-gate classification (GATE_TWIN_WRITE), read
+# from the turn's own tool registry when there is one, so a commit-capable
+# skill counts without a second hand-kept list.
+_TWIN_WRITE_TOOL_IDS = frozenset(
+    tool_id for tool_id, gates in _GATED_TOOL_IDS.items() if GATE_TWIN_WRITE in gates
+)
+_TWIN_WRITE_TOOL_NAMES = _TWIN_WRITE_TOOL_IDS | frozenset(
+    ToolRegistry.mcp_name(*tool_id.split(".", 1)) for tool_id in _TWIN_WRITE_TOOL_IDS
+)
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+# Words that make a sentence about a write a non-claim: a negation, a plan, an
+# offer or a condition ("not committed yet", "I will save it", "once saved").
+_NON_CLAIM = re.compile(
+    r"n't\b|\b(?:not|never|without|yet|will|would|could|should|can|shall|if|once|want)\b",
+    re.IGNORECASE,
+)
+# "committed"/"persisted" only ever describe a twin write here; "saved" or
+# "stored" can mean a file on disk, so they count only when the reply also
+# talks about the twin, a node id or a work product.
+_STRONG_WRITE_VERB = re.compile(r"\b(?:committed|persisted)\b", re.IGNORECASE)
+_WEAK_WRITE_VERB = re.compile(r"\b(?:saved|stored|recorded|written)\b", re.IGNORECASE)
+_TWIN_MENTION = re.compile(
+    r"\b(?:(?:digital )?twin|node[ _-]?ids?|work[ -]products?)\b", re.IGNORECASE
+)
+_UUID = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE
+)
+_LABELLED_NODE_ID = re.compile(
+    r"\b(?:node|work[ -]product|wp)[ _-]?id\b\s*(?:is|was|=|:)?\s*[`'\"*\[(]*"
+    r"([A-Za-z0-9][\w.:-]*[A-Za-z0-9])",
+    re.IGNORECASE,
+)
+# FreeCAD session object ids: never a twin node id, whatever returned them.
+_SESSION_OBJ_ID = re.compile(
+    r"^(?:part|assembly|body|sketch|obj|object|feature|shape)_\d+$", re.IGNORECASE
+)
+
+
+def _step_succeeded(step: ReActStep) -> bool:
+    """A tool call that ran and did not report failure in its own envelope."""
+    if step.tool_call is None or step.error is not None:
+        return False
+    obs = step.observation
+    if isinstance(obs, dict) and (
+        obs.get("success") is False or obs.get("status") == "error" or obs.get("is_error") is True
+    ):
+        return False
+    return True
+
+
+def _is_twin_write_call(call: ToolCall, tools: ToolRegistry | None) -> bool:
+    spec = None
+    if tools is not None:
+        try:
+            spec = tools.get(call.name)
+        except KeyError:
+            spec = None
+    if spec is not None:
+        if GATE_TWIN_WRITE not in spec.required_gates:
+            return False
+        # A commit-capable skill called with commit=false wrote nothing.
+        return call.arguments.get("commit", True) is not False
+    return call.name in _TWIN_WRITE_TOOL_NAMES
+
+
+def _claims_twin_write(answer: str) -> bool:
+    mentions_twin = bool(_TWIN_MENTION.search(answer))
+    for sentence in _SENTENCE_SPLIT.split(answer):
+        if not sentence or sentence.rstrip().endswith("?") or _NON_CLAIM.search(sentence):
+            continue
+        if _STRONG_WRITE_VERB.search(sentence):
+            return True
+        if mentions_twin and _WEAK_WRITE_VERB.search(sentence):
+            return True
+    return False
+
+
+def _turn_evidence_text(
+    user_content: str,
+    *,
+    system: str | None = None,
+    history: list[dict[str, Any]] | None = None,
+    project_brief: str | None = None,
+    project_id: str | None = None,
+) -> str:
+    """Everything the model was shown before this turn's tool calls.
+
+    The user's message, the system prompt (which carries the project brief on
+    the native path), the conversation history (prior user/assistant messages
+    and any prior tool results, plus the brief pair on the ReAct path), the
+    brief itself and the active project id. An id quoted from any of these is
+    one the model was given, not one it made up.
+    """
+    parts = [user_content, system or "", project_brief or "", project_id or ""]
+    for message in history or []:
+        parts.append(json.dumps(message, default=str))
+    return "\n".join(parts)
+
+
+def _unverified_node_ids(answer: str, steps: list[ReActStep], context_text: str) -> list[str]:
+    """Node ids the reply quotes that no successful tool call this turn returned.
+
+    The evidence is the text of every successful call's arguments and result,
+    plus ``context_text`` (see :func:`_turn_evidence_text`: the user's message,
+    system prompt with the project brief, conversation history including prior
+    turns' tool results, and the active project id), so an id the user pasted,
+    the brief listed, an earlier turn returned, or the model looked up is
+    grounded. A session obj_id quoted as a node id is never grounded.
+    """
+    evidence_parts = [context_text]
+    for step in steps:
+        if _step_succeeded(step) and step.tool_call is not None:
+            evidence_parts.append(json.dumps(step.tool_call.arguments, default=str))
+            evidence_parts.append(json.dumps(step.observation, default=str))
+    evidence = "\n".join(evidence_parts).lower()
+
+    found: list[str] = []
+    for match in _LABELLED_NODE_ID.finditer(answer):
+        candidate = match.group(1)
+        if not re.search(r"[\d_-]", candidate):
+            continue  # a word after "node id", not an id
+        if _SESSION_OBJ_ID.match(candidate) or candidate.lower() not in evidence:
+            found.append(candidate)
+    for match in _UUID.finditer(answer):
+        if match.group(0).lower() not in evidence:
+            found.append(match.group(0))
+    return list(dict.fromkeys(found))
+
+
+def _record_ungrounded(kind: str, metrics: MetricsCollector | None, **fields: Any) -> None:
+    logger.warning("chat_ungrounded_claim", kind=kind, **fields)
+    if metrics is not None:
+        try:
+            metrics.record_chat_ungrounded_claim(kind)
+        except Exception:  # noqa: BLE001 - metrics must never break a turn
+            pass
+
+
+def _flag_if_unfounded_completion_claim(
+    answer: str,
+    steps: list[ReActStep],
+    *,
+    tools: ToolRegistry | None = None,
+    context_text: str = "",
+    metrics: MetricsCollector | None = None,
+) -> str:
+    """Prepend a visible warning when ``answer`` claims work the turn did not do.
+
+    Three checks, each with its own banner:
+
+    * FORGE-98: a completed design action, but no successful tool call at all;
+    * FORGE-520: a twin write (saved, committed, in the twin) but no successful
+      twin write call, even though other tools ran;
+    * FORGE-520: a node id that no successful tool call returned this turn, or
+      a FreeCAD session obj_id presented as a node id.
 
     A false positive here (the reply happens to use one of these verbs in an
     unrelated, non-claim sense) costs the user one extra banner line; a false
@@ -1343,12 +1509,33 @@ def _flag_if_unfounded_completion_claim(answer: str, steps: list[ReActStep]) -> 
     the same confidence as a real one. That asymmetry is why this leans
     toward over-flagging rather than trying to parse intent.
     """
-    if not answer or _has_successful_tool_call(steps):
+    if not answer:
         return answer
     lowered = answer.lower()
-    if not any(verb in lowered for verb in _COMPLETION_CLAIM_VERBS):
+    if not _has_successful_tool_call(steps) and any(
+        verb in lowered for verb in _COMPLETION_CLAIM_VERBS
+    ):
+        _record_ungrounded("no_tool_call", metrics, steps=len(steps))
+        return UNGROUNDED_BANNER + "\n\n" + answer
+
+    banners: list[str] = []
+    if _claims_twin_write(answer) and not any(
+        _step_succeeded(s) and s.tool_call is not None and _is_twin_write_call(s.tool_call, tools)
+        for s in steps
+    ):
+        _record_ungrounded(
+            "twin_write",
+            metrics,
+            tools_called=[s.tool_call.name for s in steps if s.tool_call is not None],
+        )
+        banners.append(NO_TWIN_COMMIT_BANNER)
+    unverified = _unverified_node_ids(answer, steps, context_text)
+    if unverified:
+        _record_ungrounded("node_id", metrics, node_ids=unverified)
+        banners.append(UNVERIFIED_NODE_ID_BANNER + ", ".join(unverified) + UNVERIFIED_NODE_ID_NOTE)
+    if not banners:
         return answer
-    return UNGROUNDED_BANNER + "\n\n" + answer
+    return "\n\n".join([*banners, answer])
 
 
 def _attributed_as_chat(fn: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
@@ -1497,7 +1684,19 @@ async def _run_chat_turn(
         # FORGE-98: only the model's own final text can fabricate a claim --
         # summarize_trajectory/_FALLBACK_ANSWER below are generated FROM the
         # step trace itself, so they're inherently grounded.
-        answer = _flag_if_unfounded_completion_claim(str(result.output), result.steps)
+        answer = _flag_if_unfounded_completion_claim(
+            str(result.output),
+            result.steps,
+            tools=ctx.runtime.tools,
+            context_text=_turn_evidence_text(
+                user_content,
+                system=system,
+                history=full_history,
+                project_brief=project_brief,
+                project_id=project_id,
+            ),
+            metrics=metrics,
+        )
     elif result.stop_reason in ("max_steps", "timeout", "budget_exceeded"):
         answer = summarize_trajectory(result.steps)
     else:
@@ -2037,7 +2236,19 @@ async def run_chat_turn_streaming(
     # FORGE-98: only the model's own final text can fabricate a claim -- the
     # empty-answer branch above is generated FROM the step trace itself, so
     # it's inherently grounded.
-    answer = _flag_if_unfounded_completion_claim(answer, result.steps)
+    answer = _flag_if_unfounded_completion_claim(
+        answer,
+        result.steps,
+        tools=ctx.runtime.tools,
+        context_text=_turn_evidence_text(
+            user_content,
+            system=system,
+            history=full_history,
+            project_brief=project_brief,
+            project_id=project_id,
+        ),
+        metrics=metrics,
+    )
     await _record_turn_experience(answer)
     # Emit the loop's own answer as chunked deltas. This used to re-generate
     # the final text with a second, context-free model call (no history, no
