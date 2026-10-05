@@ -230,6 +230,46 @@ class TestPinnedAtRecordTime:
         await _cad(twin, "b")
         assert await _status(twin, out["node_id"]) == "stale"
 
+    async def test_one_depends_on_and_one_edge_per_revision_for_a_decision(self, twin) -> None:
+        """FORGE-528's decision_basis edge is the pin; no second edge (review on #1076)."""
+        constraints = make_constraint_recorder(twin, None)
+        c = [{"name": "stress", "expression": "True"}]
+        cs = await constraints(title="Bracket reqs", constraints=c, project_id=PROJECT)
+        cad = await _cad(twin, "a")
+        record = make_decision_recorder(twin, None)
+        out = await record(
+            title="Basis",
+            rationale="the constraint set",
+            parent_refs=[cad["node_id"]],
+            depends_on=["CS-BRACKET-REQS"],
+            project_id=PROJECT,
+        )
+        assert out["depends_on"] == [cs["item_ref"], "CAD-BRACKET@1"]
+        meta = await _meta(twin, out["node_id"])
+        assert meta["depends_on"] == [cs["item_ref"], "CAD-BRACKET@1"]
+        edges = await twin.graph.get_edges(
+            UUID(out["node_id"]), direction="outgoing", edge_type=EdgeType.DEPENDS_ON
+        )
+        assert sorted((str(e.target_id), e.metadata["kind"]) for e in edges) == sorted(
+            [(cs["node_id"], "decision_basis"), (cad["node_id"], "decision_basis")]
+        )
+        await constraints(
+            title="Bracket reqs",
+            constraints=[{"name": "stress", "expression": "True", "message": "tighter"}],
+            project_id=PROJECT,
+        )
+        meta = await _meta(twin, out["node_id"])
+        assert meta["staleness"] == "stale"
+        assert "CS-BRACKET-REQS is now @2" in meta["staleness_reason"]
+
+    def test_record_decision_schema_has_one_depends_on(self) -> None:
+        import inspect
+
+        from tool_registry.tools.twin import adapter
+
+        source = inspect.getsource(adapter.TwinServer._register_record_decision)
+        assert source.count('"depends_on"') == 2  # one input, one output property
+
     async def test_evidence_is_pinned_through_valid_against(self, twin) -> None:
         cad = await _cad(twin, "a")
         record = make_evidence_recorder(twin, None)
