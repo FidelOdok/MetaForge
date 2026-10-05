@@ -8,6 +8,10 @@ not a copy of the resolution rules (which live in ``twin_core.items``).
 The author and run come from the MCP call context when there is one
 (``actor_id``, and ``run_id`` from a design-flow worker call), so no tool
 grows a required argument for them.
+
+FORGE-525: the same ``run_id`` makes a write a draft in the run's change set
+(HEAD moves only when the run's gate approves), and makes the run's own reads
+of ``twin.item_history`` and ``twin.get_node`` by ``item_key`` see its drafts.
 """
 
 from __future__ import annotations
@@ -48,6 +52,13 @@ def revision_run_id(explicit: str | None = None) -> str | None:
     return run_id if isinstance(run_id, str) and run_id else None
 
 
+def revision_phase() -> str | None:
+    """The design-flow phase of the current MCP call, if any (FORGE-525)."""
+    ctx = _call_context()
+    phase = getattr(ctx, "phase", None)
+    return phase if isinstance(phase, str) and phase else None
+
+
 async def plan_definition_revision(
     twin: Any,
     *,
@@ -73,6 +84,7 @@ async def plan_definition_revision(
         change_reason=change_reason,
         run_id=revision_run_id(run_id),
         legacy_lookup=legacy_lookup,
+        phase=revision_phase(),
     )
 
 
@@ -108,19 +120,31 @@ async def finish_definition_revision(
         result["supersedes_node_id"] = str(plan.prior_node_id)
 
 
-def item_to_dict(item: Any) -> dict[str, Any]:
-    """The JSON shape of an item, shared by the MCP tool and the REST route."""
-    return {
+def item_to_dict(item: Any, run_id: str | None = None) -> dict[str, Any]:
+    """The JSON shape of an item, shared by the MCP tool and the REST route.
+
+    ``head_*`` is always the approved head (``None`` for an item that only has
+    drafts). With ``run_id`` and an open draft of that run, ``draft_*`` names
+    the run's own draft, which is what that run reads as current (FORGE-525).
+    """
+    head = item.head_node_id
+    out: dict[str, Any] = {
         "key": item.key,
         "item_type": item.item_type,
         "name": item.name,
         "project_id": str(item.project_id) if item.project_id else None,
         "head_revision": item.head_revision,
-        "head_node_id": str(item.head_node_id),
-        "head_ref": f"{item.key}@{item.head_revision}",
+        "head_node_id": str(head) if head else None,
+        "head_ref": f"{item.key}@{item.head_revision}" if head else None,
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
     }
+    entry = (getattr(item, "drafts", None) or {}).get(run_id) if run_id else None
+    if isinstance(entry, dict):
+        out["draft_revision"] = entry.get("revision")
+        out["draft_node_id"] = entry.get("node_id")
+        out["draft_ref"] = f"{item.key}@{entry.get('revision')}"
+    return out
 
 
 def revision_to_dict(revision: Any) -> dict[str, Any]:
@@ -136,6 +160,7 @@ def make_item_history_reader(twin: Any) -> Any:
         item_for_node,
         item_history,
         parse_item_ref,
+        visible_head,
     )
 
     async def read(
@@ -143,7 +168,10 @@ def make_item_history_reader(twin: Any) -> Any:
         item_key: str | None = None,
         node_id: str | None = None,
         project_id: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
+        """``run_id`` defaults to the calling run: its drafts are listed, others' are not."""
+        run_id = revision_run_id(run_id)
         if item_key:
             key, _ = parse_item_ref(item_key)
             item = await find_item(twin, key, project_id, any_project=True)
@@ -162,11 +190,18 @@ def make_item_history_reader(twin: Any) -> Any:
             item = found[0]
         else:
             raise ValueError("twin.item_history: pass 'item_key' or 'node_id'")
-        revisions = await item_history(twin, item)
-        logger.info("item_history_read", item_key=item.key, revisions=len(revisions))
+        revisions = await item_history(twin, item, run_id=run_id)
+        seen = visible_head(item, run_id)
+        logger.info("item_history_read", item_key=item.key, revisions=len(revisions), run_id=run_id)
         return {
-            "item": item_to_dict(item),
+            "item": item_to_dict(item, run_id),
             "revisions": [revision_to_dict(r) for r in revisions],
+            # What this caller reads as current: its run's draft, else the head.
+            "current": (
+                {"revision": seen[0], "node_id": str(seen[1]), "ref": f"{item.key}@{seen[0]}"}
+                if seen is not None
+                else None
+            ),
         }
 
     return read

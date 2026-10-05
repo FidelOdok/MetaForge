@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api_gateway.auth.approver import approver_from_request
+from api_gateway.runs import change_sets as run_change_sets
 from api_gateway.runs.engine import FlowEngine, resolve_flow_engine, temporal_target
 from api_gateway.runs.schemas import (
     ApprovalRequest,
@@ -84,6 +85,11 @@ _ledger: SqliteRunLedger | None = None
 def _on_transition(run: Run) -> None:
     _stream_manager.publish(run)
     _gate_coordinator.on_transition(run)
+    try:
+        # FORGE-525: a run that ended outside a gate decision settles its drafts.
+        run_change_sets.on_run_transition(run)
+    except Exception as exc:  # noqa: BLE001 - drafts must never break a transition
+        logger.warning("run_change_set_hook_failed", run_id=run.id, error=str(exc))
     if _ledger is not None:
         try:
             _ledger.record_run(run)
@@ -294,6 +300,7 @@ def reset_run_store() -> None:
     _gate_coordinator = GateCoordinator()
     _store = InMemoryRunStore(on_transition=_on_transition)
     _ledger = None
+    run_change_sets.reset()
 
 
 def _is_design_flow(request: dict) -> bool:
@@ -636,6 +643,9 @@ def _build_in_process_executor(brain: Any, project_backend: Any) -> DesignFlowEx
         # gate_id -- informational only, never fails a gate (no enforce_*
         # flag exists for it; see Gate.gate_id's own docstring for why).
         consistency_gate_checker=TwinConsistencyGateChecker(get_twin()),
+        # FORGE-525: the phase's twin writes carry its run and phase, so they
+        # are drafts in the run's change set, as on the Temporal worker.
+        phase_scope=run_change_sets.phase_scope,
     )
 
 
@@ -1316,6 +1326,49 @@ async def submit_approval(run_id: str, body: ApprovalRequest, request: Request) 
     return RunResponse.from_run(run)
 
 
+async def _open_gate_name(run: Run) -> str | None:
+    """The name of the gate ``run`` is parked at, from its own flow definition."""
+    snapshot = await gate_snapshot(run)
+    phase_id = (snapshot or {}).get("phase")
+    definition = _run_definition(run)
+    if not phase_id or definition is None:
+        return None
+    for phase in definition.phases:
+        if phase.id == phase_id and phase.gate is not None:
+            gate_id = getattr(phase.gate, "gate_id", None)
+            return f"{phase.gate.name} ({gate_id})" if gate_id else phase.gate.name
+    return None
+
+
+async def _settle_change_set(
+    run: Run, decision: ApprovalDecision, approver: Approver, reason: str
+) -> None:
+    """Commit (approve) or close (reject, retry, rework) the run's drafts (FORGE-525).
+
+    An approval whose drafts were based on revisions that moved since is
+    refused here with a 409 and the rebase message, and the run stays parked.
+    """
+    from twin_core.items import ChangeSetCommitError, ChangeSetConflictError
+
+    if decision is not ApprovalDecision.APPROVE:
+        await run_change_sets.close_for_decision(run, decision, reason)
+        return
+    gate = await _open_gate_name(run)
+    try:
+        committed = await run_change_sets.commit_for_approval(
+            run, gate=gate, decided_by=approver.label, reason=reason
+        )
+    except ChangeSetConflictError as exc:
+        logger.warning("design_flow_approval_refused_conflict", run_id=run.id, gate=gate)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ChangeSetCommitError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if committed and committed.get("items"):
+        logger.info(
+            "design_flow_change_set_committed", run_id=run.id, gate=gate, items=committed["items"]
+        )
+
+
 async def decide_run_gate(
     run_id: str,
     decision: ApprovalDecision,
@@ -1337,10 +1390,17 @@ async def decide_run_gate(
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
     await _refuse_undeliverable_decision(reconciled, decision, to_phase)
+    if _is_design_flow(reconciled.request):
+        # FORGE-525: the run's drafts follow the decision, before the run moves
+        # on (a resumed phase must not write into a change set being closed).
+        await _settle_change_set(reconciled, decision, approver, reason)
     if decision is ApprovalDecision.RETRY:
+        # A retry after a refused approval tells the phase what to rebase on.
+        reason = run_change_sets.retry_note(run_id, reason)
         _gate_coordinator.note_retry(run_id, reason)
     elif decision is ApprovalDecision.REWORK:
         _gate_coordinator.note_rework(run_id, to_phase, reason)
+    run_change_sets.begin_decision(run_id)
     try:
         run = _store.submit_approval(
             run_id,
@@ -1356,6 +1416,8 @@ async def decide_run_gate(
         _gate_coordinator.take_retry_reason(run_id)
         _gate_coordinator.take_rework(run_id)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        run_change_sets.end_decision(run_id)
 
     approved = decision is ApprovalDecision.APPROVE
     if _is_design_flow(run.request) and resolve_flow_engine() is FlowEngine.TEMPORAL:

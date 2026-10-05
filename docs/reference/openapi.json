@@ -5317,8 +5317,41 @@
         "title": "InterferenceCheckResponse",
         "type": "object"
       },
+      "ItemCurrentResponse": {
+        "properties": {
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "node_id",
+          "ref"
+        ],
+        "title": "ItemCurrentResponse",
+        "type": "object"
+      },
       "ItemHistoryResponse": {
         "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemCurrentResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "item": {
             "$ref": "#/components/schemas/ItemResponse"
           },
@@ -5365,13 +5398,60 @@
             "title": "Created At",
             "type": "string"
           },
+          "draft_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Node Id"
+          },
+          "draft_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Ref"
+          },
+          "draft_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Revision"
+          },
           "head_node_id": {
-            "title": "Head Node Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Node Id"
           },
           "head_ref": {
-            "title": "Head Ref",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Ref"
           },
           "head_revision": {
             "title": "Head Revision",
@@ -5411,8 +5491,6 @@
           "item_type",
           "name",
           "head_revision",
-          "head_node_id",
-          "head_ref",
           "created_at",
           "updated_at"
         ],
@@ -5447,6 +5525,17 @@
             ],
             "title": "Change Reason"
           },
+          "change_set": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Set"
+          },
           "created_at": {
             "anyOf": [
               {
@@ -5458,6 +5547,17 @@
               }
             ],
             "title": "Created At"
+          },
+          "gate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate"
           },
           "is_head": {
             "title": "Is Head",
@@ -5478,6 +5578,17 @@
             "title": "Node Id",
             "type": "string"
           },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -5492,6 +5603,22 @@
               }
             ],
             "title": "Run Id"
+          },
+          "status": {
+            "default": "committed",
+            "title": "Status",
+            "type": "string"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
           }
         },
         "required": [
@@ -17813,6 +17940,24 @@
               ],
               "title": "Project Id"
             }
+          },
+          {
+            "description": "Read as this design-flow run: include its open drafts",
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Read as this design-flow run: include its open drafts",
+              "title": "Run Id"
+            }
           }
         ],
         "responses": {
@@ -17899,7 +18044,7 @@
     },
     "/v1/twin/nodes": {
       "get": {
-        "description": "List work-product nodes in the Digital Twin.\n\n``project_id`` scopes the view to a single project (MET-491). Omitted\nor empty returns every node (including unscoped legacy nodes) \u2014\npreserving the prior global behaviour. A specific ``project_id``\nreturns only that project's nodes; unscoped nodes are excluded.",
+        "description": "List work-product nodes in the Digital Twin.\n\n``project_id`` scopes the view to a single project (MET-491). Omitted\nor empty returns every node (including unscoped legacy nodes) \u2014\npreserving the prior global behaviour. A specific ``project_id``\nreturns only that project's nodes; unscoped nodes are excluded.\n\nFORGE-525: a design-flow run's drafts are left out until its gate\napproves them (and for good if it never does); ``include_drafts=true``\nlists them too.",
         "operationId": "list_twin_nodes_v1_twin_nodes_get",
         "parameters": [
           {
@@ -17932,6 +18077,16 @@
                 }
               ],
               "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_drafts",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Drafts",
+              "type": "boolean"
             }
           }
         ],

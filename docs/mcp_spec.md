@@ -1006,6 +1006,12 @@ carries `item_key`, `revision` and `item_ref` (`KEY@n`). The revision's author
 is the call context's `actor_id` and its `run_id` the context's design-flow run;
 agents never number revisions themselves.
 
+Inside a design-flow run (FORGE-525) a definition write is a **draft** in the
+run's change set: its result adds `revision_status: "draft"` and a one-line
+`draft_note`, and the item's head does not move until the run's gate approves.
+The run's own reads see its drafts; other callers see approved heads only (see
+[twin_schema.md, Drafts, approval and closed drafts](twin_schema.md#drafts-approval-and-closed-drafts-forge-525)).
+
 `twin.item_history` (read-only, registered when the gateway or sidecar injects
 `item_history_reader`) takes `item_key` or the `node_id` of any revision, plus an
 optional `project_id` when a key exists in several projects, and returns:
@@ -1026,6 +1032,22 @@ optional `project_id` when a key exists in several projects, and returns:
 
 An unknown key, or a node that is not a revision of any item (a record, or an
 unclassified type), is a tool error naming the reference.
+
+FORGE-525 read semantics. Both reads follow the calling run (the call
+context's `run_id`):
+
+- `twin.item_history` lists the caller's own open drafts and never another
+  run's; closed drafts are always listed. Every revision carries `status`
+  (`committed`, `draft`, `approved`, `rejected`, `abandoned`), `change_set`,
+  `phase`, `gate` and `status_reason`. The result adds `current`
+  (`{"revision", "node_id", "ref"}`), what this caller reads as current: its
+  run's draft if it has one, else the head. `item` adds `draft_revision`,
+  `draft_node_id` and `draft_ref` when the caller's run has a draft; `head_*` is
+  always the approved head (null for an item that only has drafts).
+- `twin.get_node` accepts `item_key` instead of `node_id`: a bare `KEY` returns
+  the node `current` names, `KEY@n` that revision (only if the caller can see
+  it), with an optional `project_id` when the key exists in several projects.
+  `node_id` is no longer required when `item_key` is given.
 
 ### KiCad Adapter (`tool_registry/tools/kicad/`)
 

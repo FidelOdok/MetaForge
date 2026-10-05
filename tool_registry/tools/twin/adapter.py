@@ -589,7 +589,10 @@ class TwinServer(McpToolServer):
                 description=(
                     "Fetch a graph node by id from the digital twin. Returns "
                     "properties + first-hop neighbours. Use when you have a "
-                    "node id and want to inspect it."
+                    "node id and want to inspect it. Or pass item_key "
+                    "('CAD-BRACKET' for the current revision, 'CAD-BRACKET@2' for one "
+                    "revision) instead of node_id; inside a design-flow run the "
+                    "current revision includes that run's own drafts."
                 ),
                 capability="twin_inspect",
                 input_schema={
@@ -600,8 +603,18 @@ class TwinServer(McpToolServer):
                             "format": "uuid",
                             "description": "UUID of the node to fetch.",
                         },
+                        "item_key": {
+                            "type": "string",
+                            "description": (
+                                "Instead of node_id: an item key a write returned, "
+                                "'KEY' or 'KEY@n'."
+                            ),
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Scopes item_key when the key exists in several.",
+                        },
                     },
-                    "required": ["node_id"],
                 },
                 output_schema={
                     "type": "object",
@@ -836,10 +849,39 @@ class TwinServer(McpToolServer):
     # Handlers
     # ------------------------------------------------------------------
 
+    async def _node_id_for_item_key(self, item_key: str, project_id: Any) -> str:
+        """FORGE-525: the node an item key names, as the caller sees it.
+
+        Resolved by the injected item-history reader (tool_registry may not
+        import twin_core), which applies the run's view: a bare key is that
+        run's draft when it has one, else the head.
+        """
+        if self._item_history_reader is None:
+            raise ValueError("twin.get_node: item_key is not supported here; pass node_id")
+        data: dict[str, Any] = await self._item_history_reader(
+            item_key=item_key, project_id=project_id if isinstance(project_id, str) else None
+        )
+        _, _, pinned = item_key.strip().rpartition("@")
+        if "@" in item_key and pinned.isdigit():
+            for revision in data.get("revisions") or []:
+                if int(revision.get("revision") or 0) == int(pinned):
+                    return str(revision["node_id"])
+            raise ValueError(f"twin.get_node: {item_key} is not a revision you can read")
+        current = data.get("current")
+        if not current:
+            raise ValueError(
+                f"twin.get_node: {item_key} has no current revision yet "
+                "(its only revisions are another run's drafts)"
+            )
+        return str(current["node_id"])
+
     async def get_node(self, arguments: dict[str, Any]) -> dict[str, Any]:
         raw_id = arguments.get("node_id")
+        item_key = arguments.get("item_key")
+        if not raw_id and isinstance(item_key, str) and item_key.strip():
+            raw_id = await self._node_id_for_item_key(item_key, arguments.get("project_id"))
         if not raw_id:
-            raise ValueError("node_id is required")
+            raise ValueError("node_id is required (or pass item_key)")
         try:
             node_id = UUID(str(raw_id))
         except (ValueError, AttributeError) as exc:

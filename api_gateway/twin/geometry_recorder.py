@@ -369,6 +369,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             # for the identical-content short circuit) — reused here as the
             # SUPERSEDES predecessor rather than looked up twice.
 
+            plan_is_draft = plan is not None and plan.draft
             now = datetime.now(UTC)
             wp = WorkProduct(
                 id=wp_id,
@@ -387,7 +388,9 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             created = await twin.create_work_product(wp)
             node_id = str(getattr(created, "id", wp_id))
 
-            if prior_step is not None and prior_step.id != created.id:
+            # FORGE-525: a draft (inside a run) must not mark the head replaced;
+            # its gate approval adds SUPERSEDES and propagates staleness.
+            if prior_step is not None and prior_step.id != created.id and not plan_is_draft:
                 try:
                     await twin.add_edge(created.id, prior_step.id, EdgeType.SUPERSEDES)
                 except Exception as exc:  # noqa: BLE001 — supersedes link is best-effort

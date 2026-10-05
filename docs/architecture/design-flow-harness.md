@@ -426,6 +426,75 @@ the same way (`GateCoordinator.note_rework`), so the two engines stay at parity.
 There is still no MCP tool for this: like approve and retry, only a human answers
 a gate.
 
+## A run's change set: drafts until the gate (FORGE-525)
+
+Every definition a run writes (parts, assemblies, constraint sets, intent,
+needs, objectives, BOMs, component selections: the definition types in
+[twin_schema.md section 2.30](../twin_schema.md#230-items-and-revisions-definitions-vs-records-forge-522-forge-523))
+is a **draft** revision in the run's change set. Nothing new is asked of the
+agent or the reviewer: the tools are the same, and the write knows its run from
+the MCP call context (`run_id` and `phase`, set by the Temporal worker's phase
+scope and, for the in-process engine, by the executor's injected `phase_scope`).
+
+- **During the run** a draft never moves its item's head. The run's own reads
+  (`twin.item_history`, `twin.get_node` with `item_key`) see its drafts over the
+  head; the dashboard, other runs and `GET /v1/twin/items` see only approved
+  heads. The phase's own gate is evaluated over its drafts, so the reviewer sees
+  exactly what an approval would commit.
+- **Approve** commits the change set before the run moves on: every drafted
+  item's head moves to the run's latest draft, the drafts become `approved` with
+  the gate's name and the gate's reason as `change_reason`, and `SUPERSEDES`
+  links each one to the revision it replaced (with staleness propagation, spec
+  section 21). All of a gate's items move or none do.
+- **Reject, retry and rework** close the change set: its drafts become
+  `rejected` (reject) or `abandoned` (retry, rework) with the reviewer's reason.
+  No head moves. The drafts stay in each item's history; they never reach the
+  current view. A retried or reworked phase is told that what it recorded was
+  discarded, and records its work again on top of the current heads.
+- **The run ends any other way**: a completed run commits what phases after its
+  last human gate drafted (an ungated or auto-approved phase rides along with the
+  next human gate otherwise); a failed or canceled run abandons its drafts; a gate
+  that timed out rejects them.
+
+**Optimistic concurrency (spec sections 40 and 41).** When a run first drafts an
+item, the change set records that item's head as its base. At approval, if any
+base head has moved since (another run's approval, or a direct write outside any
+run), the whole approval is refused with `409` and a `PATCH_CONFLICT` message
+naming each item, its base and its current head, for example
+`CAD-LEG was @1 when this run drafted CAD-LEG@3, and is now @2`. Nothing is
+committed and the run stays parked at its gate. A **retry** of that gate is the
+rebase: it closes the stale drafts, and the conflict message is appended to the
+retry reason, so the phase redoes its work on the current revisions. Revision
+numbers are never reused, so two runs drafting one item get distinct numbers
+(`@2` and `@3` above) and a closed draft's number stays its own.
+
+**Both engines.** Gate decisions from either engine go through
+`routes.decide_run_gate` (shared by `/v1/runs/{id}/approval` and
+`/v1/approvals/gate:{id}/decision`), which settles the change set before the run
+record moves, so a resumed phase never writes into a change set that is being
+closed. Terminal states reach `api_gateway/runs/change_sets.py` through the run
+store's transition observer, which on Temporal is fed by the reconcile loop.
+
+**Not a branch.** The change set has no node of its own and no branch or merge
+vocabulary: it is the items whose `Item.drafts` names the run plus the
+`REVISION_OF` edges stamped `change_set=<run id>`. It does not go through
+`TransactionEngine` (FORGE-50), whose `Patch` carries field edits: here the
+revisions already exist as immutable nodes and committing is a head move. It
+shares that engine's discipline instead: check every precondition, then write,
+and since `GraphEngine` has no multi-write transaction, a commit that fails
+part-way restores the heads it already moved and reports `503`.
+
+**Observability.** `item_revision_drafted`, `run_change_set_committed`,
+`run_change_set_refused`, `run_change_set_closed` and
+`run_change_set_commit_failed` log events; the
+`metaforge_twin_change_set_total{outcome}` counter (`committed`, `refused`,
+`rejected`, `abandoned`, `failed`); the `TwinChangeSetApprovalsRefused` alert.
+
+Known limits: the gate's deliverable check (`present_types`) reads the project's
+work products, so two runs on one project at the same time can each count the
+other's drafts as present; the check at approval still refuses a commit whose
+base moved.
+
 ## Phase step budget, blob storage and tool visibility (FORGE-501)
 
 **Step budget.** Each native phase has its own tool-use budget instead of one
