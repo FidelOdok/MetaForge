@@ -11,7 +11,8 @@
  *
  * Rules, in priority order:
  *   1. A work product type whose meaning beats its file format (robot,
- *      simulation result, design decision, constraint set, BOM, assembly).
+ *      simulation result, design decision, constraint set, BOM, assembly,
+ *      and a prd revision, FORGE-528, which renders the derived prd).
  *   2. The file format (from `format`, else the `file_path` extension).
  *   3. A per-type default when the format is missing or unknown.
  *   4. `none`, which names the format so the fallback can say which engine
@@ -22,6 +23,7 @@ export type PreviewEngine =
   | 'cad3d'
   | 'mesh3d'
   | 'markdown'
+  | 'prd'
   | 'requirements'
   | 'bom'
   | 'decision'
@@ -95,7 +97,7 @@ export const BINARY_FORMATS = new Set([
 
 /** Engines that read the file as text (and so may fetch it). */
 export const TEXT_ENGINES = new Set<PreviewEngine>([
-  'markdown', 'requirements', 'bom', 'decision', 'csv', 'json', 'code', 'gerber', 'dxf', 'html', 'text',
+  'markdown', 'prd', 'requirements', 'bom', 'decision', 'csv', 'json', 'code', 'gerber', 'dxf', 'html', 'text',
 ]);
 
 /** Human names, used by the "engine missing" fallback and the UI labels. */
@@ -103,6 +105,7 @@ export const ENGINE_LABELS: Record<PreviewEngine, string> = {
   cad3d: '3D CAD',
   mesh3d: '3D mesh',
   markdown: 'Markdown',
+  prd: 'PRD (prose + live requirements)',
   requirements: 'Requirements table',
   bom: 'BOM table',
   decision: 'Decision card',
@@ -174,6 +177,11 @@ export function previewEngineFor(subject: PreviewSubject): PreviewResolution {
   if (wpType === 'simulation_result') return { engine: 'sim', format: fmt };
   if (wpType === 'design_decision' && isTextualOrUnknown(fmt)) return { engine: 'decision', format: fmt };
   if (wpType === 'constraint_set' && isTextualOrUnknown(fmt)) return { engine: 'requirements', format: fmt };
+  // FORGE-528: a prd item revision is prose only; the reader sees it rendered
+  // with the live requirements. A legacy prd (no item) is just markdown.
+  if (wpType === 'prd' && str(subject.properties?.item_key) && isTextualOrUnknown(fmt)) {
+    return { engine: 'prd', format: fmt };
+  }
   if (wpType === 'bom' && (fmt === '' || CSV_FORMATS.has(fmt))) return { engine: 'bom', format: fmt };
   if ((subject.assemblyParts?.length ?? 0) > 0 && !MESH_FORMATS.has(fmt)) return { engine: 'cad3d', format: fmt };
 

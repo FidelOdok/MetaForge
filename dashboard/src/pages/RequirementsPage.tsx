@@ -371,7 +371,18 @@ function MatrixRow({ row }: { row: RequirementMatrixRow }) {
         style={{ borderBottom: expanded ? 'none' : '1px solid var(--mf-r-65-72-90-0p1)' }}
       >
         <td className="px-3 py-2 text-xs text-on-surface" style={{ maxWidth: '320px' }}>
-          <div className="font-medium">{row.requirementName}</div>
+          <div className="font-medium">
+            {row.requirementName}
+            {row.revisionRef && (
+              <span
+                data-testid="requirement-revision-ref"
+                className="font-mono text-on-surface-variant"
+                style={{ fontSize: '10px', marginLeft: '6px' }}
+              >
+                {row.revisionRef}
+              </span>
+            )}
+          </div>
           <div className="text-on-surface-variant" style={{ fontSize: '11px' }}>
             {row.limitText}
           </div>
@@ -457,6 +468,9 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 function RequirementMatrixSection({ projectId }: { projectId?: string }) {
   const { data: matrix, isLoading } = useRequirementMatrix(projectId);
   const rows = matrix?.rows ?? [];
+  // FORGE-528: the rows are the current constraint set revision(s), the one
+  // home for requirement values; say which.
+  const revisionRefs = matrix?.revisionRefs ?? [];
   const [showForm, setShowForm] = useState(false);
 
   if (!isLoading && rows.length === 0 && !showForm && !projectId) return null;
@@ -466,6 +480,16 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-medium text-on-surface" style={{ margin: 0 }}>
           Evidence matrix
+          {revisionRefs.length > 0 && (
+            <span
+              data-testid="requirements-revision"
+              className="font-mono text-on-surface-variant"
+              style={{ fontSize: '11px', fontWeight: 400, marginLeft: '8px' }}
+              title="The current constraint set revision these requirements are read from"
+            >
+              current: {revisionRefs.join(', ')}
+            </span>
+          )}
         </h2>
         <div className="flex gap-2">
           {projectId && !showForm && (

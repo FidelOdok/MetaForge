@@ -75,6 +75,9 @@ async def get_requirement_quality(
 
 class RequirementMatrixResponse(BaseModel):
     rows: list[RequirementMatrixRow]
+    # FORGE-528: the current constraint set revisions the rows were read
+    # from, e.g. ["CS-WIDGET@2"]; empty when no constraint set is itemized.
+    revisionRefs: list[str] = []  # noqa: N815
 
 
 @router.get("/matrix", response_model=RequirementMatrixResponse)
@@ -87,8 +90,11 @@ async def get_requirement_matrix(project_id: str) -> RequirementMatrixResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid project_id") from exc
     with tracer.start_as_current_span("requirements.matrix"):
+        from api_gateway.twin.requirements_home import current_revisions
+
         rows = await build_requirement_matrix(_twin, pid)
-        return RequirementMatrixResponse(rows=rows)
+        refs = [r.ref for r in await current_revisions(_twin, pid, "constraint_set")]
+        return RequirementMatrixResponse(rows=rows, revisionRefs=refs)
 
 
 @router.get("/coverage", response_model=TraceabilityCoverage)

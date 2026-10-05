@@ -118,6 +118,13 @@ describe('previewEngineFor: explicit type/format expectations', () => {
     expect(previewEngineFor(wp('cad_source_script', '')).language).toBe('python');
   });
 
+  it('renders a prd revision as the derived prd, a legacy prd as Markdown (FORGE-528)', () => {
+    expect(previewEngineFor({ properties: { wp_type: 'prd', format: 'md', item_key: 'PRD-W' } }).engine).toBe('prd');
+    expect(previewEngineFor({ properties: { wp_type: 'prd', format: '', item_key: 'PRD-W' } }).engine).toBe('prd');
+    expect(previewEngineFor({ properties: { wp_type: 'prd', format: 'md' } }).engine).toBe('markdown');
+    expect(previewEngineFor({ properties: { wp_type: 'prd', format: 'pdf', item_key: 'PRD-W' } }).engine).toBe('pdf');
+  });
+
   it('routes an assembly (metadata.parts) to the 3D CAD engine', () => {
     const asm = { properties: { wp_type: 'cad_model', format: 'json' }, assemblyParts: [{ node_id: 'p1', name: 'arm' }] };
     expect(previewEngineFor(asm).engine).toBe('cad3d');

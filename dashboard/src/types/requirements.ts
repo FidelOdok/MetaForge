@@ -68,10 +68,15 @@ export interface RequirementMatrixRow {
    * live status, which is about evidence, not declaration. */
   verificationMethod: string;
   expectedEvidence: string;
+  /** FORGE-528: the constraint set revision this row was read from
+   * (e.g. "CS-WIDGET@2"); null for a constraint recorded outside any item. */
+  revisionRef?: string | null;
 }
 
 export interface RequirementMatrixReport {
   rows: RequirementMatrixRow[];
+  /** FORGE-528: the current constraint set revisions the rows come from. */
+  revisionRefs?: string[];
 }
 
 /** FORGE-297 (gap G-I1): the 5 traceability coverage percentages, computed

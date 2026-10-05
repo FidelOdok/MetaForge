@@ -9,8 +9,13 @@ this registry to decide what a write means:
 - **record**: a thing that *happened*. Append-only, never revised, never
   given an item. A second design decision is a second decision, not "the
   decision, revision 2".
-- **derived**: a generated view of other nodes (``prd``). Not a source of
-  truth; it gets neither an item nor record semantics.
+- **derived**: a generated view of other nodes (``prd_view``). Not a source
+  of truth; it gets neither an item nor record semantics.
+
+FORGE-528: the ``prd`` work product is the prd's *prose* (background, scope,
+non-requirements), a definition like any other. The prd a reader sees is the
+derived ``prd_view``: that prose plus intent, needs, objectives and the
+current constraint set, rendered on read.
 
 A type absent from this table keeps its pre-FORGE-522 behaviour (one node per
 write, no item) until it is classified. Classifying it here is the only step
@@ -116,6 +121,17 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "choosing a different part for the same role is a new revision."
         ),
     ),
+    TwinTypeSpec(
+        "prd",
+        TwinTypeKind.DEFINITION,
+        "work_product:prd",
+        key_prefix="PRD",
+        description=(
+            "The prd prose: background, scope, non-requirements "
+            "(twin.record_document with document_type='prd'). Requirement "
+            "values live in the constraint set."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",
@@ -155,10 +171,13 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
     ),
     # -- derived -----------------------------------------------------------
     TwinTypeSpec(
-        "prd",
+        "prd_view",
         TwinTypeKind.DERIVED,
-        "work_product:prd",
-        description="A generated view of intent, needs and requirements.",
+        "rendered on read (GET /v1/twin/projects/{id}/prd)",
+        description=(
+            "The prd a reader sees: the prd prose plus intent, needs, objectives "
+            "and the current constraint set revision, with KEY@n refs."
+        ),
     ),
 )
 

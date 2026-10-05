@@ -123,7 +123,7 @@ pattern:
 
 | Phase | Handler | Produces |
 |-------|---------|----------|
-| Requirements | `GoalDrivenRequirementsHandler` | `prd` + verifiable constraints (each with an acceptance method) |
+| Requirements | `GoalDrivenRequirementsHandler` | the `constraint_set` (verifiable constraints, each with an acceptance method, the one home of the values), then the `prd` prose, then a decision linking `CS-...@n` by `depends_on` (FORGE-528) |
 | Architecture | `GoalDrivenArchitectureHandler` | `documentation` (per-subsystem numeric mass/power/cost budgets) |
 | Concept Selection | `GoalDrivenConceptSelectionHandler` | `design_decision` (trade study: alternatives + rationale + link to the architecture decision) |
 | Mechanical Design | `GoalDrivenMechanicalHandler` | loadable `cad_model` (FreeCAD → STEP → MinIO) |

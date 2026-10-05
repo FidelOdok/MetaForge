@@ -1,4 +1,5 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { fetchDerivedPrd, type DerivedPrd } from '../../../api/endpoints/twin';
 import { parseInline, parseMarkdown, type MdBlock, type MdInline } from '../parsers/markdown';
 import { parseConstraintSet, parseDecision } from '../parsers/records';
 import { PC } from '../tokens';
@@ -188,6 +189,85 @@ export function RequirementsPreview({ source }: { source: string }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ── PRD (derived view, FORGE-528) ───────────────────────────────────────────
+
+/** `KEY@n` of a prd revision node, from the stamp its recorder wrote. */
+export function prdItemRef(node: TwinNode): string | null {
+  const key = node.properties.item_key;
+  if (typeof key !== 'string' || !key) return null;
+  const rev = node.properties.item_revision;
+  return typeof rev === 'number' || (typeof rev === 'string' && rev) ? `${key}@${rev}` : key;
+}
+
+/**
+ * A prd revision rendered the way readers should see it: its prose plus the
+ * project's current intent, needs and constraint set (the one home for
+ * requirement values). Falls back to the stored prose when the derived view
+ * cannot be fetched.
+ */
+export function PrdPreview({ node, fallback }: { node: TwinNode; fallback: string | null }) {
+  const ref = prdItemRef(node);
+  const [state, setState] = useState<{ prd: DerivedPrd | null; loading: boolean; failed: boolean }>({
+    prd: null,
+    loading: ref !== null,
+    failed: false,
+  });
+
+  useEffect(() => {
+    if (!ref) {
+      setState({ prd: null, loading: false, failed: true });
+      return;
+    }
+    let cancelled = false;
+    setState({ prd: null, loading: true, failed: false });
+    fetchDerivedPrd(ref, node.projectId)
+      .then((prd) => {
+        if (!cancelled) setState({ prd, loading: false, failed: false });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ prd: null, loading: false, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ref, node.projectId, node.updatedAt]);
+
+  if (state.loading) {
+    return (
+      <div className="font-mono" style={{ fontSize: 12, color: PC.onSurfaceVariant }}>
+        Rendering the prd…
+      </div>
+    );
+  }
+  if (!state.prd) {
+    return (
+      <div data-testid="preview-prd" data-derived="false">
+        <div className="font-mono mb-2" style={{ fontSize: 11, color: PC.amber }}>
+          Could not render the live requirements; showing the stored prose only.
+        </div>
+        <MarkdownView source={fallback ?? ''} />
+      </div>
+    );
+  }
+  const { prd } = state;
+  return (
+    <div data-testid="preview-prd" data-derived="true">
+      <div className="font-mono uppercase mb-2 flex flex-wrap gap-2 items-center" style={{ fontSize: 10, letterSpacing: '0.08em', color: PC.onSurfaceVariant }}>
+        <span>Prose</span>
+        <Pill label={prd.prose_ref ?? 'none'} />
+        <span>Requirements</span>
+        {prd.requirement_refs.length > 0 ? (
+          prd.requirement_refs.map((r) => <Pill key={r} label={r} tone={SEVERITY_TONE.info} />)
+        ) : (
+          <Pill label="none yet" />
+        )}
+        <span>{prd.requirement_count} requirement{prd.requirement_count === 1 ? '' : 's'}</span>
+      </div>
+      <MarkdownView source={prd.markdown} />
     </div>
   );
 }

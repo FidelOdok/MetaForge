@@ -34,6 +34,12 @@ that: resolved the same way as ``parent_refs``, linked via
 ``EdgeType.SUPPORTED_BY`` (previously declared, never used) rather than
 ``satisfies`` -- "supported by evidence" and "satisfies a requirement" are
 different relations and shouldn't share one edge type.
+
+FORGE-528: ``depends_on`` names the item revisions a decision rests on
+(``KEY@n``, or a bare ``KEY`` pinned to its current revision at record time),
+linked with ``EdgeType.DEPENDS_ON``. A decision about requirements links the
+constraint set revision instead of restating its values, so the values have
+one home and a later revision of the set is visibly not what was decided on.
 """
 
 from __future__ import annotations
@@ -67,11 +73,14 @@ def render_decision_markdown(
     rationale: str,
     alternatives: list[dict[str, Any]] | None,
     supersedes: str | None,
+    depends_on: list[str] | None = None,
 ) -> str:
     """Render an ADR-style markdown doc."""
     lines = [f"# {title}", ""]
     if supersedes:
         lines += [f"> Supersedes: `{supersedes}`", ""]
+    if depends_on:
+        lines += ["> Depends on: " + ", ".join(f"`{ref}`" for ref in depends_on), ""]
     lines += ["## Decision", "", rationale.strip(), ""]
     if alternatives:
         lines += ["## Alternatives considered", "", "| Option | Why rejected |", "|---|---|"]
@@ -83,6 +92,31 @@ def render_decision_markdown(
             lines.append(f"| {option} | {reason} |")
         lines.append("")
     return "\n".join(lines)
+
+
+async def _resolve_depends_on(
+    twin: Any, refs: list[str] | None, project_id: str | None
+) -> list[tuple[str, UUID]]:
+    """``[(KEY@n, revision node id)]`` for each ref; raises on an unknown one."""
+    if not refs:
+        return []
+    from api_gateway.twin.item_revisions import revision_run_id
+    from twin_core.items import resolve_item_ref
+
+    run_id = revision_run_id()
+    out: list[tuple[str, UUID]] = []
+    for raw in refs:
+        ref = str(raw).strip()
+        if not ref:
+            raise ValueError("twin.record_decision: 'depends_on' entries must be non-empty")
+        try:
+            item, revision = await resolve_item_ref(twin, ref, project_id, run_id=run_id)
+        except ValueError as exc:
+            raise ValueError(f"twin.record_decision: depends_on {ref!r}: {exc}") from exc
+        pinned = f"{item.key}@{revision.revision}"
+        if pinned not in {p for p, _ in out}:
+            out.append((pinned, revision.node_id))
+    return out
 
 
 def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
@@ -104,6 +138,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         session_id: str | None = None,
         supersedes: str | None = None,
         domain: str = "systems",
+        depends_on: list[str] | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.enums import WorkProductType
         from twin_core.models.work_product import WorkProduct
@@ -115,9 +150,15 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 f"twin.record_decision: 'relation' must be a valid EdgeType, got {relation!r}"
             ) from exc
 
+        # FORGE-528: pin each depends_on ref to a revision before anything is
+        # written, so an unknown item fails the call with nothing created.
+        basis = await _resolve_depends_on(twin, depends_on, project_id)
+
         with tracer.start_as_current_span("twin.record_decision") as span:
             wp_id = uuid4()
-            markdown = render_decision_markdown(title, rationale, alternatives, supersedes)
+            markdown = render_decision_markdown(
+                title, rationale, alternatives, supersedes, [ref for ref, _ in basis]
+            )
             content = markdown.encode("utf-8")
             content_hash = hashlib.sha256(content).hexdigest()
             filename = f"{_slug(title)}.md"
@@ -208,6 +249,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["parent_refs"] = [str(p) for p in resolved_parent_ids]
             if resolved_evidence_ids:
                 metadata["evidence_refs"] = [str(e) for e in resolved_evidence_ids]
+            if basis:
+                metadata["depends_on"] = [ref for ref, _ in basis]
 
             now = datetime.now(UTC)
             wp = WorkProduct(
@@ -250,6 +293,15 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                     metadata={"kind": "decision_evidence"},
                 )
 
+            # FORGE-528: Decision -[DEPENDS_ON]-> the exact revision it rests on.
+            for ref, revision_node_id in basis:
+                await twin.add_edge(
+                    created.id,
+                    revision_node_id,
+                    EdgeType.DEPENDS_ON,
+                    metadata={"kind": "decision_basis", "item_ref": ref},
+                )
+
             # 2. project junction link (MET-489 facet 3) so it shows on the
             #    Projects page, not just the scoped twin view.
             linked = False
@@ -287,6 +339,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 minio_object_key=minio_object_key,
                 parent_count=len(resolved_parent_ids),
                 evidence_count=len(resolved_evidence_ids),
+                depends_on=[ref for ref, _ in basis],
             )
             return {
                 "node_id": node_id,
@@ -295,6 +348,7 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "project_linked": linked,
                 "parent_refs": [str(p) for p in resolved_parent_ids],
                 "evidence_refs": [str(e) for e in resolved_evidence_ids],
+                "depends_on": [ref for ref, _ in basis],
                 "knowledge_indexed": indexed,
                 "deduplicated": False,
             }

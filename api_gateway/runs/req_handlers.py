@@ -5,10 +5,17 @@ prose with no verification method, so the requirements rubric scores it 0.833
 (the gap is verification_criteria — ISO-15288 verifiability). This handler makes
 the requirements engineering-grade: the LLM extracts the functional requirements
 and constraints from the goal, then this handler deterministically ties each
-quantified constraint to an acceptance / verification method, emits a real
-``prd`` work product (the requirements table), and records a decision that
-carries functional requirements, quantified + verifiable constraints, interfaces,
-and the operating environment.
+quantified constraint to an acceptance / verification method and records it.
+
+FORGE-528: the requirement values have one home, the constraint set. The
+handler records, in order:
+
+1. the constraint set (``twin.record_constraint_set``), the only place the
+   quantified constraints and their verification methods are stored;
+2. the prd *prose* (goal, functional scope, interfaces, environment), which
+   the prd view renders together with the current constraint set;
+3. a decision that records the choice and links the constraint set revision
+   (``depends_on=[CS-KEY@n]``) instead of restating its values.
 """
 
 from __future__ import annotations
@@ -88,7 +95,12 @@ def _normalize_req_spec(spec: dict[str, Any], goal: str) -> dict[str, Any]:
 
 
 def prd_md(spec: dict[str, Any], goal: str) -> str:
-    """Render the requirements as a PRD with a verification column."""
+    """The requirements as one markdown table with a verification column.
+
+    Kept for the reader who wants the extracted spec in one page; the
+    handler itself records :func:`prd_prose_md` and lets the constraint set
+    carry the table (FORGE-528).
+    """
     lines = [
         f"# {spec['name']} — product requirements",
         "",
@@ -112,6 +124,29 @@ def prd_md(spec: dict[str, Any], goal: str) -> str:
         f"## Interfaces\n\n- {', '.join(spec['interfaces'])}",
         "",
         f"## Operating environment\n\n- {spec['environment']}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def prd_prose_md(spec: dict[str, Any], goal: str, requirements_ref: str | None) -> str:
+    """The prd prose: everything but the requirement values (FORGE-528)."""
+    where = f"`{requirements_ref}`" if requirements_ref else "the project's constraint set"
+    lines = [
+        f"# {spec['name']}: product requirements",
+        "",
+        f"Goal: {goal}",
+        "",
+        "## Functional scope",
+        "",
+    ]
+    lines += [f"- {f}" for f in spec["functional"]]
+    lines += [
+        "",
+        f"## Interfaces\n\n- {', '.join(spec['interfaces'])}",
+        "",
+        f"## Operating environment\n\n- {spec['environment']}",
+        "",
+        f"Quantified requirements and their verification methods are in {where}.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -248,10 +283,19 @@ class GoalDrivenRequirementsHandler:
         self._model = model
         self._extract = extract
 
-    async def _record_decision(self, *, title: str, rationale: str, project_id: str | None) -> None:
+    async def _record_decision(
+        self,
+        *,
+        title: str,
+        rationale: str,
+        project_id: str | None,
+        depends_on: list[str] | None = None,
+    ) -> None:
         args: dict[str, Any] = {"title": title, "rationale": rationale}
         if project_id:
             args["project_id"] = project_id
+        if depends_on:
+            args["depends_on"] = depends_on
         _data(await self._bridge.invoke("twin.record_decision", args), "twin.record_decision")
 
     async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
@@ -267,43 +311,14 @@ class GoalDrivenRequirementsHandler:
         prior = "\n".join(f"  - {p.title}: {o.summary}" for p, o in context.completed) or "(none)"
         spec = await self._extract(goal, prior, provider=self._provider, model=self._model)
 
-        # 1. Real PRD artifact (requirements table with a verification column).
-        rec = await self._doc_recorder(
-            content=prd_md(spec, goal),
-            name=f"{spec['name']} PRD",
-            wp_type=WorkProductType.PRD,
-            domain="requirements",
-            fmt="md",
-            link_type="prd",
-            source_tool="requirements.prd",
-            session_id=context.session_id,
-            project_id=context.project_id,
-        )
-        prd_node = rec.get("node_id") if isinstance(rec, dict) else None
-
-        # 2. Decision: functional + quantified & verifiable constraints + env.
-        cons = "; ".join(
-            f"{c['param']} {c['limit']} {c['unit']} (verified: {c['verify']})".strip()
-            for c in spec["constraints"]
-        )
-        ifaces = ", ".join(spec["interfaces"])
-        rationale = (
-            f"Requirements for {goal}. Functional requirements: {'; '.join(spec['functional'])}. "
-            f"Constraints (each quantified with an acceptance / verification criterion): {cons}. "
-            f"Interfaces: {ifaces}. Operating environment: {spec['environment']}."
-        )
-        await self._record_decision(
-            title=f"{spec['name']} (verifiable requirements)",
-            rationale=rationale,
-            project_id=context.project_id,
-        )
-
-        # 3. MET-582: the quantified constraints ALSO land as an evaluable
-        #    constraint_set (Constraint nodes + typed work product) so the
-        #    constraint engine can check them at every later gate (MET-583).
-        #    The Requirements gate now REQUIRES this deliverable, so a failure
-        #    here surfaces as a readable missing-deliverable gate failure.
+        # 1. MET-582 / FORGE-528: the quantified constraints land as an
+        #    evaluable constraint_set (Constraint nodes + typed work product),
+        #    the one home of the requirement values. The constraint engine
+        #    checks them at every later gate (MET-583), and the Requirements
+        #    gate REQUIRES this deliverable, so a failure here surfaces as a
+        #    readable missing-deliverable gate failure.
         set_node = None
+        set_ref: str | None = None
         try:
             cs_args: dict[str, Any] = {
                 "title": f"{spec['name']} constraints",
@@ -316,14 +331,48 @@ class GoalDrivenRequirementsHandler:
                 "twin.record_constraint_set",
             )
             set_node = cs.get("node_id") if isinstance(cs, dict) else None
+            ref = cs.get("item_ref") if isinstance(cs, dict) else None
+            set_ref = ref if isinstance(ref, str) and ref else None
         except Exception as exc:  # noqa: BLE001 - the gate enforces; don't mask the phase
             logger.warning("requirements_constraint_set_failed", error=str(exc))
+
+        # 2. The prd prose. The prd a reader sees renders it together with
+        #    the constraint set above, so the values are not copied here.
+        rec = await self._doc_recorder(
+            content=prd_prose_md(spec, goal, set_ref),
+            name=f"{spec['name']} PRD",
+            wp_type=WorkProductType.PRD,
+            domain="requirements",
+            fmt="md",
+            link_type="prd",
+            source_tool="requirements.prd",
+            session_id=context.session_id,
+            project_id=context.project_id,
+        )
+        prd_node = rec.get("node_id") if isinstance(rec, dict) else None
+
+        # 3. Decision: the choice, linked to the requirement revision it rests
+        #    on rather than restating the values.
+        where = set_ref or "the project's constraint set"
+        rationale = (
+            f"Requirements for {goal}: {len(spec['functional'])} functional requirements "
+            f"and {len(spec['constraints'])} quantified constraints, each with an acceptance / "
+            f"verification method, recorded in {where}. Interfaces: "
+            f"{', '.join(spec['interfaces'])}. The values are kept in the constraint set only."
+        )
+        await self._record_decision(
+            title=f"{spec['name']} (verifiable requirements)",
+            rationale=rationale,
+            project_id=context.project_id,
+            depends_on=[set_ref] if set_ref else None,
+        )
 
         return PhaseOutcome(
             summary=(
                 f"Requirements: {len(spec['functional'])} functional + {len(spec['constraints'])} "
-                f"quantified constraints, each with an acceptance/verification method; committed a "
-                f"PRD (node {prd_node}) and an evaluable constraint set (node {set_node})."
+                f"quantified constraints, each with an acceptance/verification method; recorded "
+                f"the constraint set {set_ref or f'(node {set_node})'}, the prd prose "
+                f"(node {prd_node}) and a decision that links them."
             ),
             artifacts=[
                 f"prd:{prd_node}",

@@ -4,6 +4,7 @@ import type { TwinNode } from '../../../types/twin';
 
 vi.mock('../../../api/endpoints/twin', () => ({
   fetchNodeFileText: vi.fn(),
+  fetchDerivedPrd: vi.fn(),
   nodeFileUrl: (id: string, download = false) => `/api/v1/twin/nodes/${id}/file${download ? '?download=true' : ''}`,
   getNodeModel: vi.fn(),
 }));
@@ -15,11 +16,12 @@ vi.mock('../engines/ModelPreview', () => ({
   ),
 }));
 
-import { fetchNodeFileText } from '../../../api/endpoints/twin';
+import { fetchDerivedPrd, fetchNodeFileText } from '../../../api/endpoints/twin';
 import { PreviewHost, hasInlinePreview } from '../PreviewHost';
 import { clearNodeFileTextCache } from '../useNodeFileText';
 
 const mockFetch = vi.mocked(fetchNodeFileText);
+const mockPrd = vi.mocked(fetchDerivedPrd);
 
 let seq = 0;
 function node(properties: TwinNode['properties'], extra: Partial<TwinNode> = {}): TwinNode {
@@ -38,6 +40,7 @@ function node(properties: TwinNode['properties'], extra: Partial<TwinNode> = {})
 
 beforeEach(() => {
   mockFetch.mockReset();
+  mockPrd.mockReset();
   clearNodeFileTextCache();
 });
 
@@ -51,6 +54,39 @@ describe('PreviewHost: markdown', () => {
     // The tag is text, not an element.
     expect(container.querySelector('script')).toBeNull();
     expect(screen.getByText('<script>alert(1)</script>')).toBeInTheDocument();
+  });
+});
+
+describe('PreviewHost: derived prd (FORGE-528)', () => {
+  it('shows the prose with the live requirement table and the revisions it came from', async () => {
+    mockFetch.mockResolvedValue('A desk stand.');
+    mockPrd.mockResolvedValue({
+      project_id: 'p1',
+      title: 'Widget PRD',
+      markdown:
+        '# Widget PRD\n\nA desk stand.\n\n## Requirements\n\n| Ref | Requirement | Limit | Unit |\n|---|---|---|---|\n| CS-W@2 | mass | 12 | g |\n',
+      prose_ref: 'PRD-W@1',
+      requirement_refs: ['CS-W@2'],
+      requirement_count: 1,
+      refs: ['PRD-W@1', 'CS-W@2'],
+    });
+    const prd = node({ wp_type: 'prd', format: 'md', item_key: 'PRD-W', item_revision: 1 }, { projectId: 'p1' });
+    render(<PreviewHost node={prd} mode="modal" />);
+    const view = await screen.findByTestId('preview-prd');
+    expect(view).toHaveAttribute('data-derived', 'true');
+    expect(mockPrd).toHaveBeenCalledWith('PRD-W@1', 'p1');
+    expect(within(view).getByRole('table')).toBeInTheDocument();
+    expect(within(view).getAllByText('CS-W@2').length).toBeGreaterThan(0);
+    expect(within(view).getByText('PRD-W@1')).toBeInTheDocument();
+  });
+
+  it('falls back to the stored prose when the derived view fails', async () => {
+    mockFetch.mockResolvedValue('Stored prose only.');
+    mockPrd.mockRejectedValue(new Error('down'));
+    render(<PreviewHost node={node({ wp_type: 'prd', format: 'md', item_key: 'PRD-W', item_revision: 2 })} mode="modal" />);
+    const view = await screen.findByTestId('preview-prd');
+    await screen.findByText('Stored prose only.');
+    expect(view).toHaveAttribute('data-derived', 'false');
   });
 });
 

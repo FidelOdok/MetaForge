@@ -36,6 +36,12 @@ established):
   A SUPPORTED claim with no extractable margin at all (evidence shape this
   module doesn't recognize) falls back to a bare ``pass`` with a note --
   never guessed at as fail/uncertain.
+
+FORGE-528: the rows are the project's *current* requirements, read from their
+one home: the current revision of each constraint set item (plus constraints
+recorded outside any item). An older revision's constraints are not listed,
+so a requirement revised from 15 g to 12 g shows once, at 12 g. Each row
+carries ``revisionRef`` (``CS-KEY@n``), the revision it was read from.
 """
 
 from __future__ import annotations
@@ -78,6 +84,9 @@ class RequirementMatrixRow(BaseModel):
     # undeclared, distinct from the live status (which is about evidence,
     # not declaration).
     verificationMethod: str = ""  # noqa: N815
+    # FORGE-528: the constraint set revision this requirement was read from,
+    # e.g. "CS-WIDGET@2"; None for a constraint recorded outside any item.
+    revisionRef: str | None = None  # noqa: N815
     expectedEvidence: str = ""  # noqa: N815
 
 
@@ -255,10 +264,15 @@ async def _derive_row(
 
 
 async def build_requirement_matrix(twin: TwinAPI, project_id: UUID) -> list[RequirementMatrixRow]:
-    constraints = await twin.list_constraints(project_id=project_id)
-    requirements = [c for c in constraints if not c.metadata.get("candidate")]
+    from api_gateway.twin.requirements_home import current_requirements
+
+    current = await current_requirements(twin, project_id)
     staleness = StalenessEngine(twin)
-    return [
-        await _derive_row(twin, staleness, req, await list_claims_for_requirement(twin, req.id))
-        for req in requirements
-    ]
+    rows: list[RequirementMatrixRow] = []
+    for req in current.all():
+        row = await _derive_row(
+            twin, staleness, req, await list_claims_for_requirement(twin, req.id)
+        )
+        row.revisionRef = current.ref_for(req.id)
+        rows.append(row)
+    return rows

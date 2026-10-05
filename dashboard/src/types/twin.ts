@@ -55,6 +55,8 @@ export interface TwinNode {
   // FORGE-511: an assembly cad_model's part list (metadata.parts) — undefined
   // for every other node.
   assemblyParts?: AssemblyPart[];
+  // FORGE-528: the project the node belongs to, when it has one.
+  projectId?: string;
 }
 
 export interface AssemblyPartBox {

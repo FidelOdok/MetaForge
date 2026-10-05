@@ -27,6 +27,7 @@ def test_definitions_are_the_versioned_types() -> None:
         "objective",
         "bom",
         "component_selection",
+        "prd",
     }
 
 
@@ -37,10 +38,13 @@ def test_records_are_append_only_and_never_definitions() -> None:
         assert not is_definition(name)
 
 
-def test_prd_is_derived() -> None:
-    spec = classify("prd")
-    assert spec is not None and spec.kind is TwinTypeKind.DERIVED
-    assert not is_definition("prd")
+def test_prd_prose_is_a_definition_and_the_prd_view_is_derived() -> None:
+    # FORGE-528: the prd prose is revised like any definition; the prd a
+    # reader sees is rendered from it and the constraint set.
+    assert is_definition("prd")
+    view = classify("prd_view")
+    assert view is not None and view.kind is TwinTypeKind.DERIVED
+    assert not is_definition("prd_view")
 
 
 def test_unclassified_type_is_not_a_definition() -> None:
