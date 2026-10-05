@@ -79,8 +79,10 @@ async def _wp(
     *,
     metadata: dict[str, Any] | None = None,
     project: UUID | None = PROJECT,
+    node_id: UUID | None = None,
 ) -> WorkProduct:
     node = WorkProduct(
+        id=node_id or uuid4(),
         name=name,
         type=wp_type,
         domain="mechanical",
@@ -596,6 +598,200 @@ class TestEdgeCases:
         assert "Nothing to migrate" in render_report(plan)
         result = await ItemMigration(twin).apply(plan)
         assert result.items_created == 0
+
+
+def _box(x: float, y: float, z: float) -> dict[str, float]:
+    """A bbox the way the cad adapters record it in ``metadata.bbox_mm``."""
+    return {"min_x": 0.0, "min_y": 0.0, "min_z": 0.0, "max_x": x, "max_y": y, "max_z": z}
+
+
+BOARD_GEOMETRY = {"bbox_mm": _box(800, 250, 18), "volume_mm3": 3_600_000.0}
+ASSEMBLY_GEOMETRY = {"bbox_mm": _box(800, 250, 138), "volume_mm3": 4_100_000.0}
+
+
+def _live_id(prefix: str) -> UUID:
+    return UUID(f"{prefix}-0000-4000-8000-000000000529")
+
+
+class LiveShelf:
+    """The shelf nodes the FORGE-529 live dry run grouped wrongly, by id prefix."""
+
+    def __init__(self, nodes: dict[str, WorkProduct]) -> None:
+        self.nodes = nodes
+
+    def ids(self, *prefixes: str) -> list[str]:
+        return [str(self.nodes[p].id) for p in prefixes]
+
+
+async def build_live_shelf(twin: InMemoryTwinAPI, *, assembly_bbox: bool = True) -> LiveShelf:
+    cad = WorkProductType.CAD_MODEL
+    parts = {"parts": [{"name": "board"}, {"name": "left"}, {"name": "right"}]}
+    rows: list[tuple[str, str, dict[str, Any]]] = [
+        ("1eb00001", "Left PETG Gusset Bracket", {"bbox_mm": _box(220, 120, 12)}),
+        ("2eb00002", "Right PETG Gusset Bracket", {"bbox_mm": _box(220, 120, 12)}),
+        ("7f2cc6e0", "wall_shelf_board", BOARD_GEOMETRY),
+        (
+            "dd05d813",
+            "Wall Shelf Assembly - plywood board with two PETG brackets",
+            ASSEMBLY_GEOMETRY if assembly_bbox else {},
+        ),
+        ("c897427a", "Shelf Board", BOARD_GEOMETRY),
+        ("6ec0302c", "Shelf Board - 800 x 250 x 18 mm Birch Plywood", BOARD_GEOMETRY),
+        ("5354f43b", "Wall Shelf Assembly", ASSEMBLY_GEOMETRY),
+        ("add83a72", "Shelf Board - 800 x 250 x 18 mm Birch Plywood", BOARD_GEOMETRY),
+        ("4535762b", "Wall Shelf Assembly", {**ASSEMBLY_GEOMETRY, **parts}),
+        ("63d4e171", "Wall Shelf Assembly", {**ASSEMBLY_GEOMETRY, **parts}),
+    ]
+    nodes: dict[str, WorkProduct] = {}
+    for n, (prefix, name, meta) in enumerate(rows):
+        nodes[prefix] = await _wp(
+            twin, name, cad, T0 + timedelta(hours=n), metadata=meta, node_id=_live_id(prefix)
+        )
+    for newer, older in (
+        ("add83a72", "6ec0302c"),
+        ("4535762b", "5354f43b"),
+        ("63d4e171", "4535762b"),
+    ):
+        await twin.add_edge(nodes[newer].id, nodes[older].id, EdgeType.SUPERSEDES)
+    return LiveShelf(nodes)
+
+
+class TestLiveShelfGrouping:
+    """Regressions for the FORGE-529 live dry run on the shelf project."""
+
+    async def test_geometry_evidence_is_read_from_bbox_mm_and_volume(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        live = await build_live_shelf(twin)
+        plan = await ItemMigration(twin).plan(PROJECT)
+        board = _item_with(plan, live.nodes["c897427a"])
+        evidence = next(r.evidence for r in board.revisions if r.rule == "name_similarity")
+        assert "18x250x800 mm" in evidence
+        assert "volume 3.6e+06 mm3" in evidence
+        assert "no bbox" not in evidence
+
+    async def test_clearly_different_geometry_blocks_a_name_similarity_merge(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        await _wp(twin, "Shelf Board", WorkProductType.CAD_MODEL, T0, metadata=BOARD_GEOMETRY)
+        await _wp(
+            twin,
+            "Shelf Board Plywood",
+            WorkProductType.CAD_MODEL,
+            T0 + timedelta(1),
+            metadata={"bbox_mm": _box(800, 250, 138)},
+        )
+        await _wp(
+            twin,
+            "Shelf Board Panel",
+            WorkProductType.CAD_MODEL,
+            T0 + timedelta(2),
+            metadata={"bbox_mm": _box(800, 250, 18), "volume_mm3": 4_200_000.0},
+        )
+        plan = await ItemMigration(twin).plan(PROJECT)
+        assert len(plan.items) == 3
+        assert all(p.confidence == "low" for p in plan.items)
+        assert any(
+            "geometry clearly differs" in reason for p in plan.items for reason in p.review_reasons
+        )
+
+    async def test_an_assembly_is_never_a_revision_of_a_part(self, twin: InMemoryTwinAPI) -> None:
+        live = await build_live_shelf(twin)
+        plan = await ItemMigration(twin).plan(PROJECT)
+        board = _item_with(plan, live.nodes["7f2cc6e0"])
+        members = {r.node_id for r in board.revisions}
+        assert str(live.nodes["dd05d813"].id) not in members
+        assert _item_with(plan, live.nodes["dd05d813"]).item_type == "assembly"
+
+    async def test_containment_alone_does_not_merge(self, twin: InMemoryTwinAPI) -> None:
+        await _wp(twin, "wall_shelf_board", WorkProductType.CAD_MODEL, T0)
+        await _wp(
+            twin,
+            "Wall Shelf Board - plywood panel with two PETG brackets",
+            WorkProductType.CAD_MODEL,
+            T0 + timedelta(1),
+        )
+        plan = await ItemMigration(twin).plan(PROJECT)
+        assert len(plan.items) == 2
+        for entry in plan.items:
+            assert entry.confidence == "low"
+            assert any("too little to group" in r for r in entry.review_reasons)
+
+    async def test_no_chaining_through_a_weakly_joined_member(self, twin: InMemoryTwinAPI) -> None:
+        anchor = await _wp(twin, "Shelf Board", WorkProductType.CAD_MODEL, T0)
+        joined = await _wp(
+            twin, "Shelf Board Plywood Birch", WorkProductType.CAD_MODEL, T0 + timedelta(1)
+        )
+        chained = await _wp(
+            twin, "Board Plywood Birch Panel", WorkProductType.CAD_MODEL, T0 + timedelta(2)
+        )
+        plan = await ItemMigration(twin).plan(PROJECT)
+        board = _item_with(plan, anchor)
+        assert [r.node_id for r in board.revisions] == [str(anchor.id), str(joined.id)]
+        alone = _item_with(plan, chained)
+        assert alone is not board
+        assert any("through a member" in r for r in alone.review_reasons)
+
+    async def test_the_assembly_does_not_join_the_board_through_a_weak_link(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        live = await build_live_shelf(twin)
+        plan = await ItemMigration(twin).plan(PROJECT)
+        board = _item_with(plan, live.nodes["7f2cc6e0"])
+        assert str(live.nodes["5354f43b"].id) not in {r.node_id for r in board.revisions}
+
+    async def test_a_supersedes_chain_crosses_the_cad_model_assembly_split(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        part = await _wp(twin, "Bracket frame", WorkProductType.CAD_MODEL, T0)
+        welded = await _wp(
+            twin,
+            "Shelf Frame Weldment",
+            WorkProductType.CAD_MODEL,
+            T0 + timedelta(1),
+            metadata={"parts": [{"name": "rail"}, {"name": "post"}]},
+        )
+        await twin.add_edge(welded.id, part.id, EdgeType.SUPERSEDES)
+        plan = await ItemMigration(twin).plan(PROJECT)
+        assert len(plan.items) == 1
+        entry = plan.items[0]
+        assert entry.item_type == "assembly"
+        assert [r.node_id for r in entry.revisions] == [str(part.id), str(welded.id)]
+        assert entry.head_node_id == str(welded.id)
+
+    @pytest.mark.parametrize("assembly_bbox", [True, False])
+    async def test_the_live_shelf_groups_as_expected(
+        self, twin: InMemoryTwinAPI, assembly_bbox: bool
+    ) -> None:
+        live = await build_live_shelf(twin, assembly_bbox=assembly_bbox)
+        plan = await ItemMigration(twin).plan(PROJECT)
+
+        board = _item_with(plan, live.nodes["7f2cc6e0"])
+        assert board.item_type == "cad_model"
+        assert [r.node_id for r in board.revisions] == live.ids(
+            "7f2cc6e0", "c897427a", "6ec0302c", "add83a72"
+        )
+        assert board.head_node_id == str(live.nodes["add83a72"].id)
+
+        assembly = _item_with(plan, live.nodes["63d4e171"])
+        assert assembly.key == "ASM-WALL-SHELF-ASSEMBLY"
+        assert assembly.item_type == "assembly"
+        assert [r.node_id for r in assembly.revisions] == live.ids(
+            "5354f43b", "4535762b", "63d4e171"
+        )
+        assert assembly.revisions[0].revision == 1
+        assert assembly.head_node_id == str(live.nodes["63d4e171"].id)
+
+        stray = _item_with(plan, live.nodes["dd05d813"])
+        assert stray is not assembly and stray is not board
+        assert stray.item_type == "assembly"
+        assert stray.confidence == "low"
+        assert stray.key in {p["key"] for p in plan.low_confidence}
+
+        for prefix in ("1eb00001", "2eb00002"):
+            bracket = _item_with(plan, live.nodes[prefix])
+            assert [r.node_id for r in bracket.revisions] == live.ids(prefix)
+        assert len(plan.items) == 5
 
 
 class TestRoutes:
