@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
-import { PC } from '../tokens';
+import { PC, type PreviewMode } from '../tokens';
+import { SimFieldPreview } from '../../simulation/SimFieldPanel';
 import type { TwinNode } from '../../../types/twin';
 
 /**
@@ -23,13 +24,13 @@ import type { TwinNode } from '../../../types/twin';
  * Run/Stop toggle gated on a robot_description node) and shares nothing with
  * an FEA result but the word "sim".
  *
- * Also deliberately not a contour overlay. Per-element stress mapping needs
- * the raw .frd data, which FORGE-246 does not persist anywhere -- only the
- * summary JSON. A contour view is a larger follow-up on top of this, and
- * faking one from the summary would be inventing a field that was never
- * computed.
+ * FORGE-532: a result that stored its 3D field (calculix now persists the
+ * solved surface with per-vertex fields) also gets the contour viewer below
+ * the numbers in the inspector panel and the modal; one recorded before that
+ * shows a "field not stored" note instead, never a contour invented from the
+ * summary. Compact project rows keep the numbers only.
  */
-export function FeaSummaryCard({ node }: { node: TwinNode }) {
+export function FeaSummaryCard({ node, mode = 'panel' }: { node: TwinNode; mode?: PreviewMode }) {
   if (node.properties.wp_type !== 'simulation_result') return null;
 
   const vonMises = numericProperty(node, 'max_von_mises_mpa');
@@ -78,6 +79,12 @@ export function FeaSummaryCard({ node }: { node: TwinNode }) {
             that, so this does not pretend to be a link. */}
         Load case · {typeof loadCase === 'string' && loadCase ? loadCase : 'not recorded'}
       </div>
+
+      {mode !== 'compact' && (
+        <div className="mt-2" data-testid="fea-result-3d">
+          <SimFieldPreview node={node} height={mode === 'modal' ? 520 : 260} />
+        </div>
+      )}
 
       {meshStats && Object.keys(meshStats).length > 0 && (
         <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${PC.border}` }}>

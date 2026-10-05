@@ -2,6 +2,9 @@ import { useRef, useState } from 'react';
 import { EmptyState } from '../components/ui/EmptyState';
 import { LoadCaseDialog, type LoadCaseDialogHandle } from '../components/simulation/LoadCaseDialog';
 import { ResultsCompare } from '../components/simulation/ResultsCompare';
+import { SimFieldPanel } from '../components/simulation/SimFieldPanel';
+import { FieldCompare } from '../components/simulation/FieldCompare';
+import { MeshConvergenceChart } from '../components/simulation/MeshConvergenceChart';
 import { useLoadCases } from '../hooks/use-load-cases';
 import { useSimulationResults } from '../hooks/use-simulation-results';
 import { useActiveProject } from '../hooks/use-active-project';
@@ -57,25 +60,58 @@ function ResultRow({
   result,
   checked,
   onToggle,
+  focused,
+  onFocus,
 }: {
   result: SimulationResult;
   checked: boolean;
   onToggle: (checked: boolean) => void;
+  focused: boolean;
+  onFocus: () => void;
 }) {
   return (
     <tr
-      className="hover:bg-[#282a30] cursor-default"
-      style={{ height: '36px', borderBottom: '1px solid rgba(65,72,90,0.1)' }}
+      className="hover:bg-[#282a30] cursor-pointer"
+      aria-selected={focused}
+      onClick={onFocus}
+      style={{
+        height: '36px',
+        borderBottom: '1px solid rgba(65,72,90,0.1)',
+        background: focused ? 'rgba(230,126,34,0.08)' : undefined,
+        boxShadow: focused ? 'inset 2px 0 0 #e67e22' : undefined,
+      }}
     >
       <td className="px-3">
         <input
           type="checkbox"
           aria-label={`Select ${result.name} for comparison`}
           checked={checked}
+          onClick={(e) => e.stopPropagation()}
           onChange={(e) => onToggle(e.target.checked)}
         />
       </td>
-      <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">{result.name}</td>
+      <td className="px-3 font-mono text-xs text-on-surface whitespace-nowrap">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onFocus();
+          }}
+          className="text-left hover:text-primary-container"
+          aria-label={`Open ${result.name} in 3D`}
+        >
+          {result.name}
+        </button>
+      </td>
+      <td className="px-3 text-xs whitespace-nowrap" title={result.hasField ? '3D field stored' : 'Field not stored'}>
+        <span
+          className="material-symbols-outlined"
+          style={{ fontSize: '14px', color: result.hasField ? '#86cfff' : 'rgba(154,154,170,0.4)', verticalAlign: 'middle' }}
+        >
+          {result.hasField ? 'view_in_ar' : 'block'}
+        </span>
+        <span className="sr-only">{result.hasField ? '3D field stored' : 'Field not stored'}</span>
+      </td>
       <td className="px-3 text-xs text-on-surface-variant whitespace-nowrap">
         {result.loadCase ?? '—'}
       </td>
@@ -92,6 +128,40 @@ function ResultRow({
   );
 }
 
+function geometryLabel(result: SimulationResult): string | null {
+  const g = result.analysedGeometry;
+  if (!g) return null;
+  const name = g.name ?? g.node_id.slice(0, 8);
+  return g.revision !== undefined ? `${name} rev ${g.revision}` : name;
+}
+
+/** FORGE-532: one result in 3D (field viewer or the "field not stored"
+ * note), what it analysed, and its mesh-convergence chart if recorded. */
+function ResultDetail({ result }: { result: SimulationResult }) {
+  const geometry = geometryLabel(result);
+  const fixtures = (result.fixtures ?? []).map((f) => String(f.label ?? f.kind ?? '')).filter(Boolean);
+  return (
+    <div data-testid="result-detail" className="mt-4 flex flex-col gap-3">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h3 className="font-mono text-xs text-on-surface" style={{ margin: 0 }}>
+          {result.name}
+        </h3>
+        {geometry && (
+          <span className="font-mono text-[10px] text-on-surface-variant">Geometry · {geometry}</span>
+        )}
+        {result.loadCase && (
+          <span className="font-mono text-[10px] text-on-surface-variant">Load case · {result.loadCase}</span>
+        )}
+        {fixtures.length > 0 && (
+          <span className="font-mono text-[10px] text-on-surface-variant">Fixtures · {fixtures.join(', ')}</span>
+        )}
+      </div>
+      <SimFieldPanel resultId={result.id} hasField={result.hasField} title={result.name} />
+      {result.meshConvergence && <MeshConvergenceChart convergence={result.meshConvergence} />}
+    </div>
+  );
+}
+
 /** FORGE-278/FORGE-279: Sim tab — load cases as reusable work products, and
  * the FEA results (persisted by FORGE-246) they produced, comparable
  * side by side. */
@@ -102,6 +172,7 @@ export function SimPage() {
     activeProjectId ?? undefined,
   );
   const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
+  const [focusedResultId, setFocusedResultId] = useState<string | null>(null);
   const dialogRef = useRef<LoadCaseDialogHandle>(null);
   const newLoadCaseButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -122,6 +193,10 @@ export function SimPage() {
 
   // Oldest first, so the compare panel reads as "change from A to B"
   // regardless of which row was checked first.
+  // FORGE-532: the result open in 3D, defaulting to the newest one.
+  const focusedResult =
+    resultItems.find((r) => r.id === focusedResultId) ?? resultItems[0] ?? null;
+
   const selectedResults = resultItems
     .filter((r) => selectedResultIds.includes(r.id))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -255,6 +330,7 @@ export function SimPage() {
                     {[
                       { label: '', align: 'left' },
                       { label: 'Name', align: 'left' },
+                      { label: '3D', align: 'left' },
                       { label: 'Load Case', align: 'left' },
                       { label: 'Max Stress', align: 'right' },
                       { label: 'Max Displacement', align: 'right' },
@@ -277,6 +353,8 @@ export function SimPage() {
                       result={result}
                       checked={selectedResultIds.includes(result.id)}
                       onToggle={(checked) => toggleResult(result.id, checked)}
+                      focused={focusedResult?.id === result.id}
+                      onFocus={() => setFocusedResultId(result.id)}
                     />
                   ))}
                 </tbody>
@@ -286,8 +364,17 @@ export function SimPage() {
 
           {(() => {
             const [first, second] = selectedResults;
-            return first && second ? <ResultsCompare a={first} b={second} /> : null;
+            return first && second ? (
+              <>
+                <ResultsCompare a={first} b={second} />
+                <FieldCompare a={first} b={second} />
+              </>
+            ) : null;
           })()}
+
+          {focusedResult && selectedResults.length < 2 && (
+            <ResultDetail key={focusedResult.id} result={focusedResult} />
+          )}
         </div>
       )}
     </div>

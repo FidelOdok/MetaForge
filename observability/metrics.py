@@ -275,6 +275,33 @@ class MetricsRegistry:
         labels=["item_type", "outcome"],
     )
 
+    # ── Simulation result field metrics (FORGE-532) ──────────────────
+    #: One per solved run: did the 3D field payload build (``built``), build
+    #: only after decimation (``decimated``), or fail (``failed``)? A failure
+    #: never fails the solve, so this counter is the only place it shows.
+    SIM_FIELD_PAYLOAD_TOTAL = MetricDefinition(
+        name="metaforge_sim_field_payload_total",
+        type="counter",
+        description="CalculiX result field payload builds, by analysis type and outcome",
+        labels=["analysis_type", "outcome"],
+    )
+    SIM_FIELD_PAYLOAD_BYTES = MetricDefinition(
+        name="metaforge_sim_field_payload_bytes",
+        type="histogram",
+        description="Compressed size of a CalculiX result field payload",
+        labels=["analysis_type"],
+        unit="By",
+        buckets=[10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000, 1_500_000],
+    )
+    #: Recorder side: a simulation_result whose field blob did (``stored``)
+    #: or did not (``failed``) reach MinIO, or was rejected (``invalid``).
+    SIM_FIELD_STORE_TOTAL = MetricDefinition(
+        name="metaforge_sim_field_store_total",
+        type="counter",
+        description="Simulation result field blobs stored to MinIO, by outcome",
+        labels=["outcome"],
+    )
+
     # ── Telemetry / MQTT metrics (MET-119) ───────────────────────────
     MQTT_MESSAGES_RECEIVED_TOTAL = MetricDefinition(
         name="metaforge_mqtt_messages_received_total",
@@ -696,7 +723,17 @@ class MetricsRegistry:
             + cls.harness_metrics()
             + cls.mcp_metrics()
             + cls.design_flow_metrics()
+            + cls.sim_field_metrics()
         )
+
+    @classmethod
+    def sim_field_metrics(cls) -> list[MetricDefinition]:
+        """Simulation result field metrics (FORGE-532)."""
+        return [
+            cls.SIM_FIELD_PAYLOAD_TOTAL,
+            cls.SIM_FIELD_PAYLOAD_BYTES,
+            cls.SIM_FIELD_STORE_TOTAL,
+        ]
 
     @classmethod
     def design_flow_metrics(cls) -> list[MetricDefinition]:
@@ -1316,6 +1353,24 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_TOOL_REFUSAL_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"tool_name": tool_name, "source": source})
+
+    def record_sim_field_payload(
+        self, analysis_type: str, outcome: str, size_bytes: int | None = None
+    ) -> None:
+        """Count one result-field payload build, and its size when built (FORGE-532)."""
+        counter = self._instruments.get(MetricsRegistry.SIM_FIELD_PAYLOAD_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"analysis_type": analysis_type, "outcome": outcome})
+        if size_bytes is not None:
+            hist = self._instruments.get(MetricsRegistry.SIM_FIELD_PAYLOAD_BYTES.name)
+            if hist is not None:
+                hist.record(size_bytes, attributes={"analysis_type": analysis_type})
+
+    def record_sim_field_store(self, outcome: str) -> None:
+        """Count one simulation_result field blob store attempt (FORGE-532)."""
+        counter = self._instruments.get(MetricsRegistry.SIM_FIELD_STORE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
 
     def record_chat_ungrounded_claim(self, kind: str) -> None:
         """Count one chat reply flagged as ungrounded (FORGE-520)."""

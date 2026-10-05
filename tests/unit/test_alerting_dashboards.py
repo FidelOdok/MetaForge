@@ -102,9 +102,10 @@ class TestAlertingRules:
         # + 1 chat ungrounded claims sustained (FORGE-520).
         # + 1 item revision link failures (FORGE-523).
         # + 1 run change-set approvals refused (FORGE-525).
+        # + 2 simulation result field build / store failures (FORGE-532).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 43
+        assert len(rules) == 45
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -154,7 +155,8 @@ class TestAlertingRules:
         # + 1 chat ungrounded claims sustained (FORGE-520)
         # + 1 item revision link failures (FORGE-523)
         # + 1 run change-set approvals refused (FORGE-525)
-        assert len(warnings) == 32
+        # + 2 simulation result field build / store failures (FORGE-532)
+        assert len(warnings) == 34
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -193,6 +195,9 @@ class TestAlertingRules:
                 "ChatUngroundedClaimsSustained",
                 "ConsolidationContradictionsRising",
                 "ContextTruncationSpike",
+                # FORGE-532: 3D result fields failing to build or to store.
+                "SimFieldPayloadFailures",
+                "SimFieldStoreFailures",
                 # FORGE-401: an unanswered gate ends the run rejected, so a
                 # sustained rate means the approval queue is unattended --
                 # counted apart from outcome="rejected", which is a reviewer

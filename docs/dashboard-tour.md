@@ -281,23 +281,25 @@ the list.
 
 Selecting a `simulation_result` node adds an **FEA result** panel to the
 inspector: max von Mises and max displacement with their units, the
-load case that produced them, and the mesh statistics. It links to
-`/sim`, which is where two results compare side by side.
+load case that produced them, the mesh statistics and, when the run
+stored its field (FORGE-532), the 3D contour viewer described under
+`/sim` below. A result recorded before fields were persisted shows a
+*Field not stored* note instead of a contour. The panel links to `/sim`,
+which is where two results compare side by side.
 
-Two things that panel deliberately does not do. It is not the toolbar's
-**Sim** button, which is an unrelated robotics-physics preview (gravity,
-joint constraints, a Run/Stop toggle gated on a `robot_description`
-node) and shares nothing with an FEA result but the word. And it shows
-no stress contour on the geometry: per-element results live in the
-CalculiX `.frd` file, which is not persisted anywhere today, so a
-contour would have to be invented rather than read.
+The panel is not the toolbar's **Sim** button, which is an unrelated
+robotics-physics preview (gravity, joint constraints, a Run/Stop toggle
+gated on a `robot_description` node) and shares nothing with an FEA
+result but the word.
 
 - **Backed by:** `GET /v1/twin/nodes`, `GET /v1/twin/relationships`,
   `GET /v1/twin/nodes/{id}/model`, `GET /v1/twin/nodes/{id}/file`,
   `GET /v1/twin/nodes/{id}/versions`, and the chat routes under
   `/v1/chat`. The FEA panel reads the node's own `meshStats` plus the
   scalar `max_von_mises_mpa` / `max_displacement_mm` / `load_case`
-  properties; `GET /v1/simulation/results` backs the `/sim` listing.
+  properties, and its contour comes from
+  `GET /v1/simulation/results/{id}/field`; `GET /v1/simulation/results`
+  backs the `/sim` listing.
 - **Sample workspace.** `/twin?demo=1&node=sample-pcb` (the topbar's
   **Sample** link) opens an illustrative drone flight-controller
   workspace that runs entirely in the browser with no gateway. It is
@@ -330,7 +332,7 @@ extension); otherwise a per-type default applies.
 | KiCad viewer | `.kicad_sch`, `.kicad_pcb`, `schematic`, `pcb_layout` | Not available yet: no embeddable KiCad viewer ships as an npm package. Says so and offers the download. |
 | Gerber renderer | `.gbr`, `.gtl`, `.gbl` and the other layer extensions, `.drl` | The layer drawn by tracespace. A zipped Gerber set is not unpacked. |
 | DXF viewer | `.dxf` | Lines, polylines, arcs, circles, ellipses, splines and text drawn from dxf-parser. |
-| FEA summary | `simulation_result` | The FEA result card described above. |
+| FEA summary | `simulation_result` | The FEA result card described above, with the 3D field viewer (FORGE-532) in the inspector and the modal; project rows show the numbers only. |
 | Image, PDF, HTML sketch | `.png`/`.jpg`/`.svg`/`.webp`, `.pdf`, `.html` | As before. |
 | Robot viewer | `robot_description` | Unchanged: open it in the main 3D viewer. |
 
@@ -340,6 +342,35 @@ fetch the file body. The inspector panel leaves 3D, robot, PDF and HTML to
 the 3D viewer and the full-screen modal. The heavy engines (the 3D scene,
 the Gerber and DXF renderers, the Markdown and table renderers) load on
 first use, so the page bundles barely grow.
+
+## `/sim`: simulation
+
+Load cases (reusable boundary conditions, with a 3D face picker for the
+fixed and loaded faces) and the project's FEA results.
+
+Click a result's name to open it in 3D; the newest opens by default. The
+viewer colours the solved mesh by von Mises stress, displacement magnitude
+or temperature (pick one in the toolbar), with a legend showing the
+full-field minimum, maximum and peak. The **Deform** slider scales the
+displacement so the deflected shape is visible; it starts at a scale that
+makes the largest deflection about 5% of the part size. Fixtures show as
+blue boxes and loads as orange arrows (both also listed in the legend in
+words), the peak as a white dot, and hovering the mesh reads out the value
+under the cursor. A *Simplified from N triangles* note appears when the
+stored surface was decimated to fit its size cap.
+
+Tick two results to compare them: the numeric deltas, then the two fields
+side by side with one camera (orbit either and both follow), one quantity
+and one colour scale spanning both, so equal colours mean equal values. A
+result that recorded a mesh-convergence sweep also shows a chart of peak
+stress against element count with the *Converged* or *Not converged*
+verdict. A result recorded without a field keeps its numbers and says
+*Field not stored*.
+
+- **Backed by:** `GET/POST /v1/simulation/load-cases`,
+  `POST /v1/simulation/named-faces`, `GET /v1/simulation/results`,
+  `GET /v1/simulation/results/{id}/field`. See
+  [Simulation results in 3D](simulation-results.md).
 
 ## `/files`: files & artifacts
 

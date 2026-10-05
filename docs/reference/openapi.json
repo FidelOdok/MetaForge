@@ -9808,9 +9808,82 @@
       "SimulationResultResponse": {
         "description": "One FEA result, in the dashboard's camelCase shape (FORGE-279).",
         "properties": {
+          "analysedGeometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysedgeometry"
+          },
+          "analysisType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysistype"
+          },
           "createdAt": {
             "title": "Createdat",
             "type": "string"
+          },
+          "fieldQuantities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fieldquantities",
+            "type": "array"
+          },
+          "fieldRanges": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fieldranges"
+          },
+          "fieldSizeBytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fieldsizebytes"
+          },
+          "fixtures": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixtures"
+          },
+          "hasField": {
+            "default": false,
+            "title": "Hasfield",
+            "type": "boolean"
           },
           "id": {
             "title": "Id",
@@ -9827,6 +9900,33 @@
             ],
             "title": "Loadcase"
           },
+          "loadCaseSpec": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loadcasespec"
+          },
+          "loads": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loads"
+          },
           "maxDisplacementMm": {
             "anyOf": [
               {
@@ -9838,6 +9938,17 @@
             ],
             "title": "Maxdisplacementmm"
           },
+          "maxTemperatureC": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxtemperaturec"
+          },
           "maxVonMisesMpa": {
             "anyOf": [
               {
@@ -9848,6 +9959,18 @@
               }
             ],
             "title": "Maxvonmisesmpa"
+          },
+          "meshConvergence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meshconvergence"
           },
           "meshStats": {
             "anyOf": [
@@ -17454,6 +17577,48 @@
           }
         },
         "summary": "List Simulation Results",
+        "tags": [
+          "simulation"
+        ]
+      }
+    },
+    "/v1/simulation/results/{result_id}/field": {
+      "get": {
+        "description": "Serve a simulation_result's 3D result field (FORGE-532).\n\n404 ``field not stored`` for a result recorded without one (every\nresult before FORGE-532, or one whose MinIO write failed); the\ndashboard treats that as \"show the numbers only\".",
+        "operationId": "get_simulation_result_field_v1_simulation_results__result_id__field_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "result_id",
+            "required": true,
+            "schema": {
+              "title": "Result Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.metaforge.sim-field+json": {}
+            },
+            "description": "The result's gzipped metaforge.sim_field JSON payload (Content-Encoding: gzip)."
+          },
+          "404": {
+            "description": "No such result, or the result has no stored field."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Simulation Result Field",
         "tags": [
           "simulation"
         ]

@@ -60,10 +60,8 @@ function DeltaCell({
 }
 
 /** FORGE-279: numeric side-by-side comparison of two simulation_result work
- * products — a real, working slice of "compared across versions". A full
- * mesh contour/colorMap overlay (this ticket's other DoD bullet) needs mesh
- * geometry persisted to the Twin, which isn't wired yet (the same gap
- * FORGE-277 already flagged for its face picker) — deferred separately. */
+ * products. FORGE-532 added the 3D contour compare beside it
+ * (FieldCompare), for results that stored their field. */
 export function ResultsCompare({ a, b }: ResultsCompareProps) {
   return (
     <div

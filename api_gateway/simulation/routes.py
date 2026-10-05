@@ -25,6 +25,16 @@ dashboard's Sim tab can list and compare from. There is deliberately no
 ``twin.record_document`` path (a result without a real FEA run behind it
 would be worse than no result at all).
 
+FORGE-532: each listed result also says whether its 3D result field was
+stored (``hasField``) and what it holds, which geometry it analysed, its
+boundary conditions and any mesh-convergence verdict; ``GET
+/v1/simulation/results/{id}/field`` serves the field itself (gzipped
+``metaforge.sim_field`` JSON, ``Content-Encoding: gzip`` so a browser
+inflates it transparently). A result recorded before FORGE-532 has no
+field: the list says ``hasField: false`` and the route answers 404 with
+``field not stored``, which the dashboard shows as a note rather than an
+error.
+
 FORGE-277: ``POST /v1/simulation/named-faces`` is unrelated to load cases/
 results but lives here too -- it backs the load-case dialog's face picker,
 bridging to the ``freecad.list_named_faces`` MCP tool.
@@ -37,7 +47,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
@@ -93,6 +103,22 @@ class SimulationResultResponse(BaseModel):
     projectId: str  # noqa: N815
     createdAt: str  # noqa: N815
     updatedAt: str  # noqa: N815
+    # FORGE-532: 3D result field + what was analysed. All optional, so a
+    # result recorded before the field existed lists exactly as it did.
+    maxTemperatureC: float | None = None  # noqa: N815
+    analysisType: str | None = None  # noqa: N815 — static_stress | modal | thermal
+    hasField: bool = False  # noqa: N815
+    fieldQuantities: list[str] = Field(default_factory=list)  # noqa: N815
+    fieldRanges: dict[str, Any] | None = None  # noqa: N815
+    fieldSizeBytes: int | None = None  # noqa: N815
+    analysedGeometry: dict[str, Any] | None = None  # noqa: N815 — {node_id, revision, ...}
+    loadCaseSpec: dict[str, Any] | None = None  # noqa: N815
+    fixtures: list[dict[str, Any]] | None = None
+    loads: list[dict[str, Any]] | None = None
+    # calculix.check_mesh_convergence output recorded on the result:
+    # {points: [{element_size_mm, max_von_mises_mpa, element_count?}],
+    #  changes, converged, recommendation}.
+    meshConvergence: dict[str, Any] | None = None  # noqa: N815
 
 
 class SimulationResultListResponse(BaseModel):
@@ -221,18 +247,54 @@ async def create_load_case(body: CreateLoadCaseRequest) -> LoadCaseResponse:
         return _wp_to_load_case(wp)
 
 
+def _dict_or_none(value: Any) -> dict[str, Any] | None:
+    return value if isinstance(value, dict) else None
+
+
+def _dict_list_or_none(value: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(value, list):
+        return None
+    return [v for v in value if isinstance(v, dict)]
+
+
+def _float_or_none(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
 def _wp_to_simulation_result(wp: WorkProduct) -> SimulationResultResponse:
     md = wp.metadata or {}
+    quantities = md.get("field_quantities")
+    load_case = md.get("load_case")
+    analysis_type = md.get("field_analysis_type") or md.get("analysis_type")
     return SimulationResultResponse(
         id=str(wp.id),
         name=wp.name,
-        maxVonMisesMpa=md.get("max_von_mises_mpa"),
-        maxDisplacementMm=md.get("max_displacement_mm"),
-        loadCase=md.get("load_case"),
-        meshStats=md.get("mesh_stats") if isinstance(md.get("mesh_stats"), dict) else None,
+        maxVonMisesMpa=_float_or_none(md.get("max_von_mises_mpa")),
+        maxDisplacementMm=_float_or_none(md.get("max_displacement_mm")),
+        loadCase=load_case if isinstance(load_case, str) else None,
+        meshStats=_dict_or_none(md.get("mesh_stats")),
         projectId=str(wp.project_id) if wp.project_id else "",
         createdAt=wp.created_at.isoformat(),
         updatedAt=wp.updated_at.isoformat(),
+        maxTemperatureC=_float_or_none(md.get("max_temperature_c")),
+        analysisType=analysis_type if isinstance(analysis_type, str) else None,
+        hasField=bool(md.get("field_stored") and md.get("field_object_key")),
+        fieldQuantities=[q for q in quantities if isinstance(q, str)]
+        if isinstance(quantities, list)
+        else [],
+        fieldRanges=_dict_or_none(md.get("field_ranges")),
+        fieldSizeBytes=md.get("field_size_bytes")
+        if isinstance(md.get("field_size_bytes"), int)
+        else None,
+        analysedGeometry=_dict_or_none(md.get("analysed_geometry")),
+        loadCaseSpec=_dict_or_none(md.get("load_case_spec")),
+        fixtures=_dict_list_or_none(md.get("fixtures")),
+        loads=_dict_list_or_none(md.get("loads")),
+        meshConvergence=_dict_or_none(md.get("mesh_convergence")),
     )
 
 
@@ -261,6 +323,64 @@ async def list_simulation_results(project_id: str | None = None) -> SimulationRe
         span.set_attribute("simulation.count", len(results))
         logger.info("simulation_results_listed", count=len(results), project_id=project_id)
         return SimulationResultListResponse(results=results, total=len(results))
+
+
+#: Served media type of a result field (the inflated body is JSON).
+SIM_FIELD_MEDIA_TYPE = "application/vnd.metaforge.sim-field+json"
+
+
+@router.get(
+    "/results/{result_id}/field",
+    response_class=Response,
+    responses={
+        200: {
+            "description": (
+                "The result's gzipped metaforge.sim_field JSON payload (Content-Encoding: gzip)."
+            ),
+            "content": {SIM_FIELD_MEDIA_TYPE: {}},
+        },
+        404: {"description": "No such result, or the result has no stored field."},
+    },
+)
+async def get_simulation_result_field(result_id: str) -> Response:
+    """Serve a simulation_result's 3D result field (FORGE-532).
+
+    404 ``field not stored`` for a result recorded without one (every
+    result before FORGE-532, or one whose MinIO write failed); the
+    dashboard treats that as "show the numbers only".
+    """
+    with tracer.start_as_current_span("simulation.get_result_field") as span:
+        span.set_attribute("simulation.result_id", result_id)
+        try:
+            uid = UUID(result_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid result id format")
+        wp = await _twin.get_work_product(uid)
+        if wp is None or wp.type != WorkProductType.SIMULATION_RESULT:
+            raise HTTPException(status_code=404, detail="Simulation result not found")
+        md = wp.metadata or {}
+        key = md.get("field_object_key")
+        if not (md.get("field_stored") and isinstance(key, str) and key):
+            span.set_attribute("simulation.field_stored", False)
+            raise HTTPException(status_code=404, detail="field not stored")
+
+        from api_gateway.twin.blob_store import fetch_work_product_blob
+
+        try:
+            content = fetch_work_product_blob(key)
+        except Exception as exc:  # noqa: BLE001 — storage misconfigured / object gone
+            span.record_exception(exc)
+            logger.warning("simulation_field_fetch_failed", result_id=result_id, error=str(exc))
+            raise HTTPException(
+                status_code=502, detail="Result field could not be read from storage"
+            ) from exc
+        span.set_attribute("simulation.field_size", len(content))
+        logger.info("simulation_field_served", result_id=result_id, size=len(content))
+        headers = {"Content-Encoding": "gzip", "Cache-Control": "private, max-age=3600"}
+        etag = md.get("field_content_hash")
+        if isinstance(etag, str) and etag:
+            headers["ETag"] = f'"{etag}"'
+        return Response(content=content, media_type=SIM_FIELD_MEDIA_TYPE, headers=headers)
 
 
 @router.post("/named-faces", response_model=NamedFacesResponse)

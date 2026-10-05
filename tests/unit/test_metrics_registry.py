@@ -69,7 +69,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 twin item revisions (FORGE-523)
         # + 1 twin run change sets (FORGE-525)
         # + 1 design-flow item slots (FORGE-524)
-        assert len(all_metrics) == 74
+        # + 3 simulation result field payload/store (FORGE-532)
+        assert len(all_metrics) == 77
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -107,6 +108,7 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.harness_metrics())
             + len(MetricsRegistry.mcp_metrics())
             + len(MetricsRegistry.design_flow_metrics())
+            + len(MetricsRegistry.sim_field_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 
@@ -132,6 +134,7 @@ class TestMetricsRegistryGroupedAccess:
             MetricsRegistry.harness_metrics(),
             MetricsRegistry.mcp_metrics(),
             MetricsRegistry.design_flow_metrics(),
+            MetricsRegistry.sim_field_metrics(),
         ]
         grouped = {m.name for group in groups for m in group}
         registered = {m.name for m in MetricsRegistry.all_metrics()}
