@@ -51,5 +51,11 @@ def build_retry_feedback(*, findings: Sequence[str], reason: str, attempt: int) 
         lines.extend(f"  - {f}" for f in findings)
     if reason.strip():
         lines.append(f"Reviewer's reason: {reason.strip()}")
+    # FORGE-525: the previous attempt's twin writes were drafts and were closed,
+    # so nothing it recorded is current. Saying so stops a phase "reusing" them.
+    lines.append(
+        "What the previous attempt recorded in the twin was discarded (it never became "
+        "current); record this attempt's work again."
+    )
     lines.append("Fix exactly these problems before you reply.")
     return "\n".join(lines)

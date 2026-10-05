@@ -1172,8 +1172,8 @@ An `Item` node (`NodeType.ITEM`, `twin_core/models/item.py`) carries `key`, `ite
 
 | Edge | Direction | Metadata |
 |------|-----------|----------|
-| `REVISION_OF` | revision node -> Item | `revision`, `change_reason`, `run_id`, `author`, `created_at`; `adopted: true` for a pre-existing node folded in |
-| `HEAD` | Item -> current revision node | none; exactly one per item, moved on every revision |
+| `REVISION_OF` | revision node -> Item | `revision`, `change_reason`, `run_id`, `author`, `created_at`; `adopted: true` for a pre-existing node folded in; FORGE-525: `status`, and for a run's drafts `change_set`, `phase`, `base_revision`, `prior_node_id` (below) |
+| `HEAD` | Item -> current revision node | none; at most one per item, moved on every revision outside a run and on a gate approval inside one |
 | `SUPERSEDES` | revision n+1 -> revision n | unchanged meaning; staleness propagation (FORGE-314) still follows it |
 
 Edges and properties, deliberately both. The edges keep history traversable in Cypher and let a node written before items existed join an item without touching its properties. `head_revision` / `head_node_id` on the Item mirror `HEAD`, so a head read is one node fetch (the same denormalized-mirror precedent as `Baseline.includes`). History is always read from the `REVISION_OF` edges. A revision created through the new path is also stamped at creation with `metadata.item_key`, `item_revision`, `item_type` and, when present, `change_reason`, `run_id`, `revision_author`, so a node read on its own says which revision it is.
@@ -1189,17 +1189,39 @@ No caller has to do anything new. The recorder resolves the item before any writ
 3. Otherwise, in the same project: an item of the same type family whose head has the same name, or whose key the name derives to (so `Shelf Bracket` and `shelf-bracket` are one item).
 4. Otherwise, for geometry only, today's same-name rule: the current same-named `cad_model` with no item is adopted, together with its whole `SUPERSEDES` chain, as revisions `@1..@k`, and the new write becomes `@k+1`.
 
-Nothing found means a new item at revision 1. An unscoped write (no `project_id`) with neither `item_key` nor `supersedes` gets no item, the same rule the geometry `SUPERSEDES` chain always followed: with no project there is no identity to match on. Author and run come from the MCP call context (`actor_id`, and `run_id` when a design-flow worker makes the call); `run_id` is otherwise null until run-scoped change sets (FORGE-525). Every definition write tool returns `item_key`, `revision` and `item_ref` (`KEY@n`).
+Nothing found means a new item at revision 1. An unscoped write (no `project_id`) with neither `item_key` nor `supersedes` gets no item, the same rule the geometry `SUPERSEDES` chain always followed: with no project there is no identity to match on. Author and run come from the MCP call context (`actor_id`, and `run_id` when a design-flow run makes the call; `run_id` is null outside a run). Every definition write tool returns `item_key`, `revision` and `item_ref` (`KEY@n`); a write inside a run also returns `revision_status: "draft"`. Revision numbers are `max(last_revision, head_revision) + 1`, so a number is never handed out twice, drafts included.
 
-Reads: `GET /v1/twin/items?project_id=` lists items at their heads; `GET /v1/twin/items/{key}/revisions` returns one item's history, oldest first; the MCP tool `twin.item_history` returns the same by key or by any revision's node id. `GET /v1/twin/nodes` is unchanged (it still lists every node), and `GET /v1/twin/relationships` omits `REVISION_OF` / `HEAD` because their Item endpoints are not in the node list.
+Reads: `GET /v1/twin/items?project_id=` lists items at their heads; `GET /v1/twin/items/{key}/revisions` returns one item's history, oldest first; the MCP tool `twin.item_history` returns the same by key or by any revision's node id. `GET /v1/twin/nodes` lists every node except unapproved drafts (below), and `GET /v1/twin/relationships` omits `REVISION_OF` / `HEAD` because their Item endpoints are not in the node list.
 
-Concurrent writes: two writes to one item can both plan revision n+1. Before linking, each write re-reads the item's head. The one that finds the head already moved is renumbered to n+2 and supersedes the actual head, and its node's `item_revision` stamp is corrected (`item_revision_race` logs the planned and assigned numbers). A write pinned with `KEY@n` is refused instead, with the same stale-revision error as at planning time; its node stays saved but is not a revision of the item. The re-read and the link are not one transaction, so this narrows the window rather than closing it; run-scoped change sets (FORGE-525) are where writes to one item get serialised.
+Concurrent writes: two writes to one item can both plan revision n+1. Before linking, each write re-reads the item's head. The one that finds the head already moved is renumbered to the next free number and supersedes the actual head, and its node's `item_revision` stamp is corrected (`item_revision_race` logs the planned and assigned numbers). A write pinned with `KEY@n` is refused instead, with the same stale-revision error as at planning time; its node stays saved but is not a revision of the item. The re-read and the link are not one transaction, so this narrows the window rather than closing it; inside a run the base check at approval (FORGE-525, below) catches what it misses.
+
+#### Drafts, approval and closed drafts (FORGE-525)
+
+A definition written inside a design-flow run is a **draft** in that run's change set. The node is created as usual (stamped `metadata.change_set = <run id>` at creation) and linked by `REVISION_OF`, but `HEAD` does not move and no `SUPERSEDES` is added, so for everyone outside the run the head is still current. The run's gate decides what it becomes. Each `REVISION_OF` edge carries a `status`:
+
+| Status | Meaning | Head |
+|--------|---------|------|
+| `committed` | written outside any run (the FORGE-523 behaviour, unchanged) | moved immediately |
+| `draft` | written inside run `change_set`, in phase `phase`, on base revision `base_revision` | not moved |
+| `approved` | committed by the run's gate: `gate`, `decided_by`, `approved_at`; `change_reason` is the gate's reason (the agent's own is kept as `draft_change_reason`) | moved to the run's latest draft; `SUPERSEDES` added to what it replaced |
+| `rejected` | closed by a gate rejection (`status_reason`, `closed_at`) | never moved |
+| `abandoned` | closed by a retry, a rework, a failed or canceled run, or a conflict at run completion | never moved |
+
+The `Item` gains `last_revision` (the highest number handed out) and `drafts`, a map from run id to that run's open draft: `revision`, `node_id`, `base_revision`, `base_node_id`, `phase`, `name`. An item first written inside a run has no head (`head_node_id` null, `head_revision` 0) until its gate approves.
+
+Who sees what:
+
+- **The run itself** sees its drafts over the head: `resolve_item_ref` and `twin.item_history` / `twin.get_node` with `item_key` resolve a bare `KEY` to the run's latest draft; a second write to the same item in the same run revises that draft.
+- **Everyone else** (the dashboard, other runs, `GET /v1/twin/items`, `GET /v1/twin/items/{key}/revisions` by default) sees approved heads only. Another run's open drafts are not in a history; `GET /v1/twin/nodes` leaves out open, rejected and abandoned drafts unless `include_drafts=true`; an item with no head yet is not listed. `GET /v1/twin/items/{key}/revisions?run_id=` reads as that run, drafts included.
+- **Closed drafts** (rejected, abandoned) stay in every item's history with their status and reason, and never become current.
+
+Approval is atomic and optimistic (spec sections 40 and 41): each item's head must still be the base the run drafted on, or the whole commit is refused with `PATCH_CONFLICT` and nothing moves. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate-forge-525) for the gate side.
 
 Limits of this first slice: the old revisions of a constraint set keep their `Constraint` nodes, so the constraint engine still evaluates them; the project-wide migration of today's unlinked duplicates is FORGE-529.
 
 Observability: `item_revision_created` / `item_revision_failed` log events, the `metaforge_twin_item_revision_total{item_type, outcome, resolved_by}` counter, and the `TwinItemRevisionLinkFailures` alert. A failed link never fails the write (the node already exists, and failing would invite a retry that duplicates it); the result carries `item_warning` instead.
 
-*Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`*
+*Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/items/change_sets.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`, `api_gateway/runs/change_sets.py`*
 
 ---
 
@@ -1222,7 +1244,7 @@ Edges are directed relationships between nodes. Each edge type has defined sourc
 | `REALIZED_BY` | HierarchyNode -> WorkProduct | FORGE-260: a hierarchy position's real cad_model/robot_description geometry |
 | `INSTANCE_OF` | HierarchyNode -> BOMItem, or DeviceInstance -> WorkProduct | FORGE-260: a COTS leaf position is an instance of one canonical component record. FORGE-321: a manufactured unit is an instance of the design revision it was built from |
 | `MEASURED_BY` | DeviceInstance -> WorkProduct | FORGE-321: a real-world measurement from this unit was recorded against an interface quantity embedded in this system_architecture WorkProduct |
-| `REVISION_OF` | revision node -> Item | FORGE-523: this node is revision `metadata.revision` of the item (section 2.30) |
+| `REVISION_OF` | revision node -> Item | FORGE-523: this node is revision `metadata.revision` of the item (section 2.30); FORGE-525: `metadata.status` is `committed`, `draft`, `approved`, `rejected` or `abandoned` |
 | `HEAD` | Item -> revision node | FORGE-523: the item's current revision; exactly one per item |
 
 ### Typed Edge Models

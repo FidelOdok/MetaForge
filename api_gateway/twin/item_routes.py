@@ -4,6 +4,11 @@
 definition, showing its head) and ``GET /v1/twin/items/{key}/revisions``
 returns one item's history, oldest first. Read-only: items and revisions are
 created by the existing write paths, never through this router.
+
+FORGE-525: both show approved state only. An item whose revisions are all
+still drafts of a run is not listed, and another run's open drafts are not in
+a history. ``?run_id=`` on the history route reads it as that run does, with
+the run's own drafts (opt-in, for reviewing what a gate would commit).
 """
 
 from __future__ import annotations
@@ -29,10 +34,15 @@ class ItemResponse(BaseModel):
     name: str
     project_id: str | None = None
     head_revision: int
-    head_node_id: str
-    head_ref: str
+    #: ``None`` only for an item that has drafts and no approved revision yet.
+    head_node_id: str | None = None
+    head_ref: str | None = None
     created_at: datetime
     updated_at: datetime
+    #: FORGE-525: set only when reading as a run that has a draft of this item.
+    draft_revision: int | None = None
+    draft_node_id: str | None = None
+    draft_ref: str | None = None
 
 
 class ItemListResponse(BaseModel):
@@ -50,11 +60,25 @@ class ItemRevisionResponse(BaseModel):
     created_at: datetime | None = None
     is_head: bool
     adopted: bool
+    #: FORGE-525: committed | draft | approved | rejected | abandoned.
+    status: str = "committed"
+    change_set: str | None = None
+    phase: str | None = None
+    gate: str | None = None
+    status_reason: str | None = None
+
+
+class ItemCurrentResponse(BaseModel):
+    revision: int
+    node_id: str
+    ref: str
 
 
 class ItemHistoryResponse(BaseModel):
     item: ItemResponse
     revisions: list[ItemRevisionResponse]
+    #: What the reader sees as current: its run's draft, else the head.
+    current: ItemCurrentResponse | None = None
 
 
 def _twin() -> object:
@@ -93,7 +117,13 @@ async def list_twin_items(
 
 
 @router.get("/items/{key}/revisions", response_model=ItemHistoryResponse)
-async def get_item_revisions(key: str, project_id: str | None = None) -> ItemHistoryResponse:
+async def get_item_revisions(
+    key: str,
+    project_id: str | None = None,
+    run_id: str | None = Query(
+        default=None, description="Read as this design-flow run: include its open drafts"
+    ),
+) -> ItemHistoryResponse:
     """Every revision of one item, oldest first. ``key`` may carry an ``@n`` suffix."""
     from api_gateway.twin.item_revisions import make_item_history_reader
     from twin_core.items import AmbiguousItemKeyError, ItemError, UnknownItemError
@@ -103,7 +133,7 @@ async def get_item_revisions(key: str, project_id: str | None = None) -> ItemHis
         _parse_project(project_id)
         read = make_item_history_reader(_twin())
         try:
-            data = await read(item_key=key, project_id=project_id)
+            data = await read(item_key=key, project_id=project_id, run_id=run_id)
         except UnknownItemError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except AmbiguousItemKeyError as exc:
@@ -113,4 +143,5 @@ async def get_item_revisions(key: str, project_id: str | None = None) -> ItemHis
         return ItemHistoryResponse(
             item=ItemResponse(**data["item"]),
             revisions=[ItemRevisionResponse(**r) for r in data["revisions"]],
+            current=ItemCurrentResponse(**data["current"]) if data.get("current") else None,
         )

@@ -241,7 +241,8 @@ class MetricsRegistry:
         labels=["kind"],
     )
     #: One sample per definition write that went through item identity
-    #: (FORGE-523). ``outcome`` is ``created`` or ``failed``; ``resolved_by``
+    #: (FORGE-523). ``outcome`` is ``created``, ``drafted`` (inside a run,
+    #: FORGE-525) or ``failed``; ``resolved_by``
     #: says how the item was found (``new``, ``name``, ``item_key``,
     #: ``supersedes``, or one of those with ``_adopted`` when an old
     #: SUPERSEDES chain was folded in). A ``failed`` sample means a node was
@@ -251,6 +252,17 @@ class MetricsRegistry:
         type="counter",
         description="Item revisions written per definition type, by outcome and resolution",
         labels=["item_type", "outcome", "resolved_by"],
+    )
+    #: One sample per run change-set decision (FORGE-525). ``outcome`` is
+    #: ``committed`` (a gate approval moved the heads), ``refused`` (the
+    #: approval found heads that moved since the run drafted them, so nothing
+    #: was committed), ``rejected`` / ``abandoned`` (drafts closed without a
+    #: head move) or ``failed`` (a commit broke part-way and was restored).
+    TWIN_CHANGE_SET_TOTAL = MetricDefinition(
+        name="metaforge_twin_change_set_total",
+        type="counter",
+        description="Run change-set commits and closes, by outcome",
+        labels=["outcome"],
     )
 
     # ── Telemetry / MQTT metrics (MET-119) ───────────────────────────
@@ -735,7 +747,7 @@ class MetricsRegistry:
     @classmethod
     def twin_metrics(cls) -> list[MetricDefinition]:
         """MET-439 twin graph hygiene metrics."""
-        return [cls.TWIN_ORPHANS, cls.TWIN_ITEM_REVISION_TOTAL]
+        return [cls.TWIN_ORPHANS, cls.TWIN_ITEM_REVISION_TOTAL, cls.TWIN_CHANGE_SET_TOTAL]
 
     @classmethod
     def retrieval_metrics(cls) -> list[MetricDefinition]:
@@ -931,6 +943,12 @@ class MetricsCollector:
         gauge = self._instruments.get(MetricsRegistry.TWIN_ORPHANS.name)
         if gauge is not None:
             gauge.add(count, attributes={"kind": kind})
+
+    def record_twin_change_set(self, outcome: str) -> None:
+        """Record one run change-set commit or close (FORGE-525)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_CHANGE_SET_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
 
     def record_twin_item_revision(self, item_type: str, outcome: str, resolved_by: str) -> None:
         """Record one item revision write (FORGE-523)."""

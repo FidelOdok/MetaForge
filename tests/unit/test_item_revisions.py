@@ -283,8 +283,10 @@ class TestGeometryRevisions:
         with with_context(ctx):
             out = await record(step_base64=_step("a"), name="Leg", project_id=PROJECT)
         item = await find_item(twin, out["item_key"], PROJECT)
-        (rev,) = await item_history(twin, item)
+        # FORGE-525: a write inside a run is that run's draft; read as the run.
+        (rev,) = await item_history(twin, item, run_id="run-42")
         assert (rev.run_id, rev.author) == ("run-42", "agent:mechanical")
+        assert (rev.status, rev.change_set) == ("draft", "run-42")
         wp = await twin.get_work_product(UUID(out["node_id"]))
         assert wp.metadata["run_id"] == "run-42"
 

@@ -97,5 +97,11 @@ def build_rework_feedback(
         lines.append(summary)
     if reason.strip():
         lines.append(f"Reviewer's reason: {reason.strip()}")
+    # FORGE-525: drafts of the gate that sent the run back were closed; earlier
+    # approved phases' revisions are current and are what this phase revises.
+    lines.append(
+        f"What '{from_phase}' recorded in the twin since the last approved gate was "
+        f"discarded; '{to_phase}' revises the current, approved revisions."
+    )
     lines.append("Change the work so these problems are resolved before you reply.")
     return "\n".join(lines)

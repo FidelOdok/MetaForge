@@ -16,7 +16,10 @@ already wraps.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -178,6 +181,13 @@ class ConsistencyGateChecker(Protocol):
     """
 
     async def check(self, gate_id: str, project_id: str | None) -> ConsistencyGateReport: ...
+
+
+#: FORGE-525: wraps one phase's work so every twin write it makes knows its
+#: run and phase (and lands as a draft in the run's change set). Called with
+#: ``(run_id, phase_id, project_id)``. Injected by the gateway, which owns the
+#: MCP call context; this layer may not import it.
+PhaseScope = Callable[[str, str, str | None], AbstractContextManager[object]]
 
 
 class GateCoordinator:
@@ -350,8 +360,10 @@ class DesignFlowExecutor:
         gate_evaluator: GateEvaluator | None = None,
         constraint_checker: ConstraintChecker | None = None,
         consistency_gate_checker: ConsistencyGateChecker | None = None,
+        phase_scope: PhaseScope | None = None,
     ) -> None:
         self._store = store
+        self._phase_scope = phase_scope
         self._brain = brain
         self._coordinator = coordinator
         self._evaluator = gate_evaluator
@@ -464,7 +476,13 @@ class DesignFlowExecutor:
         """
         phase_start = time.time()
         logger.info("design_flow_phase_start", run_id=run_id, phase=phase.id, attempt=attempt)
-        outcome = await self._brain.run_phase(goal=ctx.goal, phase=phase, context=ctx)
+        scope = (
+            self._phase_scope(run_id, phase.id, ctx.project_id)
+            if self._phase_scope is not None
+            else contextlib.nullcontext()
+        )
+        with scope:
+            outcome = await self._brain.run_phase(goal=ctx.goal, phase=phase, context=ctx)
         outcome.status = phase_status(outcome.summary, outcome.status)
         ctx.completed.append((phase, outcome))
         logger.info(

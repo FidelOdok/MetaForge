@@ -262,6 +262,7 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
 async def list_twin_nodes(
     domain: str | None = None,
     project_id: str | None = None,
+    include_drafts: bool = False,
 ) -> TwinNodeListResponse:
     """List work-product nodes in the Digital Twin.
 
@@ -269,6 +270,10 @@ async def list_twin_nodes(
     or empty returns every node (including unscoped legacy nodes) —
     preserving the prior global behaviour. A specific ``project_id``
     returns only that project's nodes; unscoped nodes are excluded.
+
+    FORGE-525: a design-flow run's drafts are left out until its gate
+    approves them (and for good if it never does); ``include_drafts=true``
+    lists them too.
     """
     with tracer.start_as_current_span("twin.list_nodes") as span:
         if domain is not None:
@@ -281,8 +286,23 @@ async def list_twin_nodes(
                 raise HTTPException(status_code=400, detail="Invalid project_id format")
             span.set_attribute("twin.filter.project_id", project_id)
         work_products = await _twin.list_work_products(domain=domain, project_id=scoped_project)
+        hidden = 0
+        if not include_drafts:
+            from twin_core.items import is_unapproved_draft, supports_items
+
+            if supports_items(_twin):
+                kept = [wp for wp in work_products if not await is_unapproved_draft(_twin, wp)]
+                hidden = len(work_products) - len(kept)
+                work_products = kept
         nodes = [_wp_to_response(wp) for wp in work_products]
-        logger.info("twin_nodes_listed", count=len(nodes), domain=domain, project_id=project_id)
+        span.set_attribute("twin.drafts_hidden", hidden)
+        logger.info(
+            "twin_nodes_listed",
+            count=len(nodes),
+            domain=domain,
+            project_id=project_id,
+            drafts_hidden=hidden,
+        )
         return TwinNodeListResponse(nodes=nodes, total=len(nodes))
 
 

@@ -71,10 +71,10 @@ gets the answer.
 | Status | When |
 |--------|------|
 | 404 | Unknown id. |
-| 409 | Not decidable now: already decided, expired or canceled, elicitation route, gate not ready for approve, retries or reworks used up, or the run's workflow no longer exists (only `reject` is offered then). |
+| 409 | Not decidable now: already decided, expired or canceled, elicitation route, gate not ready for approve, retries or reworks used up, or the run's workflow no longer exists (only `reject` is offered then). Also an `approve` whose drafts were based on revisions that changed since (`PATCH_CONFLICT`, FORGE-525): nothing is committed and the gate stays open; `retry` rebases. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate-forge-525). |
 | 422 | Decision not offered for this kind, invalid `to_phase`, or no `reason` for `reject`, `retry` or `rework`. |
 | 200 | `reject` on a gate whose workflow no longer exists: the decision is saved and there is no run left to signal. |
-| 503 | A gate decision was recorded but could not be delivered to the workflow. |
+| 503 | A gate decision was recorded but could not be delivered to the workflow; or committing a gate's drafts failed part-way (heads restored, approve again). |
 
 ### Identity and surface
 

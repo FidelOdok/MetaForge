@@ -101,9 +101,10 @@ class TestAlertingRules:
         # + 1 design-flow tool refusals sustained (FORGE-492).
         # + 1 chat ungrounded claims sustained (FORGE-520).
         # + 1 item revision link failures (FORGE-523).
+        # + 1 run change-set approvals refused (FORGE-525).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 42
+        assert len(rules) == 43
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -152,7 +153,8 @@ class TestAlertingRules:
         # + 1 design-flow tool refusals sustained (FORGE-492)
         # + 1 chat ungrounded claims sustained (FORGE-520)
         # + 1 item revision link failures (FORGE-523)
-        assert len(warnings) == 31
+        # + 1 run change-set approvals refused (FORGE-525)
+        assert len(warnings) == 32
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -226,6 +228,8 @@ class TestAlertingRules:
                 "TwinOrphansDetected",
                 # FORGE-523: a definition write saved without its item link.
                 "TwinItemRevisionLinkFailures",
+                # FORGE-525: a gate approval refused on a revision conflict.
+                "TwinChangeSetApprovalsRefused",
                 # FORGE-466: the sidecar cannot close holds it opened, so
                 # stale entries sit on the Approvals page until expired.
                 "ToolApprovalHoldCloseFailing",
