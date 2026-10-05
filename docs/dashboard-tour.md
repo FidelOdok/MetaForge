@@ -144,6 +144,15 @@ last activity.
   project recorded" rather than just getting shorter — otherwise an empty
   page means both "nothing ran" and "everything that ran was internal",
   with no way to tell which.
+- **The agent roster is derived, not declared.** It lists the agents that
+  have actually run a session in this project — `chat-harness`, `mcp`,
+  `claude-code` and so on — one row each, showing the most recent session's
+  status and how many that agent has run. It used to be a hardcoded array
+  of four discipline agents with invented statuses, including a pulsing
+  "running spec" that nothing had measured. Those four do not exist as
+  running things: `domain_agents/` holds the disciplines as code invoked
+  during a run, and nothing keeps a per-discipline process with a status to
+  report. An empty roster says so rather than showing the four.
 - **The pending-approval card is scoped too.** It used to read proposals
   unscoped while `/approvals` read the same hook scoped, so reading one
   project's sessions could surface — and let you approve — a proposal

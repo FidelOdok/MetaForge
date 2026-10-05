@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '../../test/test-utils';
+import { render, screen, within } from '../../test/test-utils';
 
 vi.mock('../../hooks/use-sessions', () => ({
   useSessions: vi.fn(),
@@ -79,7 +79,7 @@ describe('SessionsPage', () => {
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
     expect(screen.getByText('validate stress')).toBeInTheDocument();
-    expect(screen.getByText('MECH')).toBeInTheDocument();
+    expect(within(screen.getByTestId('session-row')).getByText('MECH')).toBeInTheDocument();
   });
 
   it('shows status text for completed session', () => {
@@ -88,7 +88,7 @@ describe('SessionsPage', () => {
       isLoading: false,
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    expect(screen.getByText('completed')).toBeInTheDocument();
+    expect(within(screen.getByTestId('session-row')).getByText('completed')).toBeInTheDocument();
   });
 
   it('shows status text for failed session', () => {
@@ -97,7 +97,7 @@ describe('SessionsPage', () => {
       isLoading: false,
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(within(screen.getByTestId('session-row')).getByText('failed')).toBeInTheDocument();
   });
 
   it('shows status text for running session', () => {
@@ -106,7 +106,7 @@ describe('SessionsPage', () => {
       isLoading: false,
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
-    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(within(screen.getByTestId('session-row')).getByText('running')).toBeInTheDocument();
   });
 
   it('does not warn about duplicate React keys when multiple sessions share a taskType', () => {
@@ -192,5 +192,82 @@ describe('SessionsPage project scoping', () => {
     } as unknown as ReturnType<typeof useSessions>);
     render(<SessionsPage />);
     expect(screen.queryByTestId('sessions-unscoped')).not.toBeInTheDocument();
+  });
+});
+
+describe('Agent roster', () => {
+  // It was a hardcoded array of four rows -- "Requirements Agent: running
+  // spec" with a pulsing dot, "Mechanical Agent: idle" -- rendered
+  // identically forever, on every project, whatever was happening. Those
+  // four also do not exist as running things: `domain_agents/` holds the
+  // disciplines as code invoked during a run, and nothing keeps a
+  // per-discipline process with a status. The real record is which agent ran
+  // a session: chat-harness, mcp, claude-code and friends.
+  const session = (
+    agentCode: string,
+    status: string,
+    startedAt: string,
+    completedAt?: string,
+  ) => ({
+    id: `${agentCode}-${startedAt}`,
+    agentCode,
+    taskType: 'task',
+    status: status as 'completed',
+    startedAt,
+    completedAt,
+    events: [],
+  });
+
+  function renderWith(sessions: ReturnType<typeof session>[]) {
+    mockUseSessions.mockReturnValue({
+      data: { sessions, unscopedCount: 0 },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useSessions>);
+    render(<SessionsPage />);
+  }
+
+  it('lists the agents that actually ran, not four invented ones', () => {
+    renderWith([
+      session('chat-harness', 'completed', '2026-10-01T10:00:00Z', '2026-10-01T10:05:00Z'),
+      session('mcp', 'running', '2026-10-02T10:00:00Z'),
+    ]);
+    const roster = screen.getAllByTestId('agent-roster-row');
+    const text = roster.map((r) => r.textContent).join(' ');
+    expect(text).toContain('chat-harness');
+    expect(text).toContain('mcp');
+    expect(screen.queryByText('Requirements Agent')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mechanical Agent')).not.toBeInTheDocument();
+  });
+
+  it('shows one row per agent, however many sessions it ran', () => {
+    renderWith([
+      session('mcp', 'completed', '2026-10-01T10:00:00Z', '2026-10-01T10:01:00Z'),
+      session('mcp', 'completed', '2026-10-02T10:00:00Z', '2026-10-02T10:01:00Z'),
+      session('claude-code', 'completed', '2026-10-01T09:00:00Z', '2026-10-01T09:01:00Z'),
+    ]);
+    expect(screen.getAllByTestId('agent-roster-row')).toHaveLength(2);
+  });
+
+  it('reports the most recent session, not whichever came first', () => {
+    // Deliberately out of order: a panel that trusts its caller's sort is one
+    // re-sort away from showing a stale status as current.
+    renderWith([
+      session('mcp', 'failed', '2026-10-01T10:00:00Z', '2026-10-01T10:01:00Z'),
+      session('mcp', 'running', '2026-10-03T10:00:00Z'),
+      session('mcp', 'completed', '2026-10-02T10:00:00Z', '2026-10-02T10:01:00Z'),
+    ]);
+    const row = screen.getByTestId('agent-roster-row');
+    expect(row).toHaveTextContent('running');
+    expect(row).not.toHaveTextContent('failed');
+  });
+
+  it('says so when no agent has run here', () => {
+    // An empty roster is a real answer, and a truer one than four invented
+    // rows on a project nothing has touched.
+    renderWith([]);
+    expect(screen.getByTestId('agent-roster-empty')).toHaveTextContent(
+      'No agent has run a session in this project yet',
+    );
+    expect(screen.queryByTestId('agent-roster-row')).not.toBeInTheDocument();
   });
 });
