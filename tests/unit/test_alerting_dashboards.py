@@ -103,9 +103,10 @@ class TestAlertingRules:
         # + 1 item revision link failures (FORGE-523).
         # + 1 run change-set approvals refused (FORGE-525).
         # + 2 simulation result field build / store failures (FORGE-532).
+        # + 1 prd stray requirement values (FORGE-528).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 45
+        assert len(rules) == 46
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
