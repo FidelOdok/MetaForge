@@ -126,7 +126,14 @@ Drill-in for a single project: metrics, an action row (**Start design
 run**, **Open twin & agent**, **Bill of materials**) and the project's
 artifact updates, newest first.
 
-- **Backed by:** `GET /v1/projects/{id}`.
+Each work product row has a **Preview** toggle (the eye icon). It opens a
+compact preview under the row, on demand: the same engine the twin
+inspector and the full-screen preview use (see
+[Work product previews](#work-product-previews)), loaded only when first
+opened.
+
+- **Backed by:** `GET /v1/projects/{id}`, plus `GET /v1/twin/nodes/{id}`
+  and the twin file routes when a row preview is opened.
 - **Use it to:** find a `work_product` UUID for the CLI's
   `--work_product` flag, rename or delete the project, or set it as the
   active project.
@@ -258,7 +265,7 @@ and prices in their own currency. Exports to CSV.
 
 The full-width twin workspace. A toolbar switches between **Graph**
 (work products and their relationships), **Model** (the React Three
-Fiber viewer for STEP/GLB geometry), **Sim** and **Assembly**. A status
+Fiber viewer for STEP, GLB, STL and 3MF geometry), **Sim** and **Assembly**. A status
 strip counts nodes needing attention and nodes without relationships,
 with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
@@ -296,6 +303,43 @@ contour would have to be invented rather than read.
   workspace that runs entirely in the browser with no gateway. It is
   labelled *Sample data · resets on refresh* and its assistant is
   scripted.
+
+### Work product previews
+
+One registry, `previewEngineFor` in
+`dashboard/src/components/preview/registry.ts` (FORGE-531), picks how a
+work product is previewed. The twin inspector, the full-screen
+**Preview** modal and the project page rows all render its answer through
+the same `PreviewHost`, so the three surfaces always agree.
+
+The work product type wins where it carries the meaning; otherwise the
+file format decides (the `format` property, or the `file_path`
+extension); otherwise a per-type default applies.
+
+| Engine | Picked for | Renders |
+|---|---|---|
+| 3D CAD | `.step`/`.stp`/`.iges`/`.brep`/`.fcstd`, a `cad_model` with no mesh format, any assembly (`metadata.parts`) | The STEP to GLB converter route (`GET /v1/twin/nodes/{id}/model`) in the 3D viewer. In the modal an assembly also shows its part tree. |
+| 3D mesh | `.stl`, `.3mf`, `.glb`, `.gltf` | The stored file loaded directly with three.js loaders, in the main viewer and the modal. STL carries no colour, so it renders in a uniform neutral. |
+| Markdown | `.md`, and `prd`, `documentation`, `test_plan` and the other document types | Formatted Markdown (headings, lists, tables, code). Raw HTML in the source shows as text. |
+| Requirements table | `constraint_set` | One row per constraint: severity, domain, acceptance criteria, verification, binding. Falls back to Markdown if the document is not in the recorder's shape. |
+| BOM table | `bom` (`.csv`) | Line items and total quantity over the CSV table. |
+| Decision card | `design_decision` | Title, rationale, alternatives with why each was rejected, status. |
+| CSV table | `.csv`, `.tsv` | A table, capped with a "Show all" for long files. |
+| JSON tree | `.json` | A collapsible tree. Invalid JSON is shown as text with a warning. |
+| Code | `.c`, `.h`, `.cpp`, `.py` and other sources, `firmware_source`, `cad_source_script` | Highlighted source with line numbers. |
+| KiCad viewer | `.kicad_sch`, `.kicad_pcb`, `schematic`, `pcb_layout` | Not available yet: no embeddable KiCad viewer ships as an npm package. Says so and offers the download. |
+| Gerber renderer | `.gbr`, `.gtl`, `.gbl` and the other layer extensions, `.drl` | The layer drawn by tracespace. A zipped Gerber set is not unpacked. |
+| DXF viewer | `.dxf` | Lines, polylines, arcs, circles, ellipses, splines and text drawn from dxf-parser. |
+| FEA summary | `simulation_result` | The FEA result card described above. |
+| Image, PDF, HTML sketch | `.png`/`.jpg`/`.svg`/`.webp`, `.pdf`, `.html` | As before. |
+| Robot viewer | `robot_description` | Unchanged: open it in the main 3D viewer. |
+
+Anything else gets **No preview engine for .ext files** with a download
+link. The preview never shows a binary as text: only the text engines
+fetch the file body. The inspector panel leaves 3D, robot, PDF and HTML to
+the 3D viewer and the full-screen modal. The heavy engines (the 3D scene,
+the Gerber and DXF renderers, the Markdown and table renderers) load on
+first use, so the page bundles barely grow.
 
 ## `/files`: files & artifacts
 

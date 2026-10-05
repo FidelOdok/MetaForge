@@ -10,6 +10,12 @@ vi.mock('../../hooks/use-twin', () => ({
   useGeometryDiff: vi.fn(() => ({ data: undefined, isLoading: false })),
 }));
 
+// FORGE-531: the inspector's inline preview reads the node's file.
+vi.mock('../../api/endpoints/twin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/endpoints/twin')>()),
+  fetchNodeFileText: vi.fn(async () => '# Flight time target\n\nTwenty minutes.'),
+}));
+
 vi.mock('../../hooks/use-conversion', () => ({
   useUploadAndConvert: () => ({
     mutate: vi.fn(),
@@ -785,5 +791,57 @@ describe('TwinViewerPage FEA result view (FORGE-305)', () => {
       name: /Compare in Sim/,
     });
     expect(link).toHaveAttribute('href', '/sim');
+  });
+});
+
+describe('TwinViewerPage — inspector preview from the registry (FORGE-531)', () => {
+  function selectWp(properties: Record<string, unknown>) {
+    const node = {
+      id: 'wp-prev',
+      name: 'preview-target',
+      type: 'work_product',
+      domain: 'systems',
+      status: 'valid',
+      properties,
+      updatedAt: new Date().toISOString(),
+    };
+    window.history.pushState({}, '', '/twin');
+    useLayoutStore.setState({ sidebarCollapsed: false });
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /preview-target/ }));
+  }
+
+  it('renders a PRD as Markdown in the inspector, not a raw dump', async () => {
+    selectWp({ wp_type: 'prd', format: 'md' });
+    const section = screen.getByTestId('node-preview-section');
+    expect(within(section).getByText(/Preview · Markdown/)).toBeInTheDocument();
+    expect(await within(section).findByRole('heading', { name: 'Flight time target' })).toBeInTheDocument();
+  });
+
+  it('leaves a STEP model to the 3D viewer and keeps the CAD actions', () => {
+    selectWp({ wp_type: 'cad_model', format: 'step' });
+    expect(screen.queryByTestId('node-preview-section')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /View 3D Model/ })).toBeInTheDocument();
+    expect(screen.getByTitle('Boolean cut against another CAD node')).toBeInTheDocument();
+  });
+
+  it('offers 3D for an STL mesh, without the STEP-only boolean cut', () => {
+    selectWp({ wp_type: 'manufacturing_file', format: 'stl' });
+    expect(screen.getByRole('button', { name: /View 3D Model/ })).toBeInTheDocument();
+    expect(screen.queryByTitle('Boolean cut against another CAD node')).not.toBeInTheDocument();
+  });
+
+  it('names the missing engine for an unknown format', () => {
+    selectWp({ wp_type: 'manufacturing_file', format: 'weird' });
+    const section = screen.getByTestId('node-preview-section');
+    expect(within(section).getByText('No preview engine for .weird files')).toBeInTheDocument();
   });
 });

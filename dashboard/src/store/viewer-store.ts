@@ -51,6 +51,9 @@ export interface RobotJointInfo {
 
 interface ViewerState {
   glbUrl: string | null;
+  /** FORGE-531: how `glbUrl` is encoded -- 'glb' (the converter's output,
+   * the default), or a mesh file loaded directly ('stl', '3mf', 'gltf'). */
+  modelFormat: string;
   manifest: ModelManifest | null;
   selectedMeshName: string | null;
   hiddenMeshes: Set<string>;
@@ -119,7 +122,7 @@ interface ViewerState {
   ) => void;
   computeJointLoadChain: (jointNames: string[]) => JointLoadChainPayload | null;
 
-  loadModel: (glbUrl: string, manifest: ModelManifest) => void;
+  loadModel: (glbUrl: string, manifest: ModelManifest, format?: string) => void;
   /** MET-683: clear the loaded model WITHOUT leaving 3D view mode (unlike
    * `reset`, which also flips viewMode back to 'graph') -- used before
    * loading a newly-selected node so a failed load doesn't leave the
@@ -158,6 +161,7 @@ interface ViewerState {
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
   glbUrl: null,
+  modelFormat: 'glb',
   manifest: null,
   selectedMeshName: null,
   hiddenMeshes: new Set<string>(),
@@ -237,9 +241,10 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     return fn ? fn(jointNames) : null;
   },
 
-  loadModel: (glbUrl, manifest) =>
+  loadModel: (glbUrl, manifest, format = 'glb') =>
     set({
       glbUrl,
+      modelFormat: format,
       manifest,
       selectedMeshName: null,
       hiddenMeshes: new Set(),

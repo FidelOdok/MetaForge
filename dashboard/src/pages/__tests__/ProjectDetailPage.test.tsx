@@ -27,6 +27,11 @@ vi.mock('../../hooks/use-active-project', () => ({
   }),
 }));
 
+// FORGE-531: the row preview itself is covered by PreviewHost's tests.
+vi.mock('../../components/preview/ProjectRowPreview', () => ({
+  ProjectRowPreview: ({ nodeId }: { nodeId: string }) => <div data-testid="row-preview-stub">{nodeId}</div>,
+}));
+
 import { ProjectDetailPage } from '../ProjectDetailPage';
 import { useProject } from '../../hooks/use-projects';
 
@@ -190,5 +195,35 @@ describe('ProjectDetailPage', () => {
       expect(screen.queryByText('Delete project')).not.toBeInTheDocument();
       expect(mockDeleteMutate).not.toHaveBeenCalled();
     });
+  });
+
+  it('opens a compact preview for one work product row on demand (FORGE-531)', async () => {
+    mockUseProject.mockReturnValue({
+      data: {
+        id: 'proj-001',
+        name: 'Drone FC',
+        description: '',
+        status: 'active',
+        work_products: [
+          { id: 'a1', name: 'Main board', type: 'cad_model', status: 'valid', updatedAt: new Date().toISOString() },
+          { id: 'a2', name: 'Power BOM', type: 'bom', status: 'valid', updatedAt: new Date().toISOString() },
+        ],
+        agentCount: 1,
+        lastUpdated: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useProject>);
+    render(<ProjectDetailPage />);
+    // Nothing loads until asked.
+    expect(screen.queryByTestId('project-row-preview')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Show preview of Power BOM' });
+    fireEvent.click(toggle);
+    expect(await screen.findByTestId('row-preview-stub')).toHaveTextContent('a2');
+    expect(screen.getByRole('button', { name: 'Hide preview of Power BOM' })).toHaveAttribute('aria-expanded', 'true');
+    // The row is still one link to the twin.
+    expect(screen.getByRole('link', { name: /Power BOM/ })).toHaveAttribute('href', '/twin?node=a2');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide preview of Power BOM' }));
+    expect(screen.queryByTestId('project-row-preview')).not.toBeInTheDocument();
   });
 });

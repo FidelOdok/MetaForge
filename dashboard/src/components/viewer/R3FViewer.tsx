@@ -332,6 +332,7 @@ function GizmoControls() {
 
 export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps) {
   const glbUrl = useViewerStore((s) => s.glbUrl);
+  const modelFormat = useViewerStore((s) => s.modelFormat);
   const manifest = useViewerStore((s) => s.manifest);
   const resetCamera = useViewerStore((s) => s.resetCamera);
   const booleanCut = useViewerStore((s) => s.booleanCut);
@@ -388,6 +389,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
             manifest && (
               <SceneContents
                 glbUrl={glbUrl}
+                format={modelFormat}
                 manifest={manifest}
                 onPartClick={onPartClick}
               />

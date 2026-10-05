@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useProject, useUpdateProject, useDeleteProject } from '../hooks/use-projects';
 import { useActiveProject } from '../hooks/use-active-project';
@@ -7,6 +7,12 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { formatRelativeTime } from '../utils/format-time';
+
+// FORGE-531: the preview registry and engines load only when a row's
+// Preview toggle is first opened.
+const ProjectRowPreview = lazy(() =>
+  import('../components/preview/ProjectRowPreview').then((m) => ({ default: m.ProjectRowPreview })),
+);
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'response' in error) {
@@ -80,6 +86,8 @@ export function ProjectDetailPage() {
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // FORGE-531: which work product row has its compact preview open.
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -370,10 +378,11 @@ export function ProjectDetailPage() {
             </div>
           ) : (
             project.work_products.map((wp) => (
+              <div key={wp.id}>
+              <div className="flex items-center hover:bg-surface-high">
               <Link
-                key={wp.id}
                 to={`/twin?node=${wp.id}`}
-                className="flex items-center gap-3 px-4 hover:bg-surface-high cursor-pointer"
+                className="flex flex-1 min-w-0 items-center gap-3 pl-4 pr-2 cursor-pointer"
                 style={{ height: '40px' }}
               >
                 {/* Status dot */}
@@ -423,6 +432,44 @@ export function ProjectDetailPage() {
                   {formatRelativeTime(wp.updatedAt)}
                 </span>
               </Link>
+              <button
+                type="button"
+                onClick={() => setPreviewId((id) => (id === wp.id ? null : wp.id))}
+                aria-expanded={previewId === wp.id}
+                aria-label={`${previewId === wp.id ? 'Hide' : 'Show'} preview of ${wp.name}`}
+                title="Preview"
+                className="flex-shrink-0 mr-3 rounded"
+                style={{
+                  background: previewId === wp.id ? 'var(--mf-c-282a30)' : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 4,
+                  color: previewId === wp.id ? '#ff5a0a' : 'var(--mf-c-9a9aaa)',
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 16, verticalAlign: 'middle' }}>
+                  {previewId === wp.id ? 'visibility_off' : 'visibility'}
+                </span>
+              </button>
+              </div>
+              {previewId === wp.id && (
+                <div
+                  className="px-4 py-3"
+                  data-testid="project-row-preview"
+                  style={{ borderTop: '1px solid var(--mf-r-65-72-90-0p2)', borderBottom: '1px solid var(--mf-r-65-72-90-0p2)', background: 'var(--mf-c-111319)' }}
+                >
+                  <Suspense
+                    fallback={
+                      <div className="font-mono" style={{ fontSize: 11, color: 'var(--mf-c-9a9aaa)' }}>
+                        Loading preview…
+                      </div>
+                    }
+                  >
+                    <ProjectRowPreview nodeId={wp.id} />
+                  </Suspense>
+                </div>
+              )}
+              </div>
             ))
           )}
         </div>
