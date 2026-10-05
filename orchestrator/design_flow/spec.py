@@ -57,6 +57,25 @@ class Gate:
 
 
 @dataclass(frozen=True)
+class DeliverableSlot:
+    """One item a phase is expected to write (FORGE-524).
+
+    ``item_type`` is a definition type from the twin's item registry
+    (``cad_model``, ``constraint_set``, ...); ``name`` is the deliverable's
+    declared name ("left bracket"). ``item_key`` is the item every write of
+    this deliverable lands on during a run. It is bound when a flow version is
+    saved (see :func:`orchestrator.design_flow.slots.bind_slots`) and frozen
+    with the rest of the version, so a model renaming the part cannot create a
+    new item. Empty means "not bound yet": the run derives the same key from
+    ``item_type`` and ``name``.
+    """
+
+    item_type: str
+    name: str
+    item_key: str = ""
+
+
+@dataclass(frozen=True)
 class Phase:
     """One step of the design lifecycle.
 
@@ -83,6 +102,10 @@ class Phase:
     # brain runs on, overriding the project and table routes. ``None`` = route
     # by role. Validated with the family rule wherever a flow is accepted.
     model: str | None = None
+    # FORGE-524: the items this phase writes, one per declared deliverable.
+    # Empty = derived at run time from the phase's definition-type deliverables
+    # (one per type, named after the phase); see ``slots.effective_slots``.
+    slots: tuple[DeliverableSlot, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -191,6 +214,10 @@ def definition_from_frozen(frozen: FrozenFlow) -> FlowDefinition:
                 enforce_deliverables=p.enforce_deliverables,
                 disciplines=tuple(p.disciplines),
                 model=p.model,
+                slots=tuple(
+                    DeliverableSlot(item_type=s.item_type, name=s.name, item_key=s.item_key)
+                    for s in p.slots
+                ),
                 gate=(
                     None
                     if p.gate is None

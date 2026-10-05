@@ -37,9 +37,11 @@ from orchestrator.design_flow.context import (
 )
 from orchestrator.design_flow.generator import FlowProposal, TailoringError
 from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
+from orchestrator.design_flow.slots import effective_slots, is_derived
 from orchestrator.design_flow.spec import (
     DEFAULT_FLOW_ID,
     FLOWS,
+    DeliverableSlot,
     FlowDefinition,
     Gate,
     Phase,
@@ -68,6 +70,18 @@ class GateView(BaseModel):
     gateId: str | None = None  # noqa: N815
 
 
+class SlotView(BaseModel):
+    """A deliverable slot: one item the phase writes (FORGE-524)."""
+
+    itemType: str  # noqa: N815
+    name: str
+    #: The item every write of this deliverable lands on during a run.
+    itemKey: str  # noqa: N815
+    #: A default slot, derived from the phase at run time and not stored in
+    #: the version (so it is not part of its hash).
+    derived: bool = False
+
+
 class PhaseView(BaseModel):
     id: str
     title: str
@@ -79,6 +93,9 @@ class PhaseView(BaseModel):
     #: FORGE-477: "provider:model" this phase runs on, or null to route by role.
     model: str | None = None
     gate: GateView | None = None
+    #: FORGE-524: the items this phase writes and their keys. Frozen into a
+    #: saved version; derived the same way for a template.
+    slots: list[SlotView] = Field(default_factory=list)
 
 
 class DesignFlowView(BaseModel):
@@ -136,6 +153,15 @@ def _phase_view(phase: object) -> PhaseView:
         enforceDeliverables=phase.enforce_deliverables,
         disciplines=list(phase.disciplines),
         model=phase.model,
+        slots=[
+            SlotView(
+                itemType=s.item_type,
+                name=s.name,
+                itemKey=s.item_key,
+                derived=is_derived(phase, s),  # type: ignore[arg-type]
+            )
+            for s in effective_slots(phase)  # type: ignore[arg-type]
+        ],
         gate=(
             None
             if gate is None
@@ -626,6 +652,14 @@ class EditGate(BaseModel):
     gateId: str | None = None  # noqa: N815
 
 
+class EditSlot(BaseModel):
+    itemType: str  # noqa: N815
+    name: str
+    itemKey: str = ""  # noqa: N815
+    #: Echoed back from a view; a derived slot is not declared, so it is dropped.
+    derived: bool = False
+
+
 class EditPhase(BaseModel):
     id: str
     title: str
@@ -636,6 +670,9 @@ class EditPhase(BaseModel):
     disciplines: list[str] = Field(default_factory=list)
     model: str | None = None
     gate: EditGate | None = None
+    #: FORGE-524: items the phase declares. ``itemKey`` is optional; the
+    #: server binds a missing one when the version is saved.
+    slots: list[EditSlot] = Field(default_factory=list)
 
 
 class EditFlowRequest(BaseModel):
@@ -686,6 +723,11 @@ def _definition_from(body: EditFlowRequest) -> FlowDefinition:
                 enforce_deliverables=p.enforceDeliverables,
                 disciplines=tuple(p.disciplines),
                 model=p.model or None,
+                slots=tuple(
+                    DeliverableSlot(item_type=s.itemType, name=s.name, item_key=s.itemKey)
+                    for s in p.slots
+                    if not s.derived
+                ),
                 gate=(
                     None
                     if p.gate is None

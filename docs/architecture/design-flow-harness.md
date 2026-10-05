@@ -733,7 +733,8 @@ and a dedicated `forge design` CLI wrapper.
 
 | Module | Role |
 |--------|------|
-| `orchestrator/design_flow/spec.py` | `Phase` / `Gate` / `FlowDefinition`, built-in flows |
+| `orchestrator/design_flow/spec.py` | `Phase` / `Gate` / `FlowDefinition` / `DeliverableSlot`, built-in flows |
+| `orchestrator/design_flow/slots.py` | Deliverable slots: default slots, key binding, write-to-slot matching (FORGE-524) |
 | `orchestrator/design_flow/executor.py` | `DesignFlowExecutor`, `GateCoordinator`, `PhaseBrain` |
 | `api_gateway/runs/flow_brain.py` | `ReActPhaseBrain` fallback + the decision backstop |
 | `api_gateway/runs/{req,arch,mech,elec,fw,vv,mfg}_handlers.py` | Goal-driven deterministic phase handlers |
@@ -750,3 +751,87 @@ string (FORGE-491) that is part of the version's content hash, so a reviewer
 sees exactly what the phase brain will be handed. The G6 geometry-constraint
 check likewise considers only cad_models committed in the phase window, with
 superseded parts excluded, the same scoping as the FORGE-511 assembly check.
+
+## Deliverable slots carry item keys (FORGE-524) {#deliverable-slots-carry-item-keys-forge-524}
+
+FORGE-523 gave every definition write an item (see
+[Items and revisions](../twin_schema.md#230-items-and-revisions-definitions-vs-records-forge-522-forge-523)),
+but the item was still found by name, and the model chooses the name. A slot
+fixes the identity before the run starts: each deliverable a phase declares
+gets one, with the item key every write of it lands on.
+
+**Where slots come from.**
+
+- *Declared*: a template phase's `slots` list (`{type, name, key?}`), a
+  tailoring's `declare_items` operation (`value: [{"type": "cad_model",
+  "name": "left bracket"}, ...]`, or bare names when the phase produces exactly
+  one definition type), or an edited version's `slots` per phase. Two brackets
+  are two slots.
+- *Default*: one slot per singleton definition type a phase requires or
+  expects and no declared slot covers (`intent`, `constraint_set`, `bom`,
+  `assembly`), named after the phase: the requirements phase's constraint set
+  is `CS-REQUIREMENTS`, the intent phase's intent `INT-INTENT`. Parts,
+  stakeholder needs and objectives get no default slot, because a phase
+  usually writes several and one shared slot would turn four parts into four
+  revisions of one item; they are declared by name or resolved by name as in
+  FORGE-523.
+
+**Keys.** A slot's key is the FORGE-523 key for its type and name
+(`derive_key`, e.g. `CAD-LEFT-BRACKET`). The project part of an item's identity
+is the item's project scope, not a prefix in the key: keys are already unique
+per project, a key cannot contain `/` (it sits in the
+`/v1/twin/items/{key}/revisions` path), and a project can be renamed while its
+id cannot. So the same deliverable in the same project has the same key in
+every version, and a part a run before slots already recorded as
+`CAD-LEFT-BRACKET` is the slot's item from the first slotted run.
+
+**Frozen at save.** `FlowVersionStore.save` binds the *declared* slots
+(`slots.bind_slots` fills in their keys) before freezing, so they and their
+keys are part of the version's content hash and an approval approves them.
+Default slots are never stored: they are a pure function of the frozen phase,
+derived at run time (`slots.effective_slots`), and shown in the API with
+`derived: true`. A flow that declares no slots (every built-in template, a
+version saved before FORGE-524) therefore hashes exactly as before, because an
+empty `slots` list is left out of the hash like an unset `model`: an approved
+version still verifies, and a new version of the same content gets the same
+hash. `diff_flows` reports declared items (`phase 'design' declares cad_model
+'left bracket' (item CAD-LEFT-BRACKET)`), never the derived defaults.
+
+**During a run.** The phase brain puts the phase's slots on the MCP call
+context (`McpCallContext.item_slots`, carried to the sidecar in the
+`X-MetaForge-Item-Slots` header next to `X-MetaForge-Run`) and lists them in
+the phase brief, so the agent knows its item keys without having to pass them.
+A definition write with no explicit `item_key` / `supersedes`, in a phase that
+declares slots of its type, resolves to a slot (`slots.match_slot`):
+
+1. the slot with the same name or key;
+2. else the slot whose name shares the most meaningful words, when one is
+   clearly best ("Bracket, left side v2" is `CAD-LEFT-BRACKET`);
+3. else the only slot of that type, unless this same run already wrote that
+   item under a different name (a second name in one run is a second part);
+4. else no slot.
+
+An explicit `item_key` or `supersedes` always wins. A write whose final item is
+not one of the phase's slots for that type is still recorded, as its own item,
+and flagged: `metadata.undeclared_item`, `undeclared_phase`,
+`declared_item_keys`; `undeclared_item: true` plus a note in the tool result;
+a `flow_undeclared_item` log event; and the
+`metaforge_flow_item_slot_total{item_type, outcome="undeclared"}` counter
+(`outcome="slot"` for writes that landed on a slot). A write of a type the
+phase declares no slot for is not judged and resolves as in FORGE-523.
+
+**At the gate.** `TwinConstraintChecker` lists undeclared items in the
+report's `undeclared_items`, rendered in the gate reason as `Undeclared items
+(n): ...`. They are findings for the reviewer (a real new part, or a renamed
+declared one), never violations, so they never fail a gate. The in-process
+engine scopes them to the phase window; the Temporal gate check, like its
+deliverable check, looks at the whole project. There is no alert on the
+counter: an undeclared item is a review item, and the reviewer already sees it.
+
+**API.** Every phase in `GET /v1/design-flows`, `GET /v1/design-flows/{id}`
+and `GET /v1/design-flows/versions/{id}` carries `slots`
+(`[{itemType, name, itemKey, derived}]`, `derived` for a default slot that is
+computed rather than stored), and `POST /v1/design-flows/versions` accepts
+`slots` per phase (`itemKey` optional). A slot the editor sends back with
+`derived: true` is dropped rather than turned into a declared one, so
+round-tripping a flow through the editor does not change its hash.

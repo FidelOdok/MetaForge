@@ -38,7 +38,9 @@ import structlog
 
 from orchestrator.design_flow.frozen import FrozenFlow, freeze_flow
 from orchestrator.design_flow.invariants import validate_flow
+from orchestrator.design_flow.slots import bind_slots, effective_slots
 from orchestrator.design_flow.spec import FlowDefinition, Gate, Phase
+from orchestrator.design_flow.templates import slots_from
 
 logger = structlog.get_logger(__name__)
 
@@ -148,6 +150,18 @@ def diff_flows(base: FlowDefinition, candidate: FlowDefinition) -> list[str]:
                 f"phase '{phase_id}' model: {before.model or 'routed by role'} → "
                 f"{after.model or 'routed by role'}"
             )
+        # FORGE-524: declared items. Compared on the effective slots, so a
+        # version whose defaults were materialised at save does not read as a
+        # change from the template it was never different from.
+        before_slots = {(s.item_type, s.name): s.item_key for s in effective_slots(before)}
+        after_slots = {(s.item_type, s.name): s.item_key for s in effective_slots(after)}
+        for item_type, name in sorted(after_slots.keys() - before_slots.keys()):
+            lines.append(
+                f"phase '{phase_id}' declares {item_type} '{name}' "
+                f"(item {after_slots[(item_type, name)]})"
+            )
+        for item_type, name in sorted(before_slots.keys() - after_slots.keys()):
+            lines.append(f"phase '{phase_id}' no longer declares {item_type} '{name}'")
         if before.enforce_deliverables and not after.enforce_deliverables:
             lines.append(f"phase '{phase_id}' NO LONGER enforces its deliverables")
         if (before.gate is None) != (after.gate is None):
@@ -202,6 +216,7 @@ def _definition_from_dict(data: dict[str, Any]) -> FlowDefinition:
                 gate=gate,
                 disciplines=tuple(p.get("disciplines", ())),
                 model=p.get("model"),
+                slots=slots_from(p.get("slots")),
             )
         )
     return FlowDefinition(id=data["id"], name=data["name"], phases=tuple(phases))
@@ -342,7 +357,13 @@ class FlowVersionStore:
         approval_id: str = "",
         context: str = "",
     ) -> FlowVersion:
-        """Write a new version. Refuses one that breaks an invariant."""
+        """Write a new version. Refuses one that breaks an invariant.
+
+        FORGE-524: the deliverable slots and their item keys are bound here,
+        so they are part of the version's frozen, hashed content from the
+        moment it exists, and an approval approves them too.
+        """
+        definition = bind_slots(definition)
         result = validate_flow(definition)
         if not result.ok:
             result.raise_if_invalid(definition.id)

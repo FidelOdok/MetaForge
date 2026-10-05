@@ -27,6 +27,7 @@ __all__ = [
     "FrozenFlow",
     "FrozenGate",
     "FrozenPhase",
+    "FrozenSlot",
     "freeze_flow",
 ]
 
@@ -43,6 +44,15 @@ class FrozenGate:
 
 
 @dataclass
+class FrozenSlot:
+    """A deliverable slot and the item key it is frozen to (FORGE-524)."""
+
+    item_type: str
+    name: str
+    item_key: str = ""
+
+
+@dataclass
 class FrozenPhase:
     """A phase, as the workflow sees it."""
 
@@ -56,6 +66,9 @@ class FrozenPhase:
     disciplines: list[str] = field(default_factory=list)
     #: FORGE-477: ``"provider:model"`` override for this phase, or ``None``.
     model: str | None = None
+    #: FORGE-524: the items this phase writes. Empty for flows frozen before
+    #: slots existed and for template runs, whose slots are derived at run time.
+    slots: list[FrozenSlot] = field(default_factory=list)
 
 
 @dataclass
@@ -90,6 +103,9 @@ class FrozenFlow:
             # hash they were approved with.
             if row.get("model") is None:
                 row.pop("model", None)
+            # Same for FORGE-524 slots: absent when empty.
+            if not row.get("slots"):
+                row.pop("slots", None)
             rows.append(row)
         # Absent when empty, so flows frozen before FORGE-491 keep their hash.
         body: object = {"phases": rows, "context": self.context} if self.context else rows
@@ -132,6 +148,14 @@ def freeze_flow(definition: object, *, version: str = "builtin", context: str = 
                 enforce_deliverables=bool(getattr(phase, "enforce_deliverables", True)),
                 disciplines=list(getattr(phase, "disciplines", ()) or ()),
                 model=getattr(phase, "model", None) or None,
+                slots=[
+                    FrozenSlot(
+                        item_type=str(slot.item_type),
+                        name=str(slot.name),
+                        item_key=str(getattr(slot, "item_key", "") or ""),
+                    )
+                    for slot in (getattr(phase, "slots", ()) or ())
+                ],
                 gate=(
                     None
                     if gate is None

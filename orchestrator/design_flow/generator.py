@@ -17,6 +17,9 @@ What a model *can* do:
 * **require more of a phase** — add a deliverable, so a gate demands evidence
   it would otherwise accept the absence of
 * **assign disciplines** — the branches a phase fans out into
+* **declare items**: the parts a phase writes, by name (FORGE-524), so two
+  brackets are two items with keys fixed before the run, not whatever the
+  model happens to call them on the day
 
 Every operation carries a rationale, because a flow that differs from its
 template and cannot say why is a flow nobody can review.
@@ -38,7 +41,7 @@ import structlog
 
 from orchestrator.design_flow.context import ClarifyingQuestion, FlowContext, ManufacturingRoute
 from orchestrator.design_flow.invariants import ValidationResult, validate_flow
-from orchestrator.design_flow.spec import FlowDefinition, Gate, Phase
+from orchestrator.design_flow.spec import DeliverableSlot, FlowDefinition, Gate, Phase
 
 logger = structlog.get_logger(__name__)
 
@@ -64,6 +67,9 @@ class OperationKind(StrEnum):
     SET_DISCIPLINES = "set_disciplines"
     #: Input I5 (FORGE-477): run one phase on a named "provider:model".
     SET_MODEL = "set_model"
+    #: FORGE-524: name the items (parts, requirement sets) a phase writes.
+    #: Each becomes a deliverable slot with a fixed item key.
+    DECLARE_ITEMS = "declare_items"
     #: Server-only (FORGE-463): inserted when the manufacturing route is
     #: "undecided", so the route becomes a gated decision rather than a guess.
     #: Not in :data:`MODEL_OPERATIONS` -- a model cannot add phases.
@@ -77,6 +83,7 @@ MODEL_OPERATIONS: frozenset[OperationKind] = frozenset(
         OperationKind.ADD_DELIVERABLE,
         OperationKind.SET_DISCIPLINES,
         OperationKind.SET_MODEL,
+        OperationKind.DECLARE_ITEMS,
     }
 )
 
@@ -170,6 +177,9 @@ class Operation:
             return f"require '{self.value}' from phase '{self.phase_id}'"
         if self.kind is OperationKind.SET_MODEL:
             return f"run phase '{self.phase_id}' on model {self.value}"
+        if self.kind is OperationKind.DECLARE_ITEMS:
+            names = ", ".join(f"{t} '{n}'" for t, n in _declared_items(self.value, ()))
+            return f"phase '{self.phase_id}' declares {names}"
         return f"assign {self.value} to phase '{self.phase_id}'"
 
 
@@ -330,12 +340,53 @@ def parse_caller_operations(raw: Any, base: FlowDefinition) -> list[Operation]:
             isinstance(value, list) and any(str(v).strip() for v in value)
         ):
             raise TailoringError(f"{where}: set_disciplines needs a non-empty list 'value'")
+        if kind is OperationKind.DECLARE_ITEMS:
+            phase = next(p for p in base.phases if p.id == phase_id)
+            if not _declared_items(value, _phase_definition_types(phase)):
+                raise TailoringError(
+                    f"{where}: declare_items needs a 'value' list of item names, or of "
+                    "{type, name} objects; a bare name needs the phase to produce exactly "
+                    f"one definition type (phase '{phase_id}' produces "
+                    f"{_phase_definition_types(phase) or 'none'})"
+                )
         if kind is OperationKind.SET_MODEL and not _model_ref_ok(str(value or "").strip()):
             raise TailoringError(
                 f"{where}: set_model value '{value}' is not a usable provider:model"
             )
         operations.append(Operation(kind=kind, phase_id=phase_id, rationale=rationale, value=value))
     return operations
+
+
+def _phase_definition_types(phase: Phase) -> tuple[str, ...]:
+    from orchestrator.design_flow.slots import definition_deliverables
+
+    return tuple(definition_deliverables(phase))
+
+
+def _declared_items(value: Any, phase_types: tuple[str, ...]) -> list[tuple[str, str]]:
+    """``(item_type, name)`` pairs from a ``declare_items`` value.
+
+    Entries are ``{"type": ..., "name": ...}`` objects, or bare names when the
+    phase produces exactly one definition type (``["left bracket", "right
+    bracket"]`` on a design phase that commits cad_models). Anything else is
+    dropped; duplicates collapse.
+    """
+    from twin_core.items.registry import is_definition
+
+    entries = value if isinstance(value, list) else [value] if value else []
+    out: list[tuple[str, str]] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            item_type = str(entry.get("type") or entry.get("item_type") or "").strip()
+            name = str(entry.get("name") or "").strip()
+        else:
+            item_type = phase_types[0] if len(phase_types) == 1 else ""
+            name = str(entry or "").strip()
+        if not item_type and len(phase_types) == 1:
+            item_type = phase_types[0]
+        if item_type and name and is_definition(item_type) and (item_type, name) not in out:
+            out.append((item_type, name))
+    return out
 
 
 def _model_ref_ok(ref: str) -> bool:
@@ -367,6 +418,7 @@ def apply_operations(
     extra_deliverables: dict[str, list[str]] = {}
     disciplines: dict[str, list[str]] = {}
     models: dict[str, str] = {}
+    declared: dict[str, list[DeliverableSlot]] = {}
     applied: list[Operation] = []
     add_route_selection = False
 
@@ -401,6 +453,16 @@ def apply_operations(
                 continue
             models[op.phase_id] = ref
             applied.append(op)
+        elif op.kind is OperationKind.DECLARE_ITEMS:
+            items = _declared_items(op.value, _phase_definition_types(by_id[op.phase_id]))
+            if not items:
+                logger.info("flow_generator_bad_declared_items", phase=op.phase_id)
+                continue
+            slots = declared.setdefault(op.phase_id, [])
+            for item_type, name in items:
+                if all((s.item_type, s.name) != (item_type, name) for s in slots):
+                    slots.append(DeliverableSlot(item_type=item_type, name=name))
+            applied.append(op)
         elif op.kind is OperationKind.SET_DISCIPLINES:
             value = op.value if isinstance(op.value, list) else []
             names = [str(v).strip() for v in value if str(v).strip()]
@@ -422,6 +484,20 @@ def apply_operations(
         assigned = disciplines.get(phase.id)
         if phase.id in models:
             phase = replace(phase, model=models[phase.id])
+        if phase.id in declared:
+            # Keys are bound when the version is saved (slots.bind_slots).
+            new_slots = [
+                s
+                for s in declared[phase.id]
+                if all((o.item_type, o.name) != (s.item_type, s.name) for o in phase.slots)
+            ]
+            phase = replace(
+                phase,
+                slots=(*phase.slots, *new_slots),
+                expected_artifacts=tuple(
+                    dict.fromkeys([*phase.expected_artifacts, *(s.item_type for s in new_slots)])
+                ),
+            )
         if not added and assigned is None:
             phases.append(phase)
             continue
@@ -453,6 +529,7 @@ def apply_operations(
                     else phase.disciplines
                 ),
                 model=phase.model,
+                slots=phase.slots,
             )
         )
 

@@ -116,7 +116,9 @@ class DesignFlowServer(McpToolServer):
                     "applies your operations with the deterministic generator, runs the "
                     "same invariants and holds the same single approval. Operations are "
                     "drop_phase, add_deliverable (value: artifact type), set_disciplines "
-                    "(value: list) and set_model (value: provider:model), each on a "
+                    "(value: list), set_model (value: provider:model) and declare_items "
+                    "(value: list of {type, name}, e.g. two cad_model brackets; each "
+                    "becomes an item with a fixed key), each on a "
                     "phase of the template with a rationale. Read flow.list for template "
                     "and phase ids. An unknown operation, template or phase, or an "
                     "invariant violation (for example dropping verification with unknown "
@@ -198,6 +200,7 @@ class DesignFlowServer(McpToolServer):
                                             "add_deliverable",
                                             "set_disciplines",
                                             "set_model",
+                                            "declare_items",
                                         ],
                                     },
                                     "phase": {"type": "string"},

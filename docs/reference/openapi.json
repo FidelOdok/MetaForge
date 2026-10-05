@@ -2917,6 +2917,13 @@
             "title": "Requireddeliverables",
             "type": "array"
           },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/EditSlot"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2928,6 +2935,34 @@
           "objective"
         ],
         "title": "EditPhase",
+        "type": "object"
+      },
+      "EditSlot": {
+        "properties": {
+          "derived": {
+            "default": false,
+            "title": "Derived",
+            "type": "boolean"
+          },
+          "itemKey": {
+            "default": "",
+            "title": "Itemkey",
+            "type": "string"
+          },
+          "itemType": {
+            "title": "Itemtype",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "itemType",
+          "name"
+        ],
+        "title": "EditSlot",
         "type": "object"
       },
       "EmittedJoint": {
@@ -7234,6 +7269,13 @@
             "title": "Requireddeliverables",
             "type": "array"
           },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/SlotView"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -9840,6 +9882,35 @@
           "updatedAt"
         ],
         "title": "SimulationResultResponse",
+        "type": "object"
+      },
+      "SlotView": {
+        "description": "A deliverable slot: one item the phase writes (FORGE-524).",
+        "properties": {
+          "derived": {
+            "default": false,
+            "title": "Derived",
+            "type": "boolean"
+          },
+          "itemKey": {
+            "title": "Itemkey",
+            "type": "string"
+          },
+          "itemType": {
+            "title": "Itemtype",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "itemType",
+          "name",
+          "itemKey"
+        ],
+        "title": "SlotView",
         "type": "object"
       },
       "SourceDeleteResponse": {

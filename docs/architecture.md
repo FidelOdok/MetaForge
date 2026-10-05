@@ -418,8 +418,10 @@ them itself.
 
 `POST /v1/design-flows/propose` (and the `flow.propose` tool) optionally
 accepts `template` and `operations` written by the caller's own model, each
-operation being `drop_phase`, `add_deliverable`, `set_disciplines` or
-`set_model` on a phase of the template, with a `rationale`. When either is
+operation being `drop_phase`, `add_deliverable`, `set_disciplines`,
+`set_model` or `declare_items` (FORGE-524: the named parts a phase writes, see
+[deliverable slots](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys-forge-524))
+on a phase of the template, with a `rationale`. When either is
 supplied the server makes **no generator model call**, not even for the
 optional product-specific questions: it applies the operations with the same
 deterministic generator (`parse_caller_operations` then `build_proposal`),

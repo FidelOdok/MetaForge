@@ -1184,6 +1184,8 @@ A reference is `KEY@n` for one revision, or the bare `KEY` for the current head.
 
 No caller has to do anything new. The recorder resolves the item before any write (so a bad reference creates nothing), in this order:
 
+0. Inside a design-flow phase that declares deliverable slots of the write's type (FORGE-524), and with neither `item_key` nor `supersedes` given: the matching slot's key, used as if it were `item_key`. The slots ride on the MCP call context like `run_id`; see [deliverable slots](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys-forge-524) for how a write is matched to a slot. A write that matches none is recorded as its own item and stamped `metadata.undeclared_item: true`, `undeclared_phase` and `declared_item_keys`; a write that matched carries `metadata.flow_slot_key`.
+
 1. `item_key`, if given. A bare key revises that item's head (or names a new item if no item has that key yet). `KEY@n` additionally asserts the head is still `n`; otherwise the call fails with "`KEY` is at @m, not @n" and nothing is written. An unknown `KEY@n` is an error.
 2. `supersedes`, a node id: the item that node belongs to.
 3. Otherwise, in the same project: an item of the same type family whose head has the same name, or whose key the name derives to (so `Shelf Bracket` and `shelf-bracket` are one item).
@@ -1221,7 +1223,7 @@ Limits of this first slice: the old revisions of a constraint set keep their `Co
 
 Observability: `item_revision_created` / `item_revision_failed` log events, the `metaforge_twin_item_revision_total{item_type, outcome, resolved_by}` counter, and the `TwinItemRevisionLinkFailures` alert. A failed link never fails the write (the node already exists, and failing would invite a retry that duplicates it); the result carries `item_warning` instead.
 
-*Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/items/change_sets.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`, `api_gateway/runs/change_sets.py`*
+*Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/items/change_sets.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`, `api_gateway/runs/change_sets.py`, `orchestrator/design_flow/slots.py`*
 
 ---
 

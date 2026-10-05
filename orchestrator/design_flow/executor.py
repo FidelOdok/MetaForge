@@ -141,6 +141,9 @@ class ConstraintReport:
     satisfied: list[str] = field(default_factory=list)
     not_evaluated: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    # FORGE-524: writes that matched none of the phase's declared item slots.
+    # A finding for the reviewer, never a violation.
+    undeclared_items: list[str] = field(default_factory=list)
 
 
 @runtime_checkable
@@ -299,6 +302,10 @@ def _constraint_details(constraints: ConstraintReport) -> str:
         )
     if constraints.assumptions:
         out += " | Modelling assumptions: " + "; ".join(constraints.assumptions[:3])
+    if constraints.undeclared_items:
+        out += f" | Undeclared items ({len(constraints.undeclared_items)}): " + "; ".join(
+            constraints.undeclared_items[:5]
+        )
     return out
 
 

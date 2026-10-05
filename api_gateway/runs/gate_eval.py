@@ -345,6 +345,48 @@ class TwinConstraintChecker:
         name = str(getattr(wp, "name", "") or sim_id)
         return SimResult(id=sim_id, name=name, updated_at=ts, metadata=meta, cad_ids=cad_ids)
 
+    async def _undeclared_items(self, project_id: str | None, since_ts: float) -> list[str]:
+        """Writes in this phase window that matched no declared slot (FORGE-524).
+
+        Reported as warnings: the reviewer decides whether each is a real new
+        part or a renamed declared one. Never a violation, so never a failed gate.
+        """
+        getter = getattr(self._twin, "get_work_product", None)
+        if not project_id or self._backend is None or getter is None:
+            return []
+        try:
+            project = await self._backend.get_project(project_id)
+        except Exception as exc:  # noqa: BLE001 - advisory only
+            logger.warning(
+                "gate_eval_undeclared_scan_failed", project_id=project_id, error=str(exc)
+            )
+            return []
+        if project is None:
+            return []
+        findings: dict[str, str] = {}
+        for wp in project.work_products:
+            ts = _to_epoch(getattr(wp, "updated_at", None))
+            if ts is not None and ts < since_ts:
+                continue
+            try:
+                node = await getter(UUID(str(getattr(wp, "id", ""))))
+            except Exception:  # noqa: BLE001, S112 - one unreadable node must not hide the rest
+                continue
+            meta = dict(getattr(node, "metadata", None) or {})
+            if not meta.get("undeclared_item"):
+                continue
+            declared = ", ".join(meta.get("declared_item_keys") or []) or "none"
+            key = str(meta.get("item_key") or getattr(wp, "id", "?"))
+            findings[key] = (
+                f"undeclared item {key} "
+                f"({meta.get('item_type', '?')} '{getattr(wp, 'name', '')}'): not one of the "
+                f"phase's declared items ({declared}); review whether it is a new part or a "
+                "renamed declared one"
+            )
+        if findings:
+            logger.info("gate_eval_undeclared_items", project_id=project_id, count=len(findings))
+        return list(findings.values())
+
     async def check(self, project_id: str | None, since_ts: float = 0.0) -> ConstraintReport:
         evaluate = getattr(self._twin, "evaluate_constraints", None)
         if evaluate is None:
@@ -385,6 +427,7 @@ class TwinConstraintChecker:
             satisfied=analysis.satisfied,
             not_evaluated=geometry.not_evaluated + analysis.not_evaluated,
             assumptions=analysis.assumptions,
+            undeclared_items=await self._undeclared_items(project_id, since_ts),
         )
         logger.info(
             "gate_eval_constraints",

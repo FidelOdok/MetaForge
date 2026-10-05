@@ -234,6 +234,24 @@ def _phase_scope(request: PhaseRequest) -> Iterator[McpCallContext]:
         yield ctx
 
 
+def _slots_of(phase: Any) -> tuple[Any, ...]:
+    """The frozen phase's slots as ``DeliverableSlot``s (dicts or dataclasses)."""
+    from orchestrator.design_flow.spec import DeliverableSlot
+
+    out = []
+    for slot in getattr(phase, "slots", None) or ():
+        get = slot.get if isinstance(slot, dict) else lambda k, s=slot: getattr(s, k, "")
+        if get("item_type") and get("name"):
+            out.append(
+                DeliverableSlot(
+                    item_type=str(get("item_type")),
+                    name=str(get("name")),
+                    item_key=str(get("item_key") or ""),
+                )
+            )
+    return tuple(out)
+
+
 def _log_phase_skills(request: PhaseRequest) -> None:
     """Say which discipline skills the phase's brain will load.
 
@@ -320,6 +338,8 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
         enforce_deliverables=request.phase.enforce_deliverables,
         disciplines=tuple(request.phase.disciplines),
         model=request.phase.model,
+        # FORGE-524: the frozen deliverable slots, so writes land on their items.
+        slots=_slots_of(request.phase),
     )
     ctx = FlowContext(
         goal=request.goal,
