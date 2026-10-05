@@ -416,6 +416,16 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   registered. When the cap is reached it answers that the tool exists but is
   not available to this phase, instead of implying the tool is missing.
 
+- **Chat turns keep companion tools together (FORGE-518).** Plain chat has no
+  phase allowlist, so the provider's tools-array cap (128 on OpenAI) is applied
+  by `_select_tools`. It keeps tool groups that only work as a set
+  (`twin.stage_work_product_file` with `freecad.import_step` and
+  `freecad.describe_step_file`; `freecad.export_model` with
+  `twin.commit_geometry`; `freecad.open_session` with `close_session`) and
+  drops niche families (`gazebo`, `isaac_sim`, `omniverse_usd`) first. The
+  dropped names are logged at info as `chat_tools_dropped`. See
+  [robust-harness-design](robust-harness-design.md).
+
 Measurement: `tests/unit/test_context_budget.py::test_phase_prompt_tokens_before_and_after`
 scripts one 3-call phase (two large reads, then an answer) against a 121-tool
 bridge, with and without the limits, and reads prompt tokens back from the
