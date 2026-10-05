@@ -7,6 +7,7 @@ import { ApprovalCard } from '../components/approvals/ApprovalCard';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { FlowGraph } from '../components/runs/FlowGraph';
 import { PhaseActivity } from '../components/runs/PhaseActivity';
+import { RunChangesPanel } from '../components/items/RunChangesPanel';
 import { useDesignFlows } from '../hooks/use-design-flows';
 import { useFlowState } from '../hooks/use-flow-state';
 import { useApproval } from '../hooks/use-approvals';
@@ -196,6 +197,9 @@ export function RunDetailPage() {
           <p>{run.error}</p>
         </section>
       )}
+
+      {/* FORGE-526: the item revisions this run produced, and what each gate did. */}
+      <RunChangesPanel runId={run.id} projectId={projectId} />
 
       <div className="flow-columns">
         <section className="flow-panel">

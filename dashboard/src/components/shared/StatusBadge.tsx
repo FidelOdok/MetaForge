@@ -27,6 +27,7 @@ const STATUS_MAP: Record<string, { variant: 'success' | 'warning' | 'error' | 'i
   canceled:         { variant: 'default', label: 'Canceled'  },
   timed_out:        { variant: 'default', label: 'Timed Out' },
   abandoned:        { variant: 'warning', label: 'Abandoned' },
+  committed:        { variant: 'success', label: 'Committed' },
 };
 
 // Status dot colors for use in tables/lists

@@ -31,6 +31,8 @@ import {
 } from '../hooks/use-twin';
 import { useFeatureDiff } from '../hooks/use-features';
 import { useActiveProject } from '../hooks/use-active-project';
+import { RevisionPicker } from '../components/items/RevisionPicker';
+import { ItemHistoryPanel } from '../components/items/ItemHistoryPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
 import { ComponentTree } from '../components/viewer/ComponentTree';
 import { AssemblyPartTree } from '../components/viewer/AssemblyPartTree';
@@ -430,7 +432,22 @@ function ExportForSimSection({ node, onClose }: { node: TwinNode; onClose: () =>
   );
 }
 
-function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) {
+/** FORGE-526: a node that is a revision of an item carries its key. */
+function itemKeyOf(node: TwinNode): string | undefined {
+  const key = node.properties?.item_key;
+  return typeof key === 'string' && key ? key : undefined;
+}
+
+function NodeDetail({
+  node,
+  onClose,
+  onSelectNode,
+}: {
+  node: TwinNode;
+  onClose: () => void;
+  onSelectNode?: (id: string) => void;
+}) {
+  const { activeProjectId: itemProjectId } = useActiveProject();
   const loadModel = useViewerStore((s) => s.loadModel);
   const setViewMode = useViewerStore((s) => s.setViewMode);
   const openBooleanCut = useViewerStore((s) => s.openBooleanCut);
@@ -492,7 +509,17 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
       <div className="flex-1 overflow-y-auto">
         {/* Status + meta */}
         <div className="px-3 py-2 flex-shrink-0" style={{ borderBottom: `1px solid ${KC.border}` }}>
-          <StatusBadge status={node.status} />
+          <div className="flex items-center justify-between gap-2">
+            <StatusBadge status={node.status} />
+            {onSelectNode && (
+              <RevisionPicker
+                itemKey={itemKeyOf(node)}
+                nodeId={node.id}
+                projectId={node.projectId ?? itemProjectId ?? undefined}
+                onSelect={onSelectNode}
+              />
+            )}
+          </div>
           <div className="font-mono mt-1" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
             {node.domain} · {node.type} · {formatRelativeTime(node.updatedAt)}
           </div>
@@ -1650,9 +1677,14 @@ export function TwinViewerPage() {
           <div className="tw-inspector-content">
             {node ? (
               inspectorTab === 'overview' ? (
-                <NodeDetail node={node} onClose={() => setSelectedId(null)} />
+                <NodeDetail node={node} onClose={() => setSelectedId(null)} onSelectNode={selectNode} />
               ) : inspectorTab === 'history' ? (
                 <>
+                  {itemKeyOf(node) && (
+                    <div className="px-3 py-2">
+                      <ItemHistoryPanel itemKey={itemKeyOf(node) as string} projectId={node.projectId ?? activeProjectId ?? undefined} />
+                    </div>
+                  )}
                   <NodeHistorySection nodeId={node.id} />
                   <FeatureVersionSection nodeId={node.id} />
                   <GeometryDiffSection nodeId={node.id} />

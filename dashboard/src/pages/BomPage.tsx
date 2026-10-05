@@ -5,6 +5,9 @@ import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { useBom, useHierarchicalBom } from '../hooks/use-bom';
 import { useBomRisk } from '../hooks/use-bom-risk';
+import { useRevisionIndex } from '../hooks/use-items';
+import { RevisionBadge } from '../components/items/RevisionBadge';
+import type { RevisionIndexEntry } from '../api/endpoints/items';
 import { useActiveProject } from '../hooks/use-active-project';
 import { useSelectComponent } from '../hooks/use-component-selection';
 import type { BomComponent, HierarchicalBomLine } from '../types/bom';
@@ -38,7 +41,16 @@ function formatPrice(amount: number, currency: string): string {
   return symbol ? `${symbol}${amount.toFixed(2)}` : `${currency} ${amount.toFixed(2)}`;
 }
 
-function BomRow({ component }: { component: BomComponent }) {
+function BomRow({
+  component,
+  revision,
+  projectId,
+}: {
+  component: BomComponent;
+  // FORGE-526: this component's item revision, with a history link.
+  revision?: RevisionIndexEntry;
+  projectId?: string;
+}) {
   return (
     <tr
       className="hover:bg-[var(--mf-c-282a30)] cursor-default"
@@ -72,6 +84,11 @@ function BomRow({ component }: { component: BomComponent }) {
           </a>
         ) : (
           component.partNumber
+        )}
+        {revision && (
+          <span className="ml-1.5">
+            <RevisionBadge entry={revision} projectId={projectId} />
+          </span>
         )}
         {component.datasheetUrl && (
           <a
@@ -523,6 +540,7 @@ export function BomPage() {
   const { activeProjectId } = useActiveProject();
   const [view, setView] = useState<BomView>('flat');
   const { data: components, isLoading: flatLoading } = useBom(activeProjectId ?? undefined);
+  const { data: revisionIndex } = useRevisionIndex(activeProjectId);
   const { data: hierarchicalLines, isLoading: hierarchicalLoading } = useHierarchicalBom(
     activeProjectId ?? undefined,
   );
@@ -878,7 +896,12 @@ export function BomPage() {
                 </thead>
                 <tbody>
                   {sorted.map((component) => (
-                    <BomRow key={component.id} component={component} />
+                    <BomRow
+                      key={component.id}
+                      component={component}
+                      revision={revisionIndex?.[component.id]}
+                      projectId={activeProjectId ?? undefined}
+                    />
                   ))}
                 </tbody>
               </table>
