@@ -62,6 +62,7 @@ from api_gateway.simulation.routes import router as simulation_router
 from api_gateway.technical_drawings.routes import router as technical_drawings_router
 from api_gateway.testplans.routes import router as testplans_router
 from api_gateway.trade_study.routes import router as trade_study_router
+from api_gateway.twin.baseline_routes import router as twin_baselines_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
@@ -2073,6 +2074,7 @@ def create_app(
     app.include_router(twin_router)
     app.include_router(twin_items_router)
     app.include_router(twin_prd_router)
+    app.include_router(twin_baselines_router)
     app.include_router(hierarchy_router)
     app.include_router(bom_router)
     app.include_router(bom_risk_router)

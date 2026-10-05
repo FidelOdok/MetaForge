@@ -108,7 +108,8 @@ class TestAlertingRules:
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         # + 1 record pin / staleness failures (FORGE-527).
-        assert len(rules) == 48
+        # + 1 gate approval without a baseline (FORGE-526).
+        assert len(rules) == 49
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -160,7 +161,8 @@ class TestAlertingRules:
         # + 1 run change-set approvals refused (FORGE-525)
         # + 2 simulation result field build / store failures (FORGE-532)
         # + 1 record pin / staleness failures (FORGE-527)
-        assert len(warnings) == 35
+        # + 1 gate approval without a baseline (FORGE-526)
+        assert len(warnings) == 36
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -241,6 +243,8 @@ class TestAlertingRules:
                 "TwinChangeSetApprovalsRefused",
                 # FORGE-527: record pins or staleness marking failing.
                 "TwinRecordStalenessFailures",
+                # FORGE-526: a gate approval recorded no baseline.
+                "TwinGateBaselineMissing",
                 # FORGE-466: the sidecar cannot close holds it opened, so
                 # stale entries sit on the Approvals page until expired.
                 "ToolApprovalHoldCloseFailing",

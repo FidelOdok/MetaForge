@@ -123,8 +123,33 @@ The home of the dashboard.
 ## `/projects/:id`: project detail
 
 Drill-in for a single project: metrics, an action row (**Start design
-run**, **Open twin & agent**, **Bill of materials**) and the project's
-artifact updates, newest first.
+run**, **Open twin & agent**, **Bill of materials**, **Baselines**) and the
+project's artifact updates, newest first.
+
+**Current items (FORGE-526).** By default the page lists one row per item
+at its current revision, grouped by type (Parts, Assemblies, Requirements,
+Intent, Needs, BOM, Components): its `KEY@n`, the gate and run that produced
+it, its evidence state (current, out of date, none) and its validation
+status. Older revisions are hidden; the panel header says how many. The
+counts and the readiness percentage cover current items only, never every
+node a run ever wrote. Decisions, simulation results and evidence stay
+listed as records, and a result whose analysed revision is no longer current
+moves to an **Out of date** group. Work products that are not items (a
+pinmap, the PRD) are listed under **Other work products**. If the current
+view cannot load, the page falls back to the flat work product list.
+
+Everything else is opt-in:
+
+- **Working** shows open runs' draft revisions, labelled DRAFT, under their
+  item (and draft-only items), until a gate approves them.
+- **N revisions** on a row opens the item's history: a timeline of
+  revisions with status, run, gate, reason and the baselines that pin each.
+  Tick two revisions to **compare** them: a 3D overlay with the older
+  revision ghosted (parts and assemblies), volume, mass and bounding box
+  deltas, the parameter table, requirement value changes, and the records
+  still pinned to the older revision.
+- **Baselines** lists the project's baselines (one per gate approval) and
+  diffs any two, or one against the current items, item by item.
 
 Each work product row has a **Preview** toggle (the eye icon). It opens a
 compact preview under the row, on demand: the same engine the twin
@@ -132,8 +157,11 @@ inspector and the full-screen preview use (see
 [Work product previews](#work-product-previews)), loaded only when first
 opened.
 
-- **Backed by:** `GET /v1/projects/{id}`, plus `GET /v1/twin/nodes/{id}`
-  and the twin file routes when a row preview is opened.
+- **Backed by:** `GET /v1/projects/{id}`, `GET /v1/twin/current-view`,
+  plus `GET /v1/twin/items/{key}/revisions` and `/items/{key}/diff` for
+  history and compare, `GET /v1/twin/baselines` and `/baselines/diff`, and
+  `GET /v1/twin/nodes/{id}` and the twin file routes when a row preview is
+  opened.
 - **Use it to:** find a `work_product` UUID for the CLI's
   `--work_product` flag, rename or delete the project, or set it as the
   active project.
@@ -215,8 +243,10 @@ A two-step wizard: **Define the intent**, then **Review & launch**.
 
 One run's phases, gate decisions and outputs. A run that can't be
 loaded shows a *Run could not be loaded* state rather than *not found*.
+**This run changed** lists the item revisions the run produced, with what
+each gate did (approved into a baseline, waiting for the gate, or closed).
 
-- **Backed by:** `GET /v1/runs/{id}`.
+- **Backed by:** `GET /v1/runs/{id}`, `GET /v1/twin/runs/{id}/changes`.
 
 ## `/approvals`: human review
 
@@ -255,9 +285,12 @@ sketches and drawings.
 ## `/bom`: bill of materials
 
 Per-row sourcing data with part images, purchase and datasheet links,
-and prices in their own currency. Exports to CSV.
+and prices in their own currency. Exports to CSV. Each component that is an
+item revision shows its `@n` (marked *old* when it is not current); clicking
+it opens the item's history. The Requirements page's matrix does the same
+for each requirement, with its constraint set's revision.
 
-- **Backed by:** `GET /v1/bom`.
+- **Backed by:** `GET /v1/bom`, `GET /v1/twin/revision-index`.
 - **Use it to:** sanity-check supply-chain coverage before a fab
   release.
 
@@ -270,6 +303,12 @@ strip counts nodes needing attention and nodes without relationships,
 with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
+
+A node that is a revision of an item (FORGE-526) shows a **revision
+picker** (`KEY @n`) in the inspector Overview: picking another revision
+selects that revision's node, and the Model tab reloads it. The *History*
+tab adds the item's revision timeline and the compare view described under
+[project detail](#projectsid-project-detail).
 
 An assembly `cad_model` (one with `metadata.parts`, FORGE-511) shows an
 **Assembly parts** tree in the inspector Overview and on the Assembly tab:

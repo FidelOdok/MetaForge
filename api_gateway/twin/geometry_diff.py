@@ -66,7 +66,12 @@ def make_geometry_diff(twin: Any, *, blob_stager: Any, mcp_bridge: Any) -> Any:
     blob stager + mcp_bridge (a real ``freecad.describe_step_file`` call).
     """
 
-    async def diff(*, work_product_id: str) -> dict[str, Any]:
+    async def diff(
+        *, work_product_id: str, previous_work_product_id: str | None = None
+    ) -> dict[str, Any]:
+        """Diff against the SUPERSEDES predecessor, or against
+        ``previous_work_product_id`` when given (FORGE-526: any two revisions
+        of one item, ``KEY@a`` vs ``KEY@b``)."""
         with tracer.start_as_current_span("geometry.diff") as span:
             span.set_attribute("geometry_diff.work_product_id", work_product_id)
 
@@ -81,14 +86,23 @@ def make_geometry_diff(twin: Any, *, blob_stager: Any, mcp_bridge: Any) -> Any:
             if current_wp is None:
                 raise ValueError(f"twin.geometry_diff: no work_product {work_product_id!r}")
 
-            edges = await twin.get_edges(
-                current_id, direction="outgoing", edge_type=EdgeType.SUPERSEDES
-            )
-            if not edges:
-                raise LookupError(
-                    f"work product {work_product_id} has no prior version (no SUPERSEDES edge)"
+            if previous_work_product_id:
+                try:
+                    previous_id = UUID(previous_work_product_id)
+                except ValueError as exc:
+                    raise ValueError(
+                        "twin.geometry_diff: invalid previous_work_product_id "
+                        f"{previous_work_product_id!r}"
+                    ) from exc
+            else:
+                edges = await twin.get_edges(
+                    current_id, direction="outgoing", edge_type=EdgeType.SUPERSEDES
                 )
-            previous_id = edges[0].target_id
+                if not edges:
+                    raise LookupError(
+                        f"work product {work_product_id} has no prior version (no SUPERSEDES edge)"
+                    )
+                previous_id = edges[0].target_id
             previous_wp = await twin.get_work_product(previous_id)
             if previous_wp is None:
                 raise LookupError("superseded work product no longer exists")

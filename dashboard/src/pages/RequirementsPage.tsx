@@ -39,6 +39,9 @@ import type { DesignLoopIteration, DesignLoopStatus } from '../types/design-loop
 import type { AttemptPromotionResult, MaturityLevel } from '../types/promotion';
 import type { FeatureType, GenerateFeatureResult } from '../types/features';
 import type { ConceptOption } from '../types/trade-study';
+import { useRevisionIndex } from '../hooks/use-items';
+import { RevisionBadge } from '../components/items/RevisionBadge';
+import type { RevisionIndexEntry } from '../api/endpoints/items';
 
 const OPERATORS = ['<=', '>=', '==', '<', '>', '!='] as const;
 
@@ -362,7 +365,16 @@ function EvidenceDetail({ evidence }: { evidence: EvidenceSummary }) {
   );
 }
 
-function MatrixRow({ row }: { row: RequirementMatrixRow }) {
+function MatrixRow({
+  row,
+  revision,
+  projectId,
+}: {
+  row: RequirementMatrixRow;
+  // FORGE-526: the constraint set revision this requirement belongs to.
+  revision?: RevisionIndexEntry;
+  projectId?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   return (
     <>
@@ -371,16 +383,20 @@ function MatrixRow({ row }: { row: RequirementMatrixRow }) {
         style={{ borderBottom: expanded ? 'none' : '1px solid var(--mf-r-65-72-90-0p1)' }}
       >
         <td className="px-3 py-2 text-xs text-on-surface" style={{ maxWidth: '320px' }}>
-          <div className="font-medium">
+          <div className="font-medium flex items-center gap-1.5">
             {row.requirementName}
-            {row.revisionRef && (
-              <span
-                data-testid="requirement-revision-ref"
-                className="font-mono text-on-surface-variant"
-                style={{ fontSize: '10px', marginLeft: '6px' }}
-              >
-                {row.revisionRef}
-              </span>
+            {revision ? (
+              <RevisionBadge entry={revision} projectId={projectId} />
+            ) : (
+              row.revisionRef && (
+                <span
+                  data-testid="requirement-revision-ref"
+                  className="font-mono text-on-surface-variant"
+                  style={{ fontSize: '10px' }}
+                >
+                  {row.revisionRef}
+                </span>
+              )
             )}
           </div>
           <div className="text-on-surface-variant" style={{ fontSize: '11px' }}>
@@ -467,6 +483,7 @@ function downloadFile(content: string, filename: string, mimeType: string) {
 
 function RequirementMatrixSection({ projectId }: { projectId?: string }) {
   const { data: matrix, isLoading } = useRequirementMatrix(projectId);
+  const { data: revisionIndex } = useRevisionIndex(projectId);
   const rows = matrix?.rows ?? [];
   // FORGE-528: the rows are the current constraint set revision(s), the one
   // home for requirement values; say which.
@@ -559,7 +576,12 @@ function RequirementMatrixSection({ projectId }: { projectId?: string }) {
             </thead>
             <tbody>
               {rows.map((row) => (
-                <MatrixRow key={row.requirementId} row={row} />
+                <MatrixRow
+                  key={row.requirementId}
+                  row={row}
+                  revision={revisionIndex?.[row.requirementId]}
+                  projectId={projectId}
+                />
               ))}
             </tbody>
           </table>

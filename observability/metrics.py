@@ -292,6 +292,16 @@ class MetricsRegistry:
         ),
         labels=["record_type", "status"],
     )
+    #: FORGE-526: baselines recorded, by ``source`` (``gate`` approval or
+    #: ``manual`` twin.create_baseline) and ``outcome`` (``created``,
+    #: ``existing`` for an idempotent repeat, ``empty`` when the project had
+    #: no current item to pin, ``failed``).
+    TWIN_BASELINE_TOTAL = MetricDefinition(
+        name="metaforge_twin_baseline_total",
+        type="counter",
+        description="Baselines recorded per source and outcome",
+        labels=["source", "outcome"],
+    )
 
     # ── Simulation result field metrics (FORGE-532) ──────────────────
     #: One per solved run: did the 3D field payload build (``built``), build
@@ -1071,6 +1081,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.FLOW_ITEM_SLOT_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"item_type": item_type, "outcome": outcome})
+
+    def record_twin_baseline(self, source: str, outcome: str) -> None:
+        """Record one baseline attempt (FORGE-526)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_BASELINE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"source": source, "outcome": outcome})
 
     # ── Agent ──────────────────────────────────────────────────────────
 

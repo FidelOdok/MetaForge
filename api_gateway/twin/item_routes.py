@@ -9,16 +9,22 @@ FORGE-525: both show approved state only. An item whose revisions are all
 still drafts of a run is not listed, and another run's open drafts are not in
 a history. ``?run_id=`` on the history route reads it as that run does, with
 the run's own drafts (opt-in, for reviewing what a gate would commit).
+
+FORGE-526: each revision also lists the baselines that pin it (and the gate of
+the first one, when the revision's own edge names no gate), and
+``GET /v1/twin/items/{key}/diff?a=&b=`` compares two revisions
+(``api_gateway.twin.item_diff``).
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from observability.tracing import get_tracer
 
@@ -66,6 +72,8 @@ class ItemRevisionResponse(BaseModel):
     phase: str | None = None
     gate: str | None = None
     status_reason: str | None = None
+    #: FORGE-526: baselines (ids) that pin this revision, oldest first.
+    baselines: list[str] = Field(default_factory=list)
 
 
 class ItemCurrentResponse(BaseModel):
@@ -90,6 +98,22 @@ class ItemHistoryResponse(BaseModel):
     #: What the reader sees as current: its run's draft, else the head.
     current: ItemCurrentResponse | None = None
     lessons: list[ItemLessonResponse] = []
+
+
+class ItemDiffResponse(BaseModel):
+    key: str
+    item_type: str
+    name: str
+    a: dict[str, Any]
+    b: dict[str, Any]
+    a_ref: str
+    b_ref: str
+    geometry: dict[str, Any] | None = None
+    parameters: list[dict[str, Any]] = Field(default_factory=list)
+    requirements: list[dict[str, Any]] = Field(default_factory=list)
+    fields: list[dict[str, Any]] = Field(default_factory=list)
+    dependents: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 def _twin() -> object:
@@ -153,7 +177,58 @@ async def get_item_revisions(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return ItemHistoryResponse(
             item=ItemResponse(**data["item"]),
-            revisions=[ItemRevisionResponse(**r) for r in data["revisions"]],
+            revisions=await _with_baselines(data),
             current=ItemCurrentResponse(**data["current"]) if data.get("current") else None,
             lessons=[ItemLessonResponse(**lesson) for lesson in data.get("lessons", [])],
         )
+
+
+async def _with_baselines(data: dict[str, Any]) -> list[ItemRevisionResponse]:
+    """Add the pinning baselines (and their gate, as a fallback) to each revision."""
+    item = data["item"]
+    pinned: dict[int, list[Any]] = {}
+    if item.get("project_id"):
+        twin: Any = _twin()
+        baselines = sorted(
+            await twin.list_baselines(project_id=UUID(item["project_id"])),
+            key=lambda b: b.created_at,
+        )
+        for baseline in baselines:
+            for pin in baseline.items:
+                if pin.key == item["key"]:
+                    pinned.setdefault(pin.revision, []).append(baseline)
+    rows: list[ItemRevisionResponse] = []
+    for raw in data["revisions"]:
+        holders = pinned.get(raw["revision"], [])
+        merged = {**raw, "baselines": [str(b.id) for b in holders]}
+        if not merged.get("gate"):
+            merged["gate"] = next((b.gate_id for b in holders if b.gate_id), None)
+        rows.append(ItemRevisionResponse(**merged))
+    return rows
+
+
+@router.get("/items/{key}/diff", response_model=ItemDiffResponse)
+async def get_item_diff(
+    key: str,
+    a: str | None = Query(default=None, description="Older revision, e.g. 2 or @2"),
+    b: str | None = Query(default=None, description="Newer revision; defaults to the current one"),
+    project_id: str | None = None,
+) -> ItemDiffResponse:
+    """Geometry delta, parameter, requirement and field changes between two revisions."""
+    from api_gateway.twin.item_diff import make_item_differ
+    from api_gateway.twin.routes import get_geometry_diff
+    from twin_core.items import AmbiguousItemKeyError, ItemError, UnknownItemError
+
+    with tracer.start_as_current_span("twin.item_diff_route") as span:
+        span.set_attribute("twin.item_key", key)
+        _parse_project(project_id)
+        diff = make_item_differ(_twin(), geometry_diff_provider=get_geometry_diff)
+        try:
+            data = await diff(key, a=a, b=b, project_id=project_id)
+        except UnknownItemError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AmbiguousItemKeyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ItemError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return ItemDiffResponse(**data)

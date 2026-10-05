@@ -174,6 +174,43 @@ class ForgeClient:
             resp.raise_for_status()
             return resp.json()
 
+    def _get_json(self, path: str, params: dict[str, str] | None = None) -> Any:
+        with self._client() as client:
+            resp = client.get(self._url(path), params=params or {})
+            resp.raise_for_status()
+            return resp.json()
+
+    def twin_item_history(self, key: str, project_id: str | None = None) -> dict[str, Any]:
+        """One item's revisions via ``GET /v1/twin/items/{key}/revisions`` (FORGE-526)."""
+        params = {"project_id": project_id} if project_id else {}
+        result: dict[str, Any] = self._get_json(f"/twin/items/{key}/revisions", params)
+        return result
+
+    def twin_item_diff(
+        self, key: str, a: str | None = None, b: str | None = None, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """Compare two revisions via ``GET /v1/twin/items/{key}/diff`` (FORGE-526)."""
+        params: dict[str, str] = {}
+        if a:
+            params["a"] = a
+        if b:
+            params["b"] = b
+        if project_id:
+            params["project_id"] = project_id
+        result: dict[str, Any] = self._get_json(f"/twin/items/{key}/diff", params)
+        return result
+
+    def twin_baselines(self, project_id: str | None = None) -> dict[str, Any]:
+        """A project's baselines via ``GET /v1/twin/baselines`` (FORGE-526)."""
+        params = {"project_id": project_id} if project_id else {}
+        result: dict[str, Any] = self._get_json("/twin/baselines", params)
+        return result
+
+    def twin_baseline_diff(self, a: str, b: str) -> dict[str, Any]:
+        """Compare two baselines via ``GET /v1/twin/baselines/diff`` (FORGE-526)."""
+        result: dict[str, Any] = self._get_json("/twin/baselines/diff", {"a": a, "b": b})
+        return result
+
     # ------------------------------------------------------------------
     # Proposals
     # ------------------------------------------------------------------

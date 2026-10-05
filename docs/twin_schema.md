@@ -1247,6 +1247,64 @@ Observability: `prd_rendered` and `prd_prose_recorded` / `prd_stray_requirement_
 
 *Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/items/change_sets.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`, `api_gateway/runs/change_sets.py`, `orchestrator/design_flow/slots.py`, `api_gateway/twin/requirements_home.py`, `api_gateway/twin/prd_routes.py`*
 
+### 2.31 Baselines over items, the current view and revision compare (FORGE-526)
+
+Items (section 2.30) say what each definition is now and what it was. This section is how a reader sees that without wading through every node a run ever wrote: by default the project shows its **current items only**; history, compare and baselines are opt-in views.
+
+#### Baselines pin item revisions
+
+The existing `Baseline` node (FORGE-51; `twin.create_baseline` is described in section 2.26) gains item pins rather than a parallel concept:
+
+| Field | Meaning |
+|-------|---------|
+| `items` | one immutable `{key, item_type, revision, node_id, name}` pin per current item of the project (`KEY@n`) |
+| `gate_id` | the gate whose approval recorded it, or null |
+| `run_id` | the design-flow run that gate belongs to, or null |
+| `source` | `gate` (a gate approval) or `manual` (`twin.create_baseline`) |
+| `approved_by`, `created_at`, `reason` | unchanged |
+
+A baseline is never edited after creation: there is no update path, and each pin is a frozen model. Each pinned revision also gets an `INCLUDED_IN_BASELINE` edge to the baseline (edge metadata `item_key`, `revision`). The current revision of an item is its head; an open draft (status `draft`) or a closed one (`rejected`, `abandoned`) never reaches a baseline, and an item whose every revision is still a draft is left out.
+
+Two paths create a baseline, and neither needs a new step from a user or an agent:
+
+- **A gate approval.** After `decide_run_gate` commits the run's change set (section 2.30), it calls `api_gateway.twin.baseline.create_item_baseline(project_id, gate, approver, run_id)`, which pins every current item of the project with the gate, run and approver. It is idempotent per (project, gate, run), so a retried approval does not record two baselines, and best-effort: a project with no current item records nothing, and a failure is logged (`item_baseline_failed`) without failing the approval. A rejection, retry or rework records no baseline.
+- **`twin.create_baseline`.** The existing tool now also pins the project's items, so a project whose only definitions are parts can be baselined; its result adds `item_count` and `items` (`KEY@n` list).
+
+#### Read API
+
+| Route | Returns |
+|-------|---------|
+| `GET /v1/twin/baselines?project_id=` | the project's baselines, newest first |
+| `GET /v1/twin/baselines/{id}` | one baseline with its item pins and constraint/entity members |
+| `GET /v1/twin/baselines/diff?a=&b=` | per item: `unchanged`, `changed` (`@x -> @y`), `added` (only in `b`) or `removed`; `b=current` compares `a` with the project's current items |
+| `GET /v1/twin/items/{key}/revisions` | as section 2.30, plus `baselines` (ids pinning each revision) and `gate` filled from the first such baseline when the edge names none |
+| `GET /v1/twin/items/{key}/diff?a=&b=` | compare `KEY@a` with `KEY@b` (defaults: `b` is the current revision, `a` the committed or approved one before it) |
+| `GET /v1/twin/current-view?project_id=` | the project page's default view (below) |
+| `GET /v1/twin/runs/{run_id}/changes?project_id=` | revisions the run produced (with status and whether each is current) and the baselines its gates recorded |
+| `GET /v1/twin/revision-index?project_id=` | node id to `KEY@n` for every committed or approved revision of the project, and for each `Constraint` of a constraint-set revision (`via: constraint_set`), so the BOM and Requirements pages can show a revision per row |
+
+The item diff returns:
+
+- `geometry`: bounding box, volume and mass for `KEY@a` and `KEY@b` and their deltas. When the gateway's geometry differ is configured (FORGE-301, a real `freecad.describe_step_file` on both STEP files) it is called with the two revision nodes (it now takes an explicit `previous_work_product_id`); otherwise, or when that call fails, the measurements each revision recorded at commit (`metadata.geometry_features.properties`) are compared. `source` says which (`describe_step_file` or `recorded`). Mass is the recorded mass, else volume times the density of the recorded material when that material is known (`mass_source` says so); it is never guessed.
+- `parameters`: generation parameters that changed, were added or were removed.
+- `requirements`: for a constraint set, each constraint matched by name, with its value (`operator limit unit`, else its expression) and severity before and after.
+- `fields`: other top-level scalar fields that differ (statement, title, part number, quantity), so intent, needs and BOM rows compare too.
+- `dependents`: records and baselines still pinned to `KEY@a` (an edge into that revision node, or a record whose `analysed_geometry` pin (FORGE-532) or `source_cad_model_id` names it). These are what go out of date once `b` is current.
+
+#### The current view
+
+`GET /v1/twin/current-view` (`twin_core/items/current.py`) returns:
+
+- `items`: one row per item at its current revision: `key`, `ref` (`KEY@n`), `revision_status`, `validation_status` (from the project's linked work product for that revision: `valid`, `warning`, `error`, `unknown`), `run_id` and `gate_id` that produced it, `revision_count`, `evidence_state` and `drafts` (the open drafts of any run, for the dashboard's Working toggle). An item with drafts only has a row with no revision; it is not counted.
+- `groups`: current items grouped by type.
+- `records`: decisions, simulation results and evidence, listed as they are (records are never revised). A simulation result or evidence record whose analysed revision (its `depends_on_items` pins and `DEPENDS_ON` revision-pin edges, FORGE-527; a simulation result's `analysed_geometry` pin, FORGE-532; or any other edge to a revision node) is no longer current, and which names no current revision of that item, is `out_of_date`. The record's own FORGE-527 `staleness` wins when set: `revalidated` keeps it current, `stale`, `invalid` and `superseded` mark it out of date; the row carries `staleness` too. `evidence_state` on an item row is `current`, `out_of_date` or `none` accordingly.
+- `other`: linked work products that are neither a revision of an item nor a record (unclassified types such as a pinmap, derived views such as the PRD, and unsuperseded definitions written before items existed).
+- `counts` and `readiness`: computed over current items plus `other`, never over every node. Readiness is the share whose validation status is `valid`. `superseded_revisions` counts what the default view hides.
+
+Observability: `item_baseline_created`, `item_baseline_exists`, `item_baseline_skipped`, `item_baseline_failed`, `current_view_built` and `item_diff_computed` log events; the `metaforge_twin_baseline_total{source, outcome}` counter (`created`, `existing`, `empty`, `failed`); the `TwinGateBaselineMissing` alert when a gate approval records no baseline; spans `twin.baseline.create_item_baseline`, `twin.items.current_view`, `twin.item_diff`.
+
+*Source: `twin_core/models/baseline.py`, `twin_core/transactions/baseline.py`, `twin_core/items/current.py`, `api_gateway/twin/baseline.py`, `api_gateway/twin/baseline_routes.py`, `api_gateway/twin/item_diff.py`, `api_gateway/twin/item_routes.py`, `api_gateway/runs/routes.py`*
+
 ---
 
 ### 2.31 Records pinned to revisions and stale evidence (FORGE-527) {#records-pinned-to-revisions-forge-527}
