@@ -963,8 +963,23 @@ async def _evaluate_baseline_check(twin: TwinAPI, project_id: UUID) -> GateCheck
 
 
 async def _evaluate_stale_evidence_check(twin: TwinAPI, project_id: UUID) -> GateCheck:
+    """FORGE-527: ``simulation_result`` work products are evidence too, and the
+    detail names each stale record and the revision it was for, so the
+    reviewer knows what to re-run. Superseded records are replaced, not
+    outstanding, so they do not fail the check."""
+    from twin_core.consistency.record_pins import describe_staleness
+    from twin_core.models.enums import WorkProductType
+
     entities = await twin.list_engineering_entities(project_id=project_id)
-    evidence = [e for e in entities if e.entity_type == "evidence"]
+    evidence: list[tuple[str, dict]] = [
+        (e.statement or e.title or str(e.id), e.metadata)
+        for e in entities
+        if e.entity_type == "evidence"
+    ]
+    sims = await twin.list_work_products(
+        work_product_type=WorkProductType.SIMULATION_RESULT, project_id=project_id
+    )
+    evidence += [(w.name, w.metadata) for w in sims]
     if not evidence:
         return GateCheck(
             id="stale_evidence_resolved",
@@ -972,15 +987,21 @@ async def _evaluate_stale_evidence_check(twin: TwinAPI, project_id: UUID) -> Gat
             status=GateCheckStatus.NOT_EVALUATED,
             detail="no 'evidence' entities recorded for this project yet",
         )
-    stale = [e for e in evidence if e.metadata.get("staleness", "current") in ("stale", "invalid")]
+    stale = [
+        describe_staleness(name, meta) or name
+        for name, meta in evidence
+        if (meta or {}).get("staleness", "current") in ("stale", "invalid")
+    ]
     return GateCheck(
         id="stale_evidence_resolved",
         label="Stale evidence resolved",
         status=GateCheckStatus.FAIL if stale else GateCheckStatus.PASS,
         detail=(
-            f"{len(stale)} of {len(evidence)} evidence entit(ies) stale/invalid"
+            f"{len(stale)} of {len(evidence)} evidence record(s) stale/invalid: "
+            + "; ".join(stale[:5])
+            + (f"; and {len(stale) - 5} more" if len(stale) > 5 else "")
             if stale
-            else f"all {len(evidence)} evidence entit(ies) current"
+            else f"all {len(evidence)} evidence record(s) current"
         ),
     )
 

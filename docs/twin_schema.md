@@ -1249,13 +1249,69 @@ Observability: `prd_rendered` and `prd_prose_recorded` / `prd_stray_requirement_
 
 ---
 
+### 2.31 Records pinned to revisions and stale evidence (FORGE-527) {#records-pinned-to-revisions-forge-527}
+
+A record (section 2.30) is only valid against the definition revisions it was produced from (spec sections 20, 21 and 54). Each record now says which, and says when one of them has moved on.
+
+#### What a record is pinned to
+
+When `twin.record_document` writes a `simulation_result`, `twin.record_decision` writes a `design_decision`, or `twin.record_evidence` writes an `evidence` entity, the recorder resolves its pins before anything is written. Nothing new is asked of the caller; the pins come from what the call already names:
+
+| Record | Pinned to |
+|--------|-----------|
+| `simulation_result` | first the `analysed_geometry_node_id` (FORGE-532, the node the analysis meshed and solved; its `analysed_geometry` block also gains `item_ref`, `item_key` and `item_revision`), then each `source_part_node_ids` node (and `metadata.source_cad_model_id`), plus the current head of every `constraint_set` item in the project |
+| `evidence` | each `valid_against` entry of kind `work_product`, plus every project `constraint_set` head |
+| `design_decision` | each `parent_refs` node that is an item revision |
+
+A node is pinned at the revision it is (`item_for_node`), so a simulation of `CAD-BRACKET@1` stays pinned to `@1` whatever happens later. A node that is not an item revision is not pinned. Inside a run, "current" for a constraint set is the run's own draft. All three tools also take an optional `depends_on`: item references (`KEY@n`, a bare `KEY` for the current revision, or a revision's node id). A bad explicit reference fails the call before anything is written. One pin per item; an explicit reference wins.
+
+Stored twice, for the same reason as items:
+
+- `metadata.depends_on_items` on the record, `[{item_key, revision, item_ref, item_type, node_id}]`, and `metadata.staleness`, so the record read on its own answers "what was this for, and is it still current".
+- one `DEPENDS_ON` edge per pin, record -> the pinned revision node, with `metadata.kind = "revision_pin"` and the `item_ref`. This is what makes invalidation dependency-directed and lets Cypher traverse it.
+
+The record tools return `depends_on` (the `KEY@n` refs), `staleness` and `superseded_records`.
+
+#### Status
+
+The vocabulary is `StalenessStatus` (`twin_core/consistency/staleness.py`):
+
+| Status | Set when |
+|--------|----------|
+| `current` | at record time |
+| `stale` | an item the record is pinned to got a newer head; `staleness_reason` says which (`it was for CAD-BRACKET@1, and CAD-BRACKET is now @2`) and `stale_for` holds `{item_key: {pinned, current}}` |
+| `superseded` | a re-run of the same check on a newer revision of a pinned item was recorded; `superseded_by` names it and a `SUPERSEDES` edge runs new -> old |
+| `invalid` | the record was pinned to a run's draft that its gate rejected or the run abandoned, so it was never about the design |
+| `revalidated` | set by a caller that re-checked the record and found it still holds (`set_record_status`) |
+
+A record is never deleted or hidden; only the status changes, and the status write keeps the record's `updated_at`, so a stale record never looks like the newest result of a phase window. "The same check" is the same `analysis_type` (else `load_case`) for a simulation, the same `evidence_type` and producing tool for evidence, and the same title for a decision.
+
+#### When the status changes
+
+- **A head write outside a run** (`commit_revision` moving `HEAD`): every record pinned to an older revision of that item becomes `stale`.
+- **A gate approving a run's change set** (`commit_change_set`): the same, per item whose head moved. A record the run made on its draft is now pinned to the head, so it stays `current`, and it supersedes its older run.
+- **A draft** moves no head, so it stales nothing. A re-run recorded on an open draft supersedes nothing until the gate approves it.
+- **A rejected or abandoned draft** (`close_change_set`): records pinned to it become `invalid`; records on the unchanged head are untouched.
+
+Only records with a pin edge to one of the changed item's revisions are visited (spec section 21): a new bracket revision never touches the leg's analysis. FORGE-314's `StalenessEngine.propagate` still runs alongside for constraints and engineering entities pinned through `metadata.depends_on`.
+
+Gates read the same flag; see [stale evidence at the gate](architecture/design-flow-harness.md#stale-evidence-at-the-gate-forge-527). `GET /v1/twin/nodes/{id}` returns `dependsOn` (`[{itemKey, revision, itemRef, itemType, nodeId}]`) and `staleness` (`{status, reason, staleFor, supersededBy}`) for a record; both are null for a definition.
+
+Observability: `record_pinned`, `record_superseded`, `records_marked_stale`, `records_marked_invalid`, `record_pin_edge_failed` and `record_staleness_failed` log events; the `metaforge_twin_record_staleness_total{record_type, status}` counter (`stale`, `superseded`, `invalid`, `revalidated`, plus `pin_failed` and `propagation_failed`); the `TwinRecordStalenessFailures` alert. A failure after the record or the head write is saved is logged and counted, never raised.
+
+Limits: records written before FORGE-527 carry no pins and read as `current`; a record about a record (a decision citing evidence) is not pinned through it.
+
+*Source: `twin_core/consistency/record_pins.py`, `api_gateway/twin/record_pins.py`, `api_gateway/runs/analysis_constraints.py`, `api_gateway/runs/gate_eval.py`*
+
+---
+
 ## 3. Edge Types
 
 Edges are directed relationships between nodes. Each edge type has defined source and target node types.
 
 | Edge Type | Source -> Target | Description |
 |-----------|-----------------|-------------|
-| `DEPENDS_ON` | WorkProduct -> WorkProduct | WorkProduct A requires WorkProduct B (e.g., PCB depends on schematic) |
+| `DEPENDS_ON` | WorkProduct -> WorkProduct, or record -> revision node | WorkProduct A requires WorkProduct B (e.g., PCB depends on schematic). FORGE-527: with `metadata.kind = "revision_pin"`, a record (`simulation_result`, `design_decision`, `evidence`) is pinned to the item revision `metadata.item_ref` (section 2.31) |
 | `IMPLEMENTS` | WorkProduct -> WorkProduct | WorkProduct A implements the spec defined in WorkProduct B |
 | `VALIDATES` | WorkProduct -> WorkProduct | WorkProduct A (test result) validates WorkProduct B (design) |
 | `CONTAINS` | WorkProduct -> WorkProduct, or HierarchyNode -> HierarchyNode | Hierarchical composition. FORGE-260: `metadata` carries `{quantity, placement}` when nesting one product-hierarchy position inside another |

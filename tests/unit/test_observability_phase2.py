@@ -280,7 +280,8 @@ class TestAllMetricsCombined:
         # + 3 simulation result field payload/store (FORGE-532)
         # + 1 prd requirement values (FORGE-528)
         # + 2 project brief count/size (FORGE-530)
-        assert len(MetricsRegistry.all_metrics()) == 80
+        # + 1 twin record staleness (FORGE-527)
+        assert len(MetricsRegistry.all_metrics()) == 81
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (

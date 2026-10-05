@@ -283,6 +283,15 @@ class MetricsRegistry:
         description="Requirement values found in prd prose, matched or stray",
         labels=["outcome"],
     )
+    TWIN_RECORD_STALENESS_TOTAL = MetricDefinition(
+        name="metaforge_twin_record_staleness_total",
+        type="counter",
+        description=(
+            "Records (simulation results, decisions, evidence) whose staleness changed, "
+            "by record type and status (FORGE-527)"
+        ),
+        labels=["record_type", "status"],
+    )
 
     # ── Simulation result field metrics (FORGE-532) ──────────────────
     #: One per solved run: did the 3D field payload build (``built``), build
@@ -826,6 +835,7 @@ class MetricsRegistry:
             cls.TWIN_CHANGE_SET_TOTAL,
             cls.FLOW_ITEM_SLOT_TOTAL,
             cls.TWIN_PRD_REQUIREMENT_VALUE_TOTAL,
+            cls.TWIN_RECORD_STALENESS_TOTAL,
         ]
 
     @classmethod
@@ -1036,6 +1046,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.TWIN_PRD_REQUIREMENT_VALUE_TOTAL.name)
         if counter is not None and count > 0:
             counter.add(count, attributes={"outcome": outcome})
+
+    def record_twin_record_staleness(self, record_type: str, status: str) -> None:
+        """Record one record staleness change (FORGE-527)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_RECORD_STALENESS_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"record_type": record_type, "status": status})
 
     def record_twin_item_revision(self, item_type: str, outcome: str, resolved_by: str) -> None:
         """Record one item revision write (FORGE-523)."""
