@@ -1424,13 +1424,37 @@ def _claims_twin_write(answer: str) -> bool:
     return False
 
 
+def _turn_evidence_text(
+    user_content: str,
+    *,
+    system: str | None = None,
+    history: list[dict[str, Any]] | None = None,
+    project_brief: str | None = None,
+    project_id: str | None = None,
+) -> str:
+    """Everything the model was shown before this turn's tool calls.
+
+    The user's message, the system prompt (which carries the project brief on
+    the native path), the conversation history (prior user/assistant messages
+    and any prior tool results, plus the brief pair on the ReAct path), the
+    brief itself and the active project id. An id quoted from any of these is
+    one the model was given, not one it made up.
+    """
+    parts = [user_content, system or "", project_brief or "", project_id or ""]
+    for message in history or []:
+        parts.append(json.dumps(message, default=str))
+    return "\n".join(parts)
+
+
 def _unverified_node_ids(answer: str, steps: list[ReActStep], context_text: str) -> list[str]:
     """Node ids the reply quotes that no successful tool call this turn returned.
 
     The evidence is the text of every successful call's arguments and result,
-    plus ``context_text`` (the user's own message), so an id the user pasted
-    or the model looked up is grounded. A session obj_id quoted as a node id
-    is never grounded.
+    plus ``context_text`` (see :func:`_turn_evidence_text`: the user's message,
+    system prompt with the project brief, conversation history including prior
+    turns' tool results, and the active project id), so an id the user pasted,
+    the brief listed, an earlier turn returned, or the model looked up is
+    grounded. A session obj_id quoted as a node id is never grounded.
     """
     evidence_parts = [context_text]
     for step in steps:
@@ -1664,7 +1688,13 @@ async def _run_chat_turn(
             str(result.output),
             result.steps,
             tools=ctx.runtime.tools,
-            context_text=user_content,
+            context_text=_turn_evidence_text(
+                user_content,
+                system=system,
+                history=full_history,
+                project_brief=project_brief,
+                project_id=project_id,
+            ),
             metrics=metrics,
         )
     elif result.stop_reason in ("max_steps", "timeout", "budget_exceeded"):
@@ -2210,7 +2240,13 @@ async def run_chat_turn_streaming(
         answer,
         result.steps,
         tools=ctx.runtime.tools,
-        context_text=user_content,
+        context_text=_turn_evidence_text(
+            user_content,
+            system=system,
+            history=full_history,
+            project_brief=project_brief,
+            project_id=project_id,
+        ),
         metrics=metrics,
     )
     await _record_turn_experience(answer)

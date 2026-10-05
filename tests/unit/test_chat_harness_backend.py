@@ -10,6 +10,7 @@ from api_gateway.chat.backend import InMemoryChatBackend
 from api_gateway.chat.harness_backend import (
     _build_context,
     _flag_if_unfounded_completion_claim,
+    _turn_evidence_text,
     chat_harness_enabled,
     make_set_project_scope_tool,
     provider_config_from_env,
@@ -188,6 +189,7 @@ class TestFlagUnfoundedCompletionClaim:
 # "assembly_4" (a FreeCAD session obj_id).
 
 _COMMITTED_NODE_ID = "3f2b8c1e-9a4d-4e7b-8c2a-1d5e6f7a8b9c"
+_PROJECT_ID = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
 
 
 def _ok(name: str, observation: object, arguments: dict | None = None) -> ReActStep:
@@ -270,6 +272,48 @@ class TestClaimSpecificGrounding:
             == answer
         )
 
+    def test_node_id_from_the_project_brief_is_grounded(self) -> None:
+        brief = f"Project: shelf (id {_PROJECT_ID})\nWork products:\n- Shelf: {_COMMITTED_NODE_ID}"
+        context = _turn_evidence_text(
+            "what is in this project?",
+            system=f"You are MetaForge.\n\n{brief}",
+            project_brief=brief,
+            project_id=_PROJECT_ID,
+        )
+        answer = f"Project {_PROJECT_ID} has one work product, node id {_COMMITTED_NODE_ID}."
+        steps = [_ok("twin.get_node", {"children": 3})]
+        assert _flag_if_unfounded_completion_claim(answer, steps, context_text=context) == answer
+
+    def test_node_id_from_a_prior_turns_tool_result_is_grounded(self) -> None:
+        history = [
+            {"role": "user", "content": "commit the shelf"},
+            {
+                "role": "tool",
+                "name": "twin.commit_geometry",
+                "content": {"status": "ok", "data": {"node_id": _COMMITTED_NODE_ID}},
+            },
+            {"role": "assistant", "content": "Committed."},
+        ]
+        context = _turn_evidence_text("what was the node id?", history=history)
+        answer = f"The shelf's node id is {_COMMITTED_NODE_ID}."
+        assert _flag_if_unfounded_completion_claim(answer, [], context_text=context) == answer
+
+    def test_live_case_still_flagged_with_brief_and_history(self) -> None:
+        history = [{"role": "assistant", "content": "Imported part_1 and built assembly_4."}]
+        context = _turn_evidence_text(
+            "save the shelf",
+            system="You are MetaForge.",
+            history=history,
+            project_brief=f"Work products:\n- Shelf: {_COMMITTED_NODE_ID}",
+            project_id=_PROJECT_ID,
+        )
+        answer = "The shelf assembly has been saved to the digital twin.\nNode ID: assembly_4"
+        flagged = _flag_if_unfounded_completion_claim(
+            answer, _freecad_session_steps(), context_text=context
+        )
+        assert NO_TWIN_COMMIT_BANNER in flagged
+        assert UNVERIFIED_NODE_ID_BANNER + "assembly_4" in flagged
+
     def test_registry_classification_counts_a_committing_skill(self) -> None:
         tools = ToolRegistry()
 
@@ -320,6 +364,28 @@ async def test_run_chat_turn_flags_a_zero_tool_call_completion_claim(
     out = await run_chat_turn("assemble the gripper", invoke=fake_invoke)
     assert out.startswith("⚠")
     assert "Assembled the gripper" in out
+
+
+@pytest.mark.asyncio
+async def test_run_chat_turn_treats_the_project_brief_as_node_id_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("METAFORGE_LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("METAFORGE_NATIVE_TOOLS", "false")  # ReAct JSON-final path
+
+    async def fake_invoke(spec: ProviderSpec, request: object) -> dict:
+        return {
+            "text": f'{{"thought": "from brief", "final": "Project {_PROJECT_ID} is active."}}',
+            "model": spec.model,
+        }
+
+    out = await run_chat_turn(
+        "which project is this?",
+        invoke=fake_invoke,
+        project_brief=f"Project id: {_PROJECT_ID}",
+        project_id=_PROJECT_ID,
+    )
+    assert out == f"Project {_PROJECT_ID} is active."
 
 
 @pytest.mark.asyncio

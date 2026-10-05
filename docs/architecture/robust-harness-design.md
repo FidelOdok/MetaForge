@@ -793,11 +793,15 @@ its result is not an error envelope (`status: "error"`, `success: false`).
 
 A **node id** is any UUID in the reply, or an id-shaped token after `node id`,
 `node_id`, `work product id` or `wp id`. It is grounded when it appears in the
-arguments or result of a successful call this turn, or in the user's own
-message. A FreeCAD session object id (`part_N`, `assembly_N`, `body_N`, and
-similar) presented as a node id is never grounded, whatever returned it. A
-node id carried over from an earlier turn is flagged too: the banner says it
-was not verified this turn, not that it is wrong.
+arguments or result of a successful call this turn, or in anything the model
+was given before the turn ran (`_turn_evidence_text`): the user's message, the
+system prompt (which carries the project brief on the native path), the
+conversation history (prior user and assistant messages, prior tool results,
+and the brief pair on the ReAct path), the project brief itself and the
+active `project_id`. So in `forge chat --project` an id quoted from the brief
+or from an earlier turn is not flagged. A FreeCAD session object id (`part_N`,
+`assembly_N`, `body_N`, and similar) presented as a node id is never grounded,
+whatever returned it or wherever it appeared before.
 
 Only `UNGROUNDED_BANNER` changes a design-flow phase status (`is_ungrounded`);
 the two new banners are chat-only. Each flag logs a `chat_ungrounded_claim`
