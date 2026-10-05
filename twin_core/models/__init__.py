@@ -2,7 +2,7 @@
 
 from twin_core.models.agent import AgentNode
 from twin_core.models.base import EdgeBase, NodeBase
-from twin_core.models.baseline import Baseline, BaselineMember, BaselineResult
+from twin_core.models.baseline import Baseline, BaselineItemRef, BaselineMember, BaselineResult
 from twin_core.models.bom_item import BOMItem
 from twin_core.models.component import Component
 from twin_core.models.confidence import Confidence
@@ -78,6 +78,7 @@ __all__ = [
     "PatchResult",
     # Baselines + revision history (FORGE-51)
     "Baseline",
+    "BaselineItemRef",
     "BaselineMember",
     "BaselineResult",
     "RevisionSnapshot",

@@ -41,6 +41,34 @@
         "title": "AddConceptOptionRequest",
         "type": "object"
       },
+      "AnalysedRef": {
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "revision",
+          "ref",
+          "current"
+        ],
+        "title": "AnalysedRef",
+        "type": "object"
+      },
       "ApprovalDecision": {
         "description": "Body for ``POST /api/v1/assistant/proposals/{change_id}/decide``.",
         "properties": {
@@ -847,6 +875,385 @@
           "results"
         ],
         "title": "AttemptPromotionResponse",
+        "type": "object"
+      },
+      "BaselineDetail": {
+        "properties": {
+          "approved_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Approved By",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "gate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BaselineItemRefResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/BaselineMemberResponse"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "source": {
+            "default": "manual",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "approved_by",
+          "item_count",
+          "member_count"
+        ],
+        "title": "BaselineDetail",
+        "type": "object"
+      },
+      "BaselineDiffResponse": {
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/BaselineSummary"
+          },
+          "b": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BaselineSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "b_is_current": {
+            "default": false,
+            "title": "B Is Current",
+            "type": "boolean"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BaselineItemDiffResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "a",
+          "items",
+          "counts"
+        ],
+        "title": "BaselineDiffResponse",
+        "type": "object"
+      },
+      "BaselineItemDiffResponse": {
+        "properties": {
+          "from_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Ref"
+          },
+          "from_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Revision"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "to_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Ref"
+          },
+          "to_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Revision"
+          }
+        },
+        "required": [
+          "key",
+          "item_type",
+          "name",
+          "status"
+        ],
+        "title": "BaselineItemDiffResponse",
+        "type": "object"
+      },
+      "BaselineItemRefResponse": {
+        "properties": {
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "item_type",
+          "revision",
+          "ref",
+          "node_id"
+        ],
+        "title": "BaselineItemRefResponse",
+        "type": "object"
+      },
+      "BaselineListResponse": {
+        "properties": {
+          "baselines": {
+            "items": {
+              "$ref": "#/components/schemas/BaselineSummary"
+            },
+            "title": "Baselines",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "baselines",
+          "total"
+        ],
+        "title": "BaselineListResponse",
+        "type": "object"
+      },
+      "BaselineMemberResponse": {
+        "properties": {
+          "entity_id": {
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "entity_kind": {
+            "title": "Entity Kind",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entity_kind",
+          "entity_id",
+          "revision"
+        ],
+        "title": "BaselineMemberResponse",
+        "type": "object"
+      },
+      "BaselineSummary": {
+        "properties": {
+          "approved_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Approved By",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "gate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "source": {
+            "default": "manual",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "approved_by",
+          "item_count",
+          "member_count"
+        ],
+        "title": "BaselineSummary",
         "type": "object"
       },
       "Body_import_work_product_v1_twin_import_post": {
@@ -2384,6 +2791,221 @@
           "scope_entity_id"
         ],
         "title": "CreateThreadRequest",
+        "type": "object"
+      },
+      "CurrentItemRow": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "change_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
+          "drafts": {
+            "items": {
+              "$ref": "#/components/schemas/RevisionStateResponse"
+            },
+            "title": "Drafts",
+            "type": "array"
+          },
+          "evidence_count": {
+            "title": "Evidence Count",
+            "type": "integer"
+          },
+          "evidence_state": {
+            "title": "Evidence State",
+            "type": "string"
+          },
+          "gate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate Id"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "revision_count": {
+            "title": "Revision Count",
+            "type": "integer"
+          },
+          "revision_status": {
+            "title": "Revision Status",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "validation_status": {
+            "title": "Validation Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "item_type",
+          "name",
+          "revision_status",
+          "validation_status",
+          "revision_count",
+          "evidence_state",
+          "evidence_count"
+        ],
+        "title": "CurrentItemRow",
+        "type": "object"
+      },
+      "CurrentViewResponse": {
+        "properties": {
+          "counts": {
+            "additionalProperties": true,
+            "title": "Counts",
+            "type": "object"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ItemGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurrentItemRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "latest_baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BaselineSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "other": {
+            "items": {
+              "$ref": "#/components/schemas/OtherRow"
+            },
+            "title": "Other",
+            "type": "array"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "readiness": {
+            "title": "Readiness",
+            "type": "integer"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/RecordRowResponse"
+            },
+            "title": "Records",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "groups",
+          "records",
+          "other",
+          "counts",
+          "readiness"
+        ],
+        "title": "CurrentViewResponse",
         "type": "object"
       },
       "DecisionRecord": {
@@ -5441,6 +6063,128 @@
         "title": "ItemCurrentResponse",
         "type": "object"
       },
+      "ItemDiffResponse": {
+        "properties": {
+          "a": {
+            "additionalProperties": true,
+            "title": "A",
+            "type": "object"
+          },
+          "a_ref": {
+            "title": "A Ref",
+            "type": "string"
+          },
+          "b": {
+            "additionalProperties": true,
+            "title": "B",
+            "type": "object"
+          },
+          "b_ref": {
+            "title": "B Ref",
+            "type": "string"
+          },
+          "dependents": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Dependents",
+            "type": "array"
+          },
+          "fields": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "requirements": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Requirements",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "item_type",
+          "name",
+          "a",
+          "b",
+          "a_ref",
+          "b_ref"
+        ],
+        "title": "ItemDiffResponse",
+        "type": "object"
+      },
+      "ItemGroup": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "item_type",
+          "count",
+          "keys"
+        ],
+        "title": "ItemGroup",
+        "type": "object"
+      },
       "ItemHistoryResponse": {
         "properties": {
           "current": {
@@ -5668,6 +6412,13 @@
               }
             ],
             "title": "Author"
+          },
+          "baselines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Baselines",
+            "type": "array"
           },
           "change_reason": {
             "anyOf": [
@@ -7120,6 +7871,45 @@
         "title": "OkResponse",
         "type": "object"
       },
+      "OtherRow": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "validation_status": {
+            "title": "Validation Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "name",
+          "type",
+          "validation_status"
+        ],
+        "title": "OtherRow",
+        "type": "object"
+      },
       "OverhangCheckRequest": {
         "properties": {
           "build_axis": {
@@ -7966,6 +8756,63 @@
         "title": "RecordPinResponse",
         "type": "object"
       },
+      "RecordRowResponse": {
+        "properties": {
+          "analysed": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysedRef"
+            },
+            "title": "Analysed",
+            "type": "array"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "out_of_date": {
+            "default": false,
+            "title": "Out Of Date",
+            "type": "boolean"
+          },
+          "record_type": {
+            "title": "Record Type",
+            "type": "string"
+          },
+          "staleness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staleness"
+          }
+        },
+        "required": [
+          "node_id",
+          "record_type",
+          "name"
+        ],
+        "title": "RecordRowResponse",
+        "type": "object"
+      },
       "RecordStalenessResponse": {
         "description": "Whether a record is still valid evidence (FORGE-527, spec section 20).",
         "properties": {
@@ -8611,6 +9458,169 @@
         "title": "RevisionDiff",
         "type": "object"
       },
+      "RevisionIndexEntry": {
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "boolean"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "revision_count": {
+            "title": "Revision Count",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "via": {
+            "title": "Via",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "item_type",
+          "revision",
+          "ref",
+          "status",
+          "current",
+          "revision_count",
+          "via"
+        ],
+        "title": "RevisionIndexEntry",
+        "type": "object"
+      },
+      "RevisionIndexResponse": {
+        "properties": {
+          "nodes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RevisionIndexEntry"
+            },
+            "title": "Nodes",
+            "type": "object"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "nodes"
+        ],
+        "title": "RevisionIndexResponse",
+        "type": "object"
+      },
+      "RevisionStateResponse": {
+        "properties": {
+          "adopted": {
+            "default": false,
+            "title": "Adopted",
+            "type": "boolean"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "change_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "gate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "node_id",
+          "status"
+        ],
+        "title": "RevisionStateResponse",
+        "type": "object"
+      },
       "Ros2LaunchRequest": {
         "properties": {
           "default_urdf_path": {
@@ -8776,6 +9786,35 @@
           }
         },
         "title": "RoutingResponse",
+        "type": "object"
+      },
+      "RunChangesResponse": {
+        "properties": {
+          "baselines": {
+            "items": {
+              "$ref": "#/components/schemas/BaselineSummary"
+            },
+            "title": "Baselines",
+            "type": "array"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/RunRevisionRow"
+            },
+            "title": "Revisions",
+            "type": "array"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "revisions",
+          "baselines"
+        ],
+        "title": "RunChangesResponse",
         "type": "object"
       },
       "RunListResponse": {
@@ -8958,6 +9997,87 @@
           "history"
         ],
         "title": "RunResponse",
+        "type": "object"
+      },
+      "RunRevisionRow": {
+        "properties": {
+          "baselined_by_gate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baselined By Gate"
+          },
+          "change_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Reason"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "is_current": {
+            "title": "Is Current",
+            "type": "boolean"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "item_type",
+          "name",
+          "revision",
+          "ref",
+          "node_id",
+          "status",
+          "is_current"
+        ],
+        "title": "RunRevisionRow",
         "type": "object"
       },
       "RunStatusResponse": {
@@ -18178,6 +19298,198 @@
         ]
       }
     },
+    "/v1/twin/baselines": {
+      "get": {
+        "description": "A project's baselines, newest first.",
+        "operationId": "list_baselines_v1_twin_baselines_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaselineListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Baselines",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/baselines/diff": {
+      "get": {
+        "description": "Per item: unchanged, changed (@x -> @y), added or removed between ``a`` and ``b``.",
+        "operationId": "diff_baselines_route_v1_twin_baselines_diff_get",
+        "parameters": [
+          {
+            "description": "Baseline id",
+            "in": "query",
+            "name": "a",
+            "required": true,
+            "schema": {
+              "description": "Baseline id",
+              "title": "A",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Baseline id, or 'current' for the project's current items",
+            "in": "query",
+            "name": "b",
+            "required": true,
+            "schema": {
+              "description": "Baseline id, or 'current' for the project's current items",
+              "title": "B",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaselineDiffResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Baselines Route",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/baselines/{baseline_id}": {
+      "get": {
+        "description": "One baseline with its item pins and constraint/entity members.",
+        "operationId": "get_baseline_v1_twin_baselines__baseline_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "baseline_id",
+            "required": true,
+            "schema": {
+              "title": "Baseline Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaselineDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Baseline",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/current-view": {
+      "get": {
+        "description": "The project's current items, records, counts and readiness (current items only).",
+        "operationId": "get_current_view_v1_twin_current_view_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentViewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Current View",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/hierarchy": {
       "get": {
         "description": "List a project's hierarchy nodes, each with its parent link and its\nown rolled-up mass/cost.\n\nEmpty (not a 404) when the project has none yet, matching ``/v1/bom``.\nNote: computes one rollup per node (each its own subtree walk) -- fine\nat the scale a hand-built product hierarchy actually reaches, not\noptimized for a tree of thousands of nodes.",
@@ -18438,6 +19750,101 @@
           }
         },
         "summary": "List Twin Items",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/items/{key}/diff": {
+      "get": {
+        "description": "Geometry delta, parameter, requirement and field changes between two revisions.",
+        "operationId": "get_item_diff_v1_twin_items__key__diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Older revision, e.g. 2 or @2",
+            "in": "query",
+            "name": "a",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Older revision, e.g. 2 or @2",
+              "title": "A"
+            }
+          },
+          {
+            "description": "Newer revision; defaults to the current one",
+            "in": "query",
+            "name": "b",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Newer revision; defaults to the current one",
+              "title": "B"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDiffResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Item Diff",
         "tags": [
           "twin"
         ]
@@ -19705,6 +21112,108 @@
           }
         },
         "summary": "List Twin Relationships",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/revision-index": {
+      "get": {
+        "description": "Node id -> ``KEY@n`` for every revision (and constraint-set constraint) of the project.",
+        "operationId": "get_revision_index_v1_twin_revision_index_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionIndexResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Revision Index",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/runs/{run_id}/changes": {
+      "get": {
+        "description": "Revisions a design-flow run produced, and the baselines its gates recorded.",
+        "operationId": "get_run_changes_v1_twin_runs__run_id__changes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunChangesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Changes",
         "tags": [
           "twin"
         ]

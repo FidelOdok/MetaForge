@@ -24,6 +24,13 @@ the same project-scoped list calls ``release_package.py`` already uses for
 its own snapshot). A baseline with zero members is rejected by
 ``create_baseline`` itself (``ValueError``); this wrapper surfaces that as a
 clear error rather than creating a vacuous baseline.
+
+**Items (FORGE-526).** The same baseline now also pins every current item of
+the project (``KEY@n``, see ``twin_core.items``): a project whose only
+definitions are parts or assemblies can be baselined too.
+:func:`create_item_baseline` is the one-line seam a gate approval calls
+(FORGE-525 owns the approval path), and :func:`baseline_to_dict` is the JSON
+shape the MCP tool and the REST routes share.
 """
 
 from __future__ import annotations
@@ -36,7 +43,9 @@ import structlog
 
 from observability.tracing import get_tracer
 from twin_core.models.patch import ControlledEntityKind
+from twin_core.transactions.baseline import baseline_item_refs
 from twin_core.transactions.baseline import create_baseline as _create_baseline_txn
+from twin_core.transactions.baseline import create_item_baseline as _create_item_baseline
 from twin_core.transactions.engine import TransactionEngine
 
 logger = structlog.get_logger(__name__)
@@ -66,10 +75,11 @@ def make_baseline_creator(twin: Any, *, engine: Any = None) -> Any:
             members: list[tuple[ControlledEntityKind, UUID]] = [
                 ("constraint", c.id) for c in constraints
             ] + [("engineering_entity", e.id) for e in entities]
+            items = await baseline_item_refs(twin, pid)
 
-            if not members:
+            if not members and not items:
                 raise ValueError(
-                    "twin.create_baseline: no constraints or engineering entities "
+                    "twin.create_baseline: no constraints, engineering entities or items "
                     "recorded for this project -- there is nothing to baseline yet"
                 )
 
@@ -85,6 +95,7 @@ def make_baseline_creator(twin: Any, *, engine: Any = None) -> Any:
                 approved_by=approved_by,
                 reason=reason,
                 project_id=pid,
+                items=items,
             )
 
             span.set_attribute("baseline.status", result.status)
@@ -104,6 +115,7 @@ def make_baseline_creator(twin: Any, *, engine: Any = None) -> Any:
                 member_count=len(baseline.includes),
                 constraint_count=len(constraints),
                 entity_count=len(entities),
+                item_count=len(items),
             )
 
             return {
@@ -112,9 +124,107 @@ def make_baseline_creator(twin: Any, *, engine: Any = None) -> Any:
                 "member_count": len(baseline.includes),
                 "constraint_count": len(constraints),
                 "entity_count": len(entities),
+                "item_count": len(baseline.items),
+                "items": [r.ref for r in baseline.items],
                 "approved_by": baseline.approved_by,
                 "reason": baseline.reason,
                 "created_at": baseline.created_at.isoformat(),
             }
 
     return create
+
+
+async def create_item_baseline(
+    project_id: str | None,
+    gate_id: str | None,
+    approver: str,
+    run_id: str | None = None,
+    *,
+    twin: Any = None,
+) -> dict[str, Any] | None:
+    """Record the baseline a gate approval implies (FORGE-526 seam for FORGE-525).
+
+    Pins every current item of ``project_id`` with the approver, gate and run.
+    Idempotent per (project, gate, run). Best-effort by design: an approval
+    must never fail because its baseline could not be recorded, so a failure
+    is logged (``item_baseline_failed``), counted, and returns ``None``.
+    ``twin`` defaults to the gateway's active twin.
+    """
+    if not project_id:
+        return None
+    if twin is None:
+        from api_gateway.twin.routes import get_twin
+
+        twin = get_twin()
+    with tracer.start_as_current_span("twin.create_item_baseline") as span:
+        span.set_attribute("baseline.project_id", project_id)
+        span.set_attribute("baseline.gate_id", gate_id or "")
+        try:
+            baseline = await _create_item_baseline(
+                twin,
+                project_id=project_id,
+                approved_by=[approver or "unknown"],
+                gate_id=gate_id,
+                run_id=run_id,
+            )
+        except ValueError as exc:
+            logger.info(
+                "item_baseline_skipped",
+                project_id=project_id,
+                gate_id=gate_id,
+                run_id=run_id,
+                reason=str(exc),
+            )
+            return None
+        except Exception as exc:  # noqa: BLE001 -- never fail the approval
+            span.record_exception(exc)
+            logger.error(
+                "item_baseline_failed",
+                project_id=project_id,
+                gate_id=gate_id,
+                run_id=run_id,
+                error=str(exc),
+            )
+            from observability.metrics import collector_for
+
+            collector_for("metaforge-twin-baselines").record_twin_baseline("gate", "failed")
+            return None
+        return baseline_to_dict(baseline)
+
+
+def baseline_to_dict(baseline: Any, *, include_items: bool = True) -> dict[str, Any]:
+    """The JSON shape of a baseline, shared by the MCP tool and the REST routes."""
+    out: dict[str, Any] = {
+        "id": str(baseline.id),
+        "name": baseline.name,
+        "project_id": str(baseline.project_id) if baseline.project_id else None,
+        "created_at": baseline.created_at.isoformat(),
+        "approved_by": list(baseline.approved_by),
+        "reason": baseline.reason,
+        "gate_id": getattr(baseline, "gate_id", None),
+        "run_id": getattr(baseline, "run_id", None),
+        "source": getattr(baseline, "source", "manual"),
+        "item_count": len(getattr(baseline, "items", [])),
+        "member_count": len(baseline.includes),
+    }
+    if include_items:
+        out["items"] = [
+            {
+                "key": r.key,
+                "item_type": r.item_type,
+                "revision": r.revision,
+                "ref": r.ref,
+                "node_id": str(r.node_id),
+                "name": r.name,
+            }
+            for r in baseline.items
+        ]
+        out["members"] = [
+            {
+                "entity_kind": m.entity_kind,
+                "entity_id": str(m.entity_id),
+                "revision": m.revision,
+            }
+            for m in baseline.includes
+        ]
+    return out

@@ -551,6 +551,30 @@ python -m cli.forge_cli twin list --domain electronics --type schematic
 | `--domain` | One of: `mechanical`, `electronics`, `firmware`, `simulation`, … |
 | `--type` | Work-product type: `cad_model`, `schematic`, `bom`, etc. |
 
+### `twin history`, `twin diff`, `twin baseline`: revisions and baselines {#twin-items}
+
+```
+twin history <KEY> [--project <id|name>]
+twin diff <KEY> [@a] [@b] [--project <id|name>]
+twin baseline list --project <id|name>
+twin baseline diff <baseline-id> <baseline-id|current>
+```
+
+```bash
+python -m cli.forge_cli twin history CAD-BRACKET
+python -m cli.forge_cli twin diff CAD-BRACKET @2 @3
+python -m cli.forge_cli twin baseline list --project "Shelf"
+python -m cli.forge_cli twin baseline diff 4f1c... current
+```
+
+Opt-in views over items (FORGE-526, see [Twin schema section 2.31](twin_schema.md#231-baselines-over-items-the-current-view-and-revision-compare-forge-526)); the normal flow needs none of them, because writes create revisions and gate approvals record baselines on their own.
+
+- `history` lists every revision of one item with its status (`committed`, `draft`, `approved`, `rejected`, `abandoned`), the head marker, the run and gate, and the change reason.
+- `diff` compares two revisions. With no revisions it compares the current one with the one before it; with one, that revision with the current one. It prints the geometry delta (volume, mass, bounding box, and whether the numbers came from the STEP files or from what each revision recorded), parameter, requirement and field changes, and the records still pinned to the older revision.
+- `baseline list` shows a project's baselines, newest first, with gate, run, approver and item count. `baseline diff` compares two of them item by item (`unchanged`, `changed`, `added`, `removed`); `current` as the second id compares a baseline with the project's current items.
+
+Add `--format json` for the raw gateway response.
+
 ### `approvals`: review and decide pending approvals {#approvals}
 
 ```

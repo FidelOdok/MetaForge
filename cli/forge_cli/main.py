@@ -7,6 +7,9 @@ Usage::
     python -m cli.forge_cli.main twin query <node-id>
     python -m cli.forge_cli.main twin list --domain mechanical --type cad_model
     python -m cli.forge_cli.main twin list --project "6-DOF Robotic Arm"
+    python -m cli.forge_cli.main twin history CAD-BRACKET
+    python -m cli.forge_cli.main twin diff CAD-BRACKET @2 @3
+    python -m cli.forge_cli.main twin baseline list --project "6-DOF Robotic Arm"
     python -m cli.forge_cli.main proposals
     python -m cli.forge_cli.main approve <change-id> --reason "looks good"
     python -m cli.forge_cli.main reject <change-id> --reason "needs revision"
@@ -142,6 +145,25 @@ def build_parser() -> argparse.ArgumentParser:
     twin_list.add_argument(
         "--project", default=None, help="Filter by project id or name (FORGE-248)"
     )
+
+    # FORGE-526: opt-in history, compare and baselines over items.
+    twin_history = twin_sub.add_parser("history", help="Revisions of one item (KEY)")
+    twin_history.add_argument("key", help="Item key, e.g. CAD-BRACKET")
+    twin_history.add_argument("--project", default=None, help="Project id or name")
+
+    twin_diff = twin_sub.add_parser("diff", help="Compare two revisions: KEY [@a] [@b]")
+    twin_diff.add_argument("key", help="Item key, e.g. CAD-BRACKET")
+    twin_diff.add_argument("a", nargs="?", default=None, help="Older revision (default: previous)")
+    twin_diff.add_argument("b", nargs="?", default=None, help="Newer revision (default: current)")
+    twin_diff.add_argument("--project", default=None, help="Project id or name")
+
+    twin_baseline = twin_sub.add_parser("baseline", help="Baselines recorded by gate approvals")
+    baseline_sub = twin_baseline.add_subparsers(dest="baseline_command")
+    baseline_list = baseline_sub.add_parser("list", help="List a project's baselines")
+    baseline_list.add_argument("--project", required=True, help="Project id or name")
+    baseline_diff = baseline_sub.add_parser("diff", help="Compare two baselines item by item")
+    baseline_diff.add_argument("a", help="Baseline id")
+    baseline_diff.add_argument("b", help="Baseline id, or 'current' for the current items")
 
     # -- proposals ---------------------------------------------------------
     subparsers.add_parser("proposals", help="List pending change proposals")
@@ -444,8 +466,79 @@ def _resolve_project_ref(client: ForgeClient, project_ref: str) -> str:
     return str(matches[0]["id"])
 
 
+def _fmt(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={v}" for k, v in value.items())
+    return str(value)
+
+
+def _history_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    key = data["item"]["key"]
+    return [
+        {
+            "rev": f"{key}@{r['revision']}",
+            "status": r.get("status", ""),
+            "head": "*" if r.get("is_head") else "",
+            "run": r.get("run_id") or "",
+            "gate": r.get("gate") or "",
+            "reason": r.get("change_reason") or r.get("status_reason") or "",
+            "created": r.get("created_at") or "",
+        }
+        for r in data["revisions"]
+    ]
+
+
+def _diff_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    geo = data.get("geometry") or {}
+    if geo.get("available"):
+        a, b = geo.get("a") or {}, geo.get("b") or {}
+        for label, field, delta in (
+            ("volume_mm3", "volume_mm3", geo.get("volume_delta_mm3")),
+            ("mass_kg", "mass_kg", geo.get("mass_delta_kg")),
+            ("bounding_box", "bounding_box", geo.get("bounding_box_delta")),
+        ):
+            rows.append(
+                {
+                    "section": f"geometry ({geo.get('source')})",
+                    "name": label,
+                    "status": "",
+                    "from": _fmt(a.get(field)),
+                    "to": _fmt(b.get(field)),
+                    "delta": _fmt(delta),
+                }
+            )
+    for section in ("parameters", "requirements", "fields"):
+        for change in data.get(section) or []:
+            rows.append(
+                {
+                    "section": section,
+                    "name": change["name"],
+                    "status": change["status"],
+                    "from": _fmt(change.get("from")),
+                    "to": _fmt(change.get("to")),
+                    "delta": "",
+                }
+            )
+    for dep in data.get("dependents") or []:
+        rows.append(
+            {
+                "section": f"pinned to {data['a_ref']}",
+                "name": dep["name"],
+                "status": dep["type"],
+                "from": dep["node_id"],
+                "to": "",
+                "delta": "",
+            }
+        )
+    return rows
+
+
 def handle_twin(args: argparse.Namespace, client: ForgeClient) -> Any:
-    """Handle ``forge twin query|list``."""
+    """Handle ``forge twin query|list|history|diff|baseline``."""
+    as_json = getattr(args, "output_format", "table") == "json"
     if args.twin_command == "query":
         return client.twin_query(args.node_id)
     if args.twin_command == "list":
@@ -453,7 +546,55 @@ def handle_twin(args: argparse.Namespace, client: ForgeClient) -> Any:
         return client.twin_list(
             domain=args.domain, work_product_type=args.work_product_type, project_id=project_id
         )
-    print("Error: specify a twin subcommand (query or list)", file=sys.stderr)
+    if args.twin_command == "history":
+        project_id = _resolve_project_ref(client, args.project) if args.project else None
+        history = client.twin_item_history(args.key, project_id=project_id)
+        return history if as_json else _history_rows(history)
+    if args.twin_command == "diff":
+        project_id = _resolve_project_ref(client, args.project) if args.project else None
+        diff = client.twin_item_diff(args.key, a=args.a, b=args.b, project_id=project_id)
+        if as_json:
+            return diff
+        print(f"{diff['a_ref']} -> {diff['b_ref']}  ({diff['item_type']}: {diff['name']})")
+        rows = _diff_rows(diff)
+        return rows if rows else [{"section": "", "name": "no differences recorded"}]
+    if args.twin_command == "baseline":
+        if args.baseline_command == "list":
+            project_id = _resolve_project_ref(client, args.project)
+            listed = client.twin_baselines(project_id=project_id)
+            if as_json:
+                return listed
+            return [
+                {
+                    "id": b["id"],
+                    "name": b["name"],
+                    "gate": b.get("gate_id") or "",
+                    "run": b.get("run_id") or "",
+                    "approved_by": ", ".join(b.get("approved_by") or []),
+                    "items": b.get("item_count", 0),
+                    "created": b.get("created_at", ""),
+                }
+                for b in listed["baselines"]
+            ]
+        if args.baseline_command == "diff":
+            diff = client.twin_baseline_diff(args.a, args.b)
+            if as_json:
+                return diff
+            return [
+                {
+                    "key": d["key"],
+                    "status": d["status"],
+                    "from": d.get("from_ref") or "",
+                    "to": d.get("to_ref") or "",
+                }
+                for d in diff["items"]
+            ]
+        print("Error: specify a baseline subcommand (list or diff)", file=sys.stderr)
+        sys.exit(1)
+    print(
+        "Error: specify a twin subcommand (query, list, history, diff or baseline)",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 

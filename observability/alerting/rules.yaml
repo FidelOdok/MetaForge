@@ -489,6 +489,22 @@ groups:
             Search the gateway logs for record_pin_edge_failed and
             record_staleness_failed for the record and item ids.
 
+      # FORGE-526 -- a gate approval should pin the project's current items
+      # as a baseline. "empty" or "failed" means an approval went through
+      # without a baseline, so the dashboard's baseline list and diff miss it.
+      - alert: TwinGateBaselineMissing
+        expr: increase(metaforge_twin_baseline_total{source="gate", outcome=~"empty|failed"}[30m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "A gate approval did not record a baseline"
+          description: >-
+            {{ $value }} gate approvals in 30m recorded no baseline
+            (outcome={{ $labels.outcome }}). Search the gateway logs for
+            item_baseline_failed or create_item_baseline.
+
       # MET-455 — Consolidation contradiction rate. The BACKGROUND
       # synthesis pass flags newly-synthesized insights that conflict
       # with the existing corpus. A sustained nonzero rate means the

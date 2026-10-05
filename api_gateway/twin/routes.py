@@ -114,6 +114,11 @@ def init_design_sketch_approver(approver: Any) -> None:
 _geometry_diff: Any = None
 
 
+def get_geometry_diff() -> Any:
+    """The injected geometry differ, or ``None`` (FORGE-526 item diff reuses it)."""
+    return _geometry_diff
+
+
 def init_geometry_diff(differ: Any) -> None:
     """Wire in the geometry-diff callable (server lifespan)."""
     global _geometry_diff  # noqa: PLW0603

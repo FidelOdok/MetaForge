@@ -367,6 +367,31 @@ class TestGateDecisions:
         assert (head.status, head.gate) == ("approved", "g1")
         assert head.change_reason == "Approved at gate 'g1' by local:reviewer: ok"
 
+    async def test_approve_records_a_baseline_of_current_items(self, twin, gate_run) -> None:
+        """FORGE-526: the approval pins every current item, with gate, run and approver."""
+        from api_gateway.runs.routes import decide_run_gate
+        from orchestrator.harness.runs import ApprovalDecision
+
+        run_id = gate_run()
+        await _commit(twin, "a", name="Shelf")
+        await _commit(twin, "b", run_id=run_id)
+        await decide_run_gate(run_id, ApprovalDecision.APPROVE, _approver(), reason="ok")
+        baselines = await twin.list_baselines(project_id=UUID(PROJECT))
+        assert len(baselines) == 1
+        baseline = baselines[0]
+        assert sorted(r.ref for r in baseline.items) == ["CAD-LEG@1", "CAD-SHELF@1"]
+        assert (baseline.gate_id, baseline.run_id, baseline.source) == ("g1", run_id, "gate")
+        assert baseline.approved_by == ["local:reviewer"]
+
+    async def test_reject_records_no_baseline(self, twin, gate_run) -> None:
+        from api_gateway.runs.routes import decide_run_gate
+        from orchestrator.harness.runs import ApprovalDecision
+
+        run_id = gate_run()
+        await _commit(twin, "a")
+        await decide_run_gate(run_id, ApprovalDecision.REJECT, _approver(), reason="no")
+        assert await twin.list_baselines(project_id=UUID(PROJECT)) == []
+
     async def test_conflicting_approval_is_409_and_the_run_stays_parked(
         self, twin, gate_run
     ) -> None:

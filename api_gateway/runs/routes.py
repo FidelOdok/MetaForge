@@ -33,6 +33,7 @@ from api_gateway.runs.schemas import (
     filter_by_project,
 )
 from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
+from api_gateway.twin.baseline import create_item_baseline
 from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
@@ -1376,6 +1377,8 @@ async def _settle_change_set(
         logger.info(
             "design_flow_change_set_committed", run_id=run.id, gate=gate, items=committed["items"]
         )
+    # FORGE-526: the approval records a baseline of the project's current items.
+    await create_item_baseline(run_change_sets._project(run), gate, approver.label, run.id)
 
 
 async def decide_run_gate(
