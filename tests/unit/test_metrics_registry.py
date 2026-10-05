@@ -66,7 +66,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 design-flow gate announcement (FORGE-489)
         # + 1 unified approval decision (FORGE-507)
         # + 1 chat ungrounded claim (FORGE-520)
-        assert len(all_metrics) == 71
+        # + 1 twin item revisions (FORGE-523)
+        assert len(all_metrics) == 72
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

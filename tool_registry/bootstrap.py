@@ -300,6 +300,7 @@ async def bootstrap_tool_registry(
     bringup_checklist_creator: Any = None,
     firmware_scaffold_creator: Any = None,
     harness_estimate_getter: Any = None,
+    item_history_reader: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -488,6 +489,10 @@ async def bootstrap_tool_registry(
             (make_hierarchy_geometry_linker, FORGE-266). When supplied,
             registers ``twin.realize_hierarchy_node``. ``None`` skips
             registration.
+        item_history_reader: Optional async ``read(*, item_key=None,
+            node_id=None, project_id=None)`` (make_item_history_reader,
+            FORGE-523). When supplied, registers ``twin.item_history``.
+            ``None`` skips registration.
 
     Returns:
         The populated ToolRegistry.
@@ -720,6 +725,7 @@ async def bootstrap_tool_registry(
                     bringup_checklist_creator=bringup_checklist_creator,
                     firmware_scaffold_creator=firmware_scaffold_creator,
                     harness_estimate_getter=harness_estimate_getter,
+                    item_history_reader=item_history_reader,
                 )
                 await registry.register_adapter(server)
                 registered.append("twin")

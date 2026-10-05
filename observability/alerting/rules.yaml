@@ -381,6 +381,23 @@ groups:
             cascade-delete via ``delete_work_product(id, cascade=True)``.
           runbook_url: "observability/runbooks/twin-orphans.md"
 
+      # FORGE-523 - a definition write landed but its item link did not, so
+      # the node shows as a fresh sibling instead of the next revision of its
+      # part / constraint set / intent. The write itself succeeded (it never
+      # fails over this), which is exactly why it needs an alarm.
+      - alert: TwinItemRevisionLinkFailures
+        expr: increase(metaforge_twin_item_revision_total{outcome="failed"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Twin writes are landing without their item revision link"
+          description: >-
+            {{ $value }} {{ $labels.item_type }} writes in 15m were saved without
+            a REVISION_OF/HEAD link (resolved_by={{ $labels.resolved_by }}). Search
+            the gateway logs for item_revision_failed for the node ids.
+
       # MET-455 — Consolidation contradiction rate. The BACKGROUND
       # synthesis pass flags newly-synthesized insights that conflict
       # with the existing corpus. A sustained nonzero rate means the

@@ -69,7 +69,7 @@ from api_gateway.twin.version_service import VersionService
 from observability.tracing import get_tracer
 from shared.storage import default_storage
 from twin_core.api import InMemoryTwinAPI, OrphanWouldBeCreatedError
-from twin_core.models.enums import WorkProductType
+from twin_core.models.enums import EdgeType, WorkProductType
 from twin_core.models.work_product import WorkProduct
 
 logger = structlog.get_logger(__name__)
@@ -313,6 +313,10 @@ async def list_twin_relationships(
             except Exception:
                 continue
             for edge in wp_edges:
+                # FORGE-523: REVISION_OF/HEAD point at Item nodes, which this
+                # view does not list; returning them would draw dangling edges.
+                if edge.edge_type in (EdgeType.REVISION_OF, EdgeType.HEAD):
+                    continue
                 key = f"{edge.source_id}:{edge.target_id}:{edge.edge_type}"
                 if key in seen:
                     continue

@@ -111,6 +111,9 @@ async def _connect_with_retry(
     raise last
 
 
+_ITEM_EDGES = frozenset({EdgeType.REVISION_OF, EdgeType.HEAD})
+
+
 @dataclass
 class OrphanReport:
     """Result of ``TwinAPI.find_orphans()`` (MET-429).
@@ -729,6 +732,11 @@ class InMemoryTwinAPI(TwinAPI):
             for node in nodes:
                 outgoing = await self._graph.get_edges(node.id, direction="outgoing")
                 incoming = await self._graph.get_edges(node.id, direction="incoming")
+                # FORGE-523: an item's REVISION_OF/HEAD edges say which item a
+                # node is a revision of, not where it sits in the thread, so
+                # they don't rescue a BOMItem with no BOM from being an orphan.
+                outgoing = [e for e in outgoing if e.edge_type not in _ITEM_EDGES]
+                incoming = [e for e in incoming if e.edge_type not in _ITEM_EDGES]
                 if not outgoing and not incoming:
                     bucket.append(node.id)
         # MET-439: surface the per-kind counts to Prometheus so a

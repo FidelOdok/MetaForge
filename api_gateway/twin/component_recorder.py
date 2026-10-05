@@ -39,6 +39,10 @@ from uuid import UUID
 
 import structlog
 
+from api_gateway.twin.item_revisions import (
+    finish_definition_revision,
+    plan_definition_revision,
+)
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -172,6 +176,10 @@ def make_component_recorder(
         priced_distributor: str | None = None,
         project_id: str | None = None,
         session_id: str | None = None,
+        item_key: str | None = None,
+        supersedes: str | None = None,
+        change_reason: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         from twin_core.models.bom_item import BOMItem
 
@@ -181,6 +189,22 @@ def make_component_recorder(
             raise ValueError("component recorder: 'manufacturer' is required (non-empty string)")
         if not category or not isinstance(category, str):
             raise ValueError("component recorder: 'category' is required (non-empty string)")
+
+        # FORGE-523: a component selection is a definition keyed by the role
+        # it fills (or by the part when no role is given), so choosing a
+        # different part for the same role is the next revision of one item.
+        selection_name = role or f"{manufacturer} {mpn}"
+        plan = await plan_definition_revision(
+            twin,
+            item_type="component_selection",
+            name=selection_name,
+            project_id=project_id,
+            default_author="twin.record_component_selection",
+            item_key=item_key,
+            supersedes=supersedes,
+            change_reason=change_reason,
+            run_id=run_id,
+        )
 
         with tracer.start_as_current_span("twin.record_component_selection") as span:
             span.set_attribute("component.mpn", mpn)
@@ -319,6 +343,9 @@ def make_component_recorder(
                 "project_linked": linked,
                 "bom_work_product_id": bom_wp_id,
             }
+            await finish_definition_revision(
+                twin, plan, UUID(node_id), name=selection_name, result=result
+            )
             margins, unchecked = await _requirement_margins(twin, project_id, specs or {})
             if margins or unchecked:
                 result["requirement_margins"] = [m.model_dump() for m in margins]

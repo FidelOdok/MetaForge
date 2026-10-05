@@ -27,6 +27,10 @@ from uuid import UUID
 import structlog
 
 from api_gateway.twin._ref_resolver import resolve_refs
+from api_gateway.twin.item_revisions import (
+    finish_definition_revision,
+    plan_definition_revision,
+)
 from observability.tracing import get_tracer
 from twin_core.consistency.budgets import (
     BUDGET_REQUIRED_METADATA,
@@ -79,6 +83,10 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
         relation: str = _DEFAULT_RELATION,
         project_id: str | None = None,
         session_id: str | None = None,
+        item_key: str | None = None,
+        supersedes: str | None = None,
+        change_reason: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         if entity_type not in _ENTITY_TYPES:
             raise ValueError(
@@ -149,6 +157,24 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
                         f"the title, put the number here too."
                     )
 
+            # FORGE-523: intent / stakeholder_need / objective are
+            # definitions (twin_core.items.registry); every other entity
+            # type is a record or unclassified and gets plan=None here.
+            display_name = title or statement
+            plan = await plan_definition_revision(
+                twin,
+                item_type=entity_type,
+                name=display_name,
+                project_id=project_id,
+                default_author="twin.record_engineering_entity",
+                item_key=item_key,
+                supersedes=supersedes,
+                change_reason=change_reason,
+                run_id=run_id,
+            )
+            if plan is not None:
+                metadata.update(plan.stamp())
+
             entity = EngineeringEntity(
                 entity_type=entity_type,  # type: ignore[arg-type]
                 statement=statement,
@@ -174,6 +200,15 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
                 )
                 project_linked = True
 
+            result: dict[str, Any] = {
+                "node_id": str(created.id),
+                "entity_type": entity_type,
+                "parent_ids": [str(p) for p in resolved_parent_ids],
+                "project_linked": project_linked,
+            }
+            await finish_definition_revision(
+                twin, plan, created.id, name=display_name, result=result
+            )
             logger.info(
                 "engineering_entity_recorded",
                 entity_type=entity_type,
@@ -181,12 +216,8 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
                 parents=len(resolved_parent_ids),
                 relation=relation,
                 project_id=project_id,
+                item_ref=result.get("item_ref"),
             )
-            return {
-                "node_id": str(created.id),
-                "entity_type": entity_type,
-                "parent_ids": [str(p) for p in resolved_parent_ids],
-                "project_linked": project_linked,
-            }
+            return result
 
     return record

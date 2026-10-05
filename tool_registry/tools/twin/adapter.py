@@ -80,6 +80,53 @@ def undeclared_requirement_fields(constraints: list[Any]) -> list[dict[str, Any]
     return out
 
 
+# FORGE-523: optional item arguments every definition write tool accepts.
+# None are required -- with none given, a write revises the same-named item
+# in the project, so the normal path needs nothing new from the caller.
+_ITEM_WRITE_TOOLS = (
+    "twin.commit_geometry",
+    "twin.record_constraint_set",
+    "twin.record_engineering_entity",
+    "twin.record_component_selection",
+)
+_ITEM_ARG_PROPERTIES: dict[str, Any] = {
+    "item_key": {
+        "type": "string",
+        "description": (
+            "Optional. The item this write revises, as returned by an earlier write "
+            "('CAD-BRACKET'), or 'KEY@n' to also check the head is still revision n. "
+            "Use it when the name has changed but it is the same thing; omit it "
+            "otherwise (the same name in the project is the same item)."
+        ),
+    },
+    "supersedes": {
+        "type": "string",
+        "description": (
+            "Optional. Node id of an earlier revision this replaces; the write "
+            "becomes the next revision of that node's item."
+        ),
+    },
+    "change_reason": {
+        "type": "string",
+        "description": "Optional. Why this revision differs from the previous one.",
+    },
+}
+_ITEM_RESULT_PROPERTIES: dict[str, Any] = {
+    "item_key": {"type": "string"},
+    "revision": {"type": "integer"},
+    "item_ref": {"type": "string", "description": "KEY@revision"},
+}
+
+
+def _item_kwargs(arguments: dict[str, Any]) -> dict[str, Any]:
+    """The optional FORGE-523 item arguments, only those actually given."""
+    return {
+        name: arguments[name]
+        for name in ("item_key", "supersedes", "change_reason")
+        if isinstance(arguments.get(name), str) and arguments[name].strip()
+    }
+
+
 class TwinServer(McpToolServer):
     """MCP adapter wrapping ``TwinAPI`` for harness consumption."""
 
@@ -133,6 +180,7 @@ class TwinServer(McpToolServer):
         bringup_checklist_creator: Any = None,
         firmware_scaffold_creator: Any = None,
         harness_estimate_getter: Any = None,
+        item_history_reader: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -414,6 +462,11 @@ class TwinServer(McpToolServer):
         # chain from a work product's real metadata.assembly.joints. Same
         # injection seam as every recorder above.
         self._harness_estimate_getter = harness_estimate_getter
+        # FORGE-523: an injected async ``read(*, item_key=None, node_id=None,
+        # project_id=None) -> dict`` (make_item_history_reader) backing
+        # twin.item_history. Same injection seam as every recorder above; the
+        # item logic lives in twin_core.items, which this layer can't import.
+        self._item_history_reader = item_history_reader
         self._register_tools()
         self._register_thread_questions()
         if decision_recorder is not None:
@@ -505,6 +558,23 @@ class TwinServer(McpToolServer):
             self._register_create_firmware_scaffold()
         if harness_estimate_getter is not None:
             self._register_get_harness_estimate()
+        if item_history_reader is not None:
+            self._register_item_history()
+        self._add_item_arguments()
+
+    def _add_item_arguments(self) -> None:
+        """Advertise the optional item arguments/results on each definition write tool."""
+        for tool_id in _ITEM_WRITE_TOOLS:
+            registration = self._tools.get(tool_id)
+            if registration is None:
+                continue
+            manifest = registration.manifest
+            manifest.input_schema.setdefault("properties", {}).update(
+                {k: dict(v) for k, v in _ITEM_ARG_PROPERTIES.items()}
+            )
+            manifest.output_schema.setdefault("properties", {}).update(
+                {k: dict(v) for k, v in _ITEM_RESULT_PROPERTIES.items()}
+            )
 
     # ------------------------------------------------------------------
     # Tool registrations
@@ -1337,6 +1407,7 @@ class TwinServer(McpToolServer):
             ),
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            **_item_kwargs(arguments),
         )
 
     # ------------------------------------------------------------------
@@ -1563,6 +1634,7 @@ class TwinServer(McpToolServer):
             constraints=constraints,
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            **_item_kwargs(arguments),
         )
         gaps = undeclared_requirement_fields(constraints)
         if gaps:
@@ -1728,6 +1800,7 @@ class TwinServer(McpToolServer):
             relation=relation if isinstance(relation, str) else "derives_from",
             project_id=project_id if isinstance(project_id, str) else None,
             session_id=session_id if isinstance(session_id, str) else None,
+            **_item_kwargs(arguments),
         )
 
     # ------------------------------------------------------------------
@@ -2571,6 +2644,7 @@ class TwinServer(McpToolServer):
             **({"source_tool": source_tool} if source_tool else {}),
             **({"extra_metadata": extra_metadata} if extra_metadata else {}),
             **({"parts": assembly_parts} if assembly_parts else {}),
+            **_item_kwargs(arguments),
         )
 
     # ------------------------------------------------------------------
@@ -4902,6 +4976,76 @@ class TwinServer(McpToolServer):
         if not work_product_id or not isinstance(work_product_id, str):
             raise ValueError("twin.get_harness_estimate: 'work_product_id' is required")
         return await self._harness_estimate_getter(work_product_id=work_product_id)
+
+    # ------------------------------------------------------------------
+    # twin.item_history (FORGE-523)
+    # ------------------------------------------------------------------
+
+    def _register_item_history(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.item_history",
+                adapter_id="twin",
+                name="Item History",
+                description=(
+                    "List every revision of one item (a part, assembly, constraint set, "
+                    "intent, need, objective, BOM or component selection), oldest first, "
+                    "with revision number, node id, change_reason, run_id and author. "
+                    "Pass the item_key a write returned ('CAD-BRACKET'), or any revision's "
+                    "node_id. Use for 'what changed on this part' or 'which revision was "
+                    "current before'. Reads only."
+                ),
+                capability="twin_inspect",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "item_key": {
+                            "type": "string",
+                            "description": "Item key, e.g. 'CAD-BRACKET' ('@n' is ignored).",
+                        },
+                        "node_id": {
+                            "type": "string",
+                            "description": "Node id of any revision of the item.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Project UUID; only needed for a key in several.",
+                        },
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "item": {"type": "object"},
+                        "revisions": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=128, max_cpu_seconds=10, max_disk_mb=16
+                ),
+            ),
+            handler=self.item_history,
+        )
+
+    async def item_history(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        item_key = arguments.get("item_key")
+        node_id = arguments.get("node_id")
+        project_id = arguments.get("project_id")
+        if not (isinstance(item_key, str) and item_key) and not (
+            isinstance(node_id, str) and node_id
+        ):
+            raise ValueError("twin.item_history: pass 'item_key' or 'node_id'")
+        with tracer.start_as_current_span("twin.item_history") as span:
+            if isinstance(item_key, str) and item_key:
+                span.set_attribute("twin.item_key", item_key)
+            result: dict[str, Any] = await self._item_history_reader(
+                item_key=item_key if isinstance(item_key, str) and item_key else None,
+                node_id=node_id if isinstance(node_id, str) and node_id else None,
+                project_id=project_id if isinstance(project_id, str) and project_id else None,
+            )
+            span.set_attribute("twin.revision_count", len(result.get("revisions") or []))
+            return result
 
     # ------------------------------------------------------------------
     # twin.execute_revalidation_plan (FORGE-316)
