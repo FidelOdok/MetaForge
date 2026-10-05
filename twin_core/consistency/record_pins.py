@@ -215,14 +215,19 @@ async def resolve_pins(
     """The ``KEY@n`` pins for a record about to be written.
 
     * ``refs``: explicit pins from the caller, ``KEY@n``, a bare ``KEY`` (its
-      current revision as this run sees it) or a node id. A bad explicit ref
-      raises :class:`~twin_core.items.ItemError`, before anything is written.
+      current revision as this run sees it), a revision's node id, or a
+      requirement (Constraint) id, which pins the constraint-set revision that
+      requirement belongs to. A bad explicit ref raises
+      :class:`~twin_core.items.ItemError`, before anything is written.
     * ``node_ids``: what the record already names (a simulation's source
       cad_model, a decision's parents). Each is pinned to the revision that
       node is; a node that is not an item revision is skipped.
     * ``include_constraint_sets``: also pin the current head of every
-      constraint set item in the project (what an analysis or a verification
-      was judged against). Inside a run, the run's own draft counts as current.
+      constraint set item in the project (what a verification was judged
+      against; evidence only). Inside a run, the run's own draft counts as
+      current. A simulation never sets it: its numbers do not depend on
+      requirement values, so a requirement edit must not stale it unless the
+      call named the requirements it verifies.
 
     One pin per item; an explicit ref wins over an inferred one.
     """
@@ -248,18 +253,31 @@ async def resolve_pins(
         item, revision = found
         return ItemPin(item.key, revision, node_id, item.item_type)
 
+    async def _from_requirement(constraint_id: UUID) -> ItemPin | None:
+        """A requirement (Constraint) id pins the constraint-set revision it is in."""
+        getter = getattr(twin, "get_constraint", None)
+        if getter is None:
+            return None
+        try:
+            constraint = await getter(constraint_id)
+        except Exception:  # noqa: BLE001 - not a constraint id; the caller says so
+            return None
+        meta = getattr(constraint, "metadata", None) or {}
+        set_id = _as_uuid(meta.get("constraint_set_wp"))
+        return await _from_node(set_id) if set_id is not None else None
+
     for ref in refs or []:
         if not isinstance(ref, str) or not ref.strip():
             continue
         as_id = _as_uuid(ref)
         if as_id is not None:
-            pin = await _from_node(as_id)
+            pin = await _from_node(as_id) or await _from_requirement(as_id)
             if pin is None:
                 from twin_core.items import UnknownItemError
 
                 raise UnknownItemError(
-                    f"depends_on {ref!r}: that node is not a revision of any item; "
-                    "pass an item reference such as 'CAD-BRACKET@2'"
+                    f"depends_on {ref!r}: that node is neither a revision of an item nor "
+                    "a requirement; pass an item reference such as 'CAD-BRACKET@2'"
                 )
             _add(pin)
             continue

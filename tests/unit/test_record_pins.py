@@ -153,16 +153,56 @@ class TestPinnedAtRecordTime:
         await _cad(twin, "b")
         assert await _status(twin, sim["node_id"]) == "stale"
 
-    async def test_the_project_constraint_set_is_pinned_too(self, twin) -> None:
+    async def test_a_requirement_edit_does_not_stale_a_simulation(self, twin) -> None:
+        """A result's numbers do not depend on requirement values (review on #1076)."""
         constraints = make_constraint_recorder(twin, None)
-        await constraints(
-            title="Bracket reqs",
-            constraints=[{"name": "stress", "expression": "True"}],
-            project_id=PROJECT,
-        )
+        c = [{"name": "stress", "expression": "True"}]
+        await constraints(title="Bracket reqs", constraints=c, project_id=PROJECT)
         cad = await _cad(twin, "a")
         sim = await _sim(twin, cad["node_id"])
+        assert sim["depends_on"] == ["CAD-BRACKET@1"]
+        await constraints(
+            title="Bracket reqs",
+            constraints=[{"name": "stress", "expression": "True", "message": "tighter"}],
+            project_id=PROJECT,
+        )
+        assert await _status(twin, sim["node_id"]) == "current"
+
+    async def test_a_named_constraint_set_is_pinned(self, twin) -> None:
+        constraints = make_constraint_recorder(twin, None)
+        c = [{"name": "stress", "expression": "True"}]
+        cs = await constraints(title="Bracket reqs", constraints=c, project_id=PROJECT)
+        cad = await _cad(twin, "a")
+        sim = await _sim(twin, cad["node_id"], depends_on=[cs["item_ref"]])
         assert sorted(sim["depends_on"]) == ["CAD-BRACKET@1", "CS-BRACKET-REQS@1"]
+        await constraints(
+            title="Bracket reqs",
+            constraints=[{"name": "stress", "expression": "True", "message": "tighter"}],
+            project_id=PROJECT,
+        )
+        assert await _status(twin, sim["node_id"]) == "stale"
+
+    async def test_a_verified_requirement_id_pins_its_constraint_set(self, twin) -> None:
+        constraints = make_constraint_recorder(twin, None)
+        c = [{"name": "stress", "expression": "True"}]
+        cs = await constraints(title="Bracket reqs", constraints=c, project_id=PROJECT)
+        cad = await _cad(twin, "a")
+        sim = await _sim(twin, cad["node_id"], depends_on=[cs["constraint_ids"][0]])
+        assert sorted(sim["depends_on"]) == ["CAD-BRACKET@1", "CS-BRACKET-REQS@1"]
+
+    async def test_evidence_keeps_its_constraint_set_pins(self, twin) -> None:
+        constraints = make_constraint_recorder(twin, None)
+        c = [{"name": "stress", "expression": "True"}]
+        await constraints(title="Bracket reqs", constraints=c, project_id=PROJECT)
+        record = make_evidence_recorder(twin, None)
+        out = await record(
+            evidence_type="simulation",
+            producer={"tool": "calculix.run_fea"},
+            inputs={},
+            result={"max_von_mises_mpa": 120},
+            project_id=PROJECT,
+        )
+        assert out["depends_on"] == ["CS-BRACKET-REQS@1"]
 
     async def test_explicit_item_refs_are_accepted(self, twin) -> None:
         await _cad(twin, "a")

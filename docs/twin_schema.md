@@ -1259,11 +1259,11 @@ When `twin.record_document` writes a `simulation_result`, `twin.record_decision`
 
 | Record | Pinned to |
 |--------|-----------|
-| `simulation_result` | first the `analysed_geometry_node_id` (FORGE-532, the node the analysis meshed and solved; its `analysed_geometry` block also gains `item_ref`, `item_key` and `item_revision`), then each `source_part_node_ids` node (and `metadata.source_cad_model_id`), plus the current head of every `constraint_set` item in the project |
+| `simulation_result` | first the `analysed_geometry_node_id` (FORGE-532, the node the analysis meshed and solved; its `analysed_geometry` block also gains `item_ref`, `item_key` and `item_revision`), then each `source_part_node_ids` node (and `metadata.source_cad_model_id`). Constraint sets only when `depends_on` names them: a result's numbers do not depend on requirement values, so a requirement edit does not stale it unless it verifies those requirements |
 | `evidence` | each `valid_against` entry of kind `work_product`, plus every project `constraint_set` head |
 | `design_decision` | each `parent_refs` node that is an item revision |
 
-A node is pinned at the revision it is (`item_for_node`), so a simulation of `CAD-BRACKET@1` stays pinned to `@1` whatever happens later. A node that is not an item revision is not pinned. Inside a run, "current" for a constraint set is the run's own draft. All three tools also take an optional `depends_on`: item references (`KEY@n`, a bare `KEY` for the current revision, or a revision's node id). A bad explicit reference fails the call before anything is written. One pin per item; an explicit reference wins.
+A node is pinned at the revision it is (`item_for_node`), so a simulation of `CAD-BRACKET@1` stays pinned to `@1` whatever happens later. A node that is not an item revision is not pinned. Inside a run, "current" for a constraint set is the run's own draft. All three tools also take an optional `depends_on`: item references (`KEY@n`, a bare `KEY` for the current revision, a revision's node id, or a requirement (Constraint) id, which pins the constraint-set revision that requirement belongs to, `metadata.constraint_set_wp`). A bad explicit reference fails the call before anything is written. One pin per item; an explicit reference wins.
 
 Stored twice, for the same reason as items:
 

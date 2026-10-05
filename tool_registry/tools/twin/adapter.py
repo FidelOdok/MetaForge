@@ -129,16 +129,17 @@ def _item_kwargs(arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _depends_on_property(inferred: str) -> dict[str, Any]:
+def _depends_on_property(inferred: str, extra: str = "") -> dict[str, Any]:
     """FORGE-527: the optional ``depends_on`` input of a record tool."""
     return {
         "type": ["array", "null"],
         "items": {"type": "string"},
         "description": (
             "Optional: the item revisions this record is about, as 'KEY@n' (or a bare "
-            "'KEY' for the current revision, or a revision's node id). Usually not "
+            "'KEY' for the current revision, a revision's node id, or a requirement "
+            "id, which pins its constraint set revision). Usually not "
             f"needed: {inferred} are pinned automatically. A newer revision of a "
-            "pinned item marks this record stale."
+            "pinned item marks this record stale." + extra
         ),
     }
 
@@ -2213,8 +2214,13 @@ class TwinServer(McpToolServer):
                             ),
                         },
                         "depends_on": _depends_on_property(
-                            "for a simulation_result, analysed_geometry_node_id, "
-                            "source_part_node_ids and the project's constraint sets"
+                            "for a simulation_result, analysed_geometry_node_id and "
+                            "source_part_node_ids",
+                            extra=(
+                                " Requirements are not pinned automatically: name the "
+                                "constraint set (CS-KEY@n) or the requirement ids this "
+                                "result verifies to pin them."
+                            ),
                         ),
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},

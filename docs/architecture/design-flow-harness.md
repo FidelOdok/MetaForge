@@ -508,8 +508,11 @@ base moved.
 ## Stale evidence at the gate (FORGE-527)
 
 A `simulation_result`, a `design_decision` and an `evidence` entity are pinned,
-when they are written, to the item revisions they are about (`CAD-BRACKET@1`,
-`CS-BRACKET-REQS@1`); see [records pinned to revisions](../twin_schema.md#records-pinned-to-revisions-forge-527).
+when they are written, to the item revisions they are about: a simulation to the
+geometry it analysed (`CAD-BRACKET@1`), and to a constraint set
+(`CS-BRACKET-REQS@1`) only when the call names it or the requirements it
+verifies; evidence also to the project's constraint sets. See
+[records pinned to revisions](../twin_schema.md#records-pinned-to-revisions-forge-527).
 When an item's head moves (a write outside any run, or this run's gate approving
 its drafts), every record pinned to an older revision of that item becomes
 `stale`. An open draft stales nothing: a gate that rejects or abandons it leaves

@@ -230,7 +230,9 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
                     depends_on=depends_on,
                     node_ids=sources,
                     project_id=project_id,
-                    include_constraint_sets=type_name == "simulation_result",
+                    # A result's numbers do not depend on requirement values,
+                    # so constraint sets are pinned only when depends_on names
+                    # them (KEY@n, or the requirement ids it verifies).
                 )
 
             minio_object_key: str | None = None
