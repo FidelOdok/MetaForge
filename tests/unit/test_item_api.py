@@ -74,6 +74,21 @@ class TestMcpSurface:
         assert [r["revision"] for r in history["revisions"]] == [1, 2]
         assert history["revisions"][1]["change_reason"] == "renamed and lengthened"
 
+    async def test_null_item_args_are_accepted_and_ignored(self, twin) -> None:
+        # Live: a model sent change_reason=null and validation refused the
+        # whole record_constraint_set call. Null must mean "not given".
+        jsonschema = pytest.importorskip("jsonschema")
+        server = TwinServer(twin=twin, geometry_recorder=make_geometry_recorder(twin, None))
+        schema = server._tools["twin.commit_geometry"].manifest.input_schema
+        nulls = {"item_key": None, "supersedes": None, "change_reason": None}
+        args = {"name": "Leg", "step_base64": _STEP_A, "project_id": PROJECT, **nulls}
+        jsonschema.validate(args, schema)
+
+        v1 = await server.commit_geometry(args)
+        v2 = await server.commit_geometry({**args, "step_base64": _STEP_B})
+        assert (v1["revision"], v2["revision"]) == (1, 2)
+        assert v1["item_key"] == v2["item_key"]
+
     async def test_item_history_needs_a_reference(self, twin) -> None:
         server = TwinServer(twin=twin, item_history_reader=make_item_history_reader(twin))
         with pytest.raises(ValueError, match="item_key"):
