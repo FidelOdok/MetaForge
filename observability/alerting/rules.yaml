@@ -107,6 +107,19 @@ groups:
           summary: "High harness tool-call failure rate for {{ $labels.tool_name }}"
           description: "Tool {{ $labels.tool_name }} has >30% error rate over 10 minutes in the chat harness loop."
 
+      # FORGE-520: a chat reply that claims a twin commit, or quotes a node id,
+      # that the turn's tool calls do not back up. The banner tells the user
+      # each time; a sustained rate means a model (or prompt) is fabricating
+      # writes routinely, which a reviewer trusting the reply would miss.
+      - alert: ChatUngroundedClaimsSustained
+        expr: sum(increase(metaforge_chat_ungrounded_claim_total[30m])) by (kind) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chat replies keep making ungrounded {{ $labels.kind }} claims"
+          description: "More than 5 chat replies in 30 minutes were flagged as ungrounded ({{ $labels.kind }}): they claimed work or quoted node ids no tool call this turn backed up. Check the model and prompt in use."
+
       # FORGE-492: the guardrail refusing a design-flow phase's tool call is
       # survivable (the model is told and picks another tool) but it should be
       # rare. A sustained rate means a tool a phase needs is classified

@@ -491,6 +491,16 @@ class MetricsRegistry:
         ),
         labels=["tool_name", "source"],
     )
+    # FORGE-98 / FORGE-520: a chat reply flagged as claiming work the turn did
+    # not do. ``kind`` is no_tool_call (no successful tool call at all),
+    # twin_write (claims a save/commit with no successful twin write) or
+    # node_id (quotes a node id no tool returned this turn).
+    CHAT_UNGROUNDED_CLAIM_TOTAL = MetricDefinition(
+        name="metaforge_chat_ungrounded_claim_total",
+        type="counter",
+        description="Chat replies flagged as ungrounded, by kind of unsupported claim",
+        labels=["kind"],
+    )
     HARNESS_PROVIDER_CALL_DURATION = MetricDefinition(
         name="metaforge_harness_provider_call_duration_seconds",
         type="histogram",
@@ -686,6 +696,7 @@ class MetricsRegistry:
             cls.HARNESS_TOOL_CALL_DURATION,
             cls.HARNESS_TOOL_CALL_TOTAL,
             cls.DESIGN_FLOW_TOOL_REFUSAL_TOTAL,
+            cls.CHAT_UNGROUNDED_CLAIM_TOTAL,
             cls.HARNESS_PROVIDER_CALL_DURATION,
             cls.HARNESS_PROVIDER_FALLBACK_TOTAL,
             cls.LLM_TOKENS_TOTAL,
@@ -1241,6 +1252,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_TOOL_REFUSAL_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"tool_name": tool_name, "source": source})
+
+    def record_chat_ungrounded_claim(self, kind: str) -> None:
+        """Count one chat reply flagged as ungrounded (FORGE-520)."""
+        counter = self._instruments.get(MetricsRegistry.CHAT_UNGROUNDED_CLAIM_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"kind": kind})
 
     def record_mcp_tool_call(
         self, tool_id: str, status: str, duration: float, client: str = "unknown"
