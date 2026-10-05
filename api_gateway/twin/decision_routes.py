@@ -75,6 +75,8 @@ async def list_related_decisions(related_to: str) -> dict[str, Any]:
             wp = await _twin.get_work_product(edge.source_id)
             if wp is None or wp.type != WorkProductType.DESIGN_DECISION:
                 continue
+            if (wp.metadata or {}).get("run_summary"):  # FORGE-529: a run summary
+                continue
             seen.add(edge.source_id)
             decisions.append(_decision_to_dict(wp))
 

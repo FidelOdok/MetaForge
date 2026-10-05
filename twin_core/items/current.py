@@ -361,8 +361,8 @@ async def build_current_view(
         evidence_by_item: dict[str, dict[str, int]] = {}
         for node in await project_records(twin, pid):
             rtype = record_type_of(node)
-            if rtype is None:
-                continue
+            if rtype is None or (getattr(node, "metadata", None) or {}).get("run_summary"):
+                continue  # FORGE-529: a phase summary is a run summary, not a decision
             analysed: list[dict[str, Any]] = []
             stale_keys: set[str] = set()
             fresh_keys: set[str] = set()

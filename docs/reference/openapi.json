@@ -7722,6 +7722,287 @@
         "title": "MessageResponse",
         "type": "object"
       },
+      "MigrationApplyRequest": {
+        "properties": {
+          "approve": {
+            "default": false,
+            "description": "Must be true: applying the plan writes to the twin.",
+            "title": "Approve",
+            "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/MigrationPlan-Input",
+            "description": "The plan exactly as the dry run returned it."
+          },
+          "reason": {
+            "default": "",
+            "description": "Why this plan is approved (kept in the log).",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "title": "MigrationApplyRequest",
+        "type": "object"
+      },
+      "MigrationApplyResponse": {
+        "properties": {
+          "approved_by": {
+            "title": "Approved By",
+            "type": "string"
+          },
+          "approver_verified": {
+            "title": "Approver Verified",
+            "type": "boolean"
+          },
+          "result": {
+            "$ref": "#/components/schemas/MigrationResult"
+          }
+        },
+        "required": [
+          "result",
+          "approved_by",
+          "approver_verified"
+        ],
+        "title": "MigrationApplyResponse",
+        "type": "object"
+      },
+      "MigrationPlan-Input": {
+        "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
+        "properties": {
+          "counts_after": {
+            "additionalProperties": true,
+            "title": "Counts After",
+            "type": "object"
+          },
+          "counts_before": {
+            "additionalProperties": true,
+            "title": "Counts Before",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposedItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "low_confidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Low Confidence",
+            "type": "array"
+          },
+          "plan_hash": {
+            "default": "",
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/RecordAction"
+            },
+            "title": "Records",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "twin_fingerprint": {
+            "title": "Twin Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "twin_fingerprint",
+          "created_at"
+        ],
+        "title": "MigrationPlan",
+        "type": "object"
+      },
+      "MigrationPlan-Output": {
+        "description": "A dry-run result. Pass it back unchanged to :meth:`ItemMigration.apply`.",
+        "properties": {
+          "counts_after": {
+            "additionalProperties": true,
+            "title": "Counts After",
+            "type": "object"
+          },
+          "counts_before": {
+            "additionalProperties": true,
+            "title": "Counts Before",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposedItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "low_confidence": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Low Confidence",
+            "type": "array"
+          },
+          "plan_hash": {
+            "default": "",
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/RecordAction"
+            },
+            "title": "Records",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "twin_fingerprint": {
+            "title": "Twin Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "twin_fingerprint",
+          "created_at"
+        ],
+        "title": "MigrationPlan",
+        "type": "object"
+      },
+      "MigrationPlanResponse": {
+        "properties": {
+          "empty": {
+            "title": "Empty",
+            "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/MigrationPlan-Output"
+          },
+          "report": {
+            "title": "Report",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan",
+          "report",
+          "empty"
+        ],
+        "title": "MigrationPlanResponse",
+        "type": "object"
+      },
+      "MigrationResult": {
+        "description": "What :meth:`ItemMigration.apply` did.",
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "by_type": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            "title": "By Type",
+            "type": "object"
+          },
+          "failures": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Failures",
+            "type": "array"
+          },
+          "items_created": {
+            "default": 0,
+            "title": "Items Created",
+            "type": "integer"
+          },
+          "items_extended": {
+            "default": 0,
+            "title": "Items Extended",
+            "type": "integer"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "records_pinned": {
+            "default": 0,
+            "title": "Records Pinned",
+            "type": "integer"
+          },
+          "records_stale": {
+            "default": 0,
+            "title": "Records Stale",
+            "type": "integer"
+          },
+          "revisions_linked": {
+            "default": 0,
+            "title": "Revisions Linked",
+            "type": "integer"
+          },
+          "run_summaries_marked": {
+            "default": 0,
+            "title": "Run Summaries Marked",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id",
+          "plan_hash",
+          "applied"
+        ],
+        "title": "MigrationResult",
+        "type": "object"
+      },
       "ModelInfo": {
         "properties": {
           "id": {
@@ -8519,6 +8800,159 @@
         "title": "ProposeFlowRequest",
         "type": "object"
       },
+      "ProposedItem": {
+        "description": "An item the migration creates, or an existing item it extends.",
+        "properties": {
+          "confidence": {
+            "default": "high",
+            "title": "Confidence",
+            "type": "string"
+          },
+          "existing_item": {
+            "default": false,
+            "title": "Existing Item",
+            "type": "boolean"
+          },
+          "head_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Node Id"
+          },
+          "head_revision": {
+            "default": 0,
+            "title": "Head Revision",
+            "type": "integer"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "review_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Review Reasons",
+            "type": "array"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/ProposedRevision"
+            },
+            "title": "Revisions",
+            "type": "array"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "item_type",
+          "name",
+          "rule"
+        ],
+        "title": "ProposedItem",
+        "type": "object"
+      },
+      "ProposedRevision": {
+        "description": "One node as a revision of a proposed item.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
+          "existing": {
+            "default": false,
+            "title": "Existing",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          }
+        },
+        "required": [
+          "node_id",
+          "name",
+          "revision",
+          "status",
+          "rule",
+          "evidence"
+        ],
+        "title": "ProposedRevision",
+        "type": "object"
+      },
       "ProviderInfo": {
         "properties": {
           "base_url": {
@@ -8714,6 +9148,84 @@
           "nodeId"
         ],
         "title": "RealizeHierarchyNodeResponse",
+        "type": "object"
+      },
+      "RecordAction": {
+        "description": "One record update: a run-summary flag or a revision pin.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "item_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Ref"
+          },
+          "item_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Type"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "pinned_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Node Id"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "record_type": {
+            "title": "Record Type",
+            "type": "string"
+          },
+          "staleness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staleness"
+          }
+        },
+        "required": [
+          "node_id",
+          "name",
+          "record_type",
+          "action",
+          "reason"
+        ],
+        "title": "RecordAction",
         "type": "object"
       },
       "RecordPinResponse": {
@@ -21001,6 +21513,102 @@
           }
         },
         "summary": "Get Version History",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/item-migration/apply": {
+      "post": {
+        "description": "Apply a reviewed plan. Requires ``approve: true``; refused when the twin changed.",
+        "operationId": "apply_item_migration_v1_twin_projects__project_id__item_migration_apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrationApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationApplyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Item Migration",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/item-migration/plan": {
+      "post": {
+        "description": "Dry run: how the project's legacy nodes would become items. Writes nothing.",
+        "operationId": "plan_item_migration_v1_twin_projects__project_id__item_migration_plan_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationPlanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Plan Item Migration",
         "tags": [
           "twin"
         ]

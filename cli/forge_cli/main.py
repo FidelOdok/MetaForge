@@ -10,6 +10,7 @@ Usage::
     python -m cli.forge_cli.main twin history CAD-BRACKET
     python -m cli.forge_cli.main twin diff CAD-BRACKET @2 @3
     python -m cli.forge_cli.main twin baseline list --project "6-DOF Robotic Arm"
+    python -m cli.forge_cli.main twin migrate <project-id> [--apply]
     python -m cli.forge_cli.main proposals
     python -m cli.forge_cli.main approve <change-id> --reason "looks good"
     python -m cli.forge_cli.main reject <change-id> --reason "needs revision"
@@ -166,6 +167,21 @@ def build_parser() -> argparse.ArgumentParser:
     baseline_diff.add_argument("b", help="Baseline id, or 'current' for the current items")
 
     # -- proposals ---------------------------------------------------------
+    twin_migrate = twin_sub.add_parser(
+        "migrate",
+        help="Fold a project's legacy nodes into items and revisions (dry run by default)",
+    )
+    twin_migrate.add_argument("project_id", help="Project UUID or name")
+    twin_migrate.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the plan after showing it (asks for confirmation; nothing is deleted)",
+    )
+    twin_migrate.add_argument("--yes", action="store_true", help="Skip the confirmation")
+    twin_migrate.add_argument(
+        "--reason", default="", help="Why the plan is approved (kept in the gateway log)"
+    )
+
     subparsers.add_parser("proposals", help="List pending change proposals")
 
     # -- approve -----------------------------------------------------------
@@ -537,7 +553,7 @@ def _diff_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def handle_twin(args: argparse.Namespace, client: ForgeClient) -> Any:
-    """Handle ``forge twin query|list|history|diff|baseline``."""
+    """Handle ``forge twin query|list|history|diff|baseline|migrate``."""
     as_json = getattr(args, "output_format", "table") == "json"
     if args.twin_command == "query":
         return client.twin_query(args.node_id)
@@ -591,11 +607,54 @@ def handle_twin(args: argparse.Namespace, client: ForgeClient) -> Any:
             ]
         print("Error: specify a baseline subcommand (list or diff)", file=sys.stderr)
         sys.exit(1)
+    if args.twin_command == "migrate":
+        return handle_twin_migrate(args, client)
     print(
-        "Error: specify a twin subcommand (query, list, history, diff or baseline)",
+        "Error: specify a twin subcommand (query, list, history, diff, baseline or migrate)",
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def handle_twin_migrate(args: argparse.Namespace, client: ForgeClient) -> Any:
+    """``forge twin migrate <project> [--apply]`` (FORGE-529).
+
+    Always shows the dry run first. ``--apply`` then sends that exact plan back
+    with an explicit approval; the gateway refuses it if the twin changed in
+    between, and the command says to run it again.
+    """
+    project_id = _resolve_project_ref(client, args.project_id)
+    planned = client.twin_migration_plan(project_id)
+    if args.output_format == "json" and not args.apply:
+        return planned["plan"]
+    print(planned["report"])
+    if not args.apply:
+        if not planned["empty"]:
+            print("\nDry run only. Re-run with --apply to apply this plan.")
+        return None
+    if planned["empty"]:
+        return None
+    if not args.yes:
+        reply = input("\nApply this plan? Nothing is deleted. [y/N] ").strip().lower()
+        if reply not in ("y", "yes"):
+            print("Not applied.")
+            return None
+    applied = client.twin_migration_apply(
+        project_id, planned["plan"], args.reason or "applied with forge twin migrate"
+    )
+    if args.output_format == "json":
+        return applied
+    result = applied["result"]
+    print(
+        f"\nApplied plan {result['plan_hash'][:12]} as {applied['approved_by']}: "
+        f"{result['items_created']} items created, {result['items_extended']} extended, "
+        f"{result['revisions_linked']} revisions linked, "
+        f"{result['run_summaries_marked']} run summaries marked, "
+        f"{result['records_pinned']} results pinned ({result['records_stale']} stale)."
+    )
+    for failure in result.get("failures") or []:
+        print(f"  failed: {failure}", file=sys.stderr)
+    return None
 
 
 def handle_proposals(args: argparse.Namespace, client: ForgeClient) -> Any:

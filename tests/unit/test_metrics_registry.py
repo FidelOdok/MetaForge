@@ -73,7 +73,7 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 prd requirement values (FORGE-528)
         # + 2 project brief count/size (FORGE-530)
         # + 1 twin record staleness (FORGE-527)
-        assert len(all_metrics) == 81
+        assert len(all_metrics) == 82
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
