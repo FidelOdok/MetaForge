@@ -553,22 +553,63 @@ function PendingApprovalCard({ projectId }: { projectId?: string }) {
 
 // --- Agent Roster ---
 
-interface RosterAgent {
-  icon: string;
-  name: string;
-  dotColor: string;
-  dotPulse: boolean;
-  statusLabel: string;
+/** One agent that has actually worked in this project, and what it last did.
+ *
+ * This panel used to be a hardcoded array of four rows -- "Requirements
+ * Agent: running spec" with a pulsing dot, "Mechanical Agent: idle" and so
+ * on -- rendered identically forever, on every project, whatever was
+ * happening. The pulsing dot was the worst of it: it asserted live activity
+ * that nothing had measured.
+ *
+ * Those four agents also do not exist as running things. `domain_agents/`
+ * holds mechanical, electronics, simulation and the rest as *code* invoked
+ * during a run; nothing keeps a per-discipline process with a status to
+ * report. What the system really records is which agent **ran a session**:
+ * `chat-harness`, `mcp`, `claude-code`, `cli-verify` and friends. So the
+ * roster now lists those, from the same project-scoped sessions the rest of
+ * the page already has.
+ */
+interface RosterEntry {
+  agentCode: string;
+  status: AgentSession['status'];
+  lastActivity: string;
+  sessionCount: number;
 }
 
-const ROSTER_AGENTS: RosterAgent[] = [
-  { icon: 'description', name: 'Requirements Agent', dotColor: 'var(--mf-c-3dd68c)', dotPulse: true, statusLabel: 'running spec' },
-  { icon: 'precision_manufacturing', name: 'Mechanical Agent', dotColor: 'var(--mf-c-9a9aaa)', dotPulse: false, statusLabel: 'idle' },
-  { icon: 'memory', name: 'Electronics Agent', dotColor: '#f0a500', dotPulse: false, statusLabel: 'waiting' },
-  { icon: 'calculate', name: 'Simulation Agent', dotColor: 'var(--mf-c-9a9aaa)', dotPulse: false, statusLabel: 'idle' },
-];
+export function rosterFromSessions(sessions: AgentSession[]): RosterEntry[] {
+  const byAgent = new Map<string, RosterEntry>();
+  for (const session of sessions) {
+    const code = session.agentCode || 'unknown';
+    const when = session.completedAt ?? session.startedAt;
+    const seen = byAgent.get(code);
+    if (!seen) {
+      byAgent.set(code, {
+        agentCode: code,
+        status: session.status,
+        lastActivity: when,
+        sessionCount: 1,
+      });
+      continue;
+    }
+    seen.sessionCount += 1;
+    // The most recent session speaks for the agent. ISO timestamps compare
+    // lexically, and `sessions` arrives newest-first, but neither is relied
+    // on here -- a panel that silently depends on its caller's sort order is
+    // one re-sort away from reporting a stale status as current.
+    if (when > seen.lastActivity) {
+      seen.lastActivity = when;
+      seen.status = session.status;
+    }
+  }
+  // Busiest first, then alphabetical so the order is stable between polls.
+  return [...byAgent.values()].sort(
+    (a, b) => b.sessionCount - a.sessionCount || a.agentCode.localeCompare(b.agentCode),
+  );
+}
 
-function AgentRosterPanel() {
+function AgentRosterPanel({ sessions }: { sessions: AgentSession[] }) {
+  const roster = rosterFromSessions(sessions);
+
   return (
     <div style={{ ...glassPanel }}>
       {/* Header */}
@@ -584,49 +625,97 @@ function AgentRosterPanel() {
         >
           AGENT ROSTER
         </span>
-      </div>
-
-      {/* Agent rows */}
-      {ROSTER_AGENTS.map((agent) => (
-        <div
-          key={agent.name}
+        <span
           style={{
-            height: 36,
-            padding: '0 14px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            borderBottom: `1px solid var(--mf-r-65-72-90-0p08)`,
+            marginLeft: 'auto',
+            fontFamily: 'Roboto Mono, monospace',
+            fontSize: 10,
+            color: KC.onSurfaceVariant,
           }}
         >
-          <span className="material-symbols-outlined" style={{ fontSize: 16, color: KC.onSurfaceVariant }}>
-            {agent.icon}
-          </span>
-          <span style={{ flex: 1, fontSize: 12, color: KC.onSurface }}>{agent.name}</span>
-          <span
+          {roster.length === 0 ? '' : `${roster.length}`}
+        </span>
+      </div>
+
+      {roster.length === 0 ? (
+        // An empty roster is a real answer, and a truer one than four
+        // invented rows. Says which question it is answering, so "no agents"
+        // is not mistaken for "panel broken".
+        <div
+          data-testid="agent-roster-empty"
+          style={{ padding: '14px', fontSize: 12, color: KC.onSurfaceVariant }}
+        >
+          No agent has run a session in this project yet.
+        </div>
+      ) : (
+        roster.map((agent) => (
+          <div
+            key={agent.agentCode}
+            data-testid="agent-roster-row"
             style={{
-              display: 'inline-block',
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: agent.dotColor,
-              flexShrink: 0,
-              animation: agent.dotPulse ? 'pulse 1.8s ease-in-out infinite' : undefined,
-            }}
-          />
-          <span
-            style={{
-              fontFamily: 'Roboto Mono, monospace',
-              fontSize: 10,
-              color: agent.dotColor,
-              minWidth: 60,
-              textAlign: 'right',
+              height: 36,
+              padding: '0 14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              borderBottom: `1px solid var(--mf-r-65-72-90-0p08)`,
             }}
           >
-            {agent.statusLabel}
-          </span>
-        </div>
-      ))}
+            <span
+              className="material-symbols-outlined"
+              style={{ fontSize: 16, color: KC.onSurfaceVariant }}
+            >
+              smart_toy
+            </span>
+            <span
+              style={{
+                flex: 1,
+                fontSize: 12,
+                color: KC.onSurface,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={agent.agentCode}
+            >
+              {agent.agentCode}
+            </span>
+            <span
+              style={{
+                fontFamily: 'Roboto Mono, monospace',
+                fontSize: 10,
+                color: KC.onSurfaceVariant,
+              }}
+            >
+              {agent.sessionCount}
+            </span>
+            <span
+              style={{
+                display: 'inline-block',
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: statusDotColor(agent.status),
+                flexShrink: 0,
+                // Only a genuinely running session pulses. The old panel
+                // pulsed a constant.
+                animation: agent.status === 'running' ? 'pulse 1.8s ease-in-out infinite' : undefined,
+              }}
+            />
+            <span
+              style={{
+                fontFamily: 'Roboto Mono, monospace',
+                fontSize: 10,
+                color: statusDotColor(agent.status),
+                minWidth: 68,
+                textAlign: 'right',
+              }}
+            >
+              {agent.status}
+            </span>
+          </div>
+        ))
+      )}
     </div>
   );
 }
@@ -636,6 +725,7 @@ function AgentRosterPanel() {
 function SessionRow({ session }: { session: AgentSession }) {
   return (
     <Link
+      data-testid="session-row"
       to={`/sessions/${session.id}`}
       style={{ textDecoration: 'none', display: 'block' }}
     >
@@ -841,7 +931,7 @@ export function SessionsPage() {
           {/* Right column */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <PendingApprovalCard projectId={activeProjectId ?? undefined} />
-            <AgentRosterPanel />
+            <AgentRosterPanel sessions={items} />
           </div>
         </div>
       </div>
