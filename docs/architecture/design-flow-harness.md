@@ -381,7 +381,7 @@ before it (bounding box, volume, mass for a part; limit changes for a
 requirement set). In-process this is `DesignFlowExecutor(revision_notes=...)`;
 on Temporal it is the `collect_revision_notes` activity, which returns plain
 data, guarded by `workflow.patched("forge-530-revision-notes")`. See
-[context engineering](context-engineering.md).
+[context engineering](https://github.com/FidelOdok/MetaForge/blob/main/docs/architecture/context-engineering.md).
 
 There is no MCP run-approval tool: a gate is answered by a human on the
 dashboard or the approval endpoint, never by the agent.
