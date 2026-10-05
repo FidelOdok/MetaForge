@@ -19,6 +19,7 @@ the context in; this module never reaches up.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections import OrderedDict
@@ -30,6 +31,22 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 # --- Type --------------------------------------------------------------------
+
+
+class ItemSlotClaim(BaseModel):
+    """One deliverable slot of the current design-flow phase (FORGE-524).
+
+    The recorders resolve a definition write with no explicit ``item_key`` /
+    ``supersedes`` to the matching slot's ``item_key``. A claim, like
+    ``run_id``: it only chooses which item a write lands on, which a caller
+    could do anyway by passing ``item_key``.
+    """
+
+    item_type: str
+    name: str
+    item_key: str
+
+    model_config = ConfigDict(frozen=True)
 
 
 class McpCallContext(BaseModel):
@@ -91,6 +108,13 @@ class McpCallContext(BaseModel):
     run_id: str | None = Field(default=None, description="Design-flow run this call serves.")
     phase: str | None = Field(default=None, description="Design-flow phase id, as claimed.")
     model: str | None = Field(default=None, description="Model the phase runs on, as claimed.")
+    item_slots: tuple[ItemSlotClaim, ...] = Field(
+        default=(),
+        description=(
+            "FORGE-524: the deliverable slots of the design-flow phase this call "
+            "serves, so a definition write lands on its slot's item."
+        ),
+    )
     service_verified: bool = Field(
         default=False,
         description="True only when the server verified a service key AND the run.",
@@ -207,6 +231,10 @@ HEADER_RUN = "X-MetaForge-Run"
 HEADER_PHASE = "X-MetaForge-Phase"
 HEADER_MODEL = "X-MetaForge-Model"
 _MAX_CLAIM_LENGTH = 200
+# FORGE-524: the phase's slots, as a JSON list of [item_type, name, item_key].
+HEADER_ITEM_SLOTS = "X-MetaForge-Item-Slots"
+_MAX_SLOTS_HEADER_LENGTH = 8192
+_MAX_SLOTS = 64
 
 # Stdio — client passes these env vars at spawn (see .mcp.json).
 ENV_PROJECT = "METAFORGE_PROJECT_ID"
@@ -350,7 +378,38 @@ def context_to_headers(ctx: McpCallContext) -> dict[str, str]:
     ):
         if value:
             headers[header] = value
+    if ctx.item_slots:
+        headers[HEADER_ITEM_SLOTS] = encode_item_slots(ctx.item_slots)
     return headers
+
+
+def encode_item_slots(slots: tuple[ItemSlotClaim, ...]) -> str:
+    """The header form of ``slots``: compact JSON, ASCII only."""
+    return json.dumps(
+        [[s.item_type, s.name, s.item_key] for s in slots[:_MAX_SLOTS]],
+        separators=(",", ":"),
+    )
+
+
+def decode_item_slots(value: str | None) -> tuple[ItemSlotClaim, ...]:
+    """Parse the slots header. Malformed or oversized input is no slots, never an error."""
+    if not value or len(value) > _MAX_SLOTS_HEADER_LENGTH:
+        return ()
+    try:
+        raw = json.loads(value)
+    except ValueError:
+        return ()
+    if not isinstance(raw, list):
+        return ()
+    out: list[ItemSlotClaim] = []
+    for entry in raw[:_MAX_SLOTS]:
+        if (
+            isinstance(entry, list)
+            and len(entry) == 3
+            and all(isinstance(v, str) and v and len(v) <= _MAX_CLAIM_LENGTH for v in entry)
+        ):
+            out.append(ItemSlotClaim(item_type=entry[0], name=entry[1], item_key=entry[2]))
+    return tuple(out)
 
 
 def _claim(value: str | None) -> str | None:
@@ -389,6 +448,7 @@ def context_from_headers(headers: dict[str, str] | None) -> McpCallContext:
     fields["run_id"] = _claim(folded.get(HEADER_RUN.lower()))
     fields["phase"] = _claim(folded.get(HEADER_PHASE.lower()))
     fields["model"] = _claim(folded.get(HEADER_MODEL.lower()))
+    fields["item_slots"] = decode_item_slots(folded.get(HEADER_ITEM_SLOTS.lower()))
     _apply_session_binding(fields, session)
     return McpCallContext(**fields)
 
@@ -416,11 +476,13 @@ __all__ = [
     "ENV_SESSION",
     "HEADER_ACTOR",
     "HEADER_CORRELATION",
+    "HEADER_ITEM_SLOTS",
     "HEADER_MODEL",
     "HEADER_PHASE",
     "HEADER_PROJECT",
     "HEADER_RUN",
     "HEADER_SESSION",
+    "ItemSlotClaim",
     "McpCallContext",
     "bind_session_project",
     "bound_project",
@@ -428,6 +490,8 @@ __all__ = [
     "context_from_env",
     "context_from_headers",
     "context_to_headers",
+    "decode_item_slots",
+    "encode_item_slots",
     "current_context",
     "reset_context",
     "set_context",

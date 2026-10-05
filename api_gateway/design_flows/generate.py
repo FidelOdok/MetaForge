@@ -157,6 +157,9 @@ only changes that exist are:
   set_model         = run one phase on a named "provider:model" (use only when
                       the intent or project context asks for it; otherwise
                       phases are routed by role and you leave this alone)
+  declare_items     = name the parts a phase writes ("left bracket", "right
+                      bracket"), one item each, so every run revises the same
+                      parts instead of inventing new ones
 
 There is no operation to remove a gate, remove a deliverable, or relax a
 check. Tailoring may make a flow stricter, never laxer. If a phase is
@@ -175,7 +178,10 @@ Reply with ONLY JSON:
     {{"op": "set_disciplines", "phase": "<phase id>", "value": ["mechanical", "electronics"],
       "rationale": "<why these disciplines>"}},
     {{"op": "set_model", "phase": "<phase id>", "value": "anthropic:claude-opus-4-8",
-      "rationale": "<why this phase needs that model>"}}
+      "rationale": "<why this phase needs that model>"}},
+    {{"op": "declare_items", "phase": "<phase id>",
+      "value": [{{"type": "cad_model", "name": "left bracket"}}],
+      "rationale": "<why the product has these parts>"}}
   ]}}
 
 Every operation needs a rationale. An operation without one is discarded.

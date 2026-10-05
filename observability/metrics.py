@@ -264,6 +264,16 @@ class MetricsRegistry:
         description="Run change-set commits and closes, by outcome",
         labels=["outcome"],
     )
+    #: One sample per definition write inside a design-flow phase that
+    #: declares slots of its type (FORGE-524). ``outcome`` is ``slot`` (the
+    #: write landed on its declared item) or ``undeclared`` (it matched none
+    #: and became a new item, listed for the gate reviewer).
+    FLOW_ITEM_SLOT_TOTAL = MetricDefinition(
+        name="metaforge_flow_item_slot_total",
+        type="counter",
+        description="Design-flow definition writes by slot outcome (slot or undeclared)",
+        labels=["item_type", "outcome"],
+    )
 
     # ── Telemetry / MQTT metrics (MET-119) ───────────────────────────
     MQTT_MESSAGES_RECEIVED_TOTAL = MetricDefinition(
@@ -747,7 +757,12 @@ class MetricsRegistry:
     @classmethod
     def twin_metrics(cls) -> list[MetricDefinition]:
         """MET-439 twin graph hygiene metrics."""
-        return [cls.TWIN_ORPHANS, cls.TWIN_ITEM_REVISION_TOTAL, cls.TWIN_CHANGE_SET_TOTAL]
+        return [
+            cls.TWIN_ORPHANS,
+            cls.TWIN_ITEM_REVISION_TOTAL,
+            cls.TWIN_CHANGE_SET_TOTAL,
+            cls.FLOW_ITEM_SLOT_TOTAL,
+        ]
 
     @classmethod
     def retrieval_metrics(cls) -> list[MetricDefinition]:
@@ -962,6 +977,12 @@ class MetricsCollector:
                     "resolved_by": resolved_by,
                 },
             )
+
+    def record_flow_item_slot(self, item_type: str, outcome: str) -> None:
+        """Record one design-flow write's slot outcome (FORGE-524)."""
+        counter = self._instruments.get(MetricsRegistry.FLOW_ITEM_SLOT_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"item_type": item_type, "outcome": outcome})
 
     # ── Agent ──────────────────────────────────────────────────────────
 

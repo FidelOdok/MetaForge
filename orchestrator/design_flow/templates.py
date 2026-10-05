@@ -29,7 +29,7 @@ from typing import Any
 import structlog
 import yaml
 
-from orchestrator.design_flow.spec import FlowDefinition, Gate, Phase
+from orchestrator.design_flow.spec import DeliverableSlot, FlowDefinition, Gate, Phase
 
 logger = structlog.get_logger(__name__)
 
@@ -83,6 +83,25 @@ def _gate_from(raw: dict[str, Any] | None) -> Gate | None:
     )
 
 
+def slots_from(raw: Any) -> tuple[DeliverableSlot, ...]:
+    """Parse a phase's ``slots`` list (FORGE-524): ``{type, name, key?}`` each.
+
+    Shared by the template loader and the version store, so a slot written by
+    one reads back identically through the other.
+    """
+    out: list[DeliverableSlot] = []
+    for entry in raw or ():
+        if not isinstance(entry, dict):
+            continue
+        item_type = str(entry.get("item_type") or entry.get("type") or "").strip()
+        name = str(entry.get("name") or "").strip()
+        if not item_type or not name:
+            continue
+        key = str(entry.get("item_key") or entry.get("key") or "").strip()
+        out.append(DeliverableSlot(item_type=item_type, name=name, item_key=key))
+    return tuple(out)
+
+
 def _phase_from(raw: dict[str, Any]) -> Phase:
     return Phase(
         id=raw["id"],
@@ -98,6 +117,7 @@ def _phase_from(raw: dict[str, Any]) -> Phase:
         gate=_gate_from(raw.get("gate")),
         disciplines=tuple(raw.get("disciplines") or ()),
         model=raw.get("model") or None,
+        slots=slots_from(raw.get("slots")),
     )
 
 
@@ -140,6 +160,11 @@ def to_mapping(
             entry["disciplines"] = list(phase.disciplines)
         if phase.model:
             entry["model"] = phase.model
+        if phase.slots:
+            entry["slots"] = [
+                {"type": s.item_type, "name": s.name, **({"key": s.item_key} if s.item_key else {})}
+                for s in phase.slots
+            ]
         if phase.gate is not None:
             gate: dict[str, Any] = {"name": phase.gate.name}
             if phase.gate.auto_approve:

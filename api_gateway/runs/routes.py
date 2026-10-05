@@ -515,6 +515,13 @@ class _GateCheckers:
                 f"{len(present)} deliverable type(s) recorded; "
                 f"{len(constraints.violations)} constraint violation(s)"
                 + ("" if constraints.checked else " (constraints not evaluated)")
+                # FORGE-524: listed for the reviewer, never a reason to block.
+                + (
+                    f"; {len(constraints.undeclared_items)} undeclared item(s): "
+                    + "; ".join(constraints.undeclared_items[:5])
+                    if getattr(constraints, "undeclared_items", None)
+                    else ""
+                )
             ),
         )
 

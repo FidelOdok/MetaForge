@@ -13,14 +13,19 @@ the MCP bridge; the executor it plugs into stays pure in ``orchestrator``.
 from __future__ import annotations
 
 import os
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import structlog
 
 from api_gateway.chat.harness_backend import design_flow_approval_timeout_seconds, run_chat_turn
 from api_gateway.chat.routes import get_metrics
+from mcp_core.context import ItemSlotClaim, McpCallContext, current_context, with_context
 from mcp_core.profiles import phase_overflow, tools_for_phase, unmapped_disciplines
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
-from orchestrator.design_flow.spec import Phase
+from orchestrator.design_flow.slots import effective_slots, slots_brief
+from orchestrator.design_flow.spec import DeliverableSlot, Phase
 from skill_registry.mcp_bridge import McpBridge
 from skill_registry.skill_context import (
     SkillCard,
@@ -213,6 +218,40 @@ def phase_step_budget(phase: Phase, override: int | None = None) -> int:
     return _env_int("METAFORGE_FLOW_PHASE_MAX_STEPS", DEFAULT_PHASE_MAX_STEPS)
 
 
+_SENTINEL_SESSION = uuid.UUID(int=0)
+
+
+@contextmanager
+def phase_slot_scope(
+    slots: tuple[DeliverableSlot, ...], project_id: str | None
+) -> Iterator[McpCallContext]:
+    """Put the phase's slots on the MCP call context (FORGE-524).
+
+    The recorders read them (``item_revisions.phase_slots``) the same way they
+    read ``run_id``: the Temporal worker's phase scope already carries the run
+    and project, and this adds the slots to it. With no scope installed (the
+    in-process engine), one is created for the run's project, so its writes
+    resolve to slots too. No slots, no change: the context is left as it is.
+    """
+    ctx = current_context()
+    if not slots:
+        yield ctx
+        return
+    claims = tuple(
+        ItemSlotClaim(item_type=s.item_type, name=s.name, item_key=s.item_key) for s in slots
+    )
+    if ctx.session_id == _SENTINEL_SESSION:
+        try:
+            pid = uuid.UUID(str(project_id)) if project_id else None
+        except ValueError:
+            pid = None
+        scoped = McpCallContext(project_id=pid, item_slots=claims)
+    else:
+        scoped = ctx.model_copy(update={"item_slots": claims})
+    with with_context(scoped):
+        yield scoped
+
+
 class ReActPhaseBrain:
     """A :class:`~orchestrator.design_flow.executor.PhaseBrain` backed by ReAct.
 
@@ -252,6 +291,9 @@ class ReActPhaseBrain:
         )
         expected = ", ".join(phase.expected_artifacts) or "the appropriate work products"
         deliverables = self._deliverable_guidance(phase, context)
+        # FORGE-524: the item keys this phase's writes land on.
+        items_brief = slots_brief(effective_slots(phase))
+        items_block = f"{items_brief}\n" if items_brief else ""
         overlay = procedural_overlay(cards_for_domains(self._cards, phase.disciplines))
         overlay_block = f"{overlay}\n" if overlay else ""
         # FORGE-491: the flow's stated context leads the prompt, identical for
@@ -275,6 +317,7 @@ class ReActPhaseBrain:
             f"Prior phases completed:\n{prior}\n\n"
             f"Your objective for THIS phase:\n{phase.objective}\n\n"
             f"{deliverables}\n"
+            f"{items_block}"
             f"{overlay_block}"
             f"Use the available MCP tools (project, twin, CAD/FEA/EDA, knowledge) to "
             f"actually perform the work and record {expected} into the digital twin — "
@@ -311,7 +354,19 @@ class ReActPhaseBrain:
             max_steps=budget,
             heavy=phase_is_heavy(phase),
         )
-        summary = await run_chat_turn(
+        slots = effective_slots(phase)
+        with phase_slot_scope(slots, context.project_id):
+            summary = await self._turn(prompt, phase, budget)
+        # run_chat_turn returns a fallback sentence when the loop doesn't converge.
+        status = "exhausted" if summary.startswith("I couldn't converge") else "completed"
+        if status == "exhausted":
+            summary = f"{summary} (phase '{phase.id}' used its full budget of {budget} steps.)"
+            logger.warning("design_flow_phase_exhausted", phase=phase.id, max_steps=budget)
+        await self._backstop_decision(phase, context, summary)
+        return PhaseOutcome(summary=summary, artifacts=[], status=status)
+
+    async def _turn(self, prompt: str, phase: Phase, budget: int) -> str:
+        return await run_chat_turn(
             prompt,
             mcp_bridge=self._bridge,
             session_id=f"{self._session_id}:{phase.id}",
@@ -340,13 +395,6 @@ class ReActPhaseBrain:
             # FORGE-490: no in-process hold; the sidecar's service-caller policy decides.
             approval_mode="forward",
         )
-        # run_chat_turn returns a fallback sentence when the loop doesn't converge.
-        status = "exhausted" if summary.startswith("I couldn't converge") else "completed"
-        if status == "exhausted":
-            summary = f"{summary} (phase '{phase.id}' used its full budget of {budget} steps.)"
-            logger.warning("design_flow_phase_exhausted", phase=phase.id, max_steps=budget)
-        await self._backstop_decision(phase, context, summary)
-        return PhaseOutcome(summary=summary, artifacts=[], status=status)
 
     async def _backstop_decision(self, phase: Phase, context: FlowContext, summary: str) -> None:
         """Guarantee a phase's ``design_decision`` deliverable.

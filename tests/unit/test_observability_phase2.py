@@ -276,7 +276,8 @@ class TestAllMetricsCombined:
         # + 1 chat ungrounded claim (FORGE-520)
         # + 1 twin item revisions (FORGE-523)
         # + 1 twin run change sets (FORGE-525)
-        assert len(MetricsRegistry.all_metrics()) == 73
+        # + 1 design-flow item slots (FORGE-524)
+        assert len(MetricsRegistry.all_metrics()) == 74
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
