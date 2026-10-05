@@ -150,6 +150,21 @@ class TestDomainScoping:
         assert {td.name for _s, td in defs} == {"pad_sketch"}
 
     @pytest.mark.asyncio
+    async def test_domains_keep_the_freecad_stage_import_round_trip(self) -> None:
+        """FORGE-518: twin.stage_work_product_file is core, so freecad.import_step
+        and describe_step_file must survive domain scoping too, or a project
+        chat can stage a part and never load it."""
+        bridge = InMemoryMcpBridge()
+        bridge.register_tool("twin.stage_work_product_file", capability="twin_write")
+        for name in ("import_step", "describe_step_file", "open_session", "export_model"):
+            bridge.register_tool(f"freecad.{name}", capability="cad_author")
+        bridge.register_tool("kicad.run_drc", capability="eda_drc")
+        for domains in (("mechanical",), ("electronics",), ("firmware",)):
+            names = {td.name for _s, td in await mcp_tools_from_bridge(bridge, domains=domains)}
+            assert {"stage_work_product_file", "import_step", "describe_step_file"} <= names
+            assert {"open_session", "export_model"} <= names
+
+    @pytest.mark.asyncio
     async def test_domains_excludes_other_disciplines_tools(self) -> None:
         """kicad.run_drc is declared only by an electronics skill -- a
         mechanical-scoped turn must NOT see it (this is the cap-avoidance

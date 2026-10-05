@@ -272,6 +272,22 @@ _CORE_ADAPTER_SERVERS = frozenset(
     }
 )
 
+# FORGE-518: tool ids that stay visible under domain scoping even though no
+# skill declares them. ``twin.stage_work_product_file`` is a core tool, so a
+# domain-scoped chat turn could stage a stored part yet have no way to load it
+# (``freecad.import_step`` is in no skill's ``tools_required``). These are the
+# FreeCAD stage/import/export round-trip, kept with their twin counterparts.
+_ALWAYS_VISIBLE_TOOL_IDS = frozenset(
+    {
+        "freecad.open_session",
+        "freecad.close_session",
+        "freecad.import_step",
+        "freecad.describe_step_file",
+        "freecad.describe_session",
+        "freecad.export_model",
+    }
+)
+
 _skill_cards_cache: list[SkillCard] | None = None
 
 
@@ -355,6 +371,7 @@ async def mcp_tools_from_bridge(
             and domain_allow is not None
             and server not in _CORE_ADAPTER_SERVERS
             and tool_id not in domain_allow
+            and tool_id not in _ALWAYS_VISIBLE_TOOL_IDS
         ):
             continue
         capability = entry.get("capability")
