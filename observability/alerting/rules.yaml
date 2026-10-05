@@ -120,6 +120,27 @@ groups:
           summary: "Chat replies keep making ungrounded {{ $labels.kind }} claims"
           description: "More than 5 chat replies in 30 minutes were flagged as ungrounded ({{ $labels.kind }}): they claimed work or quoted node ids no tool call this turn backed up. Check the model and prompt in use."
 
+      # FORGE-532: a solved run whose 3D result field could not be built, or a
+      # recorded simulation_result whose field blob never reached MinIO. Both
+      # degrade silently to the numbers-only card, so the counter is the only
+      # signal that contours have stopped appearing.
+      - alert: SimFieldPayloadFailures
+        expr: sum(increase(metaforge_sim_field_payload_total{outcome="failed"}[30m])) by (analysis_type) > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CalculiX result fields failing to build ({{ $labels.analysis_type }})"
+          description: "More than 3 solved {{ $labels.analysis_type }} runs in 30 minutes produced no 3D field payload. Results still record their summary numbers, but the dashboard cannot show contours for them. Check the calculix adapter logs for calculix_field_payload_failed."
+      - alert: SimFieldStoreFailures
+        expr: sum(increase(metaforge_sim_field_store_total{outcome="failed"}[30m])) > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Simulation result fields are not reaching MinIO"
+          description: "More than 3 simulation_result field blobs in 30 minutes failed to store. The results are recorded without a field, so the 3D viewer shows the 'field not stored' note. Check MinIO reachability from the MCP sidecar."
+
       # FORGE-492: the guardrail refusing a design-flow phase's tool call is
       # survivable (the model is told and picks another tool) but it should be
       # rare. A sustained rate means a tool a phase needs is classified

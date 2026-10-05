@@ -1991,7 +1991,10 @@ class TwinServer(McpToolServer):
                     "this, a completed run_fea/extract_results chain leaves the "
                     "twin with only an evidence entity (numbers restated as "
                     "text) and no versioned, loadable result the dashboard's "
-                    "Sim tab can show. FORGE-278: use "
+                    "Sim tab can show. FORGE-532: for a simulation_result also "
+                    "pass field_file (the 'field.file' calculix.run_fea/run_thermal "
+                    "returned) and analysed_geometry_node_id, so the result shows "
+                    "as a 3D contour pinned to the geometry it analysed. FORGE-278: use "
                     "document_type='load_case' to persist a boundary-condition "
                     "definition (material, fixed_node_set, load_node_set, "
                     "load_force_n, source_of_loads) ONCE so it can be reused "
@@ -2097,6 +2100,62 @@ class TwinServer(McpToolServer):
                                 "'simulation_result'."
                             ),
                         },
+                        "field_file": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-532, 'simulation_result' only: the 3D result "
+                                "field to store with this result -- pass the "
+                                "'field.file' path calculix.run_fea/run_thermal "
+                                "returned, as-is (absolute, or relative to the "
+                                "shared adapter workspace). Stored in MinIO beside "
+                                "the summary so the dashboard can draw stress/"
+                                "displacement/temperature contours. Prefer this "
+                                "over field_base64."
+                            ),
+                        },
+                        "field_base64": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-532: the same field payload inline (the "
+                                "'field.base64' value). Only for programmatic "
+                                "callers; field_file wins when both are given."
+                            ),
+                        },
+                        "analysed_geometry_node_id": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-532, 'simulation_result' only: the cad_model "
+                                "node this analysis meshed and solved. Pinned with "
+                                "its revision and content hash so a later geometry "
+                                "revision can mark the result stale; also recorded "
+                                "as a DERIVES_FROM edge."
+                            ),
+                        },
+                        "analysed_geometry_revision": {
+                            "type": ["string", "integer"],
+                            "description": (
+                                "Optional revision label of that geometry, if the "
+                                "caller knows it (otherwise taken from the node)."
+                            ),
+                        },
+                        "load_case_spec": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-532, 'simulation_result' only: the boundary "
+                                "conditions actually solved (material, "
+                                "fixed_node_set, load_node_set, load_force_n, or the "
+                                "thermal source/sink), as passed to calculix."
+                            ),
+                        },
+                        "fixtures": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": (
+                                "FORGE-532: the supports, e.g. [{'label': "
+                                "'Surface1', 'kind': 'fixture'}]. Derived from the "
+                                "field's own markers when omitted."
+                            ),
+                        },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                     },
@@ -2110,6 +2169,9 @@ class TwinServer(McpToolServer):
                         "content_hash": {"type": "string"},
                         "size_bytes": {"type": "integer"},
                         "project_linked": {"type": "boolean"},
+                        "field_stored": {"type": "boolean"},
+                        "field_object_key": {"type": ["string", "null"]},
+                        "field_content_hash": {"type": ["string", "null"]},
                     },
                 },
                 phase=1,
@@ -2141,6 +2203,9 @@ class TwinServer(McpToolServer):
         metadata = arguments.get("metadata")
         source_ids = arguments.get("source_part_node_ids")
         evidence_node_id = arguments.get("evidence_node_id")
+        # FORGE-532: the 3D result field and what was analysed. Passed only
+        # when present, so recorders without these parameters keep working.
+        result_kwargs = self._simulation_result_kwargs(document_type, arguments)
         return await self._document_recorder(
             content=content,
             name=name,
@@ -2159,7 +2224,71 @@ class TwinServer(McpToolServer):
             evidence_node_id=(
                 evidence_node_id if isinstance(evidence_node_id, str) and evidence_node_id else None
             ),
+            **result_kwargs,
         )
+
+    _FIELD_ARGS = (
+        "field_file",
+        "field_base64",
+        "analysed_geometry_node_id",
+        "analysed_geometry_revision",
+        "load_case_spec",
+        "fixtures",
+    )
+
+    def _simulation_result_kwargs(
+        self, document_type: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """``field_blob`` / ``analysis`` recorder kwargs for a simulation_result.
+
+        Reads ``field_file`` server-side from the shared adapter workspace
+        (same resolution as commit_geometry's ``file_path``, FORGE-224), so
+        the model never has to carry the payload between two tool calls.
+        """
+        given = [k for k in self._FIELD_ARGS if arguments.get(k) not in (None, "", [], {})]
+        if not given:
+            return {}
+        if document_type != "simulation_result":
+            raise ValueError(
+                f"twin.record_document: {', '.join(given)} only apply to "
+                "document_type='simulation_result'"
+            )
+        kwargs: dict[str, Any] = {}
+        field_file = arguments.get("field_file")
+        field_b64 = arguments.get("field_base64")
+        if isinstance(field_file, str) and field_file:
+            resolved = Path(field_file)
+            if not resolved.is_absolute():
+                resolved = Path(os.getenv("ADAPTER_WORKSPACE_DIR", "/workspace")) / field_file
+            try:
+                kwargs["field_blob"] = resolved.read_bytes()
+            except OSError as exc:
+                raise ValueError(
+                    f"twin.record_document: could not read field_file {field_file!r} "
+                    f"(resolved to {resolved}): {exc}"
+                ) from exc
+        elif isinstance(field_b64, str) and field_b64:
+            try:
+                kwargs["field_blob"] = base64.b64decode(field_b64, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    "twin.record_document: field_base64 is not valid base64 -- pass "
+                    "field_file (the 'field.file' path) instead"
+                ) from exc
+        analysis: dict[str, Any] = {}
+        geometry_id = arguments.get("analysed_geometry_node_id")
+        if isinstance(geometry_id, str) and geometry_id:
+            analysis["geometry_node_id"] = geometry_id
+        revision = arguments.get("analysed_geometry_revision")
+        if isinstance(revision, str | int) and not isinstance(revision, bool):
+            analysis["geometry_revision"] = revision
+        if isinstance(arguments.get("load_case_spec"), dict):
+            analysis["load_case_spec"] = arguments["load_case_spec"]
+        if isinstance(arguments.get("fixtures"), list):
+            analysis["fixtures"] = arguments["fixtures"]
+        if analysis or "field_blob" in kwargs:
+            kwargs["analysis"] = analysis
+        return kwargs
 
     # ------------------------------------------------------------------
     # twin.propose_change (MET-548) — gated HITL modification

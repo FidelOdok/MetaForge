@@ -556,6 +556,13 @@ _PREVIEW_CONTENT_TYPES: dict[str, str] = {
     "gbr": "text/plain; charset=utf-8",
     "c": "text/plain; charset=utf-8",
     "h": "text/plain; charset=utf-8",
+    # FORGE-532: solver result formats. A CalculiX .frd is fixed-width
+    # ASCII; a .vtu is VTK XML. The 3D viewer's own field payload is served
+    # by GET /v1/simulation/results/{id}/field, not this route.
+    "frd": "text/plain; charset=utf-8",
+    "dat": "text/plain; charset=utf-8",
+    "vtu": "application/xml",
+    "gz": "application/gzip",
 }
 
 

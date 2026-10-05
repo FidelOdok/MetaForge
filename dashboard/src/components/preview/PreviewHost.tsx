@@ -93,7 +93,7 @@ export function PreviewHost({ node, mode, onOpenInViewer }: PreviewHostProps) {
   // ── Engines that need no file text ────────────────────────────────────
   switch (engine) {
     case 'sim':
-      return frame(doc(<FeaSummaryCard node={node} />));
+      return frame(doc(<FeaSummaryCard node={node} mode={mode} />));
     case 'cad3d':
     case 'mesh3d':
       return frame(

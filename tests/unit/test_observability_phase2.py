@@ -277,7 +277,8 @@ class TestAllMetricsCombined:
         # + 1 twin item revisions (FORGE-523)
         # + 1 twin run change sets (FORGE-525)
         # + 1 design-flow item slots (FORGE-524)
-        assert len(MetricsRegistry.all_metrics()) == 74
+        # + 3 simulation result field payload/store (FORGE-532)
+        assert len(MetricsRegistry.all_metrics()) == 77
 
     def test_all_metrics_equals_sum_of_all_groups(self) -> None:
         total = (
@@ -295,6 +296,7 @@ class TestAllMetricsCombined:
             + len(MetricsRegistry.harness_metrics())
             + len(MetricsRegistry.mcp_metrics())
             + len(MetricsRegistry.design_flow_metrics())
+            + len(MetricsRegistry.sim_field_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 

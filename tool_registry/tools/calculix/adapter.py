@@ -27,6 +27,14 @@ from tool_registry.tools.calculix.deck_builder import (
     build_static_stress_deck,
     build_thermal_deck,
 )
+from tool_registry.tools.calculix.field_payload import (
+    FieldPayloadError,
+    build_field_payload,
+    elements_from_inp_mesh,
+    node_set_marker,
+    parse_frd_model,
+    write_payload_file,
+)
 from tool_registry.tools.calculix.inp_mesh import MeshData, parse_mesh_inp
 from tool_registry.tools.calculix.result_parser import (
     extract_results,
@@ -45,6 +53,97 @@ from tool_registry.tools.calculix.statics import (
 logger = structlog.get_logger()
 tracer = get_tracer("tool_registry.tools.calculix.adapter")
 
+_metrics: Any = None
+
+
+def _collector() -> Any:
+    """Lazily resolved metrics collector (a no-op one without an OTel SDK)."""
+    global _metrics  # noqa: PLW0603
+    if _metrics is None:
+        from observability.metrics import collector_for
+
+        _metrics = collector_for("metaforge-calculix")
+    return _metrics
+
+
+def _field_markers(
+    mesh: MeshData | None, analysis_type: str, deck_spec: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Fixture / load (or thermal source / sink) markers for the viewer,
+    located on the mesh by the same node sets the deck was built from."""
+    if mesh is None or not deck_spec:
+        return []
+    wanted: list[tuple[str, str, dict[str, Any]]] = []
+    if analysis_type == "thermal":
+        wanted.append(
+            (
+                "heat_source",
+                deck_spec["heat_source_node_set"],
+                {"value": deck_spec["power_dissipation_w"], "unit": "W"},
+            )
+        )
+        wanted.append(
+            ("sink", deck_spec["sink_node_set"], {"value": deck_spec["sink_temp_c"], "unit": "C"})
+        )
+    else:
+        wanted.append(("fixture", deck_spec["fixed_node_set"], {}))
+        if deck_spec.get("load_node_set"):
+            wanted.append(
+                (
+                    "load",
+                    deck_spec["load_node_set"],
+                    {"vector": list(deck_spec["load_force_n"]), "unit": "N"},
+                )
+            )
+    markers = []
+    for kind, node_set, extra in wanted:
+        marker = node_set_marker(mesh, node_set, kind=kind, **extra)
+        if marker is not None:
+            markers.append(marker)
+    return markers
+
+
+def _build_result_field(
+    frd_path: str,
+    analysis_type: str,
+    mesh: MeshData | None,
+    deck_spec: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """FORGE-532: the 3D result field for a solved run, or an ``error`` entry.
+
+    Best-effort by design: the numeric summary is the contract every
+    existing caller relies on, so a field that cannot be built (unusual
+    element types, an over-cap mesh) is reported, never raised.
+    """
+    with tracer.start_as_current_span("calculix.result_field") as span:
+        span.set_attribute("calculix.analysis_type", analysis_type)
+        try:
+            model = parse_frd_model(frd_path)
+            if not model.elements and mesh is not None:
+                model.elements = elements_from_inp_mesh(mesh)
+            payload = build_field_payload(
+                model,
+                analysis_type,
+                markers=_field_markers(mesh, analysis_type, deck_spec),
+                source_name=Path(frd_path).name,
+            )
+            field_file = write_payload_file(payload, frd_path)
+        except (FieldPayloadError, OSError, ValueError, KeyError) as exc:
+            span.record_exception(exc)
+            logger.warning(
+                "calculix_field_payload_failed",
+                frd_path=frd_path,
+                analysis_type=analysis_type,
+                error=str(exc),
+            )
+            _collector().record_sim_field_payload(analysis_type, "failed")
+            return {"error": f"result field not built: {exc}"}
+        outcome = "decimated" if payload.summary["decimated"] else "built"
+        _collector().record_sim_field_payload(analysis_type, outcome, len(payload.gz_bytes))
+        span.set_attribute("calculix.field.outcome", outcome)
+        return payload.to_result(field_file)
+
+
 # FORGE-223: this adapter has no Twin access and none of its tools accept a
 # work_product_id -- a mesh_file must already be a path on the shared adapter
 # workspace, e.g. freecad.generate_mesh's own 'mesh_file' result. A model that
@@ -59,6 +158,37 @@ _MESH_FILE_DESCRIPTION = (
     "a work_product_id -- call twin.stage_work_product_file first if you "
     "only have one, and pass its returned file_path here."
 )
+
+# FORGE-532: the 3D result field every solve now returns alongside its
+# numeric summary. 'file' is the by-reference handle: pass it as
+# twin.record_document's 'field_file' rather than copying 'base64'.
+_FIELD_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": (
+        "FORGE-532: the solved mesh's outer surface with per-vertex von Mises / "
+        "displacement (or temperature), as a gzipped metaforge.sim_field JSON "
+        "payload for the 3D viewer. 'file' is its path on the shared adapter "
+        "workspace: pass it as twin.record_document's 'field_file' when "
+        "recording the simulation_result (do NOT copy 'base64' between calls). "
+        "'quantities' and 'ranges' summarise what it holds. Only 'error' is "
+        "present when the field could not be built; the numeric summary is "
+        "still valid then."
+    ),
+    "properties": {
+        "file": {"type": "string"},
+        "format": {"type": "string"},
+        "media_type": {"type": "string"},
+        "encoding": {"type": "string"},
+        "size_bytes": {"type": "integer"},
+        "base64": {"type": "string"},
+        "quantities": {"type": "array", "items": {"type": "string"}},
+        "ranges": {"type": "object"},
+        "vertex_count": {"type": "integer"},
+        "triangle_count": {"type": "integer"},
+        "decimated": {"type": "boolean"},
+        "error": {"type": "string"},
+    },
+}
 
 # FORGE-239: a fixed_node_set that spans this much of the part's own extent
 # along its LONGEST axis (its "length") is very likely the wrong face, not a
@@ -253,6 +383,7 @@ class CalculixServer(McpToolServer):
                         },
                         "solver_time": {"type": "number"},
                         "mesh_elements": {"type": "integer"},
+                        "field": _FIELD_OUTPUT_SCHEMA,
                         "frd_path": {
                             "type": "string",
                             "description": (
@@ -374,6 +505,7 @@ class CalculixServer(McpToolServer):
                         "min_temperature_c": {"type": "number"},
                         "solver_time": {"type": "number"},
                         "frd_path": {"type": "string"},
+                        "field": _FIELD_OUTPUT_SCHEMA,
                         "warnings": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -727,10 +859,23 @@ class CalculixServer(McpToolServer):
                                 "properties": {
                                     "element_size_mm": {"type": "number"},
                                     "max_von_mises_mpa": {"type": "number"},
+                                    "element_count": {
+                                        "type": "integer",
+                                        "description": (
+                                            "Optional (FORGE-532): elements in that run's "
+                                            "mesh, so the dashboard can chart element "
+                                            "count against peak stress."
+                                        ),
+                                    },
                                 },
                                 "required": ["element_size_mm", "max_von_mises_mpa"],
                             },
-                            "description": "One entry per element size already run, at least 2.",
+                            "description": (
+                                "One entry per element size already run, at least 2. "
+                                "Record the returned verdict on the finest run's "
+                                "simulation_result as metadata.mesh_convergence so the "
+                                "Sim page can chart it."
+                            ),
                         },
                         "tolerance_pct": {
                             "type": "number",
@@ -1281,6 +1426,7 @@ class CalculixServer(McpToolServer):
             try:
                 solved_file = mesh_file
                 span_warning: str | None = None
+                mesh: MeshData | None = None
                 if deck_spec is not None:
                     mesh = parse_mesh_inp(mesh_file)
                     # FORGE-239: check BEFORE solving -- the warning is about
@@ -1361,6 +1507,13 @@ class CalculixServer(McpToolServer):
                             "file -- nothing was actually solved for this *FREQUENCY step."
                         )
                     result["frequencies_hz"] = parse_frequencies_dat(dat_files[0])
+                # FORGE-532: surface mesh + nodal fields for the 3D viewer.
+                result["field"] = _build_result_field(
+                    frd_path,
+                    analysis_type,
+                    mesh,
+                    deck_spec,
+                )
                 if span_warning:
                     result["warnings"] = [span_warning]
                 return result
@@ -1455,6 +1608,8 @@ class CalculixServer(McpToolServer):
                     "solver_time": solver_result["solver_time_s"],
                     "result_files": solver_result["result_files"],
                     "frd_path": frd_path,
+                    # FORGE-532: same 3D field path as static/modal.
+                    "field": _build_result_field(frd_path, "thermal", mesh, deck_spec),
                 }
                 if span_warnings:
                     result["warnings"] = span_warnings

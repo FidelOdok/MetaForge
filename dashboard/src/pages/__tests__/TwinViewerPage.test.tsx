@@ -785,6 +785,13 @@ describe('TwinViewerPage FEA result view (FORGE-305)', () => {
     expect(within(panel).getByText('0.500')).toBeInTheDocument();
   });
 
+  it('notes that a result recorded before FORGE-532 has no stored 3D field', () => {
+    selectNode(resultNode());
+    expect(
+      within(screen.getByTestId('fea-result-section')).getByTestId('field-not-stored'),
+    ).toHaveTextContent(/Field not stored/);
+  });
+
   it('points at the Sim page for comparison instead of duplicating it', () => {
     selectNode(resultNode());
     const link = within(screen.getByTestId('fea-result-section')).getByRole('link', {
