@@ -423,7 +423,13 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   `freecad.describe_step_file`; `freecad.export_model` with
   `twin.commit_geometry`; `freecad.open_session` with `close_session`) and
   drops niche families (`gazebo`, `isaac_sim`, `omniverse_usd`) first. The
-  dropped names are logged at info as `chat_tools_dropped`. See
+  dropped names are logged at info as `chat_tools_dropped`. The cap was not
+  the only filter: a project-scoped chat turn is also domain-scoped
+  (`mcp_tools_from_bridge(domains=...)`), which hides every non-core adapter
+  tool no skill declares. `freecad.import_step`, `describe_step_file`,
+  `describe_session`, `export_model`, `open_session` and `close_session` are
+  exempt (`_ALWAYS_VISIBLE_TOOL_IDS`), because their core counterpart
+  `twin.stage_work_product_file` is always visible. See
   [robust-harness-design](robust-harness-design.md).
 
 Measurement: `tests/unit/test_context_budget.py::test_phase_prompt_tokens_before_and_after`
