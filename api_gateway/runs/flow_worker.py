@@ -393,12 +393,16 @@ async def _check_gate(payload: dict[str, Any]) -> GateCheck:
 
 
 def build_activities() -> DesignFlowActivities:
+    from api_gateway.runs.change_sets import revision_notes
     from api_gateway.runs.gate_announce import http_gate_announcer
 
     return DesignFlowActivities(
         phase_runner=_run_phase,
         gate_checker=_check_gate,
         gate_announcer=http_gate_announcer(),
+        # FORGE-530: the twin reads behind a retry/rework brief happen here,
+        # in an activity; the workflow only receives the plain notes.
+        revision_notes=revision_notes,
     )
 
 

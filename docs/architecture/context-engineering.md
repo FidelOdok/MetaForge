@@ -172,6 +172,30 @@ stale) by combining three signals via `max`:
    `source_id` carry `metadata["shadowed_by"]` ≥ 1 (each shadow
    contributes 0.5).
 
+**Revision state first (FORGE-530).** A fragment whose metadata carries
+`item_key`/`item_revision` (every definition revision is stamped with them,
+FORGE-523) is scored by revision state *before* age decay, and the three
+signals above do not apply to it:
+
+| Revision state | Score |
+| --- | --- |
+| current (newest approved revision) | `0.0`, however old |
+| superseded (older than the current revision) | `1.0`, however new |
+| rejected | `1.0`; `0.0` when `request.include_rejected_lessons` is set, so it is kept as "already tried, failed because" |
+| abandoned (its run failed, was cancelled or was sent back) | `1.0` |
+| draft | `0.0` only when `request.run_id` is the run that wrote it; `1.0` for every other reader, so one run's work in progress never leaks into another's retrieval |
+
+`annotate_revision_state(fragments, twin)` runs in the assembler before the
+shadowing pass and fills `revision_status`, `revision_run`,
+`item_current_revision`, `item_head_revision` and `rejection_reason` from the
+twin (`twin_core/items/state.py`). It reads FORGE-525's `REVISION_OF` edge
+fields: `status` (`committed` and `approved` are the baseline, a missing status
+is `committed`, an unknown one is treated as a draft), `change_set` (the run)
+and `status_reason`. The current revision is the item's HEAD. A fragment
+stamped with a `change_set` whose state could not be read is treated as a
+draft of that run. A fragment with no item, or with no readable state and no
+`change_set`, keeps age decay.
+
 `request.staleness_threshold` (default `1.0` = back-compat) gates the
 drop. `0.5` keeps roughly the last 30 days of decisions; `0.2` is
 freshness-only.
@@ -278,6 +302,36 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   `run.start_design_flow` for that shape of ask rather than waiting for
   matching phrasing — the tool already gates every phase on human
   approval, so surfacing it costs nothing if the user declines.
+- **Brief from the item baseline (FORGE-530)**: for a project that has
+  items, `build_project_brief` lists **one line per item** at its current
+  revision instead of the newest work products: `KEY@n`, type, name and key
+  facts (bounding box, material, volume and mass for a part; constraint count
+  and the first limits for a requirement set; the statement for an intent or
+  need), plus the evidence state of a part (`FEA @3 ok`, `FEA @3 fail`, or
+  `FEA stale (@2, not re-run on @3)` when the newest simulation result
+  analysed an older revision). The dependency is the result's
+  `analysed_geometry` pin (FORGE-532): a result pinned to another node is not
+  evidence for this one, whatever other edges point here; a result recorded
+  before the pin existed counts by its `DERIVES_FROM` edge. The current revision is the item's HEAD
+  (FORGE-525 moves it only on gate approval), so a superseded, rejected,
+  abandoned or other run's draft revision never appears. Then: rejected revisions as "already tried, failed because" lessons
+  (up to 5), recent real design decisions (up to 5, de-duplicated by title,
+  never the design-flow "phase summary" backstops), a one-line count of other
+  records, and an excerpt of the *current* constraint set and prd prose
+  (FORGE-86 picked the three newest, which on the shelf project were three
+  revisions of one set; FORGE-528 made the prd prose an item, so it has one
+  line and one excerpt like any other).
+  When the call belongs to a design-flow run (`run_id` from the MCP call
+  context, or passed explicitly), that run's own draft revisions are listed
+  under "Drafts written by this run", labelled as not yet approved. The
+  10,000-char cap, the closing `project_id` directives and the
+  `metaforge://twin/brief/<project_id>` pointer are unchanged. A project with
+  no items gets exactly the legacy brief. Code:
+  `api_gateway/projects/baseline_brief.py`, facts in
+  `twin_core/items/facts.py`. Observability: `project_brief_composed`
+  (mode, items, drafts, chars, capped), `metaforge_project_brief_total{mode,
+  capped}`, `metaforge_project_brief_chars{mode}`, alert
+  `ProjectBriefBaselineCapped`.
 - **Telemetry** — `context.stats` gains a `retrieved_context`
   component; the `project_brief` component is now computed from the
   explicit brief text rather than sniffing the history pair.
@@ -380,7 +434,8 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   its existing observation truncation.
 - **The project brief is capped.** `build_project_brief` stops at
   `METAFORGE_BRIEF_CHAR_LIMIT` characters (default 10,000), keeps the newest
-  work products (FORGE-244 ordering), re-appends the closing `project_id`
+  work products (FORGE-244 ordering; a project with items lists one line per
+  item instead, see FORGE-530 under Live chat wiring), re-appends the closing `project_id`
   directives, and points at `metaforge://twin/brief/<project_id>`, which
   serves the uncapped brief.
 - **Design-flow phases carry a scoped tool set, driven by what they deliver.**
@@ -431,6 +486,33 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   exempt (`_ALWAYS_VISIBLE_TOOL_IDS`), because their core counterpart
   `twin.stage_work_product_file` is always visible. See
   [robust-harness-design](robust-harness-design.md).
+
+- **Rework and retry briefs name the turned-down revisions (FORGE-530).**
+  `orchestrator/design_flow/rework_context.py` takes a phase and its rejected
+  or failed revisions (node ids or `KEY@n` refs) and returns prompt lines: the
+  revision ref, the gate's reason (the revision's own, else the one passed
+  in), and a short diff against the previous revision. A part is diffed on
+  bounding box, material, volume, mass and part count, from the injected
+  STEP-measured geometry diff (`make_geometry_diff`) when there is one and
+  from the facts recorded on each revision otherwise; a requirement set is
+  diffed per constraint (added, removed, `limit` changed). The collection is
+  async (`rework_context_lines`, `collect_revision_notes`) and runs where I/O
+  is allowed; rendering is pure (`revision_note_lines`) and is what
+  `build_rework_feedback(..., revisions=...)` and
+  `build_retry_feedback(..., revisions=...)` call.
+
+  Both engines use it on every retry and rework. The gate decision closes the
+  phase's drafts first (`decide_run_gate`, FORGE-525: `abandoned` on a retry
+  or rework), then `phase_revision_notes` reads the drafts of that phase in the
+  run's change set from the latest close (`closed_phase_revisions`), so a third
+  attempt hears about the second attempt's work only. The gate's reason is its
+  findings, else the reviewer's reason; a `rejected` revision keeps its own
+  verdict. In-process, `DesignFlowExecutor(revision_notes=...)` calls the
+  gateway's `run_change_sets.revision_notes`. On Temporal the twin read is the
+  `collect_revision_notes` activity (bound by `flow_worker.build_activities`),
+  which returns plain dicts (`notes_to_dicts`); the workflow rebuilds the notes
+  and renders them, behind the `forge-530-revision-notes` patch so older
+  histories replay unchanged. A failed read gives the feedback without notes.
 
 Measurement: `tests/unit/test_context_budget.py::test_phase_prompt_tokens_before_and_after`
 scripts one 3-call phase (two large reads, then an answer) against a 121-tool

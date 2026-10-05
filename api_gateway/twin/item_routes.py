@@ -74,11 +74,22 @@ class ItemCurrentResponse(BaseModel):
     ref: str
 
 
+class ItemLessonResponse(BaseModel):
+    """A rejected revision, kept as "already tried, failed because" (FORGE-530)."""
+
+    ref: str
+    node_id: str
+    run_id: str | None = None
+    reason: str | None = None
+    lesson: str
+
+
 class ItemHistoryResponse(BaseModel):
     item: ItemResponse
     revisions: list[ItemRevisionResponse]
     #: What the reader sees as current: its run's draft, else the head.
     current: ItemCurrentResponse | None = None
+    lessons: list[ItemLessonResponse] = []
 
 
 def _twin() -> object:
@@ -144,4 +155,5 @@ async def get_item_revisions(
             item=ItemResponse(**data["item"]),
             revisions=[ItemRevisionResponse(**r) for r in data["revisions"]],
             current=ItemCurrentResponse(**data["current"]) if data.get("current") else None,
+            lessons=[ItemLessonResponse(**lesson) for lesson in data.get("lessons", [])],
         )
