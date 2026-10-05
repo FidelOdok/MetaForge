@@ -89,9 +89,11 @@ _ITEM_WRITE_TOOLS = (
     "twin.record_engineering_entity",
     "twin.record_component_selection",
 )
+# Nullable: models often send an omitted optional field as null, and a
+# plain "string" made validation refuse the whole write (FORGE-523 live check).
 _ITEM_ARG_PROPERTIES: dict[str, Any] = {
     "item_key": {
-        "type": "string",
+        "type": ["string", "null"],
         "description": (
             "Optional. The item this write revises, as returned by an earlier write "
             "('CAD-BRACKET'), or 'KEY@n' to also check the head is still revision n. "
@@ -100,14 +102,14 @@ _ITEM_ARG_PROPERTIES: dict[str, Any] = {
         ),
     },
     "supersedes": {
-        "type": "string",
+        "type": ["string", "null"],
         "description": (
             "Optional. Node id of an earlier revision this replaces; the write "
             "becomes the next revision of that node's item."
         ),
     },
     "change_reason": {
-        "type": "string",
+        "type": ["string", "null"],
         "description": "Optional. Why this revision differs from the previous one.",
     },
 }

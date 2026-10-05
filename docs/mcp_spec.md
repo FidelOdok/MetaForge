@@ -992,7 +992,8 @@ The definition write tools (`twin.commit_geometry`, `twin.record_constraint_set`
 `twin.record_engineering_entity` for `intent`/`stakeholder_need`/`objective`, and
 `twin.record_component_selection`) write each call as the next revision of an
 item (see [twin_schema.md section 2.30](twin_schema.md#230-items-and-revisions-definitions-vs-records-forge-522-forge-523)).
-They accept three optional arguments, none of which the normal path needs:
+They accept three optional arguments, none of which the normal path needs.
+Each is a string or `null`; `null` or an empty string means not given.
 
 | Argument | Meaning |
 |----------|---------|
