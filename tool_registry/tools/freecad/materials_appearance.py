@@ -13,6 +13,9 @@ and ready to move into the materials library (FORGE-445).
   invented.
 * ``apply_step_colours`` injects ``COLOUR_RGB`` / ``STYLED_ITEM`` entities into
   an already written STEP, per part (by PRODUCT name) or for every solid.
+* ``read_step_colours`` reads the colours a STEP already carries, per PRODUCT
+  name (FORGE-519), so ``import_step`` can keep them with the session object:
+  headless ``Import.insert`` keeps geometry and Labels but drops colours.
 """
 
 from __future__ import annotations
@@ -131,19 +134,103 @@ def _product_solids(ents: dict[int, tuple[str, str]]) -> dict[str, list[int]]:
     return out
 
 
+_COLOUR_RE = re.compile(
+    r"\s*COLOUR_RGB\s*\(\s*'(?:[^']|'')*'\s*,\s*([-+.\dEe]+)\s*,\s*([-+.\dEe]+)\s*,\s*([-+.\dEe]+)"
+)
+# How far a STYLED_ITEM's style chain may run before COLOUR_RGB. The standard
+# chain (PSA -> usage -> side -> fill area -> fill style -> fill colour ->
+# colour) is 6 hops; a little slack covers exporters that add a level.
+_STYLE_DEPTH = 10
+
+
+def _style_colour(ents: dict[int, tuple[str, str]], start: list[int]) -> RGB | None:
+    """First surface ``COLOUR_RGB`` reachable from a styled item's styles."""
+    seen: set[int] = set()
+    frontier = list(start)
+    for _ in range(_STYLE_DEPTH):
+        nxt: list[int] = []
+        for i in frontier:
+            if i in seen or i not in ents:
+                continue
+            seen.add(i)
+            t, a = ents[i]
+            if t == "COLOUR_RGB":
+                m = _COLOUR_RE.match(a)
+                if m:
+                    try:
+                        return _normalise_rgb([float(m.group(k)) for k in (1, 2, 3)])
+                    except ValueError:
+                        return None
+                continue
+            if t.startswith("CURVE_STYLE"):
+                continue  # edge colour, not the part's surface colour
+            nxt += [int(r) for r in _REF_RE.findall(a)]
+        if not nxt:
+            break
+        frontier = nxt
+    return None
+
+
+def read_step_colours(step: bytes | str) -> dict[str, RGB]:
+    """PRODUCT name -> RGB (0-1) for every product whose solid carries a colour.
+
+    A colour counts when a ``STYLED_ITEM`` (or ``OVER_RIDING_STYLED_ITEM``)
+    styles one of the product's solids, or the shape representation that holds
+    them, and its presentation style chain ends in ``COLOUR_RGB``. The first
+    colour found for a product wins. Pure and best-effort: an unreadable or
+    uncoloured file is an empty dict, never an error.
+    """
+    text = step.decode("utf-8", errors="replace") if isinstance(step, bytes) else step
+    ents = _parse(text)
+    if not ents:
+        return {}
+    by_product = _product_solids(ents)
+    solid_to_product = {sid: name for name, sids in by_product.items() for sid in sids}
+    out: dict[str, RGB] = {}
+    for _i, (t, a) in sorted(ents.items()):
+        if t not in ("STYLED_ITEM", "OVER_RIDING_STYLED_ITEM"):
+            continue
+        refs = [int(r) for r in _REF_RE.findall(a)]
+        if t == "OVER_RIDING_STYLED_ITEM":
+            refs = refs[:-1]  # last ref is the styled item it overrides
+        if len(refs) < 2:
+            continue
+        item, styles = refs[-1], refs[:-1]
+        targets = [item]
+        rep = ents.get(item)
+        if rep is not None and rep[0] not in _SOLID_TYPES:
+            targets += [int(r) for r in _REF_RE.findall(rep[1])]
+        names = [solid_to_product[s] for s in targets if s in solid_to_product]
+        if not names or all(n in out for n in names):
+            continue
+        rgb = _style_colour(ents, styles)
+        if rgb is None:
+            continue
+        for n in names:
+            out.setdefault(n, rgb)
+    return out
+
+
 def apply_step_colours(
     step_bytes: bytes,
     default_rgb: RGB | None = None,
     part_rgb: dict[str, RGB] | None = None,
+    *,
+    fallback_part_rgb: dict[str, RGB] | None = None,
 ) -> bytes:
     """Return ``step_bytes`` with a ``STYLED_ITEM`` colour on each solid.
 
     ``part_rgb`` (PRODUCT name, i.e. the FreeCAD Label, to colour) overrides
-    ``default_rgb`` for that part. A solid with neither stays uncoloured. If
-    nothing can be coloured the input is returned unchanged.
+    ``default_rgb`` for that part. ``fallback_part_rgb`` (FORGE-519: colours
+    recorded at import) is the lowest priority, below ``default_rgb``, and a
+    name in it that this STEP does not contain is skipped silently, since it
+    may name a session part that is not part of this export. A solid with
+    none of them stays uncoloured. If nothing can be coloured the input is
+    returned unchanged.
     """
     part_rgb = part_rgb or {}
-    if default_rgb is None and not part_rgb:
+    fallback_part_rgb = fallback_part_rgb or {}
+    if default_rgb is None and not part_rgb and not fallback_part_rgb:
         return step_bytes
     text = step_bytes.decode("utf-8", errors="replace")
     ents = _parse(text)
@@ -152,6 +239,9 @@ def apply_step_colours(
     by_product = _product_solids(ents)
     all_solids = sorted(i for i, (t, _a) in ents.items() if t in _SOLID_TYPES)
     solid_rgb: dict[int, RGB] = {}
+    for name, rgb in fallback_part_rgb.items():
+        for sid in by_product.get(name, ()):
+            solid_rgb[sid] = rgb
     if default_rgb is not None:
         for sid in all_solids:
             solid_rgb[sid] = default_rgb
