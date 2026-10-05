@@ -16,17 +16,22 @@ from api_gateway.twin.component_recorder import make_component_recorder
 from api_gateway.twin.constraint_recorder import make_constraint_recorder
 from api_gateway.twin.engineering_entity_recorder import make_engineering_entity_recorder
 from api_gateway.twin.geometry_recorder import make_geometry_recorder
-from api_gateway.twin.item_revisions import make_item_history_reader
+from api_gateway.twin.item_revisions import (
+    finish_definition_revision,
+    make_item_history_reader,
+)
 from twin_core.api import InMemoryTwinAPI
 from twin_core.items import (
     ItemError,
     ItemRevisionConflictError,
     UnknownItemError,
+    commit_revision,
     derive_key,
     find_item,
     item_history,
     list_items,
     parse_item_ref,
+    plan_revision,
     resolve_item_ref,
 )
 from twin_core.models.enums import EdgeType, WorkProductType
@@ -429,3 +434,126 @@ class TestNeo4jRoundTrip:
         back = Neo4jGraphEngine._props_to_node(Neo4jGraphEngine._node_to_props(item))
         assert isinstance(back, Item)
         assert back == item
+
+
+class TestConcurrentWrites:
+    """Two writes plan against the same head before either commits (review on #1069)."""
+
+    @staticmethod
+    async def _node(twin: InMemoryTwinAPI, name: str, stamp: dict | None = None) -> UUID:
+        wp = await twin.create_work_product(
+            WorkProduct(
+                name=name,
+                type=WorkProductType.CAD_MODEL,
+                domain="mechanical",
+                file_path="",
+                content_hash=str(uuid4()),
+                format="step",
+                created_by="test",
+                project_id=UUID(PROJECT),
+                metadata=dict(stamp or {}),
+            )
+        )
+        return wp.id
+
+    async def _item_at_one(self, twin: InMemoryTwinAPI) -> UUID:
+        plan = await plan_revision(
+            twin, item_type="cad_model", name="Leg", project_id=PROJECT, author="t"
+        )
+        first = await self._node(twin, "Leg", plan.stamp())
+        await commit_revision(twin, plan, first, name="Leg")
+        return first
+
+    async def test_interleaved_writes_get_n_plus_1_and_n_plus_2(self, twin) -> None:
+        first = await self._item_at_one(twin)
+        plan_a = await plan_revision(
+            twin, item_type="cad_model", name="Leg", project_id=PROJECT, author="a"
+        )
+        plan_b = await plan_revision(
+            twin, item_type="cad_model", name="Leg", project_id=PROJECT, author="b"
+        )
+        assert plan_a.revision == plan_b.revision == 2
+
+        node_a = await self._node(twin, "Leg", plan_a.stamp())
+        await commit_revision(twin, plan_a, node_a, name="Leg")
+        # B was planned on the old head; simulate the geometry recorder, which
+        # links SUPERSEDES itself (to the head it planned on) before committing.
+        node_b = await self._node(twin, "Leg", plan_b.stamp())
+        await twin.add_edge(node_b, first, EdgeType.SUPERSEDES)
+        item = await commit_revision(twin, plan_b, node_b, name="Leg", link_supersedes=False)
+
+        assert (plan_a.revision, plan_b.revision) == (2, 3)
+        assert plan_b.planned_revision == 2
+        assert item.head_revision == 3
+        assert item.head_node_id == node_b
+        assert await _heads(twin, item) == [node_b]
+        history = await item_history(twin, item)
+        assert [(r.revision, r.node_id) for r in history] == [
+            (1, first),
+            (2, node_a),
+            (3, node_b),
+        ]
+        # B supersedes the actual previous head (A), not the stale one.
+        sup = await twin.graph.get_edges(
+            node_b, direction="outgoing", edge_type=EdgeType.SUPERSEDES
+        )
+        assert [e.target_id for e in sup] == [node_a]
+        # The node's own stamp matches the revision it was given.
+        assert (await twin.get_work_product(node_b)).metadata["item_revision"] == 3
+
+    async def test_renumbered_write_reports_the_actual_predecessor(self, twin) -> None:
+        await self._item_at_one(twin)
+        plan_a = await plan_revision(
+            twin, item_type="cad_model", name="Leg", project_id=PROJECT, author="a"
+        )
+        plan_b = await plan_revision(
+            twin, item_type="cad_model", name="Leg", project_id=PROJECT, author="b"
+        )
+        node_a = await self._node(twin, "Leg", plan_a.stamp())
+        await commit_revision(twin, plan_a, node_a, name="Leg")
+        node_b = await self._node(twin, "Leg", plan_b.stamp())
+        result: dict = {"supersedes_node_id": "stale"}
+        await finish_definition_revision(twin, plan_b, node_b, name="Leg", result=result)
+        assert result["revision"] == 3
+        assert result["supersedes_node_id"] == str(node_a)
+
+    async def test_pinned_write_that_loses_the_race_is_refused(self, twin) -> None:
+        await self._item_at_one(twin)
+        pinned = await plan_revision(
+            twin,
+            item_type="cad_model",
+            name="Leg",
+            project_id=PROJECT,
+            author="a",
+            item_key="CAD-LEG@1",
+        )
+        other = await plan_revision(
+            twin, item_type="cad_model", name="Leg", project_id=PROJECT, author="b"
+        )
+        winner = await self._node(twin, "Leg", other.stamp())
+        await commit_revision(twin, other, winner, name="Leg")
+
+        loser = await self._node(twin, "Leg", pinned.stamp())
+        with pytest.raises(ItemRevisionConflictError, match="@2"):
+            await commit_revision(twin, pinned, loser, name="Leg")
+
+        item = await find_item(twin, "CAD-LEG", PROJECT)
+        assert (item.head_revision, item.head_node_id) == (2, winner)
+        assert await _heads(twin, item) == [winner]
+        assert loser not in [r.node_id for r in await item_history(twin, item)]
+
+    async def test_two_writes_creating_the_same_new_item_share_it(self, twin) -> None:
+        plan_a = await plan_revision(
+            twin, item_type="cad_model", name="Arm", project_id=PROJECT, author="a"
+        )
+        plan_b = await plan_revision(
+            twin, item_type="cad_model", name="Arm", project_id=PROJECT, author="b"
+        )
+        node_a = await self._node(twin, "Arm", plan_a.stamp())
+        await commit_revision(twin, plan_a, node_a, name="Arm")
+        node_b = await self._node(twin, "Arm", plan_b.stamp())
+        await commit_revision(twin, plan_b, node_b, name="Arm")
+
+        items = [i for i in await list_items(twin, project_id=PROJECT) if i.key == "CAD-ARM"]
+        assert len(items) == 1
+        assert (plan_b.revision, items[0].head_node_id) == (2, node_b)

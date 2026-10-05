@@ -1193,7 +1193,9 @@ Nothing found means a new item at revision 1. An unscoped write (no `project_id`
 
 Reads: `GET /v1/twin/items?project_id=` lists items at their heads; `GET /v1/twin/items/{key}/revisions` returns one item's history, oldest first; the MCP tool `twin.item_history` returns the same by key or by any revision's node id. `GET /v1/twin/nodes` is unchanged (it still lists every node), and `GET /v1/twin/relationships` omits `REVISION_OF` / `HEAD` because their Item endpoints are not in the node list.
 
-Limits of this first slice: two concurrent writes to one item can both plan the same next revision (logged as `item_revision_race`); the old revisions of a constraint set keep their `Constraint` nodes, so the constraint engine still evaluates them; the project-wide migration of today's unlinked duplicates is FORGE-529.
+Concurrent writes: two writes to one item can both plan revision n+1. Before linking, each write re-reads the item's head. The one that finds the head already moved is renumbered to n+2 and supersedes the actual head, and its node's `item_revision` stamp is corrected (`item_revision_race` logs the planned and assigned numbers). A write pinned with `KEY@n` is refused instead, with the same stale-revision error as at planning time; its node stays saved but is not a revision of the item. The re-read and the link are not one transaction, so this narrows the window rather than closing it; run-scoped change sets (FORGE-525) are where writes to one item get serialised.
+
+Limits of this first slice: the old revisions of a constraint set keep their `Constraint` nodes, so the constraint engine still evaluates them; the project-wide migration of today's unlinked duplicates is FORGE-529.
 
 Observability: `item_revision_created` / `item_revision_failed` log events, the `metaforge_twin_item_revision_total{item_type, outcome, resolved_by}` counter, and the `TwinItemRevisionLinkFailures` alert. A failed link never fails the write (the node already exists, and failing would invite a retry that duplicates it); the result carries `item_warning` instead.
 

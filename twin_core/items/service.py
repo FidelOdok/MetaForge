@@ -38,10 +38,13 @@ Cypher and let a legacy node join an item without touching its properties;
 node fetch. ``item_history`` reads the edges, so the edges stay the source
 of truth.
 
-Known limit: two concurrent writes to the same item can both plan ``n+1``.
-:func:`commit_revision` logs ``item_revision_race`` when it sees the head
-already moved; run-scoped change sets (FORGE-525) are where writes get
-serialised.
+Concurrent writes: two writes to one item can both plan ``n+1``.
+:func:`commit_revision` re-reads the head before linking; the write that
+finds the head moved is renumbered to ``n+2`` and supersedes the actual head
+(``item_revision_race`` logs planned vs assigned), or, if it pinned
+``KEY@n``, is refused. The re-read and the write are not one transaction, so
+this narrows the window rather than closing it; run-scoped change sets
+(FORGE-525) are where writes get serialised.
 """
 
 from __future__ import annotations
@@ -159,6 +162,12 @@ class RevisionPlan:
     change_reason: str | None = None
     run_id: str | None = None
     resolved_by: str = "new"
+    #: The head the caller pinned with ``KEY@n``; a write that loses a race
+    #: against another writer is then refused rather than renumbered.
+    expected_revision: int | None = None
+    #: Set by :func:`commit_revision` when another write moved the head first
+    #: and this one was renumbered: the revision it had planned.
+    planned_revision: int | None = None
 
     @property
     def ref(self) -> str:
@@ -399,6 +408,7 @@ async def plan_revision(
                 change_reason=change_reason,
                 run_id=run_id,
                 resolved_by=resolved_by,
+                expected_revision=expected,
             )
         else:
             if key is None:
@@ -421,6 +431,56 @@ async def plan_revision(
         return plan
 
 
+async def _rebase_on_race(twin: Any, plan: RevisionPlan, node_id: UUID, current: Item) -> None:
+    """Another write moved ``current``'s head after ``plan`` was made.
+
+    A pinned write (``KEY@n``) is refused with :class:`ItemRevisionConflictError`,
+    exactly as :func:`plan_revision` refuses a stale pin. Otherwise the write is
+    renumbered onto the actual head: ``plan.revision`` becomes
+    ``head_revision + 1``, ``plan.prior_node_id`` the actual head, the
+    SUPERSEDES edge a recorder may already have added to the stale head is
+    moved, and the node's own ``item_revision`` stamp is corrected (the node was
+    created moments ago by this same write and nothing has read it as a
+    revision yet).
+    """
+    if plan.expected_revision is not None:
+        logger.warning(
+            "item_revision_conflict",
+            item_key=plan.key,
+            pinned=plan.expected_revision,
+            head=current.head_revision,
+            node_id=str(node_id),
+        )
+        _collector().record_twin_item_revision(plan.item_type, "refused", plan.resolved_by)
+        raise ItemRevisionConflictError(
+            f"{plan.key} moved to @{current.head_revision} while this write was in progress, "
+            f"so it is no longer at @{plan.expected_revision}. Node {node_id} was saved but is "
+            f"not a revision of {plan.key}; re-read {plan.key} and revise the current head"
+        )
+    planned, stale_prior = plan.revision, plan.prior_node_id
+    plan.planned_revision = planned
+    plan.revision = current.head_revision + 1
+    plan.prior_node_id = current.head_node_id
+    plan.item = current
+    plan.adopt_chain = []
+    if stale_prior is not None and stale_prior != plan.prior_node_id:
+        await twin.remove_edge(node_id, stale_prior, EdgeType.SUPERSEDES)
+    node = await twin.graph.get_node(node_id)
+    meta = getattr(node, "metadata", None)
+    if isinstance(meta, dict) and meta.get("item_revision") == planned:
+        await twin.graph.update_node(
+            node_id, {"metadata": {**meta, "item_revision": plan.revision}}
+        )
+    logger.warning(
+        "item_revision_race",
+        item_key=plan.key,
+        node_id=str(node_id),
+        planned=planned,
+        assigned=plan.revision,
+        supersedes=str(plan.prior_node_id),
+    )
+
+
 async def commit_revision(
     twin: Any,
     plan: RevisionPlan,
@@ -431,19 +491,32 @@ async def commit_revision(
 ) -> Item | None:
     """Attach the just-created ``node_id`` to its item as ``plan.revision``.
 
-    Never raises: the node already exists, so failing the write here would
-    invite a retry that creates a duplicate. A failure is logged as
+    If another write moved the item's head (or created the item) after
+    ``plan`` was made, the write is renumbered onto the actual head, or, for a
+    pinned ``KEY@n`` write, refused with :class:`ItemRevisionConflictError`
+    (see :func:`_rebase_on_race`). ``plan`` is updated in place either way, so
+    the caller reports the revision actually assigned.
+
+    Otherwise never raises: the node already exists, so failing the write here
+    would invite a retry that creates a duplicate. A failure is logged as
     ``item_revision_failed`` and counted (``outcome="failed"``), and the
     caller gets ``None`` so its result can say the link is missing.
+
+    The check-then-write is not atomic across processes; run-scoped change
+    sets (FORGE-525) are where writes to one item get serialised.
     """
     now = datetime.now(UTC)
     with tracer.start_as_current_span("twin.items.commit_revision") as span:
         span.set_attribute("item.type", plan.item_type)
         span.set_attribute("item.key", plan.key)
-        span.set_attribute("item.revision", plan.revision)
+        span.set_attribute("item.planned_revision", plan.revision)
         try:
             graph = twin.graph
-            if plan.item is None:
+            target = plan.item
+            if target is None:
+                # Another write may have created this item since we planned.
+                target = await find_item(twin, plan.key, plan.project_id)
+            if target is None:
                 item = Item(
                     key=plan.key,
                     item_type=plan.item_type,
@@ -464,17 +537,13 @@ async def commit_revision(
                         metadata={"revision": number, "adopted": True},
                     )
             else:
-                current = await graph.get_node(plan.item.id)
-                if isinstance(current, Item) and current.head_revision >= plan.revision:
-                    logger.warning(
-                        "item_revision_race",
-                        item_key=plan.key,
-                        planned=plan.revision,
-                        head=current.head_revision,
-                    )
-                old_head = current.head_node_id if isinstance(current, Item) else None
+                current = await graph.get_node(target.id)
+                if not isinstance(current, Item):
+                    current = target
+                if plan.item is None or current.head_node_id != plan.prior_node_id:
+                    await _rebase_on_race(twin, plan, node_id, current)
                 updated = await graph.update_node(
-                    plan.item.id,
+                    current.id,
                     {
                         "head_revision": plan.revision,
                         "head_node_id": node_id,
@@ -483,9 +552,8 @@ async def commit_revision(
                         "updated_at": now,
                     },
                 )
-                item = updated if isinstance(updated, Item) else plan.item
-                if old_head is not None:
-                    await twin.remove_edge(item.id, old_head, EdgeType.HEAD)
+                item = updated if isinstance(updated, Item) else current
+                await twin.remove_edge(item.id, current.head_node_id, EdgeType.HEAD)
             await twin.add_edge(
                 node_id,
                 item.id,
@@ -499,8 +567,20 @@ async def commit_revision(
                 },
             )
             await twin.add_edge(item.id, node_id, EdgeType.HEAD)
-            if link_supersedes and plan.prior_node_id is not None and plan.prior_node_id != node_id:
-                await twin.add_edge(node_id, plan.prior_node_id, EdgeType.SUPERSEDES)
+            # A renumbered write's caller linked SUPERSEDES to the stale head
+            # (and _rebase_on_race removed it), so link the actual head here.
+            if (
+                (link_supersedes or plan.planned_revision is not None)
+                and plan.prior_node_id is not None
+                and plan.prior_node_id != node_id
+            ):
+                existing = await graph.get_edges(
+                    node_id, direction="outgoing", edge_type=EdgeType.SUPERSEDES
+                )
+                if all(e.target_id != plan.prior_node_id for e in existing):
+                    await twin.add_edge(node_id, plan.prior_node_id, EdgeType.SUPERSEDES)
+        except ItemRevisionConflictError:
+            raise
         except Exception as exc:  # noqa: BLE001 -- see docstring
             span.record_exception(exc)
             logger.error(
@@ -514,11 +594,13 @@ async def commit_revision(
             )
             _collector().record_twin_item_revision(plan.item_type, "failed", plan.resolved_by)
             return None
+        span.set_attribute("item.revision", plan.revision)
         logger.info(
             "item_revision_created",
             item_key=plan.key,
             item_type=plan.item_type,
             revision=plan.revision,
+            planned_revision=plan.planned_revision,
             node_id=str(node_id),
             project_id=str(plan.project_id) if plan.project_id else None,
             resolved_by=plan.resolved_by,

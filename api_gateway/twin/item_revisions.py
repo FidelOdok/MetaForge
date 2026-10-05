@@ -85,7 +85,11 @@ async def finish_definition_revision(
     result: dict[str, Any],
     link_supersedes: bool = True,
 ) -> None:
-    """Attach ``node_id`` to its item and add ``item_key``/``revision`` to ``result``."""
+    """Attach ``node_id`` to its item and add ``item_key``/``revision`` to ``result``.
+
+    Raises ``ItemRevisionConflictError`` when a pinned ``KEY@n`` write lost a
+    race to another writer (see ``twin_core.items.commit_revision``).
+    """
     if plan is None:
         return
     item = await commit_revision(twin, plan, node_id, name=name, link_supersedes=link_supersedes)
@@ -96,7 +100,11 @@ async def finish_definition_revision(
         )
         return
     result.update(plan.result_fields())
-    if plan.prior_node_id is not None and "supersedes_node_id" not in result:
+    if plan.prior_node_id is not None and (
+        "supersedes_node_id" not in result or plan.planned_revision is not None
+    ):
+        # After a renumber (another write moved the head first) the
+        # predecessor is the actual head, not the one the caller planned on.
         result["supersedes_node_id"] = str(plan.prior_node_id)
 
 
