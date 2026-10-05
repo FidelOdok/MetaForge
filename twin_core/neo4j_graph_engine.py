@@ -340,6 +340,13 @@ class Neo4jGraphEngine(GraphEngine):
             from twin_core.models.design_loop_iteration import DesignLoopIteration
 
             return DesignLoopIteration.model_validate(data)
+        elif node_type == NodeType.ITEM:
+            # FORGE-523: same FORGE-68 failure mode -- without this branch an
+            # Item read back from Neo4j degrades to a bare NodeBase, losing
+            # key/head_revision/head_node_id, and every item lookup misses.
+            from twin_core.models.item import Item
+
+            return Item.model_validate(data)
         else:
             return NodeBase.model_validate(data)
 

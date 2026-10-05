@@ -65,6 +65,7 @@ from api_gateway.trade_study.routes import router as trade_study_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
+from api_gateway.twin.item_routes import router as twin_items_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
 from domain_agents.electronics.agent import ElectronicsAgent
@@ -832,6 +833,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         make_hierarchy_rollup_fn,
     )
     from api_gateway.twin.interference_check import make_interference_check
+    from api_gateway.twin.item_revisions import make_item_history_reader
     from api_gateway.twin.manufacture_release import make_manufacture_release
     from api_gateway.twin.measurement_recorder import make_measurement_recorder
     from api_gateway.twin.metric_evaluator import make_metric_evaluator
@@ -1281,6 +1283,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         firmware_scaffold_creator=firmware_scaffold_creator_fn,
         # FORGE-275: per-joint cable-length estimate from assembly joints (gap G-E2).
         harness_estimate_getter=harness_estimate_getter_fn,
+        # FORGE-523: revision history of one item (twin.item_history).
+        item_history_reader=make_item_history_reader(twin),
     )
     app.state.tool_registry = tool_registry
     registry_bridge = RegistryMcpBridge(tool_registry)
@@ -2066,6 +2070,7 @@ def create_app(
     app.include_router(robot_loads_router)
     app.include_router(compliance_router)
     app.include_router(twin_router)
+    app.include_router(twin_items_router)
     app.include_router(hierarchy_router)
     app.include_router(bom_router)
     app.include_router(bom_risk_router)

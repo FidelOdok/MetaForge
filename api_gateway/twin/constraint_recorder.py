@@ -55,6 +55,10 @@ import structlog
 
 from api_gateway.twin._ref_resolver import resolve_refs
 from api_gateway.twin.document_recorder import make_document_recorder
+from api_gateway.twin.item_revisions import (
+    finish_definition_revision,
+    plan_definition_revision,
+)
 from observability.tracing import get_tracer
 from twin_core.models.constraint import Constraint
 from twin_core.models.enums import ConstraintSeverity, EdgeType, WorkProductType
@@ -176,6 +180,10 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
         constraints: list[dict[str, Any]],
         project_id: str | None = None,
         session_id: str | None = None,
+        item_key: str | None = None,
+        supersedes: str | None = None,
+        change_reason: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         if not title or not isinstance(title, str):
             raise ValueError("constraint recorder: 'title' is required (non-empty string)")
@@ -195,6 +203,20 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
             else []
             for e in entries
         ]
+        # FORGE-523: a constraint set is a definition -- re-recording it (same
+        # title, or the item named by item_key/supersedes) is its next
+        # revision. Resolved before any write, like the parent refs above.
+        plan = await plan_definition_revision(
+            twin,
+            item_type="constraint_set",
+            name=title,
+            project_id=project_id,
+            default_author="twin.record_constraint_set",
+            item_key=item_key,
+            supersedes=supersedes,
+            change_reason=change_reason,
+            run_id=run_id,
+        )
 
         with tracer.start_as_current_span("twin.record_constraint_set") as span:
             span.set_attribute("constraints.count", len(entries))
@@ -210,7 +232,10 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                 source_tool="twin.record_constraint_set",
                 session_id=session_id,
                 project_id=project_id,
-                extra_metadata={"constraint_count": len(entries)},
+                extra_metadata={
+                    "constraint_count": len(entries),
+                    **(plan.stamp() if plan is not None else {}),
+                },
             )
             set_wp_id = doc.get("node_id")
             bindings = [UUID(str(set_wp_id))] if set_wp_id else []
@@ -271,14 +296,7 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                 if parent_ids:
                     constraint_parents[str(created.id)] = [str(p) for p in parent_ids]
 
-            logger.info(
-                "constraint_set_recorded",
-                title=title,
-                constraints=len(constraint_ids),
-                project_id=project_id,
-                set_wp_id=set_wp_id,
-            )
-            return {
+            result: dict[str, Any] = {
                 "node_id": set_wp_id,
                 "constraint_ids": constraint_ids,
                 "constraint_parents": constraint_parents,
@@ -286,5 +304,18 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                 "content_hash": doc.get("content_hash"),
                 "project_linked": bool(doc.get("project_linked")),
             }
+            if set_wp_id:
+                await finish_definition_revision(
+                    twin, plan, UUID(str(set_wp_id)), name=title, result=result
+                )
+            logger.info(
+                "constraint_set_recorded",
+                title=title,
+                constraints=len(constraint_ids),
+                project_id=project_id,
+                set_wp_id=set_wp_id,
+                item_ref=result.get("item_ref"),
+            )
+            return result
 
     return record

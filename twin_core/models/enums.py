@@ -72,6 +72,13 @@ class NodeType(StrEnum):
     # generalisation to other search parameters (FORGE-288) reuses this
     # same node type rather than needing a schema migration.
     DESIGN_LOOP_ITERATION = "design_loop_iteration"
+    # FORGE-523 (epic FORGE-521): the stable identity of a versioned
+    # definition (a part, an assembly, a constraint set, an intent, ...).
+    # Each write of that definition is a separate, immutable revision node
+    # (the WorkProduct/EngineeringEntity/BOMItem the recorder already
+    # creates) linked to its Item by REVISION_OF; the Item points at its
+    # current revision by HEAD. See twin_core/items/.
+    ITEM = "item"
 
 
 class WorkProductType(StrEnum):
@@ -258,6 +265,14 @@ class EdgeType(StrEnum):
     # measurement's own metadata (interface/metric) disambiguates which
     # quantity within it.
     MEASURED_BY = "measured_by"
+    # FORGE-523: revision node --REVISION_OF--> Item. Edge metadata carries
+    # the revision number, change_reason, run_id and author, so history is
+    # readable from the edges alone, including for legacy nodes adopted
+    # into an item after the fact (their own properties are never edited).
+    REVISION_OF = "revision_of"
+    # FORGE-523: Item --HEAD--> its current revision node. Exactly one per
+    # item; moved (remove + add) on every new revision.
+    HEAD = "head"
 
 
 # FORGE-64 (epic FORGE-35, Phase 6): the real evidence kinds

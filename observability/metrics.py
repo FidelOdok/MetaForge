@@ -240,6 +240,18 @@ class MetricsRegistry:
         ),
         labels=["kind"],
     )
+    #: One sample per definition write that went through item identity
+    #: (FORGE-523). ``outcome`` is ``created`` or ``failed``; ``resolved_by``
+    #: says how the item was found (``new``, ``name``, ``item_key``,
+    #: ``supersedes``, or one of those with ``_adopted`` when an old
+    #: SUPERSEDES chain was folded in). A ``failed`` sample means a node was
+    #: written but its item link was not, so it looks like a fresh sibling.
+    TWIN_ITEM_REVISION_TOTAL = MetricDefinition(
+        name="metaforge_twin_item_revision_total",
+        type="counter",
+        description="Item revisions written per definition type, by outcome and resolution",
+        labels=["item_type", "outcome", "resolved_by"],
+    )
 
     # ── Telemetry / MQTT metrics (MET-119) ───────────────────────────
     MQTT_MESSAGES_RECEIVED_TOTAL = MetricDefinition(
@@ -723,7 +735,7 @@ class MetricsRegistry:
     @classmethod
     def twin_metrics(cls) -> list[MetricDefinition]:
         """MET-439 twin graph hygiene metrics."""
-        return [cls.TWIN_ORPHANS]
+        return [cls.TWIN_ORPHANS, cls.TWIN_ITEM_REVISION_TOTAL]
 
     @classmethod
     def retrieval_metrics(cls) -> list[MetricDefinition]:
@@ -919,6 +931,19 @@ class MetricsCollector:
         gauge = self._instruments.get(MetricsRegistry.TWIN_ORPHANS.name)
         if gauge is not None:
             gauge.add(count, attributes={"kind": kind})
+
+    def record_twin_item_revision(self, item_type: str, outcome: str, resolved_by: str) -> None:
+        """Record one item revision write (FORGE-523)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_ITEM_REVISION_TOTAL.name)
+        if counter is not None:
+            counter.add(
+                1,
+                attributes={
+                    "item_type": item_type,
+                    "outcome": outcome,
+                    "resolved_by": resolved_by,
+                },
+            )
 
     # ── Agent ──────────────────────────────────────────────────────────
 

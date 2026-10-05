@@ -1706,6 +1706,7 @@ async def _bootstrap(
     from api_gateway.twin.engineering_entity_recorder import (
         make_engineering_entity_recorder,
     )
+    from api_gateway.twin.item_revisions import make_item_history_reader
 
     entity_recorder = make_engineering_entity_recorder(twin, project_backend)
 
@@ -1743,6 +1744,8 @@ async def _bootstrap(
         component_catalog_store=component_catalog_store,
         component_intent_llm=component_intent_llm,
         component_recorder=component_recorder,
+        # FORGE-523: twin.item_history, so a plugin can read revisions too.
+        item_history_reader=make_item_history_reader(twin),
     )
     return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
 

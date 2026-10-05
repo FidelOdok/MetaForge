@@ -127,6 +127,8 @@ READ_ONLY: frozenset[str] = frozenset(
         # assembly.joints metadata -- reads only, writes nothing.
         "twin.get_harness_estimate",
         "twin.get_node",
+        # FORGE-523: an item's revision history, read from REVISION_OF edges.
+        "twin.item_history",
         "twin.rank_sensitivity",
         "twin.thread_for",
         # FORGE-357: named thread questions. Both walk the graph and write

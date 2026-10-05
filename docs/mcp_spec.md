@@ -986,6 +986,47 @@ available to a model calling `twin.commit_geometry` directly. `step_base64`
 still wins when given alongside `file_path`, same precedence as the
 session/obj_id path.
 
+### Twin adapter: item keys and revision history (FORGE-523)
+
+The definition write tools (`twin.commit_geometry`, `twin.record_constraint_set`,
+`twin.record_engineering_entity` for `intent`/`stakeholder_need`/`objective`, and
+`twin.record_component_selection`) write each call as the next revision of an
+item (see [twin_schema.md section 2.30](twin_schema.md#230-items-and-revisions-definitions-vs-records-forge-522-forge-523)).
+They accept three optional arguments, none of which the normal path needs:
+
+| Argument | Meaning |
+|----------|---------|
+| `item_key` | The item to revise, as an earlier result returned it (`CAD-BRACKET`). `KEY@n` also asserts the head is still revision `n`; a stale `@n` fails with nothing written. A bare key no item has yet names a new item. |
+| `supersedes` | Node id of an earlier revision; the write revises that node's item. |
+| `change_reason` | Why this revision differs from the previous one; stored on the `REVISION_OF` edge. |
+
+With none given, the same name in the same project is the same item. Pass
+`item_key` when a part keeps its identity under a new name. Every result
+carries `item_key`, `revision` and `item_ref` (`KEY@n`). The revision's author
+is the call context's `actor_id` and its `run_id` the context's design-flow run;
+agents never number revisions themselves.
+
+`twin.item_history` (read-only, registered when the gateway or sidecar injects
+`item_history_reader`) takes `item_key` or the `node_id` of any revision, plus an
+optional `project_id` when a key exists in several projects, and returns:
+
+```json
+{
+  "item": {"key": "CAD-LEG", "item_type": "cad_model", "name": "Leg, front left",
+           "project_id": "...", "head_revision": 2, "head_node_id": "...",
+           "head_ref": "CAD-LEG@2", "created_at": "...", "updated_at": "..."},
+  "revisions": [
+    {"revision": 1, "node_id": "...", "name": "Leg", "change_reason": null,
+     "run_id": null, "author": "agent:mechanical", "is_head": false, "adopted": false},
+    {"revision": 2, "node_id": "...", "name": "Leg, front left",
+     "change_reason": "renamed and lengthened", "is_head": true, "adopted": false}
+  ]
+}
+```
+
+An unknown key, or a node that is not a revision of any item (a record, or an
+unclassified type), is a tool error naming the reference.
+
 ### KiCad Adapter (`tool_registry/tools/kicad/`)
 
 | Property | Details |

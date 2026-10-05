@@ -21,6 +21,7 @@ from twin_core.models.enums import (
     WorkProductType,
 )
 from twin_core.models.hierarchy_node import HierarchyNode, HierarchyNodeKind
+from twin_core.models.item import Item, ItemRevision
 from twin_core.models.patch import (
     Patch,
     PatchOp,
@@ -66,6 +67,9 @@ __all__ = [
     "EngineeringEntityType",
     "HierarchyNode",
     "HierarchyNodeKind",
+    # Item identity + revisions (FORGE-523)
+    "Item",
+    "ItemRevision",
     # Patch/transaction (FORGE-50)
     "Patch",
     "PatchOp",

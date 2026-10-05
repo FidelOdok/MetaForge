@@ -29,6 +29,10 @@ from uuid import UUID, uuid4
 
 import structlog
 
+from api_gateway.twin.item_revisions import (
+    finish_definition_revision,
+    plan_definition_revision,
+)
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -127,7 +131,18 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
         properties: dict[str, Any] | None = None,
         require_blob_store: bool = False,
         parts: list[dict[str, Any]] | None = None,
+        item_key: str | None = None,
+        supersedes: str | None = None,
+        change_reason: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
+        """Persist one geometry commit as the next revision of its item.
+
+        FORGE-523: ``item_key`` (``KEY`` or ``KEY@n``) or ``supersedes`` (a
+        prior node id) pin the item explicitly, which is what keeps a part's
+        history together when its name drifts. With neither, the item is
+        found by name in the project, as the SUPERSEDES chain always was.
+        """
         from twin_core.models.enums import EdgeType, WorkProductType
         from twin_core.models.work_product import WorkProduct
 
@@ -143,6 +158,26 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
         # FORGE-511: validate the parts BEFORE any side effect, so a bad
         # reference creates nothing.
         resolved_parts = await _resolve_assembly_parts(twin, parts, project_id) if parts else []
+
+        # FORGE-523: resolve the item before any side effect too, so a bad
+        # item_key/supersedes creates nothing.
+        async def _legacy() -> Any:
+            return await _find_current_work_product(
+                twin, WorkProductType.CAD_MODEL, name, project_id
+            )
+
+        plan = await plan_definition_revision(
+            twin,
+            item_type="assembly" if resolved_parts else "cad_model",
+            name=name,
+            project_id=project_id,
+            default_author=source_tool,
+            item_key=item_key,
+            supersedes=supersedes,
+            change_reason=change_reason,
+            run_id=run_id,
+            legacy_lookup=_legacy,
+        )
 
         with tracer.start_as_current_span("twin.commit_geometry") as span:
             wp_id = uuid4()
@@ -169,9 +204,17 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             # when its output geometry happens not to have changed yet).
             # Only a bare, scriptless re-commit -- exactly the reported
             # bug's shape -- short-circuits.
-            prior_step = await _find_current_work_product(
-                twin, WorkProductType.CAD_MODEL, name, project_id
-            )
+            if plan is not None:
+                # The item's head is the predecessor, whatever it was named.
+                prior_step = (
+                    await twin.get_work_product(plan.prior_node_id)
+                    if plan.prior_node_id is not None
+                    else None
+                )
+            else:
+                prior_step = await _find_current_work_product(
+                    twin, WorkProductType.CAD_MODEL, name, project_id
+                )
             if (
                 script_source is None
                 and prior_step is not None
@@ -184,7 +227,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                     name=name,
                     project_id=project_id,
                 )
-                return {
+                existing: dict[str, Any] = {
                     "node_id": existing_id,
                     "content_hash": content_hash,
                     "format": prior_step.format,
@@ -199,6 +242,11 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                         "actually changed."
                     ),
                 }
+                if plan is not None and plan.item is not None:
+                    existing["item_key"] = plan.key
+                    existing["revision"] = plan.item.head_revision
+                    existing["item_ref"] = f"{plan.key}@{plan.item.head_revision}"
+                return existing
 
             # 1. blob → MinIO (graceful: keep the node even if storage is down).
             minio_object_key: str | None = None
@@ -236,6 +284,8 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                 metadata.update(extra_metadata)
             if resolved_parts:
                 metadata["parts"] = resolved_parts
+            if plan is not None:
+                metadata.update(plan.stamp())
             # MET-630: structured, queryable geometry semantics — separate
             # from the git-versioned script text below. Parameters are the
             # values that drove generation (e.g. pad length, hole diameter);
@@ -268,6 +318,15 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                     prior_script = await _find_current_work_product(
                         twin, WorkProductType.CAD_SOURCE_SCRIPT, script_name, project_id
                     )
+                    # FORGE-523: a renamed part keeps its script chain too --
+                    # fall back to the script the previous revision named.
+                    prior_script_id = (
+                        (prior_step.metadata or {}).get("script_node_id")
+                        if (prior_script is None and prior_step is not None)
+                        else None
+                    )
+                    if prior_script_id:
+                        prior_script = await twin.get_work_product(UUID(str(prior_script_id)))
                     script_wp = WorkProduct(
                         name=script_name,
                         type=WorkProductType.CAD_SOURCE_SCRIPT,
@@ -379,6 +438,18 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                         error=str(exc),
                     )
 
+            # FORGE-523: this node is the item's new head. SUPERSEDES was
+            # added above (with its staleness propagation), so not again here.
+            item_fields: dict[str, Any] = {}
+            await finish_definition_revision(
+                twin,
+                plan,
+                created.id,
+                name=name,
+                result=item_fields,
+                link_supersedes=False,
+            )
+
             # 2. project junction link so it shows on the Projects page.
             linked = False
             if project_id and project_backend is not None:
@@ -398,6 +469,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                 script_node_id=script_node_id,
                 git_commit_sha=git_commit_sha,
                 supersedes=str(prior_step.id) if prior_step is not None else None,
+                item_ref=item_fields.get("item_ref"),
             )
             out = {
                 "node_id": node_id,
@@ -413,6 +485,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                 out["git_commit_sha"] = git_commit_sha
             if prior_step is not None:
                 out["supersedes_node_id"] = str(prior_step.id)
+            out.update(item_fields)
             # MET-584: soft-warn (never block) when geometry lands in a project
             # with no recorded requirements — the model sees the warning in the
             # tool result and can course-correct; gates enforce, chat nudges.

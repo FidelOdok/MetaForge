@@ -100,9 +100,10 @@ class TestAlertingRules:
         # + 1 runaway LLM spend per run (FORGE-476).
         # + 1 design-flow tool refusals sustained (FORGE-492).
         # + 1 chat ungrounded claims sustained (FORGE-520).
+        # + 1 item revision link failures (FORGE-523).
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
-        assert len(rules) == 41
+        assert len(rules) == 42
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -150,7 +151,8 @@ class TestAlertingRules:
         # + 1 runaway LLM spend per run (FORGE-476)
         # + 1 design-flow tool refusals sustained (FORGE-492)
         # + 1 chat ungrounded claims sustained (FORGE-520)
-        assert len(warnings) == 30
+        # + 1 item revision link failures (FORGE-523)
+        assert len(warnings) == 31
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -222,6 +224,8 @@ class TestAlertingRules:
                 "RetrievalPrecisionRegression",
                 "SensorOutOfRange",
                 "TwinOrphansDetected",
+                # FORGE-523: a definition write saved without its item link.
+                "TwinItemRevisionLinkFailures",
                 # FORGE-466: the sidecar cannot close holds it opened, so
                 # stale entries sit on the Approvals page until expired.
                 "ToolApprovalHoldCloseFailing",

@@ -1134,6 +1134,71 @@ Both are linked back to the source assembly via a `PARENT_OF` edge (`source_part
 
 *Source: `api_gateway/twin/firmware_scaffold.py`, `api_gateway/firmware/routes.py`, `api_gateway/twin/document_recorder.py`, `api_gateway/twin/schemas.py` (`AssemblyJoint`)*
 
+### 2.30 Items and revisions: definitions vs records (FORGE-522, FORGE-523)
+
+The twin used to version single nodes but had no notion of "the same thing". Every run that re-authored a part created a new `cad_model` node, and the only link between generations was a `SUPERSEDES` edge added when the new node had exactly the same name as the old one. A renamed part, or any type other than geometry, got nothing: one live project held 16 `cad_model` nodes for 4 real parts.
+
+#### Definitions vs records
+
+Every twin type is one of three kinds. The code-level registry is `twin_core/items/registry.py` (`TWIN_TYPES`); the write paths consult it, and `tests/unit/test_item_registry.py` fails if this table and the registry disagree.
+
+- A **definition** is revised. It has an **item** with a stable key and exactly one current head; re-recording it creates the next revision of the same item.
+- A **record** happened. It is append-only, never revised and never given an item. A second decision is a second decision, not "the decision, revision 2".
+- A **derived** type is a generated view of other nodes. It is not a source of truth.
+
+| Type | Kind | Key prefix | Stored as |
+|------|------|------------|-----------|
+| `cad_model` | definition | `CAD` | `WorkProduct` `cad_model` (a part: `twin.commit_geometry` without `parts`) |
+| `assembly` | definition | `ASM` | `WorkProduct` `cad_model` (`twin.commit_geometry` with `parts`) |
+| `constraint_set` | definition | `CS` | `WorkProduct` `constraint_set` (`twin.record_constraint_set`) |
+| `intent` | definition | `INT` | `EngineeringEntity` `intent` |
+| `stakeholder_need` | definition | `NEED` | `EngineeringEntity` `stakeholder_need` |
+| `objective` | definition | `OBJ` | `EngineeringEntity` `objective` |
+| `bom` | definition | `BOM` | `WorkProduct` `bom` (electronics BOM recorder) |
+| `component_selection` | definition | `CMP` | `BOMItem` (`twin.record_component_selection`), keyed by `role`, else manufacturer + MPN |
+| `design_decision` | record | | `WorkProduct` `design_decision` |
+| `simulation_result` | record | | `WorkProduct` `simulation_result` |
+| `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |
+| `approval` | record | | approvals service |
+| `session` | record | | `agent_sessions` (Postgres) |
+| `run` | record | | runs / design-flow workflow |
+| `prd` | derived | | `WorkProduct` `prd`, a generated view of intent, needs and requirements |
+
+A type not in the table keeps its earlier behaviour (one node per write, no item) until it is classified. `cad_model` and `assembly` share a family, so a part that gains parts continues its own history as an assembly.
+
+#### Items and revisions
+
+An `Item` node (`NodeType.ITEM`, `twin_core/models/item.py`) carries `key`, `item_type`, `project_id`, `name` (the head's display name, which may drift) and `head_revision` / `head_node_id`. Each revision is the node the recorder already creates (a `WorkProduct`, `EngineeringEntity` or `BOMItem`), and it is never edited after creation:
+
+| Edge | Direction | Metadata |
+|------|-----------|----------|
+| `REVISION_OF` | revision node -> Item | `revision`, `change_reason`, `run_id`, `author`, `created_at`; `adopted: true` for a pre-existing node folded in |
+| `HEAD` | Item -> current revision node | none; exactly one per item, moved on every revision |
+| `SUPERSEDES` | revision n+1 -> revision n | unchanged meaning; staleness propagation (FORGE-314) still follows it |
+
+Edges and properties, deliberately both. The edges keep history traversable in Cypher and let a node written before items existed join an item without touching its properties. `head_revision` / `head_node_id` on the Item mirror `HEAD`, so a head read is one node fetch (the same denormalized-mirror precedent as `Baseline.includes`). History is always read from the `REVISION_OF` edges. A revision created through the new path is also stamped at creation with `metadata.item_key`, `item_revision`, `item_type` and, when present, `change_reason`, `run_id`, `revision_author`, so a node read on its own says which revision it is.
+
+A reference is `KEY@n` for one revision, or the bare `KEY` for the current head.
+
+#### Which item a write lands on
+
+No caller has to do anything new. The recorder resolves the item before any write (so a bad reference creates nothing), in this order:
+
+1. `item_key`, if given. A bare key revises that item's head (or names a new item if no item has that key yet). `KEY@n` additionally asserts the head is still `n`; otherwise the call fails with "`KEY` is at @m, not @n" and nothing is written. An unknown `KEY@n` is an error.
+2. `supersedes`, a node id: the item that node belongs to.
+3. Otherwise, in the same project: an item of the same type family whose head has the same name, or whose key the name derives to (so `Shelf Bracket` and `shelf-bracket` are one item).
+4. Otherwise, for geometry only, today's same-name rule: the current same-named `cad_model` with no item is adopted, together with its whole `SUPERSEDES` chain, as revisions `@1..@k`, and the new write becomes `@k+1`.
+
+Nothing found means a new item at revision 1. An unscoped write (no `project_id`) with neither `item_key` nor `supersedes` gets no item, the same rule the geometry `SUPERSEDES` chain always followed: with no project there is no identity to match on. Author and run come from the MCP call context (`actor_id`, and `run_id` when a design-flow worker makes the call); `run_id` is otherwise null until run-scoped change sets (FORGE-525). Every definition write tool returns `item_key`, `revision` and `item_ref` (`KEY@n`).
+
+Reads: `GET /v1/twin/items?project_id=` lists items at their heads; `GET /v1/twin/items/{key}/revisions` returns one item's history, oldest first; the MCP tool `twin.item_history` returns the same by key or by any revision's node id. `GET /v1/twin/nodes` is unchanged (it still lists every node), and `GET /v1/twin/relationships` omits `REVISION_OF` / `HEAD` because their Item endpoints are not in the node list.
+
+Limits of this first slice: two concurrent writes to one item can both plan the same next revision (logged as `item_revision_race`); the old revisions of a constraint set keep their `Constraint` nodes, so the constraint engine still evaluates them; the project-wide migration of today's unlinked duplicates is FORGE-529.
+
+Observability: `item_revision_created` / `item_revision_failed` log events, the `metaforge_twin_item_revision_total{item_type, outcome, resolved_by}` counter, and the `TwinItemRevisionLinkFailures` alert. A failed link never fails the write (the node already exists, and failing would invite a retry that duplicates it); the result carries `item_warning` instead.
+
+*Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`*
+
 ---
 
 ## 3. Edge Types
@@ -1155,6 +1220,8 @@ Edges are directed relationships between nodes. Each edge type has defined sourc
 | `REALIZED_BY` | HierarchyNode -> WorkProduct | FORGE-260: a hierarchy position's real cad_model/robot_description geometry |
 | `INSTANCE_OF` | HierarchyNode -> BOMItem, or DeviceInstance -> WorkProduct | FORGE-260: a COTS leaf position is an instance of one canonical component record. FORGE-321: a manufactured unit is an instance of the design revision it was built from |
 | `MEASURED_BY` | DeviceInstance -> WorkProduct | FORGE-321: a real-world measurement from this unit was recorded against an interface quantity embedded in this system_architecture WorkProduct |
+| `REVISION_OF` | revision node -> Item | FORGE-523: this node is revision `metadata.revision` of the item (section 2.30) |
+| `HEAD` | Item -> revision node | FORGE-523: the item's current revision; exactly one per item |
 
 ### Typed Edge Models
 
