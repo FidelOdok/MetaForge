@@ -1,4 +1,4 @@
-import { useRef, useMemo, useEffect, useState } from 'react';
+import { lazy, useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame, ThreeEvent } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
@@ -7,6 +7,7 @@ import { useTransientTransform } from '../../store/transient-transform-store';
 import { parseRigidGroups, groupForMesh } from '../../lib/rigid-groups';
 import { computeExplodeOffset } from '../../lib/explode';
 import { TransformGizmo } from './TransformGizmo';
+import { DIRECT_MESH_FORMATS } from '../preview/registry';
 import type { TransformMode, Vec3 } from '../../store/transient-transform-store';
 import type { PartInfo, ModelManifest } from '../../types/viewer';
 
@@ -15,8 +16,16 @@ const HIGHLIGHT_OPACITY = 0.4;
 const IDENTITY_QUATERNION = new THREE.Quaternion();
 const IDENTITY_SCALE_VECTOR = new THREE.Vector3(1, 1, 1);
 
+// FORGE-531: STL/3MF files load directly (no converter round trip). Lazy so
+// the loaders only ship when a mesh file is actually opened.
+const MeshFileSceneContents = lazy(() =>
+  import('./MeshFileSceneContents').then((m) => ({ default: m.MeshFileSceneContents })),
+);
+
 interface SceneContentsProps {
   glbUrl: string;
+  /** How `glbUrl` is encoded: 'glb'/'gltf' (default) or 'stl'/'3mf'. */
+  format?: string;
   manifest: ModelManifest;
   onPartClick?: (part: PartInfo) => void;
   /** Boolean-cut cutter preview (MET-612): when set, every mesh renders with
@@ -35,8 +44,24 @@ interface MeshEntry {
   boundingBox: { min: [number, number, number]; max: [number, number, number] };
 }
 
-export function SceneContents({ glbUrl, manifest, onPartClick, overlayTint }: SceneContentsProps) {
+export function SceneContents({ format, ...props }: SceneContentsProps) {
+  if (format && DIRECT_MESH_FORMATS.has(format)) {
+    return <MeshFileSceneContents format={format} {...props} />;
+  }
+  return <GltfSceneContents {...props} />;
+}
+
+function GltfSceneContents({ glbUrl, ...props }: Omit<SceneContentsProps, 'format'>) {
   const { scene } = useGLTF(glbUrl);
+  return <SceneBody scene={scene} {...props} />;
+}
+
+export interface SceneBodyProps extends Omit<SceneContentsProps, 'format' | 'glbUrl'> {
+  scene: THREE.Object3D;
+}
+
+/** Selection, visibility, explode and gizmo behaviour over a loaded scene. */
+export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBodyProps) {
   const groupRef = useRef<THREE.Group>(null);
   const meshMapRef = useRef<Map<string, MeshEntry>>(new Map());
 

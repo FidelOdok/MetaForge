@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { lazy, Suspense, useState, useRef, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Activity,
@@ -48,6 +48,8 @@ import { useLayoutStore } from '../store/layout-store';
 import { useUploadAndConvert } from '../hooks/use-conversion';
 import { getNodeModel, nodeFileUrl } from '../api/endpoints/twin';
 import { FullScreenPreviewModal } from '../components/viewer/FullScreenPreviewModal';
+import { PreviewHost, hasInlinePreview } from '../components/preview/PreviewHost';
+import { ENGINE_LABELS, is3dEngine, previewEngineFor } from '../components/preview/registry';
 import { iconForNode } from '../utils/wp-icons';
 import { toDownloadHref, type ExportFile } from '../api/endpoints/cad-export';
 import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-export';
@@ -80,6 +82,46 @@ function getModelLoadErrorMessage(error: unknown): string {
     if (typeof response?.data?.detail === 'string') return response.data.detail;
   }
   return 'This work product has no viewable 3D model yet.';
+}
+
+const JsonTree = lazy(() =>
+  import('../components/preview/engines/DataEngines').then((m) => ({ default: m.JsonTree })),
+);
+
+const EMPTY_MANIFEST: ModelManifest = {
+  parts: [],
+  meshToNodeMap: {},
+  materials: [],
+  stats: { triangleCount: 0, fileSize: 0 },
+};
+
+/**
+ * FORGE-531: what the main viewer should load for a node, per the preview
+ * registry. `cad3d` goes through the STEP->GLB converter route; `mesh3d`
+ * (STL, 3MF, GLB) is the stored file itself, loaded with three's loaders.
+ * Null for a node with no 3D engine.
+ */
+async function fetchViewerModel(
+  node: TwinNode,
+): Promise<{ url: string; manifest: ModelManifest; format: string } | null> {
+  const { engine, format } = previewEngineFor(node);
+  if (engine === 'mesh3d') {
+    return { url: nodeFileUrl(node.id), manifest: EMPTY_MANIFEST, format: format === 'gltf' ? 'glb' : format };
+  }
+  if (engine !== 'cad3d') return null;
+  const result = await getNodeModel(node.id);
+  const manifest: ModelManifest = {
+    parts: result.metadata.parts.map((p) => ({
+      name: p.name,
+      meshName: p.meshName ?? p.name,
+      children: (p.children ?? []) as ModelManifest['parts'],
+      boundingBox: p.boundingBox as PartTreeNode['boundingBox'],
+    })),
+    meshToNodeMap: {},
+    materials: result.metadata.materials ?? [],
+    stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
+  };
+  return { url: resolveGatewayHref(result.glb_url), manifest, format: 'glb' };
 }
 
 // ── KC tokens ────────────────────────────────────────────────────────────────
@@ -394,32 +436,25 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
   const openBooleanCut = useViewerStore((s) => s.openBooleanCut);
   const [loading3d, setLoading3d] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const isCAD = node.properties.wp_type === 'cad_model';
+  // FORGE-531: the preview registry, not wp_type alone, decides what is 3D.
+  const { engine } = previewEngineFor(node);
+  const is3d = is3dEngine(engine);
+  // Boolean cut and sim export need real CAD geometry (the converter path).
+  const isCAD = node.properties.wp_type === 'cad_model' && engine === 'cad3d';
 
   const handleView3D = useCallback(async () => {
     setLoading3d(true);
     try {
-      const result = await getNodeModel(node.id);
-      const manifest: ModelManifest = {
-        parts: result.metadata.parts.map((p) => ({
-          name: p.name,
-          meshName: p.meshName ?? p.name,
-          children: (p.children ?? []) as ModelManifest['parts'],
-          boundingBox: p.boundingBox as PartTreeNode['boundingBox'],
-        })),
-        meshToNodeMap: {},
-        materials: result.metadata.materials ?? [],
-        stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
-      };
-      const glbUrl = resolveGatewayHref(result.glb_url);
-      loadModel(glbUrl, manifest);
+      const model = await fetchViewerModel(node);
+      if (!model) return;
+      loadModel(model.url, model.manifest, model.format);
       setViewMode('3d');
     } catch (err) {
       console.error('Failed to load 3D model:', err);
     } finally {
       setLoading3d(false);
     }
-  }, [node.id, loadModel, setViewMode]);
+  }, [node, loadModel, setViewMode]);
 
   // Boolean-cut targets whichever node is open in the 3D panel (MET-612) —
   // ensure this node is actually loaded there first, then enter picking mode.
@@ -464,12 +499,13 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
         </div>
 
         {/* View 3D / Boolean cut (MET-612) */}
-        {isCAD && (
+        {is3d && (
           <div className="px-3 py-2 flex-shrink-0 flex gap-1.5" style={{ borderBottom: `1px solid ${KC.border}` }}>
             <Button variant="primary" size="sm" onClick={handleView3D} disabled={loading3d} className="text-xs flex-1">
               <span className="material-symbols-outlined" style={{ fontSize: 13, marginRight: 4, verticalAlign: 'middle' }}>view_in_ar</span>
               {loading3d ? 'Loading…' : 'View 3D Model'}
             </Button>
+            {isCAD && (<>
             <Button
               variant="secondary"
               size="sm"
@@ -489,6 +525,7 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
             >
               <span className="material-symbols-outlined" style={{ fontSize: 13, verticalAlign: 'middle' }}>precision_manufacturing</span>
             </Button>
+            </>)}
           </div>
         )}
 
@@ -511,8 +548,9 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
          * manual part/joint re-entry (MET-740 follow-up). */}
         <RobotDescriptionViewSection node={node} />
 
-        {/* FEA summary for a simulation_result node (FORGE-305) */}
-        <FeaResultSection node={node} />
+        {/* FORGE-531: inline preview from the shared registry (FEA summary for
+            a simulation_result, rendered Markdown, tables, decision card...). */}
+        <NodePreviewSection node={node} />
 
         {/* File: worktype + path + download / open / preview (MET-483) */}
         <WorkProductFileSection node={node} />
@@ -547,157 +585,30 @@ function NodeDetail({ node, onClose }: { node: TwinNode; onClose: () => void }) 
 
         {/* Pending design-change proposals for this node (gated apply, MET-548) */}
         <div className="px-3 py-2 flex-shrink-0">
-          <NodeProposals nodeId={node.id} onApplied={isCAD ? handleView3D : undefined} />
+          <NodeProposals nodeId={node.id} onApplied={is3d ? handleView3D : undefined} />
         </div>
       </div>
     </div>
   );
 }
 
-// ── FeaResultSection ────────────────────────────────────────────────────────
+// ── NodePreviewSection ──────────────────────────────────────────────────────
 /**
- * FORGE-305: what an FEA result actually said, for a selected
- * simulation_result node.
- *
- * FORGE-246 landed the data-model half -- a real simulation_result work
- * product with max von Mises, max displacement, load case and mesh stats,
- * instead of an evidence entity with the numbers restated as prose -- and
- * FORGE-279 added the read route the Sim page lists from. The inspector
- * never got the other half: selecting a result in the Twin Viewer showed the
- * generic scalar Properties table, so the numbers appeared as
- * `max_von_mises_mpa: 182.4` with no units, no ordering and no indication of
- * which of the forty-odd rows were the answer.
- *
- * Deliberately *not* the Twin Viewer's "Sim" tab. That tab is an
- * already-shipped robotics-physics preview (gravity, joint constraints, a
- * Run/Stop toggle gated on a robot_description node) and shares nothing with
- * an FEA result but the word "sim".
- *
- * Also deliberately not a contour overlay. Per-element stress mapping needs
- * the raw .frd data, which FORGE-246 does not persist anywhere -- only the
- * summary JSON. A contour view is a larger follow-up on top of this, and
- * faking one from the summary would be inventing a field that was never
- * computed.
+ * FORGE-531: the inspector's inline preview, rendered by the shared
+ * PreviewHost. 3D, robot, PDF and HTML engines render nothing here (the main
+ * viewer and the full-screen Preview cover them); the FEA card brings its own
+ * heading.
  */
-function FeaResultSection({ node }: { node: TwinNode }) {
-  if (node.properties.wp_type !== 'simulation_result') return null;
-
-  const vonMises = numericProperty(node, 'max_von_mises_mpa');
-  const displacement = numericProperty(node, 'max_displacement_mm');
-  const loadCase = node.properties.load_case;
-  const meshStats = node.meshStats;
-
-  // A result node with none of these is a result in name only. Say so rather
-  // than render an empty table -- a blank panel reads as "the view is broken",
-  // which is the wrong conclusion.
-  const hasSummary = vonMises !== null || displacement !== null;
-
+function NodePreviewSection({ node }: { node: TwinNode }) {
+  if (!hasInlinePreview(node, 'panel')) return null;
+  const { engine } = previewEngineFor(node);
+  if (engine === 'sim') return <PreviewHost node={node} mode="panel" />;
   return (
-    <div className="px-3 py-2 flex-shrink-0" data-testid="fea-result-section" style={{ borderBottom: `1px solid ${KC.border}` }}>
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="font-mono uppercase" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
-          FEA result
-        </div>
-        {/* The Sim page is where two results compare side by side (FORGE-279);
-            this panel is one result, so it points there rather than
-            duplicating the comparison. */}
-        <Link
-          to="/sim"
-          style={{ fontSize: 10, color: KC.onSurfaceVariant, textDecoration: 'none' }}
-        >
-          Compare in Sim &rarr;
-        </Link>
+    <div className="px-3 py-2 flex-shrink-0" data-testid="node-preview-section" style={{ borderBottom: `1px solid ${KC.border}` }}>
+      <div className="font-mono uppercase mb-1.5" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
+        Preview · {ENGINE_LABELS[engine]}
       </div>
-
-      {!hasSummary && (
-        <div style={{ fontSize: 11, color: KC.onSurfaceVariant }}>
-          No stress or displacement was recorded for this result. The work
-          product exists, but the numbers never reached it.
-        </div>
-      )}
-
-      {hasSummary && (
-        <div className="grid grid-cols-2 gap-2">
-          <FeaMetric label="Max von Mises" value={vonMises} unit="MPa" precision={1} />
-          <FeaMetric label="Max displacement" value={displacement} unit="mm" precision={3} />
-        </div>
-      )}
-
-      <div className="mt-2 font-mono" style={{ fontSize: 10, color: KC.onSurfaceVariant }}>
-        {/* Free-text, not a load-case node id -- the backend is explicit about
-            that, so this does not pretend to be a link. */}
-        Load case · {typeof loadCase === 'string' && loadCase ? loadCase : 'not recorded'}
-      </div>
-
-      {meshStats && Object.keys(meshStats).length > 0 && (
-        <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${KC.border}` }}>
-          <div className="font-mono uppercase mb-1" style={{ fontSize: 10, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
-            Mesh
-          </div>
-          <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-            <tbody>
-              {Object.entries(meshStats).map(([k, v]) => (
-                <tr key={k}>
-                  <td className="py-0.5 pr-3 font-mono" style={{ fontSize: 11, color: KC.onSurfaceVariant, width: '55%' }}>
-                    {k}
-                  </td>
-                  <td className="py-0.5 font-mono" style={{ fontSize: 11, color: KC.onSurface }}>
-                    {formatMeshStat(v)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** A property that should be a number, or null -- never NaN. The twin's
- *  scalar projection can hand back a string for a value an agent wrote as
- *  one, and `Number('')` is 0, which would read as a real measurement of
- *  zero stress. */
-function numericProperty(node: TwinNode, key: string): number | null {
-  const raw = node.properties[key];
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
-  if (typeof raw === 'string' && raw.trim() !== '') {
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-/** Mesh stats are counts and ratios written by whichever tool produced the
- *  mesh, so the shape is not fixed. Render what is there without asserting a
- *  schema over it. */
-function formatMeshStat(value: unknown): string {
-  if (typeof value === 'number') return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(3);
-  if (typeof value === 'boolean' || typeof value === 'string') return String(value);
-  if (value === null || value === undefined) return '—';
-  return JSON.stringify(value);
-}
-
-function FeaMetric({
-  label,
-  value,
-  unit,
-  precision,
-}: {
-  label: string;
-  value: number | null;
-  unit: string;
-  precision: number;
-}) {
-  return (
-    <div className="rounded px-2 py-1.5" style={{ background: KC.surfaceHigh }}>
-      <div className="font-mono uppercase" style={{ fontSize: 9, letterSpacing: '0.1em', color: KC.onSurfaceVariant }}>
-        {label}
-      </div>
-      <div className="font-mono" style={{ fontSize: 13, color: KC.onSurface }}>
-        {value === null ? '—' : `${value.toFixed(precision)} `}
-        {value !== null && <span style={{ fontSize: 10, color: KC.onSurfaceVariant }}>{unit}</span>}
-      </div>
+      <PreviewHost node={node} mode="panel" />
     </div>
   );
 }
@@ -1171,7 +1082,7 @@ export function TwinViewerPage() {
   useEffect(() => {
     if (viewMode !== '3d') return;
     const n = selectedNode;
-    if (!n || n.properties.wp_type !== 'cad_model') return;
+    if (!n || !is3dEngine(previewEngineFor(n).engine)) return;
     // MET-747: also reload if a robot description's mutual-exclusion clear
     // wiped glbUrl since this node was last loaded.
     if (loadedModelNodeId === n.id && glbUrl) return;
@@ -1181,21 +1092,9 @@ export function TwinViewerPage() {
     let cancelled = false;
     (async () => {
       try {
-        const result = await getNodeModel(n.id);
-        if (cancelled) return;
-        const m: ModelManifest = {
-          parts: result.metadata.parts.map((p) => ({
-            name: p.name,
-            meshName: p.meshName ?? p.name,
-            children: (p.children ?? []) as ModelManifest['parts'],
-            boundingBox: p.boundingBox as PartTreeNode['boundingBox'],
-          })),
-          meshToNodeMap: {},
-          materials: result.metadata.materials ?? [],
-          stats: result.metadata.stats ?? { triangleCount: 0, fileSize: 0 },
-        };
-        const url = resolveGatewayHref(result.glb_url);
-        loadModel(url, m);
+        const model = await fetchViewerModel(n);
+        if (cancelled || !model) return;
+        loadModel(model.url, model.manifest, model.format);
         setLoadedModelNodeId(n.id);
         setModelLoadError(null);
       } catch (err) {
@@ -1463,9 +1362,12 @@ export function TwinViewerPage() {
                     parts={node.assembly.parts}
                     joints={node.assembly.joints}
                   />
+                  {/* FORGE-531: a collapsible tree, not a raw JSON dump. */}
                   <details>
                     <summary>Assembly source</summary>
-                    <pre>{JSON.stringify(node.assembly, null, 2)}</pre>
+                    <Suspense fallback={null}>
+                      <JsonTree value={node.assembly} openDepth={1} />
+                    </Suspense>
                   </details>
                 </>
               ) : (
