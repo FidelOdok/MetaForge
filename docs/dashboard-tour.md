@@ -323,6 +323,7 @@ extension); otherwise a per-type default applies.
 | 3D CAD | `.step`/`.stp`/`.iges`/`.brep`/`.fcstd`, a `cad_model` with no mesh format, any assembly (`metadata.parts`) | The STEP to GLB converter route (`GET /v1/twin/nodes/{id}/model`) in the 3D viewer. In the modal an assembly also shows its part tree. |
 | 3D mesh | `.stl`, `.3mf`, `.glb`, `.gltf` | The stored file loaded directly with three.js loaders, in the main viewer and the modal. STL carries no colour, so it renders in a uniform neutral. |
 | Markdown | `.md`, and `prd`, `documentation`, `test_plan` and the other document types | Formatted Markdown (headings, lists, tables, code). Raw HTML in the source shows as text. |
+| PRD | a `prd` revision (`metadata.item_key` set, FORGE-528) | The derived prd from `GET /v1/twin/items/{KEY@n}/prd`: the prose plus the project's current intent, needs and a live requirement table read from the current constraint set, with the prose and constraint set revisions shown above it. Falls back to the stored prose, with a note, if the view cannot be fetched. A legacy prd with no item renders as Markdown. |
 | Requirements table | `constraint_set` | One row per constraint: severity, domain, acceptance criteria, verification, binding. Falls back to Markdown if the document is not in the recorder's shape. |
 | BOM table | `bom` (`.csv`) | Line items and total quantity over the CSV table. |
 | Decision card | `design_decision` | Title, rationale, alternatives with why each was rejected, status. |

@@ -274,6 +274,15 @@ class MetricsRegistry:
         description="Design-flow definition writes by slot outcome (slot or undeclared)",
         labels=["item_type", "outcome"],
     )
+    #: One sample per requirement-like value found in a prd write (FORGE-528).
+    #: ``outcome`` is ``matched`` (the current constraint set has it) or
+    #: ``stray`` (it does not, and the write returned a warning naming it).
+    TWIN_PRD_REQUIREMENT_VALUE_TOTAL = MetricDefinition(
+        name="metaforge_twin_prd_requirement_value_total",
+        type="counter",
+        description="Requirement values found in prd prose, matched or stray",
+        labels=["outcome"],
+    )
 
     # ── Simulation result field metrics (FORGE-532) ──────────────────
     #: One per solved run: did the 3D field payload build (``built``), build
@@ -799,6 +808,7 @@ class MetricsRegistry:
             cls.TWIN_ITEM_REVISION_TOTAL,
             cls.TWIN_CHANGE_SET_TOTAL,
             cls.FLOW_ITEM_SLOT_TOTAL,
+            cls.TWIN_PRD_REQUIREMENT_VALUE_TOTAL,
         ]
 
     @classmethod
@@ -1001,6 +1011,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.TWIN_CHANGE_SET_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
+
+    def record_twin_prd_requirement_value(self, outcome: str, count: int = 1) -> None:
+        """Record requirement values seen in a prd write (FORGE-528)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_PRD_REQUIREMENT_VALUE_TOTAL.name)
+        if counter is not None and count > 0:
+            counter.add(count, attributes={"outcome": outcome})
 
     def record_twin_item_revision(self, item_type: str, outcome: str, resolved_by: str) -> None:
         """Record one item revision write (FORGE-523)."""

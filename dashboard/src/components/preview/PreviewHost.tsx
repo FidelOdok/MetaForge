@@ -15,6 +15,7 @@ const MarkdownView = lazy(() => import('./engines/DocumentEngines').then((m) => 
 const RequirementsPreview = lazy(() =>
   import('./engines/DocumentEngines').then((m) => ({ default: m.RequirementsPreview })),
 );
+const PrdPreview = lazy(() => import('./engines/DocumentEngines').then((m) => ({ default: m.PrdPreview })));
 const DecisionCard = lazy(() => import('./engines/DocumentEngines').then((m) => ({ default: m.DecisionCard })));
 const CsvPreview = lazy(() => import('./engines/DataEngines').then((m) => ({ default: m.CsvPreview })));
 const BomPreview = lazy(() => import('./engines/DataEngines').then((m) => ({ default: m.BomPreview })));
@@ -148,6 +149,9 @@ export function PreviewHost({ node, mode, onOpenInViewer }: PreviewHostProps) {
 
   // ── Text engines ───────────────────────────────────────────────────────
   if (file.loading) return frame(<Status>Loading…</Status>);
+  // FORGE-528: the derived prd has its own source; the stored prose is only
+  // its fallback, so a missing file must not hide it.
+  if (engine === 'prd') return frame(doc(<PrdPreview node={node} fallback={file.text} />));
   // A decision card still has its title, rationale and status from the node.
   if (engine === 'decision' && (file.error || file.text === null)) {
     return frame(doc(<DecisionCard node={node} source={null} />));

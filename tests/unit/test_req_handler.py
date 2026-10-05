@@ -46,7 +46,10 @@ class _Bridge:
 
 @pytest.mark.asyncio
 async def test_handler_output_scores_full_on_requirements_rubric() -> None:
+    prose: list[str] = []
+
     async def doc_recorder(**kwargs):
+        prose.append(kwargs["content"])
         return {"node_id": "prd1"}
 
     async def fake_extract(goal, prior, *, provider, model):
@@ -85,8 +88,17 @@ async def test_handler_output_scores_full_on_requirements_rubric() -> None:
 
     assert outcome.status == "completed"
     assert any(a.startswith("prd:") for a in outcome.artifacts)
-    rationale = bridge.calls[0][1]["rationale"]
-    checks = evaluate_requirements(decision_text=rationale, artifact_types={"prd"}, goal=ctx.goal)
+    # FORGE-528: the requirements are scored as the reader sees them, the
+    # derived prd: its prose plus the constraint set's rows. The decision
+    # only names the choice and links the set.
+    cs = next(a for t, a in bridge.calls if t == "twin.record_constraint_set")
+    table = " ".join(
+        f"{c['name']} {c.get('acceptance_criteria', '')} {c['verification_method']}"
+        for c in cs["constraints"]
+    )
+    rationale = next(a for t, a in bridge.calls if t == "twin.record_decision")["rationale"]
+    text = f"{prose[0]} {table} {rationale}"
+    checks = evaluate_requirements(decision_text=text, artifact_types={"prd"}, goal=ctx.goal)
     assert checks["verification_criteria"], "each constraint must carry an acceptance method"
     assert requirements_score(checks) == 1.0, checks
 

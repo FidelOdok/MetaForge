@@ -2550,6 +2550,72 @@
         "title": "DependencyStatus",
         "type": "string"
       },
+      "DerivedPrdResponse": {
+        "properties": {
+          "markdown": {
+            "title": "Markdown",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "prose_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prose Ref"
+          },
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refs",
+            "type": "array"
+          },
+          "requirement_count": {
+            "default": 0,
+            "title": "Requirement Count",
+            "type": "integer"
+          },
+          "requirement_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requirement Refs",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/PrdSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "markdown"
+        ],
+        "title": "DerivedPrdResponse",
+        "type": "object"
+      },
       "DesignChangeProposal": {
         "description": "A proposed design change awaiting human review.\n\nCreated by agents when they want to modify the Digital Twin.\nMust be approved before the change is applied.",
         "properties": {
@@ -7289,6 +7355,51 @@
         "title": "PhaseView",
         "type": "object"
       },
+      "PrdSource": {
+        "properties": {
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "requirement_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirement Count"
+          }
+        },
+        "required": [
+          "ref",
+          "item_type",
+          "node_id"
+        ],
+        "title": "PrdSource",
+        "type": "object"
+      },
       "ProjectListResponse": {
         "description": "List of projects.",
         "properties": {
@@ -8083,6 +8194,14 @@
       },
       "RequirementMatrixResponse": {
         "properties": {
+          "revisionRefs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Revisionrefs",
+            "type": "array"
+          },
           "rows": {
             "items": {
               "$ref": "#/components/schemas/RequirementMatrixRow"
@@ -8133,6 +8252,17 @@
           "requirementName": {
             "title": "Requirementname",
             "type": "string"
+          },
+          "revisionRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revisionref"
           },
           "status": {
             "title": "Status",
@@ -18147,6 +18277,83 @@
         ]
       }
     },
+    "/v1/twin/items/{key}/prd": {
+      "get": {
+        "description": "One prd prose revision (``KEY`` or ``KEY@n``) with the current requirements.",
+        "operationId": "get_item_prd_v1_twin_items__key__prd_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "description": "Read as this design-flow run: include its open drafts",
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Read as this design-flow run: include its open drafts",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DerivedPrdResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Item Prd",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
     "/v1/twin/items/{key}/revisions": {
       "get": {
         "description": "Every revision of one item, oldest first. ``key`` may carry an ``@n`` suffix.",
@@ -19221,6 +19428,67 @@
           }
         },
         "summary": "Get Version History",
+        "tags": [
+          "twin"
+        ]
+      }
+    },
+    "/v1/twin/projects/{project_id}/prd": {
+      "get": {
+        "description": "The project's prd, rendered from its current prose and requirements.",
+        "operationId": "get_project_prd_v1_twin_projects__project_id__prd_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Read as this design-flow run: include its open drafts",
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Read as this design-flow run: include its open drafts",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DerivedPrdResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Project Prd",
         "tags": [
           "twin"
         ]

@@ -1162,7 +1162,8 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `approval` | record | | approvals service |
 | `session` | record | | `agent_sessions` (Postgres) |
 | `run` | record | | runs / design-flow workflow |
-| `prd` | derived | | `WorkProduct` `prd`, a generated view of intent, needs and requirements |
+| `prd` | definition | `PRD` | `WorkProduct` `prd`: the prd's prose only (background, scope, non-requirements), `twin.record_document` with `document_type='prd'` (FORGE-528) |
+| `prd_view` | derived | | rendered on read by `GET /v1/twin/projects/{id}/prd`: the prd prose plus intent, needs, objectives and the current constraint set (below) |
 
 A type not in the table keeps its earlier behaviour (one node per write, no item) until it is classified. `cad_model` and `assembly` share a family, so a part that gains parts continues its own history as an assembly.
 
@@ -1223,7 +1224,28 @@ Limits of this first slice: the old revisions of a constraint set keep their `Co
 
 Observability: `item_revision_created` / `item_revision_failed` log events, the `metaforge_twin_item_revision_total{item_type, outcome, resolved_by}` counter, and the `TwinItemRevisionLinkFailures` alert. A failed link never fails the write (the node already exists, and failing would invite a retry that duplicates it); the result carries `item_warning` instead.
 
-*Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/items/change_sets.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`, `api_gateway/runs/change_sets.py`, `orchestrator/design_flow/slots.py`*
+#### One home for requirements (FORGE-528)
+
+Requirements used to be stored three times: as a table in a free-standing `prd` document, as the `constraint_set`, and restated in the requirements phase's "verifiable requirements" decision. The three drifted apart. Now the **constraint set item is the only place requirement values live**, and everything else points at it by `KEY@n`:
+
+| What | Holds | Requirement values |
+|------|-------|--------------------|
+| `constraint_set` item (`CS-...`) | the requirements: metric, operator, limit, unit, verification method, acceptance criteria | the only copy |
+| `prd` item (`PRD-...`) | prose: background, scope, what is out of scope | none of its own; values in the text are checked against the constraint set |
+| the prd view | the prd prose, current intent / needs / objectives, and a requirement table read from the current constraint set revision | rendered on read, never stored |
+| the requirements decision | the choice, with `depends_on=[CS-...@n]` | none; it links the revision it rests on |
+
+**The prd view.** `GET /v1/twin/projects/{project_id}/prd` renders the project's prd as markdown; `GET /v1/twin/items/{key}/prd` renders one prd prose revision (`PRD-...@n`) the same way. Both return `markdown`, `prose_ref`, `requirement_refs` (the constraint set revisions the table came from), `requirement_count`, `refs` (every `KEY@n` used) and `sources`. The requirement table has one row per current requirement, with columns Ref (`CS-...@n`), Requirement, Metric, Operator, Limit, Unit, Verification method and Acceptance criteria (the constraint's `message` when no acceptance criteria were given). Intent, needs and objectives are listed with their `KEY@n`. When the constraint set gets `@2`, the next read shows `@2`'s values and only those: the constraints of an older revision, or of a draft another run has not had approved, are left out. Constraints recorded outside any item (no project at write time, the dashboard's constraint editor) are listed with an empty Ref. `?run_id=` reads as that run does, its own drafts included.
+
+**A prd write.** `twin.record_document` with `document_type='prd'` (and the requirements phase handler, which uses the same recorder) stores the text as given as the next revision of the project's prd item. A project has one prd: once it has exactly one prd item, a prd written under a new title is that item's next revision. The text is also kept in `metadata.prose` so the view renders without a blob fetch. Before the write, numbers written with a unit (`15 g`, `0.5 W`, `85 °C`, `$20`) are compared with the current constraint set: a value no current requirement states (same number and unit, or the same number in a generated expression) is a **stray value**. The write still succeeds and nothing is dropped; the result lists them in `stray_requirement_values` and explains in `requirement_warning`, and the node keeps them in `metadata.stray_requirement_values`. Every prd write result also carries `requirements_home` (where requirement values live) and `requirement_refs`.
+
+**The decision.** `twin.record_decision` takes an optional `depends_on`: item refs (`KEY@n`, or a bare `KEY`, pinned to its current revision at record time). Each becomes a `DEPENDS_ON` edge from the decision to that exact revision node (edge metadata `kind: decision_basis`, `item_ref`), `metadata.depends_on` on the decision, and a "Depends on" line in its markdown. An unknown ref fails the call before anything is written. The requirements phase records, in order, the constraint set, the prd prose (goal, functional scope, interfaces, environment) and a decision whose rationale counts the requirements and names `CS-...@n` without restating a value.
+
+**The Requirements page** reads the same current requirements: `GET /v1/requirements/matrix` lists only the current constraint set revisions' constraints, each row carries `revisionRef` (`CS-...@n`), and the response carries `revisionRefs`, which the page shows next to the "Evidence matrix" heading.
+
+Observability: `prd_rendered` and `prd_prose_recorded` / `prd_stray_requirement_values` log events, the `twin.prd.render`, `twin.record_prd` and `twin.requirements.current` spans, the `metaforge_twin_prd_requirement_value_total{outcome="matched"|"stray"}` counter and the `TwinPrdStrayRequirementValues` alert.
+
+*Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/items/change_sets.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`, `api_gateway/runs/change_sets.py`, `orchestrator/design_flow/slots.py`, `api_gateway/twin/requirements_home.py`, `api_gateway/twin/prd_routes.py`*
 
 ---
 

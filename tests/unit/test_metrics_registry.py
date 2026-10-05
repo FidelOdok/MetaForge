@@ -70,7 +70,8 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 twin run change sets (FORGE-525)
         # + 1 design-flow item slots (FORGE-524)
         # + 3 simulation result field payload/store (FORGE-532)
-        assert len(all_metrics) == 77
+        # + 1 prd requirement values (FORGE-528)
+        assert len(all_metrics) == 78
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4

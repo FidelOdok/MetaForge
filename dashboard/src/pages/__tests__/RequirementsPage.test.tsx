@@ -257,6 +257,23 @@ describe('RequirementsPage', () => {
     expect(matrix).toHaveTextContent('pass');
   });
 
+  it('shows the constraint set revision the requirements are read from (FORGE-528)', () => {
+    mockUseRequirementQuality.mockReturnValue({
+      data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementQuality>);
+    mockUseRequirementMatrix.mockReturnValue({
+      data: {
+        revisionRefs: ['CS-ARM@2'],
+        rows: MATRIX_REPORT.rows.map((r) => ({ ...r, revisionRef: 'CS-ARM@2' })),
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useRequirementMatrix>);
+    render(<RequirementsPage />);
+    expect(screen.getByTestId('requirements-revision')).toHaveTextContent('current: CS-ARM@2');
+    expect(screen.getAllByTestId('requirement-revision-ref')).toHaveLength(2);
+  });
+
   it('expands evidence details on click', async () => {
     mockUseRequirementQuality.mockReturnValue({
       data: { requirements: [], conflicts: [], completeness: { productType: 'generic', covered: [], missing: [] } },

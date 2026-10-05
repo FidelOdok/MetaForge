@@ -1050,6 +1050,36 @@ context's `run_id`):
   it), with an optional `project_id` when the key exists in several projects.
   `node_id` is no longer required when `item_key` is given.
 
+### Twin adapter: one home for requirements (FORGE-528)
+
+Requirement values live only in the constraint set (`twin.record_constraint_set`).
+No tool name or required argument changed; two tools behave differently (see
+[twin_schema.md, One home for requirements](twin_schema.md#one-home-for-requirements-forge-528)).
+
+**`twin.record_document` with `document_type='prd'`** records the text as the
+prd's *prose* (background, scope, what is out of scope), as the next revision of
+the project's one prd item (`PRD-...`; a new title does not start a second prd).
+Nothing in the text is dropped and the write is never refused for its content.
+Numbers written with a unit that no requirement in the current constraint set
+states are reported. The result adds:
+
+| Field | Meaning |
+|-------|---------|
+| `item_key`, `revision`, `item_ref` | The prd prose revision, as for every definition write. |
+| `requirements_home` | One sentence: requirement values go in `twin.record_constraint_set`, and the prd is rendered from the prose plus the current constraint set (`GET /v1/twin/projects/{project_id}/prd`). |
+| `requirement_refs` | The constraint set revisions the text was checked against (`["CS-WIDGET@2"]`). |
+| `stray_requirement_values` | Only when there are some: the values as written (`["2 W", "$20"]`, at most 20). |
+| `requirement_warning` | Only with stray values: names them and says to record them with `twin.record_constraint_set` if they are requirements. |
+
+Every other `document_type` is unchanged.
+
+**`twin.record_decision`** accepts an optional `depends_on`: an array of item
+refs (`KEY@n`, or a bare `KEY` for the current revision; `null` means not given).
+Each is pinned to an exact revision and linked with a `depends_on` edge; the
+result echoes the pinned refs as `depends_on`. An unknown item or revision is a
+tool error and nothing is written. Use it for a decision that rests on the
+requirements: link `CS-...@n` instead of restating its values in the rationale.
+
 ### KiCad Adapter (`tool_registry/tools/kicad/`)
 
 | Property | Details |

@@ -1174,6 +1174,18 @@ class TwinServer(McpToolServer):
                                 "(default 'satisfies')."
                             ),
                         },
+                        "depends_on": {
+                            "type": ["array", "null"],
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-528: item revisions this decision rests on, as "
+                                "'KEY@n' (or a bare 'KEY' for the current revision), "
+                                "e.g. the constraint set's item_ref. Linked with a "
+                                "depends_on edge and pinned to the exact revision, so "
+                                "the rationale can name the choice without restating "
+                                "requirement values."
+                            ),
+                        },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                         "supersedes": {
@@ -1192,6 +1204,7 @@ class TwinServer(McpToolServer):
                         "project_linked": {"type": "boolean"},
                         "parent_refs": {"type": "array", "items": {"type": "string"}},
                         "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                        "depends_on": {"type": "array", "items": {"type": "string"}},
                     },
                 },
                 phase=1,
@@ -1216,6 +1229,9 @@ class TwinServer(McpToolServer):
         evidence_refs = arguments.get("evidence_refs")
         if evidence_refs is not None and not isinstance(evidence_refs, list):
             raise ValueError("twin.record_decision: 'evidence_refs' must be an array")
+        depends_on = arguments.get("depends_on")
+        if depends_on is not None and not isinstance(depends_on, list):
+            raise ValueError("twin.record_decision: 'depends_on' must be an array")
         relation = arguments.get("relation")
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
@@ -1232,6 +1248,8 @@ class TwinServer(McpToolServer):
         }
         if isinstance(relation, str) and relation:
             kwargs["relation"] = relation
+        if depends_on:
+            kwargs["depends_on"] = [str(d) for d in depends_on]
         return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------
@@ -2003,7 +2021,13 @@ class TwinServer(McpToolServer):
                     "'metadata' keys (mirrors 'simulation_result'); this is "
                     "unrelated to a simulation_result's own free-text "
                     "'load_case' summary field, which just NAMES which load "
-                    "case a result came from."
+                    "case a result came from. FORGE-528: a 'prd' stores only "
+                    "prose (background, scope, what is out of scope) as the "
+                    "next revision of the project's prd; requirement values "
+                    "belong in twin.record_constraint_set, and the prd a "
+                    "reader sees is rendered from the prose plus the current "
+                    "constraint set. Values in the prd text that the "
+                    "constraint set lacks come back in 'requirement_warning'."
                 ),
                 capability="twin_decision",
                 input_schema={
@@ -2033,7 +2057,8 @@ class TwinServer(McpToolServer):
                             "type": "string",
                             "enum": list(self._DOCUMENT_TYPES),
                             "description": (
-                                "'prd' for a requirements/product doc, "
+                                "'prd' for the product doc's prose (requirement "
+                                "values go in twin.record_constraint_set), "
                                 "'documentation' for general notes/specs, "
                                 "'robot_description' for a URDF/SDF/ROS2-launch "
                                 "export (e.g. from cadquery.export_urdf_assembly), "
@@ -2172,6 +2197,17 @@ class TwinServer(McpToolServer):
                         "field_stored": {"type": "boolean"},
                         "field_object_key": {"type": ["string", "null"]},
                         "field_content_hash": {"type": ["string", "null"]},
+                        # FORGE-528, prd only.
+                        "item_key": {"type": "string"},
+                        "revision": {"type": "integer"},
+                        "item_ref": {"type": "string"},
+                        "requirements_home": {"type": "string"},
+                        "requirement_refs": {"type": "array", "items": {"type": "string"}},
+                        "stray_requirement_values": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "requirement_warning": {"type": "string"},
                     },
                 },
                 phase=1,

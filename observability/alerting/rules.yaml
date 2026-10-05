@@ -438,6 +438,23 @@ groups:
             gateway logs for run_change_set_refused for the run and items; the gate
             needs a retry so the phase redoes its work on the current revisions.
 
+      # FORGE-528 - prd writes keep carrying requirement values the constraint
+      # set does not have. The write still lands (with a warning), but a
+      # steady stream means agents are writing requirements into the prd
+      # instead of twin.record_constraint_set, so the prd and the gates drift.
+      - alert: TwinPrdStrayRequirementValues
+        expr: increase(metaforge_twin_prd_requirement_value_total{outcome="stray"}[1h]) > 20
+        for: 10m
+        labels:
+          severity: info
+          sev: "4"
+        annotations:
+          summary: "prd writes carry requirement values missing from the constraint set"
+          description: >-
+            {{ $value }} requirement values in prd prose in the last hour had no
+            matching requirement in the current constraint set. Search the gateway
+            logs for prd_stray_requirement_values for the projects and values.
+
       # MET-455 — Consolidation contradiction rate. The BACKGROUND
       # synthesis pass flags newly-synthesized insights that conflict
       # with the existing corpus. A sustained nonzero rate means the

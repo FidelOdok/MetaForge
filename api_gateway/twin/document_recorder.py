@@ -19,6 +19,12 @@ build). It is stored as a SECOND blob on the same node
 the summary JSON as the node's primary file. The record also pins what
 was analysed: ``analysed_geometry`` (node id, revision, content hash),
 the ``load_case_spec`` and the ``fixtures``.
+
+FORGE-528: a ``prd`` is the one exception. Requirement values live in the
+constraint set, so a prd write records only the prose, as the next revision
+of the project's prd item, and warns about values the constraint set lacks
+(``api_gateway/twin/requirements_home.py``). Every caller of this recorder
+gets that behaviour, the MCP tool and the requirements phase alike.
 """
 
 from __future__ import annotations
@@ -151,7 +157,7 @@ def _slug(name: str) -> str:
 def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
     """Return an async ``record(...)`` that persists a loadable text work product."""
 
-    async def record(
+    async def record_raw(
         *,
         content: str,
         name: str,
@@ -379,5 +385,24 @@ def make_document_recorder(twin: Any, project_backend: Any = None) -> Any:
                 out["field_object_key"] = metadata.get("field_object_key")
                 out["field_content_hash"] = metadata.get("field_content_hash")
             return out
+
+    async def record(**kwargs: Any) -> dict[str, Any]:
+        wp_type = kwargs.get("wp_type")
+        if str(getattr(wp_type, "value", wp_type)) == "prd":
+            from api_gateway.twin.requirements_home import record_prd_prose
+
+            for required in ("name", "content"):
+                if not kwargs.get(required):
+                    raise ValueError(f"document recorder: '{required}' is required (non-empty)")
+            return await record_prd_prose(
+                twin,
+                record_raw,
+                content=kwargs.pop("content"),
+                name=kwargs.pop("name"),
+                project_id=kwargs.pop("project_id", None),
+                extra_metadata=kwargs.pop("extra_metadata", None),
+                **kwargs,
+            )
+        return await record_raw(**kwargs)
 
     return record

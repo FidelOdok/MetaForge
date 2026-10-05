@@ -25,6 +25,7 @@ interface TwinNodeApiResponse {
   // FORGE-305: a simulation_result's mesh_stats.
   meshStats?: Record<string, unknown> | null;
   assemblyParts?: AssemblyPart[] | null;
+  projectId?: string | null;
 }
 
 export interface TwinNodeScript {
@@ -66,6 +67,7 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     poses: node.poses ?? undefined,
     meshStats: node.meshStats ?? undefined,
     assemblyParts: node.assemblyParts ?? undefined,
+    projectId: node.projectId ?? undefined,
   }));
 }
 
@@ -87,6 +89,7 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       poses: node.poses ?? undefined,
       meshStats: node.meshStats ?? undefined,
       assemblyParts: node.assemblyParts ?? undefined,
+      projectId: node.projectId ?? undefined,
     };
   } catch {
     return undefined;
@@ -319,6 +322,27 @@ export function nodeFileUrl(nodeId: string, download = false): string {
 }
 
 /** Fetch a text-previewable work-product blob as a string (for inline preview). */
+/** FORGE-528: the prd rendered from its one home for requirements. */
+export interface DerivedPrd {
+  project_id: string | null;
+  title: string;
+  markdown: string;
+  prose_ref: string | null;
+  requirement_refs: string[];
+  requirement_count: number;
+  refs: string[];
+}
+
+/**
+ * The derived prd for one prd prose revision (`PRD-KEY@n`): its prose plus
+ * the project's current intent, needs and constraint set, as markdown.
+ */
+export async function fetchDerivedPrd(itemRef: string, projectId?: string): Promise<DerivedPrd> {
+  const params = projectId ? { project_id: projectId } : undefined;
+  const { data } = await apiClient.get<DerivedPrd>(`/twin/items/${encodeURIComponent(itemRef)}/prd`, { params });
+  return data;
+}
+
 export async function fetchNodeFileText(nodeId: string): Promise<string> {
   const { data } = await apiClient.get(`/twin/nodes/${nodeId}/file`, { responseType: 'text' });
   return typeof data === 'string' ? data : JSON.stringify(data, null, 2);

@@ -81,6 +81,8 @@ def deliverable_hints(pid: str) -> dict[str, str]:
     return {
         "design_decision": (
             "record it with the record-decision tool (title, rationale, alternatives), "
+            "and depends_on=[the constraint set's item_ref] when it rests on requirements "
+            "(link them, do not restate their values), "
             f"project_id={pid}"
         ),
         "intent": (
@@ -108,7 +110,8 @@ def deliverable_hints(pid: str) -> dict[str, str]:
         ),
         "prd": (
             "record the product requirements document with the record-document tool "
-            "(document_type='prd', name=its title, content=the markdown body), "
+            "(document_type='prd', name=its title, content=the prose: background, scope, "
+            "out of scope; requirement values go in the constraint set, not the prd), "
             f"project_id={pid}; recording it as an engineering entity or a "
             "decision does NOT count"
         ),
