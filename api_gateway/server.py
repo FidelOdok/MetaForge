@@ -66,6 +66,7 @@ from api_gateway.twin.baseline_routes import router as twin_baselines_router
 from api_gateway.twin.decision_routes import router as decisions_router
 from api_gateway.twin.harness_estimate_routes import router as harness_estimate_router
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
+from api_gateway.twin.item_migration_routes import router as twin_item_migration_router
 from api_gateway.twin.item_routes import router as twin_items_router
 from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
@@ -2073,6 +2074,7 @@ def create_app(
     app.include_router(compliance_router)
     app.include_router(twin_router)
     app.include_router(twin_items_router)
+    app.include_router(twin_item_migration_router)
     app.include_router(twin_prd_router)
     app.include_router(twin_baselines_router)
     app.include_router(hierarchy_router)

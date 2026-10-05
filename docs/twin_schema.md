@@ -1220,7 +1220,7 @@ Who sees what:
 
 Approval is atomic and optimistic (spec sections 40 and 41): each item's head must still be the base the run drafted on, or the whole commit is refused with `PATCH_CONFLICT` and nothing moves. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate-forge-525) for the gate side.
 
-Limits of this first slice: the old revisions of a constraint set keep their `Constraint` nodes, so the constraint engine still evaluates them; the project-wide migration of today's unlinked duplicates is FORGE-529.
+Limits of this first slice: the old revisions of a constraint set keep their `Constraint` nodes, so the constraint engine still evaluates them; the project-wide migration of today's unlinked duplicates is FORGE-529 ([below](#migrating-legacy-nodes-forge-529)).
 
 Observability: `item_revision_created` / `item_revision_failed` log events, the `metaforge_twin_item_revision_total{item_type, outcome, resolved_by}` counter, and the `TwinItemRevisionLinkFailures` alert. A failed link never fails the write (the node already exists, and failing would invite a retry that duplicates it); the result carries `item_warning` instead.
 
@@ -1362,6 +1362,67 @@ Observability: `record_pinned`, `record_superseded`, `records_marked_stale`, `re
 Limits: records written before FORGE-527 carry no pins and read as `current`; a record about a record (a decision citing evidence) is not pinned through it.
 
 *Source: `twin_core/consistency/record_pins.py`, `api_gateway/twin/record_pins.py`, `api_gateway/runs/analysis_constraints.py`, `api_gateway/runs/gate_eval.py`*
+
+---
+
+### 2.33 Migrating legacy nodes into items (FORGE-529) {#migrating-legacy-nodes-forge-529}
+
+A project written before items existed (FORGE-523) holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
+
+#### Dry run, then apply
+
+`ItemMigration(twin).plan(project_id)` (`twin_core/items/migration.py`) reads the project and returns a `MigrationPlan` without writing anything:
+
+| Field | Holds |
+|-------|-------|
+| `items` | each item to create (or existing item to extend): `key`, `item_type`, `name`, `rule` (the strongest rule that formed it) and `rules`, `confidence` (`high` / `low`), `review_reasons`, `head_node_id` / `head_revision`, and `revisions` |
+| `items[].revisions` | each node: `node_id`, `name`, `created_at`, `revision`, `status` (`head`, `approved` or `rejected`), `status_reason`, `run_id`, and the `rule` and `evidence` that put it in this item |
+| `records` | `mark_run_summary` for a phase-summary decision; `pin` for a simulation result, with `item_ref` (`KEY@n`) and `staleness` (`current` / `stale`) |
+| `low_confidence` | the groupings flagged for review |
+| `skipped` | nodes left alone, with why (a run that is still open) |
+| `counts_before` / `counts_after` | per type: nodes, items, unlinked nodes; records: decisions listed, run summaries, simulation results pinned and stale |
+| `twin_fingerprint`, `plan_hash` | what the plan was made against, and a hash of what it would do |
+
+`render_report(plan)` prints the same plan as a table. `ItemMigration.apply(plan)` takes the plan back: it refuses one whose content no longer matches its `plan_hash` (`PlanTamperedError`), then plans again and refuses unless the fresh plan has the same hash (`StalePlanError`), so a plan reviewed against an earlier twin is never applied to a changed one. A failure on one item is logged and reported in `failures`; the rest still apply, and a new dry run shows what is left.
+
+#### How nodes are grouped
+
+Per definition type (`intent`, `stakeholder_need`, `objective`, `prd`, `constraint_set`, `bom`, `assembly`, `cad_model`; a `cad_model` with `parts` is an `assembly`), strongest evidence first:
+
+| Rule | Groups |
+|------|--------|
+| `existing_item` | a node already a revision stays in its item; existing items anchor the groups below |
+| `supersedes` | nodes joined by a `SUPERSEDES` edge |
+| `flow_slot` | a node carrying its run and phase (`metadata.run_id` or `change_set`, and `phase`) lands on the slot key that run's flow declared for that phase ([FORGE-524](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys-forge-524)) |
+| `same_name` | the same normalised name: case, punctuation, dimensions (`220 x 120 x 12 mm`) and version words ignored, or a name that derives an existing item's key |
+| `name_similarity` | one name's meaningful words contained in the other's (`Left PETG Gusset Bracket` and `Left Vertical Triangular PETG Gusset Bracket - 220 x 120 x 12 mm`), at least 75%. Never across opposite side words (`left` / `right`, `top` / `bottom`, ...). Bounding boxes are the geometry evidence: a partial match whose boxes disagree (a dimension more than 2x off) is not grouped, and a partial match, or a full one whose boxes disagree, is flagged for review |
+| `one_per_project` | intent, constraint set, prd and bom: a project has one, so their remaining groups fold into one item (unless the project already has two or more items of that type) |
+| `new_item` | anything left is its own item; its key is the slot key when it has one, else derived from the head's name |
+
+`component_selection` (`BOMItem`) is not migrated: its nodes have no `created_at` to order revisions by, and its write path already gives new selections items.
+
+#### Revisions, heads and rejected runs
+
+Revisions are ordered by `created_at`. The newest node whose run was approved, or simply the newest when the run is unknown, becomes HEAD; older ones are approved history. A node from a rejected, failed, canceled or timed-out run becomes a `rejected` revision with the run's reason (`approval_reason`, else `error`) as `status_reason`, so it shows up as a lesson. A node from a run still in progress is skipped for that run's gate to settle. Run outcomes and slots come from the gateway's run store (`completed` is approved); without it every run is unknown.
+
+Applying writes edges only on definition nodes, which are never edited: `REVISION_OF` (`revision`, `adopted: true`, `status` `approved` / `committed` / `rejected`, `run_id`, the node's `created_at`, `change_reason` = "migrated: rule (evidence)", and `migrated`, `migration` (the plan hash prefix), `migrated_at`, `migrated_by`), `HEAD`, and `SUPERSEDES` between consecutive accepted revisions where missing. An existing item that gains revisions numbers them after its `last_revision` (numbers are never reused), and its head moves only to a newer accepted node.
+
+#### Records
+
+* A `design_decision` titled `"<Phase> - phase summary"` (hyphen, en dash or em dash) gets `metadata.run_summary = true` and `record_kind = "run_summary"`. It stays in the twin; decision lists (the project brief, the `decisions` brief section, `GET /v1/decisions`) leave it out.
+* A `simulation_result` whose analysed geometry resolves (FORGE-532's `analysed_geometry` pin, else a `DERIVES_FROM` / `PARENT_OF` / `VALIDATES` edge to a geometry revision) is pinned the [FORGE-527](#records-pinned-to-revisions-forge-527) way: `metadata.depends_on_items`, a `DEPENDS_ON` edge with `kind: revision_pin`, and `staleness` `stale` (with `staleness_reason`, `stale_for`) when that revision is not its item's head, else `current`. From then on FORGE-527 keeps the status up to date. A result already pinned is left alone, unless this plan moves its item's head past the pinned revision.
+
+Idempotent: after an apply every definition node is a revision and every record has its flag or pin, so the next dry run is empty.
+
+#### Surfaces
+
+* `POST /v1/twin/projects/{project_id}/item-migration/plan`: the dry run, `{plan, report, empty}`. Writes nothing.
+* `POST /v1/twin/projects/{project_id}/item-migration/apply` with `{plan, approve: true, reason}`: applies the plan. Without `approve: true` it is 403; a plan for another project or an altered plan is 400; a twin that changed since the plan is 409. The approver is the request's caller (`approver_from_request`, the same identity every approval records), returned as `approved_by` / `approver_verified` and logged with the reason.
+* `forge twin migrate <project> [--apply]` ([CLI reference](cli-reference.md#twin-migrate)).
+
+Observability: `item_migration_planned`, `item_migration_applied`, `item_migration_item_applied`, `item_migration_approved`, `item_migration_plan_stale` and `item_migration_item_failed` log events; the `twin.items.migration.plan` / `.apply` spans; the `metaforge_twin_item_migration_total{item_type, kind="item"|"revision", outcome}` counter (items and revisions created per type) and the `TwinItemMigrationFailures` alert.
+
+*Source: `twin_core/items/migration.py`, `api_gateway/twin/item_migration_routes.py`, `cli/forge_cli/main.py`*
 
 ---
 

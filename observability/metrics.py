@@ -264,6 +264,16 @@ class MetricsRegistry:
         description="Run change-set commits and closes, by outcome",
         labels=["outcome"],
     )
+    #: Items and revisions created by the legacy-node migration (FORGE-529),
+    #: per definition type. ``kind`` is ``item`` (a new Item node) or
+    #: ``revision`` (a legacy node linked as a revision); ``outcome`` is
+    #: ``created`` or ``failed``.
+    TWIN_ITEM_MIGRATION_TOTAL = MetricDefinition(
+        name="metaforge_twin_item_migration_total",
+        type="counter",
+        description="Items and revisions created by the item migration, per type",
+        labels=["item_type", "kind", "outcome"],
+    )
     #: One sample per definition write inside a design-flow phase that
     #: declares slots of its type (FORGE-524). ``outcome`` is ``slot`` (the
     #: write landed on its declared item) or ``undeclared`` (it matched none
@@ -843,6 +853,7 @@ class MetricsRegistry:
             cls.TWIN_ORPHANS,
             cls.TWIN_ITEM_REVISION_TOTAL,
             cls.TWIN_CHANGE_SET_TOTAL,
+            cls.TWIN_ITEM_MIGRATION_TOTAL,
             cls.FLOW_ITEM_SLOT_TOTAL,
             cls.TWIN_PRD_REQUIREMENT_VALUE_TOTAL,
             cls.TWIN_RECORD_STALENESS_TOTAL,
@@ -1050,6 +1061,16 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.TWIN_CHANGE_SET_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
+
+    def record_twin_item_migration(
+        self, item_type: str, kind: str, outcome: str = "created", count: int = 1
+    ) -> None:
+        """Record items / revisions the item migration created (FORGE-529)."""
+        counter = self._instruments.get(MetricsRegistry.TWIN_ITEM_MIGRATION_TOTAL.name)
+        if counter is not None and count > 0:
+            counter.add(
+                count, attributes={"item_type": item_type, "kind": kind, "outcome": outcome}
+            )
 
     def record_twin_prd_requirement_value(self, outcome: str, count: int = 1) -> None:
         """Record requirement values seen in a prd write (FORGE-528)."""

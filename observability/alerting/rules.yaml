@@ -438,6 +438,22 @@ groups:
             gateway logs for run_change_set_refused for the run and items; the gate
             needs a retry so the phase redoes its work on the current revisions.
 
+      # FORGE-529 - the item migration linked some items or revisions and
+      # failed on others. Nothing is deleted and a re-plan picks up what is
+      # left, but a project half-migrated shows duplicates next to items.
+      - alert: TwinItemMigrationFailures
+        expr: increase(metaforge_twin_item_migration_total{outcome="failed"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Item migration failed on part of a project"
+          description: >-
+            {{ $value }} {{ $labels.item_type }} items failed to migrate in 15m. Search
+            the gateway logs for item_migration_item_failed for the item keys, then run
+            the dry run again (forge twin migrate <project>) to see what is left.
+
       # FORGE-528 - prd writes keep carrying requirement values the constraint
       # set does not have. The write still lands (with a warning), but a
       # steady stream means agents are writing requirements into the prd

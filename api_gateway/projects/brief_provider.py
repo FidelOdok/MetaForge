@@ -68,6 +68,8 @@ def make_brief_provider(twin: Any, project_backend: Any) -> BriefProvider:
 
             return render_requirements(await build_requirement_matrix(twin, pid))
         if kind == "decisions":
+            from api_gateway.projects.baseline_brief import is_phase_summary
+
             # Decisions are work products of type design_decision, not
             # EngineeringEntity rows — list_engineering_entities does not
             # accept that type and would have returned an empty list without
@@ -76,6 +78,8 @@ def make_brief_provider(twin: Any, project_backend: Any) -> BriefProvider:
                 wp
                 for wp in project.work_products
                 if str(getattr(wp.type, "value", wp.type)) == "design_decision"
+                # FORGE-529: phase summaries are run summaries, not decisions.
+                and not is_phase_summary(str(wp.name), getattr(wp, "metadata", None))
             ]
             return render_entities(decisions, kind="decision", title="Design decisions")
         if kind == "risks":

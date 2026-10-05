@@ -150,6 +150,36 @@ class ForgeClient:
             resp.raise_for_status()
             return resp.json()
 
+    def twin_migration_plan(self, project_id: str) -> dict[str, Any]:
+        """Dry-run the item migration (FORGE-529): ``POST .../item-migration/plan``."""
+        with self._client() as client:
+            resp = client.post(self._url(f"/twin/projects/{project_id}/item-migration/plan"))
+            resp.raise_for_status()
+            return resp.json()
+
+    def twin_migration_apply(
+        self, project_id: str, plan: dict[str, Any], reason: str
+    ) -> dict[str, Any]:
+        """Apply a reviewed migration plan with an explicit approval (FORGE-529).
+
+        A 409 (the twin changed since the plan was made) or 403 is raised as a
+        ``RuntimeError`` carrying the gateway's message.
+        """
+        with self._client() as client:
+            resp = client.post(
+                self._url(f"/twin/projects/{project_id}/item-migration/apply"),
+                json={"plan": plan, "approve": True, "reason": reason},
+                headers=self._approval_headers(),
+            )
+            if resp.status_code in (400, 403, 409):
+                try:
+                    detail = resp.json().get("detail")
+                except ValueError:
+                    detail = resp.text
+                raise RuntimeError(f"migration not applied ({resp.status_code}): {detail}")
+            resp.raise_for_status()
+            return resp.json()
+
     def twin_list(
         self,
         domain: str | None = None,

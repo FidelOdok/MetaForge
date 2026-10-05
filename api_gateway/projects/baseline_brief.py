@@ -287,9 +287,12 @@ async def read_baseline(twin: Any, project_id: Any, run_id: str | None = None) -
         )
 
 
-def is_phase_summary(name: str) -> bool:
-    """A design-flow backstop decision (titled ``"<Phase> ... phase summary"``), not a real one."""
-    return "phase summary" in (name or "").lower()
+def is_phase_summary(name: str, metadata: dict[str, Any] | None = None) -> bool:
+    """A design-flow backstop decision (titled ``"<Phase> ... phase summary"``), not a real one.
+
+    FORGE-529: the item migration also flags them ``metadata.run_summary``.
+    """
+    return "phase summary" in (name or "").lower() or bool((metadata or {}).get("run_summary"))
 
 
 async def recent_decisions(project: Any, twin: Any, limit: int = DECISION_LIMIT) -> list[str]:
@@ -298,7 +301,7 @@ async def recent_decisions(project: Any, twin: Any, limit: int = DECISION_LIMIT)
         wp
         for wp in project.work_products
         if str(getattr(wp.type, "value", wp.type)) == "design_decision"
-        and not is_phase_summary(str(wp.name))
+        and not is_phase_summary(str(wp.name), getattr(wp, "metadata", None))
     ]
     decisions.sort(key=lambda wp: wp.updated_at, reverse=True)
     seen: set[str] = set()

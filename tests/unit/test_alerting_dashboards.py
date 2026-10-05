@@ -109,7 +109,8 @@ class TestAlertingRules:
         rules = _all_alert_rules(data)
         # + 1 record pin / staleness failures (FORGE-527).
         # + 1 gate approval without a baseline (FORGE-526).
-        assert len(rules) == 49
+        # + 1 item migration failures (FORGE-529).
+        assert len(rules) == 50
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -162,7 +163,8 @@ class TestAlertingRules:
         # + 2 simulation result field build / store failures (FORGE-532)
         # + 1 record pin / staleness failures (FORGE-527)
         # + 1 gate approval without a baseline (FORGE-526)
-        assert len(warnings) == 36
+        # + 1 item migration failures (FORGE-529)
+        assert len(warnings) == 37
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -241,6 +243,8 @@ class TestAlertingRules:
                 "TwinItemRevisionLinkFailures",
                 # FORGE-525: a gate approval refused on a revision conflict.
                 "TwinChangeSetApprovalsRefused",
+                # FORGE-529: the item migration failed on part of a project.
+                "TwinItemMigrationFailures",
                 # FORGE-527: record pins or staleness marking failing.
                 "TwinRecordStalenessFailures",
                 # FORGE-526: a gate approval recorded no baseline.

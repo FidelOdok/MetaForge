@@ -575,6 +575,38 @@ Opt-in views over items (FORGE-526, see [Twin schema section 2.31](twin_schema.m
 
 Add `--format json` for the raw gateway response.
 
+### `twin migrate`: fold a project's legacy nodes into items {#twin-migrate}
+
+```
+twin migrate <project_id|name> [--apply] [--yes] [--reason <text>]
+```
+
+```bash
+# Dry run: print the plan as a table (nothing is written)
+python -m cli.forge_cli twin migrate e7b896cc-...
+# The plan as JSON, for review or scripting
+python -m cli.forge_cli --format json twin migrate e7b896cc-...
+# Show the plan, confirm, then apply exactly that plan
+python -m cli.forge_cli twin migrate e7b896cc-... --apply --reason "reviewed with the team"
+```
+
+Turns a project's nodes written before items existed into items and
+revisions ([the migration](twin_schema.md#migrating-legacy-nodes-forge-529)).
+It always shows the dry run first: every proposed item with its revisions
+(node id, name, `created_at`, status, and the rule and evidence that grouped
+it), groupings flagged `[REVIEW]`, the phase-summary decisions it will mark
+as run summaries, the simulation results it will pin (and which are stale),
+and counts before and after.
+
+| Flag | Notes |
+|---|---|
+| `--apply` | After the dry run, ask for confirmation and apply that exact plan. Nothing is deleted. The gateway refuses it (409) if the twin changed since the dry run; run the command again |
+| `--yes` | Skip the confirmation |
+| `--reason` | Why the plan is approved; kept in the gateway log with who approved it |
+
+Running it again after an apply prints "Nothing to migrate". Served by
+`POST /v1/twin/projects/{id}/item-migration/plan` and `.../apply`.
+
 ### `approvals`: review and decide pending approvals {#approvals}
 
 ```
