@@ -612,6 +612,74 @@ class TestRetryPhase:
         names = [e["event"] for e in events]
         assert "gate_not_ready" in names and "phase_retry_requested" in names
 
+    async def test_retry_brief_carries_the_turned_down_revision(self, env) -> None:
+        """FORGE-530: the twin read runs in the collect_revision_notes activity and
+        the workflow puts the plain notes into the retried phase's brief."""
+        from orchestrator.design_flow.rework_context import RevisionNote
+
+        run_id = str(uuid.uuid4())
+        requests: list[PhaseRequest] = []
+        asked: list[tuple[str, str, str]] = []
+        checks = {"n": 0}
+
+        class _Recording(_Phases):
+            async def __call__(self, request: PhaseRequest) -> PhaseResult:
+                requests.append(request)
+                return await super().__call__(request)
+
+        async def gate(payload: dict) -> GateCheck:
+            if payload["phase"]["id"] != "phase1":
+                return GateCheck(ready=True, checked=True, constraints_checked=True)
+            checks["n"] += 1
+            if checks["n"] == 1:
+                return GateCheck(ready=False, checked=True, missing=["cad_model"])
+            return GateCheck(ready=True, checked=True, present=["cad_model"])
+
+        async def notes(run: str, phase_id: str, project_id, reason: str):
+            asked.append((run, phase_id, reason))
+            return [
+                RevisionNote(
+                    ref="CAD-BRACKET@2",
+                    item_type="cad_model",
+                    name="Bracket",
+                    status="abandoned",
+                    reason=reason,
+                    previous_ref="CAD-BRACKET@1",
+                    changes=("volume 8000 -> 4000 mm3 (-4000, -50.0%)",),
+                )
+            ]
+
+        acts = DesignFlowActivities(
+            phase_runner=_Recording(),
+            gate_checker=gate,
+            gate_announcer=_announced,
+            revision_notes=notes,
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        async with _worker(env, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=self._flow3())
+            await self._wait_gate_n(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            await self._wait_gate_n(launcher, run_id, "gate1")
+            await launcher.answer_gate(
+                run_id, approved=False, retry=True, decided_by="user:r", comment="too thin"
+            )
+            for _ in range(400):
+                state = await launcher.state(run_id)
+                if state["attempt"] == 2 and state["awaiting_gate"] == "gate1":
+                    break
+                await asyncio.sleep(0.05)
+            await launcher.answer_gate(run_id, approved=False, decided_by="user:r")
+            await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+
+        assert [r.phase.id for r in requests] == ["phase0", "phase1", "phase1"]
+        assert len(asked) == 1 and asked[0][:2] == (run_id, "phase1")
+        assert "cad_model" in asked[0][2]  # the gate's findings are the reason
+        feedback = requests[2].retry_feedback
+        assert "  - CAD-BRACKET@2 cad_model 'Bracket' (abandoned)" in feedback
+        assert "    Gate's reason: " in feedback and "cad_model" in feedback
+        assert "      volume 8000 -> 4000 mm3 (-4000, -50.0%)" in feedback
+
     async def test_retry_cap_is_enforced(self, env) -> None:
         run_id = str(uuid.uuid4())
 

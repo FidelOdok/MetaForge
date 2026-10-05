@@ -36,6 +36,9 @@ GateChecker = Callable[[dict[str, Any]], Awaitable[GateCheck]]
 #: Publishes "this run is waiting at a gate" wherever a human will see it.
 GateAnnouncer = Callable[[str, str, str], Awaitable[None]]
 
+#: ``(run_id, phase_id, project_id, gate_reason) -> notes`` (FORGE-530).
+RevisionNotes = Callable[[str, str, str | None, str], Awaitable[list[Any]]]
+
 
 @dataclass
 class DesignFlowActivities:
@@ -44,6 +47,7 @@ class DesignFlowActivities:
     phase_runner: PhaseRunner
     gate_checker: GateChecker | None = None
     gate_announcer: GateAnnouncer | None = None
+    revision_notes: RevisionNotes | None = None
 
     #: Seconds between heartbeats while a phase is running. A phase is a long
     #: agent loop; without heartbeats Temporal cannot tell a slow one from a
@@ -111,6 +115,40 @@ class DesignFlowActivities:
             return
         metrics.record_design_flow_gate_announce("announced")
 
+    @activity.defn(name="collect_revision_notes")
+    async def collect_revision_notes(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """The drafts a gate just turned down, as plain notes for the workflow (FORGE-530).
+
+        The twin read happens here so the workflow stays deterministic; it gets
+        back :func:`~orchestrator.design_flow.rework_context.notes_to_dicts`
+        data. Never fails: a retry brief without notes is still a retry brief.
+        """
+        from orchestrator.design_flow.rework_context import notes_to_dicts
+
+        if self.revision_notes is None:
+            return []
+        try:
+            notes = await self.revision_notes(
+                str(payload.get("run_id") or ""),
+                str(payload.get("phase_id") or ""),
+                payload.get("project_id") or None,
+                str(payload.get("reason") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - see docstring
+            logger.warning(
+                "design_flow_revision_notes_failed",
+                run_id=payload.get("run_id"),
+                phase=payload.get("phase_id"),
+                error=str(exc),
+            )
+            return []
+        return notes_to_dicts(notes)
+
     def all(self) -> list[Any]:
         """The activity callables to register with a worker."""
-        return [self.run_phase, self.evaluate_gate, self.announce_gate]
+        return [
+            self.run_phase,
+            self.evaluate_gate,
+            self.announce_gate,
+            self.collect_revision_notes,
+        ]

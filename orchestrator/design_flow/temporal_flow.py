@@ -50,6 +50,7 @@ with workflow.unsafe.imports_passed_through():
         build_rework_feedback,
         rework_target_error,
     )
+    from orchestrator.design_flow.rework_context import RevisionNote, notes_from_dicts
 
 __all__ = [
     "DEFAULT_GATE_TIMEOUT",
@@ -74,6 +75,12 @@ RETRY_PATCH_ID = "forge-495-gate-retry"
 #: at a gate (its last one included) before this change replays unchanged and
 #: then accepts a rework as new history.
 REWORK_PATCH_ID = "forge-500-rework"
+
+#: ``workflow.patched`` id for FORGE-530. A retry or rework now runs one
+#: ``collect_revision_notes`` activity (the drafts the gate just closed) before
+#: building its feedback. Histories recorded before it replay without the
+#: activity and get the feedback they had.
+REVISION_NOTES_PATCH_ID = "forge-530-revision-notes"
 
 #: How long a gate waits before it is treated as refused. Long, because the
 #: reviewer is a person who may be asleep; finite, because a run that waits
@@ -384,6 +391,7 @@ class DesignFlowWorkflow:
                         findings=self._gate_findings,
                         reason=self._retry_reason,
                         attempt=self._attempt + 1,
+                        revisions=await self._turned_down(inp, phase, self._retry_reason),
                     )
                     self._attempt += 1
                     continue
@@ -533,6 +541,7 @@ class DesignFlowWorkflow:
                 reason=answer.comment,
                 from_summary=str(entry.get("summary") or ""),
                 cycle=self._rework_cycles,
+                revisions=await self._turned_down(inp, phase, answer.comment),
             )
             self._status = "running"
             self._gate_ready = True
@@ -580,6 +589,34 @@ class DesignFlowWorkflow:
             self._status = "running"
             self._record("gate_approved", phase=phase.id, detail=answer.decided_by or "approved")
         return None
+
+    async def _turned_down(
+        self, inp: DesignFlowInput, phase: FrozenPhase, reviewer: str
+    ) -> list[RevisionNote]:
+        """The drafts ``phase``'s gate just closed, read in an activity (FORGE-530).
+
+        The gateway closed them before the decision signal arrived, so the
+        activity sees them. Patched for replay; a failed read is no notes.
+        """
+        if not workflow.patched(REVISION_NOTES_PATCH_ID):
+            return []
+        try:
+            rows = await workflow.execute_activity(
+                "collect_revision_notes",
+                {
+                    "run_id": inp.run_id,
+                    "phase_id": phase.id,
+                    "project_id": inp.project_id,
+                    "reason": "; ".join(self._gate_findings) or reviewer,
+                },
+                start_to_close_timeout=_CHECK_TIMEOUT,
+                retry_policy=RetryPolicy(maximum_attempts=2),
+                result_type=list,
+            )
+        except ActivityError:
+            self._record("revision_notes_unavailable", phase=phase.id)
+            return []
+        return notes_from_dicts(rows)
 
     @staticmethod
     def _gate_findings_for(

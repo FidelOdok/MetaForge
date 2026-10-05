@@ -373,6 +373,16 @@ before the change still deserialize. Parking a not-ready gate replaces a
 old failure replays it unchanged. The in-process executor behaves the same way
 (`GateCoordinator.note_retry`), so the two engines stay at parity.
 
+**What the retried or reworked phase is told (FORGE-530).** After the gate
+decision closes the phase's drafts, both engines read them back and add a block
+to the retry or rework feedback: each turned-down revision's ref
+(`CAD-BRACKET@2`), the gate's reason, and a short diff against the revision
+before it (bounding box, volume, mass for a part; limit changes for a
+requirement set). In-process this is `DesignFlowExecutor(revision_notes=...)`;
+on Temporal it is the `collect_revision_notes` activity, which returns plain
+data, guarded by `workflow.patched("forge-530-revision-notes")`. See
+[context engineering](context-engineering.md).
+
 There is no MCP run-approval tool: a gate is answered by a human on the
 dashboard or the approval endpoint, never by the agent.
 

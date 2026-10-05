@@ -653,6 +653,8 @@ def _build_in_process_executor(brain: Any, project_backend: Any) -> DesignFlowEx
         # FORGE-525: the phase's twin writes carry its run and phase, so they
         # are drafts in the run's change set, as on the Temporal worker.
         phase_scope=run_change_sets.phase_scope,
+        # FORGE-530: a retried or reworked phase is told what its gate turned down.
+        revision_notes=run_change_sets.revision_notes,
     )
 
 

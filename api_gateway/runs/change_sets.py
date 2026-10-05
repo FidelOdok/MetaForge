@@ -12,6 +12,9 @@ reaches it, for both engines, because both answer gates through
   that gate hands it to the phase (:func:`retry_note`).
 * **reject, retry, rework**: :func:`close_for_decision` closes the drafts
   (``rejected`` / ``abandoned``) with the reviewer's reason. HEAD never moves.
+* **after a retry or rework** (FORGE-530): :func:`revision_notes` reads the
+  drafts that decision just closed, so the re-run phase is told which
+  revisions were turned down, why, and how they differed from the one before.
 * **the run ends any other way** (:func:`on_run_transition`, from the run
   store's observer): completed commits what is left (phases with no human
   gate after the last one), failed or canceled abandons it, and a rejection
@@ -65,6 +68,29 @@ def phase_scope(run_id: str, phase_id: str, project_id: str | None) -> Iterator[
             pass
     with with_context(base.model_copy(update=update)) as ctx:
         yield ctx
+
+
+async def revision_notes(
+    run_id: str, phase_id: str, project_id: str | None, reason: str
+) -> list[Any]:
+    """The drafts ``phase_id``'s gate just closed, as rework/retry notes (FORGE-530).
+
+    Injected into both engines (the in-process executor and the Temporal
+    ``collect_revision_notes`` activity). Never raises; no twin means no notes.
+    """
+    from orchestrator.design_flow.rework_context import phase_revision_notes
+
+    twin = _twin()
+    if not _enabled(twin):
+        return []
+    with tracer.start_as_current_span("run.change_set.revision_notes") as span:
+        span.set_attribute("run.id", run_id)
+        span.set_attribute("run.phase", phase_id)
+        notes = await phase_revision_notes(
+            twin, run_id=run_id, phase_id=phase_id, project_id=project_id, reason=reason
+        )
+        span.set_attribute("run.revision_notes", len(notes))
+        return notes
 
 
 def _twin() -> Any:

@@ -493,9 +493,21 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   diffed per constraint (added, removed, `limit` changed). The collection is
   async (`rework_context_lines`, `collect_revision_notes`) and runs where I/O
   is allowed; rendering is pure (`revision_note_lines`) and is what
-  `rework.build_rework_feedback(..., revisions=...)` calls, so the Temporal
-  workflow stays deterministic. Without revisions the rework block is
-  unchanged.
+  `build_rework_feedback(..., revisions=...)` and
+  `build_retry_feedback(..., revisions=...)` call.
+
+  Both engines use it on every retry and rework. The gate decision closes the
+  phase's drafts first (`decide_run_gate`, FORGE-525: `abandoned` on a retry
+  or rework), then `phase_revision_notes` reads the drafts of that phase in the
+  run's change set from the latest close (`closed_phase_revisions`), so a third
+  attempt hears about the second attempt's work only. The gate's reason is its
+  findings, else the reviewer's reason; a `rejected` revision keeps its own
+  verdict. In-process, `DesignFlowExecutor(revision_notes=...)` calls the
+  gateway's `run_change_sets.revision_notes`. On Temporal the twin read is the
+  `collect_revision_notes` activity (bound by `flow_worker.build_activities`),
+  which returns plain dicts (`notes_to_dicts`); the workflow rebuilds the notes
+  and renders them, behind the `forge-530-revision-notes` patch so older
+  histories replay unchanged. A failed read gives the feedback without notes.
 
 Measurement: `tests/unit/test_context_budget.py::test_phase_prompt_tokens_before_and_after`
 scripts one 3-call phase (two large reads, then an answer) against a 121-tool

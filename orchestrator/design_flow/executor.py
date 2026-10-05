@@ -33,6 +33,7 @@ from orchestrator.design_flow.rework import (
     max_rework_cycles,
     rework_target_error,
 )
+from orchestrator.design_flow.rework_context import RevisionNote, RevisionNotesProvider
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FlowDefinition, Phase, get_flow
 from orchestrator.harness.runs import (
     ApprovalDecision,
@@ -368,9 +369,13 @@ class DesignFlowExecutor:
         constraint_checker: ConstraintChecker | None = None,
         consistency_gate_checker: ConsistencyGateChecker | None = None,
         phase_scope: PhaseScope | None = None,
+        revision_notes: RevisionNotesProvider | None = None,
     ) -> None:
         self._store = store
         self._phase_scope = phase_scope
+        # FORGE-530: reads the drafts a gate just turned down, so a retried or
+        # reworked phase is told which revision failed, why, and what changed.
+        self._revision_notes = revision_notes
         self._brain = brain
         self._coordinator = coordinator
         self._evaluator = gate_evaluator
@@ -463,6 +468,31 @@ class DesignFlowExecutor:
             index += 1
         ctx.retry_feedback = ""
         self._store.complete(run_id, result=self._summarize(flow, ctx))
+
+    async def _turned_down(
+        self,
+        run_id: str,
+        phase: Phase,
+        ctx: FlowContext,
+        findings: list[str],
+        reviewer: str,
+    ) -> list[RevisionNote]:
+        """The revisions ``phase``'s gate just closed, as notes (FORGE-530). Never raises.
+
+        The gate decision closes the run's drafts before it reaches here
+        (``decide_run_gate``), so they are readable as ``rejected`` /
+        ``abandoned``. The gate's reason is its findings, else the reviewer's.
+        """
+        if self._revision_notes is None:
+            return []
+        reason = "; ".join(findings) or reviewer
+        try:
+            return await self._revision_notes(run_id, phase.id, ctx.project_id, reason)
+        except Exception as exc:  # noqa: BLE001 -- feedback without notes beats no feedback
+            logger.warning(
+                "design_flow_revision_notes_failed", run_id=run_id, phase=phase.id, error=str(exc)
+            )
+            return []
 
     async def _attempt_phase(
         self,
@@ -600,6 +630,7 @@ class DesignFlowExecutor:
                     reason=reviewer,
                     from_summary=outcome.summary,
                     cycle=cycle,
+                    revisions=await self._turned_down(run_id, phase, ctx, findings, reviewer),
                 ),
             )
         if decision is ApprovalDecision.REJECT:
@@ -618,7 +649,10 @@ class DesignFlowExecutor:
                 return True
             ctx.completed.pop()
             ctx.retry_feedback = build_retry_feedback(
-                findings=findings, reason=reviewer, attempt=attempt + 1
+                findings=findings,
+                reason=reviewer,
+                attempt=attempt + 1,
+                revisions=await self._turned_down(run_id, phase, ctx, findings, reviewer),
             )
             logger.info(
                 "design_flow_phase_retry",

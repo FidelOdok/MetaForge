@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 
+from orchestrator.design_flow.rework_context import RevisionNote, revision_note_lines
+
 __all__ = [
     "DEFAULT_MAX_PHASE_RETRIES",
     "MAX_PHASE_RETRIES_ENV",
@@ -40,7 +42,13 @@ def max_phase_retries() -> int:
     return max(value, 0)
 
 
-def build_retry_feedback(*, findings: Sequence[str], reason: str, attempt: int) -> str:
+def build_retry_feedback(
+    *,
+    findings: Sequence[str],
+    reason: str,
+    attempt: int,
+    revisions: Sequence[RevisionNote] = (),
+) -> str:
     """The block handed to the phase brain as the first thing in its prompt."""
     lines = [
         f"RETRY (attempt {attempt}): your previous attempt at this phase did not pass "
@@ -57,5 +65,7 @@ def build_retry_feedback(*, findings: Sequence[str], reason: str, attempt: int) 
         "What the previous attempt recorded in the twin was discarded (it never became "
         "current); record this attempt's work again."
     )
+    # FORGE-530: which revisions those were, why the gate turned them down, what changed.
+    lines.extend(revision_note_lines(revisions))
     lines.append("Fix exactly these problems before you reply.")
     return "\n".join(lines)

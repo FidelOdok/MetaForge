@@ -32,8 +32,13 @@ from uuid import UUID
 __all__ = [
     "MAX_NOTES",
     "RevisionNote",
+    "RevisionNotesProvider",
     "cad_delta",
+    "closed_phase_revisions",
     "collect_revision_notes",
+    "notes_from_dicts",
+    "notes_to_dicts",
+    "phase_revision_notes",
     "requirement_delta",
     "revision_note_lines",
     "rework_context_lines",
@@ -45,6 +50,13 @@ MAX_NOTES = 6
 MAX_CHANGES = 6
 
 GeometryDiff = Callable[..., Awaitable[dict[str, Any]]]
+
+#: ``(run_id, phase_id, project_id, gate_reason) -> notes``: what the executor
+#: and the Temporal activity are injected with (the twin lives in the gateway).
+RevisionNotesProvider = Callable[[str, str, str | None, str], Awaitable[list["RevisionNote"]]]
+
+#: Statuses a run's draft is closed with when its gate does not approve it.
+_CLOSED = ("rejected", "abandoned")
 
 
 @dataclass(frozen=True)
@@ -58,6 +70,42 @@ class RevisionNote:
     reason: str | None = None
     previous_ref: str | None = None
     changes: tuple[str, ...] = field(default_factory=tuple)
+
+
+def notes_to_dicts(notes: Sequence[RevisionNote]) -> list[dict[str, Any]]:
+    """Plain data for a Temporal activity result. Pure."""
+    return [
+        {
+            "ref": n.ref,
+            "item_type": n.item_type,
+            "name": n.name,
+            "status": n.status,
+            "reason": n.reason,
+            "previous_ref": n.previous_ref,
+            "changes": list(n.changes),
+        }
+        for n in notes
+    ]
+
+
+def notes_from_dicts(rows: Sequence[Any]) -> list[RevisionNote]:
+    """The inverse of :func:`notes_to_dicts`; skips anything malformed. Pure."""
+    out: list[RevisionNote] = []
+    for row in rows or ():
+        if not isinstance(row, dict) or not row.get("ref"):
+            continue
+        out.append(
+            RevisionNote(
+                ref=str(row["ref"]),
+                item_type=str(row.get("item_type") or ""),
+                name=str(row.get("name") or ""),
+                status=str(row.get("status") or "rejected"),
+                reason=row.get("reason") or None,
+                previous_ref=row.get("previous_ref") or None,
+                changes=tuple(str(c) for c in row.get("changes") or ()),
+            )
+        )
+    return out
 
 
 def revision_note_lines(notes: Sequence[RevisionNote]) -> list[str]:
@@ -212,8 +260,11 @@ async def collect_revision_notes(
 ) -> list[RevisionNote]:
     """Describe ``revisions`` (node ids or ``KEY@n`` refs) against their predecessors.
 
-    ``reason`` is the gate's reason, used for any revision that carries none
-    of its own. ``geometry_diff`` is the gateway's STEP-measured diff
+    ``reason`` is the gate's reason. A ``rejected`` revision keeps its own
+    verdict (``status_reason``) when it has one; an ``abandoned`` one (closed
+    because the phase was retried or the run sent back) shows the gate's
+    reason, since its own only says it was closed. ``geometry_diff`` is the
+    gateway's STEP-measured diff
     (``make_geometry_diff``), optional: without it, or when it fails, a part
     is compared by the facts recorded on each revision. Anything that cannot
     be resolved is skipped, never raised.
@@ -259,7 +310,12 @@ async def collect_revision_notes(
                 item_type=view.item.item_type,
                 name=str(name or ""),
                 status=view.status if view.status != "approved" else "failed",
-                reason=view.reason or (reason.strip() or None),
+                reason=(
+                    (reason.strip() or view.reason)
+                    if view.status != "rejected"
+                    else (view.reason or reason.strip() or None)
+                )
+                or None,
                 previous_ref=previous.ref if previous is not None else None,
                 changes=tuple(changes),
             )
@@ -293,3 +349,89 @@ async def rework_context_lines(
             geometry_diff=geometry_diff,
         )
         return revision_note_lines(notes)
+
+
+async def closed_phase_revisions(
+    twin: Any, *, run_id: str, phase_id: str, project_id: Any = None
+) -> list[UUID]:
+    """The drafts ``phase_id`` wrote in ``run_id``'s change set that its gate just closed.
+
+    FORGE-525 closes a run's open drafts (``rejected`` on a reject,
+    ``abandoned`` on a retry or rework) before the decision reaches the
+    flow, stamping every edge of one close with the same ``closed_at``. Only
+    the latest close is returned, so a third attempt is told about the second
+    attempt's work, not the first's as well.
+    """
+    from twin_core.items import list_items
+    from twin_core.models.enums import EdgeType
+
+    pid: UUID | None = None
+    if project_id:
+        try:
+            pid = project_id if isinstance(project_id, UUID) else UUID(str(project_id))
+        except ValueError:
+            pid = None
+    found: list[tuple[str, str, int, UUID]] = []
+    for item in await list_items(twin, project_id=pid):
+        edges = await twin.graph.get_edges(
+            item.id, direction="incoming", edge_type=EdgeType.REVISION_OF
+        )
+        for edge in edges:
+            meta = edge.metadata or {}
+            if (
+                str(meta.get("change_set") or "") == run_id
+                and str(meta.get("phase") or "") == phase_id
+                and str(meta.get("status") or "") in _CLOSED
+            ):
+                found.append(
+                    (
+                        str(meta.get("closed_at") or ""),
+                        item.key,
+                        int(meta.get("revision") or 0),
+                        edge.source_id,
+                    )
+                )
+    if not found:
+        return []
+    latest = max(f[0] for f in found)
+    batch = sorted((f for f in found if f[0] == latest), key=lambda f: (f[1], f[2]))
+    return [f[3] for f in batch]
+
+
+async def phase_revision_notes(
+    twin: Any,
+    *,
+    run_id: str,
+    phase_id: str,
+    project_id: Any = None,
+    reason: str = "",
+    geometry_diff: GeometryDiff | None = None,
+) -> list[RevisionNote]:
+    """Notes for the drafts ``phase_id``'s gate just turned down. Never raises."""
+    import structlog
+
+    logger = structlog.get_logger(__name__)
+    try:
+        revisions = await closed_phase_revisions(
+            twin, run_id=run_id, phase_id=phase_id, project_id=project_id
+        )
+        notes = await collect_revision_notes(
+            twin,
+            revisions,
+            reason=reason,
+            project_id=project_id,
+            geometry_diff=geometry_diff,
+        )
+    except Exception as exc:  # noqa: BLE001 -- feedback without notes beats no feedback
+        logger.warning(
+            "rework_context_phase_notes_failed", run_id=run_id, phase=phase_id, error=str(exc)
+        )
+        return []
+    logger.info(
+        "rework_context_phase_notes",
+        run_id=run_id,
+        phase=phase_id,
+        revisions=len(revisions),
+        notes=len(notes),
+    )
+    return notes
