@@ -391,7 +391,9 @@ class TestWritesResolveToSlots:
         assert v2["flow_slot_key"] == "CAD-LEFT-BRACKET"
         assert "undeclared_item" not in v2
         item = await find_item(twin, "CAD-LEFT-BRACKET", PROJECT)
-        assert [r.run_id for r in await item_history(twin, item)] == ["run-1", "run-2"]
+        # Both are drafts of one item (FORGE-525: HEAD moves only at a gate).
+        history = await item_history(twin, item, include_drafts=True)
+        assert [r.run_id for r in history] == ["run-1", "run-2"]
         wp = await twin.get_work_product(UUID(v2["node_id"]))
         assert wp.metadata["flow_slot_key"] == "CAD-LEFT-BRACKET"
         assert counter.calls == [("cad_model", "slot"), ("cad_model", "slot")]
