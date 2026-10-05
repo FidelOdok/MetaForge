@@ -120,8 +120,17 @@ async def _decision(twin: InMemoryTwinAPI, title: str, rationale: str, age_s: in
     return await twin.create_work_product(wp)
 
 
-async def _simulation(twin: InMemoryTwinAPI, of_node: str, **meta: Any) -> None:
+async def _simulation(
+    twin: InMemoryTwinAPI, of_node: str, *, pin: bool = True, **meta: Any
+) -> UUID:
+    """A simulation_result of ``of_node``; ``pin`` adds FORGE-532's analysed_geometry."""
     now = datetime.now(UTC)
+    if pin:
+        meta = {
+            **meta,
+            "analysed_geometry": {"node_id": of_node, "revision": None, "content_hash": "h"},
+            "analysed_geometry_node_id": of_node,
+        }
     wp = await twin.create_work_product(
         WorkProduct(
             id=uuid4(),
@@ -139,6 +148,7 @@ async def _simulation(twin: InMemoryTwinAPI, of_node: str, **meta: Any) -> None:
         )
     )
     await twin.add_edge(wp.id, UUID(of_node), EdgeType.DERIVES_FROM)
+    return wp.id
 
 
 async def _project(twin: InMemoryTwinAPI) -> SimpleNamespace:
@@ -166,7 +176,7 @@ async def _shelf(twin: InMemoryTwinAPI) -> dict[str, Any]:
             heads[name] = await _part(twin, name, rev, thickness=6.0 + rev)
             if name == "Wall Bracket" and rev == 2:
                 await _simulation(twin, heads[name]["node_id"], safety_factor=2.1)
-    await _simulation(twin, heads["Shelf Board"]["node_id"], safety_factor=3.0)
+    await _simulation(twin, heads["Shelf Board"]["node_id"], pin=False, safety_factor=3.0)
 
     record_cs = make_constraint_recorder(twin, None)
     for rev in range(1, 9):
@@ -237,6 +247,23 @@ class TestShelfBrief:
         reqs = next(ln for ln in _item_lines(brief) if "SHELF-REQUIREMENTS" in ln)
         assert "2 constraints" in reqs
         assert "max_load_kg >= 18 kg" in reqs
+
+    async def test_the_analysed_geometry_pin_is_the_dependency(self, twin) -> None:
+        """FORGE-532: a result pinned to @2 is not evidence for @3, whatever edges say."""
+        await _part(twin, "Clip", 1, thickness=2)
+        v2 = await _part(twin, "Clip", 2, thickness=3)
+        v3 = await _part(twin, "Clip", 3, thickness=4)
+        sim = await _simulation(twin, v2["node_id"], safety_factor=2.0)
+        # A provenance edge to the current revision does not make it current evidence.
+        await twin.add_edge(sim, UUID(v3["node_id"]), EdgeType.PARENT_OF)
+        brief = await build_project_brief(await _project(twin), doc_excerpt=_excerpt, twin=twin)
+        clip = next(ln for ln in _item_lines(brief) if "CAD-CLIP@3" in ln)
+        assert "FEA stale (@2, not re-run on @3)" in clip
+        # Pinned to the current revision, failing: reported as such.
+        await _simulation(twin, v3["node_id"], safety_factor=0.8)
+        brief = await build_project_brief(await _project(twin), doc_excerpt=_excerpt, twin=twin)
+        clip = next(ln for ln in _item_lines(brief) if "CAD-CLIP@3" in ln)
+        assert "FEA @3 fail" in clip
 
     async def test_records_are_real_decisions_deduplicated(self, twin) -> None:
         await _shelf(twin)

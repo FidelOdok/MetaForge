@@ -127,15 +127,39 @@ def _sim_outcome(meta: dict[str, Any]) -> str:
     return "ok"
 
 
+def analysed_node_id(meta: dict[str, Any]) -> str | None:
+    """The geometry node a simulation_result says it analysed (FORGE-532 pin)."""
+    pin = meta.get("analysed_geometry")
+    raw = pin.get("node_id") if isinstance(pin, dict) else None
+    raw = raw or meta.get("analysed_geometry_node_id")
+    return str(raw) if raw else None
+
+
 async def _simulations_for(twin: Any, node_id: UUID) -> list[Any]:
+    """Simulation results that analysed ``node_id``.
+
+    FORGE-532 pins the analysed geometry on the result (``analysed_geometry``)
+    and adds a DERIVES_FROM edge to it. The pin is the dependency: a result
+    pinned to another node is not evidence for this one even if some other
+    provenance edge points here. A result with no pin (recorded before
+    FORGE-532) counts by its edge, as before.
+    """
     edges = await twin.graph.get_edges(node_id, direction="incoming")
     sims = []
+    seen: set[Any] = set()
     for edge in edges:
         if str(getattr(edge.edge_type, "value", edge.edge_type)) not in _EVIDENCE_EDGES:
             continue
+        if edge.source_id in seen:
+            continue
+        seen.add(edge.source_id)
         node = await twin.graph.get_node(edge.source_id)
-        if node is not None and _is_simulation(node):
-            sims.append(node)
+        if node is None or not _is_simulation(node):
+            continue
+        pinned = analysed_node_id(dict(getattr(node, "metadata", None) or {}))
+        if pinned is not None and pinned != str(node_id):
+            continue
+        sims.append(node)
     return sims
 
 

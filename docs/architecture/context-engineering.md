@@ -309,7 +309,10 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   and the first limits for a requirement set; the statement for an intent or
   need), plus the evidence state of a part (`FEA @3 ok`, `FEA @3 fail`, or
   `FEA stale (@2, not re-run on @3)` when the newest simulation result
-  derives from an older revision). The current revision is the item's HEAD
+  analysed an older revision). The dependency is the result's
+  `analysed_geometry` pin (FORGE-532): a result pinned to another node is not
+  evidence for this one, whatever other edges point here; a result recorded
+  before the pin existed counts by its `DERIVES_FROM` edge. The current revision is the item's HEAD
   (FORGE-525 moves it only on gate approval), so a superseded, rejected,
   abandoned or other run's draft revision never appears. Then: rejected revisions as "already tried, failed because" lessons
   (up to 5), recent real design decisions (up to 5, de-duplicated by title,
