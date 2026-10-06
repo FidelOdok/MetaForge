@@ -173,6 +173,16 @@ def write_skills(root: Path) -> list[str]:
 
     The metadata is already in ``definition.json``. Two copies would be the
     usual problem; this reads the one that exists.
+
+    FORGE-533: a skill may also carry a ``PLUGIN.md``, the detailed version
+    written for an MCP client (when to use it, the exact tool sequence,
+    checks, failure handling). When present it ships instead of ``SKILL.md``.
+    The harness keeps reading ``SKILL.md``: ``procedural_overlay`` packs every
+    card of a discipline into a fixed character budget, and mechanical alone
+    already fills most of it, so growing ``SKILL.md`` would make the harness
+    drop procedures without saying which. ``PLUGIN.md`` may open with a
+    frontmatter block whose ``description`` replaces the definition's, so the
+    plugin copy can say *when* to use the skill as well as what it does.
     """
     skills_root = root / "skills"
     written: list[str] = []
@@ -191,8 +201,17 @@ def write_skills(root: Path) -> list[str]:
             print(f"  skipped {definition_path.parent.name}: no SKILL.md")
             continue
 
+        plugin_path = definition_path.parent / "PLUGIN.md"
+        plugin_front: dict[str, str] = {}
+        if plugin_path.exists():
+            plugin_front, body = split_frontmatter(plugin_path.read_text(encoding="utf-8"))
+        else:
+            body = body_path.read_text(encoding="utf-8")
+
         name = str(definition.get("name") or definition_path.parent.name)
-        description = str(definition.get("description") or "").strip()
+        description = (
+            plugin_front.get("description") or str(definition.get("description") or "")
+        ).strip()
         if not description:
             print(f"  skipped {name}: definition.json has no description")
             continue
@@ -211,14 +230,55 @@ def write_skills(root: Path) -> list[str]:
         target = skills_root / name
         target.mkdir(parents=True, exist_ok=True)
         (target / "SKILL.md").write_text(
-            "---\n"
-            + "\n".join(front)
-            + "\n---\n\n"
-            + body_path.read_text(encoding="utf-8").strip()
-            + "\n"
+            "---\n" + "\n".join(front) + "\n---\n\n" + body.strip() + "\n"
         )
         written.append(name)
+    written.extend(write_plugin_skills(skills_root))
     return written
+
+
+#: Skills that exist only for plugin clients (FORGE-533). They drive the MCP
+#: tools across several disciplines, so they have no domain agent, handler
+#: or ``definition.json``; each ``SKILL.md`` carries its own frontmatter and
+#: ships verbatim.
+PLUGIN_SKILLS = REPO / "mcp_core" / "plugin_skills"
+
+
+def write_plugin_skills(skills_root: Path) -> list[str]:
+    written: list[str] = []
+    for source in sorted(PLUGIN_SKILLS.glob("*/SKILL.md")):
+        front, _body = split_frontmatter(source.read_text(encoding="utf-8"))
+        name = front.get("name", "")
+        if name != source.parent.name or not front.get("description"):
+            # A plugin skill whose name and folder disagree is one a harness
+            # loads under a different name than its docs use; refuse it here
+            # rather than shipping something that fails on install.
+            raise SystemExit(
+                f"{source}: frontmatter needs a description and a name matching its folder"
+            )
+        target = skills_root / name
+        target.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target / "SKILL.md")
+        written.append(name)
+    return written
+
+
+def split_frontmatter(text: str) -> tuple[dict[str, str], str]:
+    """``(fields, body)`` for a markdown file that may open with ``---``.
+
+    Only flat ``key: value`` lines are read; that is all these files use.
+    """
+    if not text.startswith("---\n"):
+        return {}, text
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return {}, text
+    fields: dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        key, sep, value = line.partition(":")
+        if sep and key.strip():
+            fields[key.strip()] = value.strip().strip('"')
+    return fields, text[end + 5 :]
 
 
 def _one_line(text: str) -> str:
