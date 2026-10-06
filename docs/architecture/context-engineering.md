@@ -504,7 +504,7 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   Both engines use it on every retry and rework. The gate decision closes the
   phase's drafts first (`decide_run_gate`, FORGE-525: `abandoned` on a retry
   or rework), then `phase_revision_notes` reads the drafts of that phase in the
-  run's change set from the latest close (`closed_phase_revisions`), so a third
+  run's change set from the latest close (`closed_phase_revisions`, which includes items with no head yet, so a new item the gate turned down is reported too), so a third
   attempt hears about the second attempt's work only. The gate's reason is its
   findings, else the reviewer's reason; a `rejected` revision keeps its own
   verdict. In-process, `DesignFlowExecutor(revision_notes=...)` calls the

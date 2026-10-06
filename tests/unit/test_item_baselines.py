@@ -240,6 +240,25 @@ class TestCurrentView:
         ]
         assert view.counts["drafts"] == 2
 
+    async def test_an_item_whose_only_revisions_were_closed_is_not_listed(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        # Live (shelf run): a retry abandoned two new need items; they showed as
+        # 'draft' rows with no revision, although nothing was open.
+        from mcp_core.context import McpCallContext, with_context
+        from twin_core.items import close_change_set
+
+        await _part(twin, "Bracket", "a")
+        with with_context(McpCallContext(actor_id="svc", run_id="run-x", phase="design")):
+            await _part(twin, "Spacer", "s")
+        open_view = await build_current_view(twin, PROJECT)
+        assert "CAD-SPACER" in {r["key"] for r in open_view.items}  # an open draft shows
+
+        await close_change_set(twin, "run-x", status="abandoned", reason="retried")
+        view = await build_current_view(twin, PROJECT)
+        assert [r["key"] for r in view.items] == ["CAD-BRACKET"]
+        assert view.counts["drafts"] == 0
+
     async def test_out_of_date_results(self, twin: InMemoryTwinAPI) -> None:
         v1 = await _part(twin, "Bracket", "a")
         old = await _sim_result(twin, "FEA v1", v1["node_id"])
