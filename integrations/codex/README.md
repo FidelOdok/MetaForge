@@ -35,7 +35,7 @@ rather than by eyeballing `/plugins`:
   with `marketplaceLoadErrors: []` — the manifest parses, `installPolicy`
   and `authPolicy` survive, and every `interface` field lands where the
   curated plugins put theirs.
-- `plugin/read` resolves all 31 skills and `mcpServers: ["metaforge"]`.
+- `plugin/read` resolves all 43 skills and `mcpServers: ["metaforge"]`.
 - `plugin/install` succeeds and writes `[plugins."metaforge@metaforge"]`
   into `~/.codex/config.toml`.
 - Codex connects to the MCP server itself: its client logs
@@ -70,5 +70,5 @@ published spec, so a Codex upgrade can move it.
 
 ## Skills
 
-31 engineering skills are bundled. Codex prefixes a plugin's
+43 engineering skills are bundled. Codex prefixes a plugin's
 skills with its name, so they appear as `metaforge:<skill>`.

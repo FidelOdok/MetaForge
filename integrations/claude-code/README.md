@@ -20,12 +20,23 @@ Claude Code asks for your gateway URL on first enable. The default suits a gatew
 - `/metaforge:design`
 - `/metaforge:fea`
 - `/metaforge:flow`
+- `/metaforge:verify`
+- `/metaforge:replan`
 - `/metaforge:gate`
 - `/metaforge:doctor`
 
 ## Skills
 
-31 engineering skills are bundled — the same procedures the MetaForge agents follow, with their metadata taken from each skill's `definition.json`.
+32 skills are bundled: the engineering skills MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), `intent-to-verified-design` (the lifecycle procedure) and `workflow-lifecycle` (the reasoning contract).
+
+## Agents
+
+- `metaforge-flow-planner`
+- `metaforge-run-verifier`
+
+## Hooks
+
+PostToolUse, SessionStart: the working rules at session start, and a reminder when a flow proposal or patch is held for a person. Python 3 on the PATH; `METAFORGE_PLUGIN_HOOKS=off` disables them.
 
 ## Writes wait for a human
 

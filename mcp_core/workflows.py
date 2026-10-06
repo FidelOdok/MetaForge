@@ -163,6 +163,39 @@ WORKFLOWS: dict[str, tuple[str, str]] = {
         "`metaforge://flow/run/<run_id>`. A phase reading `unknown` means its "
         "state could not be read -- say unknown, never 'not started yet'.",
     ),
+    "verify": (
+        "Check whether a design run achieved what was asked",
+        "Decide whether a design run actually satisfied its intent (FORGE-539).\n\n"
+        "Call `flow.lifecycle` with the run id (or `flow.verify_completion` where "
+        "it is served). Its `completion.classification` is the verdict, and only "
+        "`COMPLETED_VERIFIED` means the intent is satisfied: every mandatory "
+        "requirement passes with current evidence, no result is stale, every "
+        "phase's objective was met and no blocking gap remains.\n\n"
+        "`PARTIALLY_COMPLETED` means the phases finished and the intent did NOT. "
+        "Never report that as done: list `unmet_requirements`, the phases whose "
+        "`validity` is STALE or POTENTIALLY_INVALID, and the blocking gaps, and "
+        "say what would close each one. `COMPLETED_WITH_WARNINGS` passed, with the "
+        "warnings as real limits of the result. Read `limits`: anything listed "
+        "there was not checked. Then do what `next_step` says.",
+    ),
+    "replan": (
+        "Change a running design flow without starting again",
+        "Apply new information to a running design flow (FORGE-539).\n\n"
+        "Read the run with `flow.status` and note its `flowContentHash`. Decide "
+        "what the new information changes: phases whose results it makes wrong "
+        "go in `invalidate` (a heavier payload invalidates the mechanical design, "
+        "not the electronics); a different structure goes in `operations` (the "
+        "same closed set as `flow.propose`). Ask the user for any value you were "
+        "not given rather than assuming it.\n\n"
+        "Call `flow.patch` with `action: propose`, the run id, the hash as "
+        "`expected_content_hash` and a `reason`. It returns what re-runs and what "
+        "is kept, and an approval id. **Stop there**: the patch is held for a "
+        "person, you cannot approve it and no tool would let you. A refusal that "
+        "says the patch is stale means the run moved on; read it again and write "
+        "a new patch. Once the user says it was approved, call `flow.patch` with "
+        "`action: apply` and the `version_id`; it takes effect at the run's next "
+        "gate.",
+    ),
     "gate": (
         "Review a maturity gate",
         "Review whether the active project can be promoted.\n\n"

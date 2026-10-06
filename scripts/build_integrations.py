@@ -258,8 +258,11 @@ def write_plugin_skills(skills_root: Path) -> list[str]:
                 f"{source}: frontmatter needs a description and a name matching its folder"
             )
         target = skills_root / name
-        target.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target / "SKILL.md")
+        if target.exists():
+            shutil.rmtree(target)
+        # The whole folder: a skill may carry references it links to
+        # (workflow-lifecycle's contract), and a dangling link is a broken skill.
+        shutil.copytree(source.parent, target, ignore=shutil.ignore_patterns("__pycache__"))
         written.append(name)
     return written
 
@@ -293,6 +296,60 @@ def _one_line(text: str) -> str:
     )
 
 
+#: FORGE-539: lifecycle hooks and subagents the Claude Code packages ship.
+PLUGIN_HOOKS = REPO / "mcp_core" / "plugin_hooks"
+PLUGIN_AGENTS = REPO / "mcp_core" / "plugin_agents"
+
+
+def write_hooks(root: Path) -> list[str]:
+    """``hooks/hooks.json`` plus the script it runs (Claude Code only).
+
+    The standard location, not a manifest field: Claude Code loads
+    ``hooks/hooks.json`` by itself, and naming it in the manifest as well
+    loads it twice.
+    """
+    target = root / "hooks"
+    target.mkdir(parents=True, exist_ok=True)
+    events: list[str] = []
+    for name in ("hooks.json", "metaforge_hook.py"):
+        shutil.copyfile(PLUGIN_HOOKS / name, target / name)
+    config = json.loads((PLUGIN_HOOKS / "hooks.json").read_text(encoding="utf-8"))
+    events.extend(sorted(config.get("hooks", {})))
+    return events
+
+
+def write_agents(root: Path) -> list[str]:
+    """Plugin subagents (Claude Code only): ``agents/<name>.md``."""
+    target = root / "agents"
+    target.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    for source in sorted(PLUGIN_AGENTS.glob("*.md")):
+        shutil.copyfile(source, target / source.name)
+        written.append(source.stem)
+    return written
+
+
+def write_workflow_skills(skills_root: Path) -> list[str]:
+    """Each curated workflow as a skill, for a harness with no slash commands.
+
+    Codex has no command surface, so ``/metaforge:flow`` and the rest were
+    simply absent there (FORGE-533 P6). The same instruction text ships as a
+    ``<name>-workflow`` skill whose description says when to use it.
+    """
+    written: list[str] = []
+    for name, (description, body) in WORKFLOWS.items():
+        skill = f"{name}-workflow"
+        target = skills_root / skill
+        target.mkdir(parents=True, exist_ok=True)
+        when = description[0].lower() + description[1:]
+        summary = _one_line(f"{description} in MetaForge. Use when the user asks to {when}.")
+        (target / "SKILL.md").write_text(
+            f"---\nname: {skill}\ndescription: {summary}\n---\n\n# {description}\n\n{body}\n"
+        )
+        written.append(skill)
+    return written
+
+
 def write_commands(root: Path) -> list[str]:
     commands = root / "commands"
     commands.mkdir(parents=True, exist_ok=True)
@@ -314,7 +371,12 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
     commands = write_commands(root)
     skills = write_skills(root)
-    print(f"  {len(skills)} skill(s), {len(commands)} command(s)")
+    hooks = write_hooks(root)
+    agents = write_agents(root)
+    print(
+        f"  {len(skills)} skill(s), {len(commands)} command(s), "
+        f"{len(hooks)} hook event(s), {len(agents)} agent(s)"
+    )
 
     (root / "README.md").write_text(
         "# MetaForge for Claude Code\n\n"
@@ -326,9 +388,15 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
         "suits a gateway running on your own machine; a team or hosted gateway "
         "is the same package with a different URL.\n\n"
         "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
-        f"## Skills\n\n{len(skills)} engineering skills are bundled — the same "
-        "procedures the MetaForge agents follow, with their metadata taken "
-        "from each skill's `definition.json`.\n\n"
+        f"## Skills\n\n{len(skills)} skills are bundled: the engineering skills "
+        "MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), "
+        "`intent-to-verified-design` (the lifecycle procedure) and "
+        "`workflow-lifecycle` (the reasoning contract).\n\n"
+        "## Agents\n\n" + "\n".join(f"- `{a}`" for a in agents) + "\n\n"
+        "## Hooks\n\n"
+        f"{', '.join(hooks)}: the working rules at session start, and a reminder when a "
+        "flow proposal or patch is held for a person. Python 3 on the PATH; "
+        "`METAFORGE_PLUGIN_HOOKS=off` disables them.\n\n"
         "## Writes wait for a human\n\n"
         "A tool that writes is held for approval when the gateway sees you as a "
         "remote caller. Held calls appear on the dashboard's Approvals page. A "
@@ -407,7 +475,12 @@ def build_claude_code_local() -> Path:
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
     commands = write_commands(root)
     skills = write_skills(root)
-    print(f"  {len(skills)} skill(s), {len(commands)} command(s)")
+    hooks = write_hooks(root)
+    agents = write_agents(root)
+    print(
+        f"  {len(skills)} skill(s), {len(commands)} command(s), "
+        f"{len(hooks)} hook event(s), {len(agents)} agent(s)"
+    )
 
     (root / "README.md").write_text(
         "# MetaForge for Claude Code — local\n\n"
@@ -618,6 +691,9 @@ def build_codex(*, default_gateway_url: str) -> Path:
     )
 
     skills = write_skills(root)
+    # FORGE-539: Codex has no slash commands and no plugin hooks, so the
+    # workflows ship as skills and the session rules live in AGENTS.md.
+    skills += write_workflow_skills(root / "skills")
 
     (root / "README.md").write_text(
         "# MetaForge for Codex\n\n"
