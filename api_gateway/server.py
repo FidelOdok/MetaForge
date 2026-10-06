@@ -1290,6 +1290,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         item_history_reader=make_item_history_reader(twin),
     )
     app.state.tool_registry = tool_registry
+    # FORGE-539: the capability report reads the live registry and its health.
+    from api_gateway.design_flows.lifecycle_service import set_tool_registry
+
+    set_tool_registry(tool_registry)
     registry_bridge = RegistryMcpBridge(tool_registry)
     logger.info(
         "tool_registry_bootstrapped",

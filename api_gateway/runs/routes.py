@@ -36,6 +36,7 @@ from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_w
 from api_gateway.twin.baseline import create_item_baseline
 from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector
+from observability.tracing import get_tracer
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
 from orchestrator.design_flow.frozen import freeze_flow
 from orchestrator.design_flow.graph import build_graph, rework_candidates
@@ -70,6 +71,7 @@ from orchestrator.harness.runs import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/runs", tags=["runs"])
+tracer = get_tracer("api_gateway.runs.routes")
 
 # Process-local store + SSE manager + gate coordinator (mirrors the chat backend
 # pattern). The store notifies BOTH the SSE stream and the gate coordinator so a
@@ -1497,3 +1499,111 @@ async def decide_run_gate(
         approver_verified=approver.verified,
     )
     return run
+
+
+# ---------------------------------------------------------------------------
+# FORGE-539: the lifecycle view and the completion verdict
+# ---------------------------------------------------------------------------
+
+
+class RunLifecycleResponse(BaseModel):
+    """Where a design run stands, as separate answers per phase, plus a verdict.
+
+    ``lifecycle`` holds the per-phase execution, eligibility, validity and
+    objective status, the capability gaps, the requirement statuses and the
+    completion verdict (``COMPLETED_VERIFIED`` only when every mandatory
+    requirement passes with current evidence). ``limits`` lists anything that
+    could not be read; an empty list means nothing was skipped.
+    """
+
+    runId: str  # noqa: N815
+    live: bool
+    limits: list[str] = Field(default_factory=list)
+    lifecycle: dict[str, Any] = Field(default_factory=dict)
+
+
+def _in_process_state(run: Run) -> dict[str, Any]:
+    """The in-process engine's run record, shaped like the Temporal ``state`` query."""
+    result = run.result if isinstance(run.result, dict) else {}
+    status = str(getattr(run.status, "value", run.status))
+    return {
+        "status": "awaiting_approval" if status == "awaiting_approval" else status,
+        "completed": [
+            {"phase": str(p.get("id")), "status": str(p.get("status") or "completed")}
+            for p in result.get("phases") or []
+        ],
+        "skipped": list(result.get("skipped") or []),
+        "error": run.error,
+        "mode": "graph" if result.get("skipped") is not None else "linear",
+    }
+
+
+@router.get("/{run_id}/lifecycle", response_model=RunLifecycleResponse)
+async def get_run_lifecycle(run_id: str) -> RunLifecycleResponse:
+    """The lifecycle view of one design run, with its completion verdict."""
+    from api_gateway.design_flows.lifecycle_service import (
+        capability_report,
+        requirement_rows,
+        stale_items_for_run,
+    )
+    from orchestrator.design_flow.lifecycle import lifecycle_view
+
+    try:
+        run = _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    if not _is_design_flow(run.request):
+        raise HTTPException(status_code=422, detail="this run is not a design flow")
+    definition = _run_definition(run)
+    if definition is None:
+        raise HTTPException(status_code=409, detail="the run's flow version could not be read back")
+
+    limits: list[str] = []
+    live = True
+    with tracer.start_as_current_span("runs.lifecycle") as span:
+        span.set_attribute("run.id", run_id)
+        if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+            state = _in_process_state(run)
+        else:
+            try:
+                launcher = await get_flow_launcher()
+                state = await launcher.state(run_id)
+            except Exception as exc:  # noqa: BLE001 - a view reports, it does not raise
+                live = False
+                limits.append(
+                    f"the workflow could not be queried ({exc}); phase state is from the run "
+                    "record and may be behind"
+                )
+                state = _in_process_state(run)
+
+        project_id = run.request.get("project_id")
+        twin = None
+        try:
+            from api_gateway.twin.routes import get_twin
+
+            twin = get_twin()
+        except Exception as exc:  # noqa: BLE001
+            limits.append(f"the twin is not available ({exc})")
+        stale, stale_limit = await stale_items_for_run(twin, run_id, project_id)
+        requirements, req_limit = await requirement_rows(twin, project_id)
+        capabilities = await capability_report(definition.phases)
+        limits.extend(x for x in (stale_limit, req_limit) if x)
+        limits.extend(capabilities.limits)
+
+        view = lifecycle_view(
+            definition.phases,
+            state,
+            stale_item_keys=stale,
+            requirements=requirements,
+            gaps=[g.as_dict() for g in capabilities.gaps],
+        )
+        span.set_attribute("lifecycle.completion", view.completion.classification.value)
+    logger.info(
+        "design_flow_lifecycle_read",
+        run_id=run_id,
+        completion=view.completion.classification.value,
+        stale=len(stale),
+        requirements=len(requirements),
+        limits=len(limits),
+    )
+    return RunLifecycleResponse(runId=run_id, live=live, limits=limits, lifecycle=view.as_dict())

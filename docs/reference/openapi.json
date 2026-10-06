@@ -1729,6 +1729,48 @@
         "title": "Candidate",
         "type": "object"
       },
+      "CapabilityView": {
+        "description": "Per-phase tool coverage and the gap register for one flow.",
+        "properties": {
+          "flowId": {
+            "title": "Flowid",
+            "type": "string"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "report": {
+            "additionalProperties": true,
+            "title": "Report",
+            "type": "object"
+          },
+          "versionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versionid"
+          }
+        },
+        "required": [
+          "flowId",
+          "report"
+        ],
+        "title": "CapabilityView",
+        "type": "object"
+      },
       "ChangeStatus": {
         "description": "Lifecycle states for a design-change proposal.",
         "enum": [
@@ -3423,6 +3465,18 @@
             "title": "Description",
             "type": "string"
           },
+          "graph": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -3550,6 +3604,31 @@
       },
       "EditPhase": {
         "properties": {
+          "condition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Condition"
+          },
+          "dependsOn": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependson"
+          },
           "disciplines": {
             "items": {
               "type": "string"
@@ -3596,6 +3675,11 @@
           },
           "objective": {
             "title": "Objective",
+            "type": "string"
+          },
+          "outcome": {
+            "default": "",
+            "title": "Outcome",
             "type": "string"
           },
           "requiredDeliverables": {
@@ -4279,6 +4363,18 @@
             "title": "Baseversion",
             "type": "string"
           },
+          "capabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capabilities"
+          },
           "changes": {
             "items": {
               "$ref": "#/components/schemas/FlowChangeView"
@@ -4302,6 +4398,18 @@
           "intent": {
             "title": "Intent",
             "type": "string"
+          },
+          "intentModel": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intentmodel"
           },
           "openQuestions": {
             "items": {
@@ -5940,6 +6048,28 @@
         ],
         "title": "InsightStatus",
         "type": "string"
+      },
+      "IntentModelView": {
+        "description": "The structured intent (see ``orchestrator.design_flow.intent``).",
+        "properties": {
+          "intent": {
+            "additionalProperties": true,
+            "title": "Intent",
+            "type": "object"
+          },
+          "missingInputs": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionView"
+            },
+            "title": "Missinginputs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "intent"
+        ],
+        "title": "IntentModelView",
+        "type": "object"
       },
       "InterfaceQuantitySummary": {
         "properties": {
@@ -8405,6 +8535,31 @@
       },
       "PhaseView": {
         "properties": {
+          "condition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Condition"
+          },
+          "dependsOn": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependson"
+          },
           "disciplines": {
             "items": {
               "type": "string"
@@ -8451,6 +8606,11 @@
           },
           "objective": {
             "title": "Objective",
+            "type": "string"
+          },
+          "outcome": {
+            "default": "",
+            "title": "Outcome",
             "type": "string"
           },
           "requiredDeliverables": {
@@ -10327,6 +10487,37 @@
           "baselines"
         ],
         "title": "RunChangesResponse",
+        "type": "object"
+      },
+      "RunLifecycleResponse": {
+        "description": "Where a design run stands, as separate answers per phase, plus a verdict.\n\n``lifecycle`` holds the per-phase execution, eligibility, validity and\nobjective status, the capability gaps, the requirement statuses and the\ncompletion verdict (``COMPLETED_VERIFIED`` only when every mandatory\nrequirement passes with current evidence). ``limits`` lists anything that\ncould not be read; an empty list means nothing was skipped.",
+        "properties": {
+          "lifecycle": {
+            "additionalProperties": true,
+            "title": "Lifecycle",
+            "type": "object"
+          },
+          "limits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limits",
+            "type": "array"
+          },
+          "live": {
+            "title": "Live",
+            "type": "boolean"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "live"
+        ],
+        "title": "RunLifecycleResponse",
         "type": "object"
       },
       "RunListResponse": {
@@ -16429,6 +16620,48 @@
         ]
       }
     },
+    "/v1/design-flows/intent": {
+      "post": {
+        "description": "Compile an intent into its structured model. Stores nothing, starts nothing.\n\nDeterministic: no model call, and no value the person did not state. Use\nit before proposing to see what was understood and what is still unknown.",
+        "operationId": "compile_flow_intent_v1_design_flows_intent_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeFlowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentModelView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compile Flow Intent",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
     "/v1/design-flows/propose": {
       "post": {
         "description": "Tailor a template to a project's intent, and hold it for a human.\n\nThe response carries an ``approvalId``, not a run. FORGE-398's rule is\nthat nothing starts before approval, and the way to make that true is for\nthe endpoint that generates a flow to have no ability to start one.\n\nIf the manufacturing route, target maturity or loads are missing, the\nanswer is ``200`` with ``status: \"needs_input\"`` and the questions to\nanswer -- no flow, no stored version, no held approval (FORGE-463). A\ngenerator that guesses those produces a flow that reads as tailored and\nis not.",
@@ -16615,6 +16848,65 @@
         ]
       }
     },
+    "/v1/design-flows/versions/{version_id}/capabilities": {
+      "get": {
+        "description": "The same assessment for a saved (tailored or edited) flow version.",
+        "operationId": "version_capabilities_v1_design_flows_versions__version_id__capabilities_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Version Capabilities",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
     "/v1/design-flows/{flow_id}": {
       "get": {
         "description": "One flow, for the run detail view and the plan canvas.",
@@ -16653,6 +16945,65 @@
           }
         },
         "summary": "Get Design Flow",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
+    "/v1/design-flows/{flow_id}/capabilities": {
+      "get": {
+        "description": "Can this template be run with the tools that exist and answer right now?\n\n``profile`` narrows coverage to the tools a client connected with that\nMCP profile is served.",
+        "operationId": "flow_capabilities_v1_design_flows__flow_id__capabilities_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "flow_id",
+            "required": true,
+            "schema": {
+              "title": "Flow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Flow Capabilities",
         "tags": [
           "design-flows"
         ]
@@ -19086,6 +19437,49 @@
           }
         },
         "summary": "Gate Opened",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/lifecycle": {
+      "get": {
+        "description": "The lifecycle view of one design run, with its completion verdict.",
+        "operationId": "get_run_lifecycle_v1_runs__run_id__lifecycle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunLifecycleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Lifecycle",
         "tags": [
           "runs"
         ]

@@ -20,12 +20,13 @@ wizard needs to say what a flow will actually demand.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import structlog
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import AliasChoices, BaseModel, Field
 
+from api_gateway.design_flows.lifecycle_service import capability_report
 from observability.tracing import get_tracer
 from orchestrator.design_flow.context import (
     ClarifyingQuestion,
@@ -36,6 +37,7 @@ from orchestrator.design_flow.context import (
     missing_inputs,
 )
 from orchestrator.design_flow.generator import FlowProposal, TailoringError
+from orchestrator.design_flow.intent import compile_intent
 from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
 from orchestrator.design_flow.slots import effective_slots, is_derived
 from orchestrator.design_flow.spec import (
@@ -96,6 +98,11 @@ class PhaseView(BaseModel):
     #: FORGE-524: the items this phase writes and their keys. Frozen into a
     #: saved version; derived the same way for a template.
     slots: list[SlotView] = Field(default_factory=list)
+    #: FORGE-539: the phases this one needs (null = the phase before it), a
+    #: run condition over the flow's facts, and the outcome it establishes.
+    dependsOn: list[str] | None = None  # noqa: N815
+    condition: str | None = None
+    outcome: str = ""
 
 
 class DesignFlowView(BaseModel):
@@ -118,6 +125,19 @@ class DesignFlowView(BaseModel):
     #: wrong, and the person picking it has no way to tell which.
     valid: bool = True
     violations: list[str] = Field(default_factory=list)
+    #: FORGE-539: the dependency graph: edges, parallel waves, conditions, and
+    #: whether it is the plain straight line. Null when the graph is invalid
+    #: (the violations say why).
+    graph: dict[str, Any] | None = None
+
+
+def _graph_dict(definition: Any) -> dict[str, Any] | None:
+    from orchestrator.design_flow.graph import ConditionError, GraphError, build_graph
+
+    try:
+        return build_graph(definition.phases).as_dict()
+    except (GraphError, ConditionError):
+        return None
 
 
 class DesignFlowListResponse(BaseModel):
@@ -139,6 +159,7 @@ def _to_view(flow_id: str) -> DesignFlowView:
         valid=result.ok,
         violations=[str(v) for v in result.violations],
         phases=[_phase_view(phase) for phase in definition.phases],
+        graph=_graph_dict(definition),
     )
 
 
@@ -162,6 +183,11 @@ def _phase_view(phase: object) -> PhaseView:
             )
             for s in effective_slots(phase)  # type: ignore[arg-type]
         ],
+        dependsOn=(
+            None if getattr(phase, "depends_on", None) is None else list(phase.depends_on)  # type: ignore[attr-defined]
+        ),
+        condition=getattr(phase, "condition", None) or None,
+        outcome=str(getattr(phase, "outcome", "") or ""),
         gate=(
             None
             if gate is None
@@ -393,6 +419,12 @@ class FlowProposalView(BaseModel):
     generatedBy: GeneratedByView | None = None  # noqa: N815
     #: Set instead of ``generatedBy`` when the caller supplied the operations.
     proposedBy: dict[str, str | None] | None = None  # noqa: N815
+    #: FORGE-539: the structured intent this proposal was made for (goal,
+    #: outcomes, classified constraints, success criteria, unknowns).
+    intentModel: dict[str, Any] | None = None  # noqa: N815
+    #: FORGE-539: whether the tools exist to do it: per-phase coverage and
+    #: the gap register, with a READY / READY_WITH_WARNINGS / BLOCKED status.
+    capabilities: dict[str, Any] | None = None
 
 
 def _generated_by(proposal: FlowProposal) -> dict[str, str | None] | None:
@@ -448,6 +480,7 @@ def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) ->
             valid=proposal.valid,
             violations=[str(v) for v in proposal.validation.violations],
             phases=[_phase_view(phase) for phase in definition.phases],
+            graph=_graph_dict(definition),
         ),
     )
 
@@ -556,6 +589,21 @@ async def propose_flow(
         logger.warning("flow_proposal_invalid", error=str(exc))
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # FORGE-539: what the proposal is for, and whether it can be done. Both go
+    # to the approver: a gap the server already knows about must not be found
+    # by the run, hours in, at a gate.
+    intent_model = compile_intent(
+        proposal.intent or body.intent,
+        context=context,
+        requirements=list(body.requirements or []),
+        questions=list(proposal.open_questions),
+        assumptions=list(proposal.assumptions),
+        template_deliverables=list(
+            dict.fromkeys(d for ph in proposal.definition.phases for d in ph.required_deliverables)
+        ),
+    )
+    capabilities = await capability_report(proposal.definition.phases)
+
     store = get_approval_store()
     run = store.create(
         {
@@ -574,6 +622,9 @@ async def propose_flow(
             "generated_by": _generated_by(proposal),
             # FORGE-481: set when the caller's model wrote the operations.
             "proposed_by": proposal.proposed_by.as_dict() if proposal.proposed_by else None,
+            # FORGE-539: readiness and the gaps behind it, for the approver.
+            "capability_status": capabilities.status,
+            "capability_gaps": [g.as_dict() for g in capabilities.gaps][:20],
         }
     )
     store.start(run.id)
@@ -593,7 +644,10 @@ async def propose_flow(
         generated_by=_generated_by(proposal),
     )
     version = version_store.attach_approval(version.id, run.id)
-    return _proposal_view(proposal, run.id, version.id)
+    view = _proposal_view(proposal, run.id, version.id)
+    view.intentModel = intent_model.as_dict()
+    view.capabilities = capabilities.as_dict()
+    return view
 
 
 async def _needs_input(
@@ -676,6 +730,10 @@ class EditPhase(BaseModel):
     #: FORGE-524: items the phase declares. ``itemKey`` is optional; the
     #: server binds a missing one when the version is saved.
     slots: list[EditSlot] = Field(default_factory=list)
+    #: FORGE-539: graph fields, as on :class:`PhaseView`.
+    dependsOn: list[str] | None = None  # noqa: N815
+    condition: str | None = None
+    outcome: str = ""
 
 
 class EditFlowRequest(BaseModel):
@@ -731,6 +789,9 @@ def _definition_from(body: EditFlowRequest) -> FlowDefinition:
                     for s in p.slots
                     if not s.derived
                 ),
+                depends_on=None if p.dependsOn is None else tuple(p.dependsOn),
+                condition=p.condition or None,
+                outcome=p.outcome,
                 gate=(
                     None
                     if p.gate is None
@@ -858,4 +919,104 @@ def _version_view(version: FlowVersion) -> FlowVersionView:
             violations=[str(v) for v in result.violations],
             phases=[_phase_view(phase) for phase in definition.phases],
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# FORGE-539: intent compilation and capability coverage
+# ---------------------------------------------------------------------------
+
+
+class IntentModelView(BaseModel):
+    """The structured intent (see ``orchestrator.design_flow.intent``)."""
+
+    intent: dict[str, Any]
+    #: The required questions still unanswered, as ``flow.propose`` would ask.
+    missingInputs: list[QuestionView] = Field(default_factory=list)  # noqa: N815
+
+
+@router.post("/intent", response_model=IntentModelView)
+def compile_flow_intent(body: ProposeFlowRequest) -> IntentModelView:
+    """Compile an intent into its structured model. Stores nothing, starts nothing.
+
+    Deterministic: no model call, and no value the person did not state. Use
+    it before proposing to see what was understood and what is still unknown.
+    """
+    if not body.intent.strip():
+        raise HTTPException(status_code=400, detail="intent is required")
+    with tracer.start_as_current_span("design_flows.compile_intent") as span:
+        context = body.flow_context()
+        missing = missing_inputs(context)
+        template = body.template if body.template in FLOWS else None
+        model = compile_intent(
+            body.intent.strip(),
+            context=context,
+            requirements=list(body.requirements or []),
+            questions=missing,
+            template_deliverables=(
+                [d for ph in get_flow(template).phases for d in ph.required_deliverables]
+                if template
+                else []
+            ),
+        )
+        span.set_attribute("intent.goal", model.goal_type.value)
+        span.set_attribute("intent.ready_to_plan", model.ready_to_plan)
+    logger.info(
+        "design_flow_intent_compiled",
+        goal=model.goal_type.value,
+        constraints=len(model.constraints),
+        criteria=len(model.success_criteria),
+        blocking_unknowns=len(model.blocking_unknowns),
+    )
+    return IntentModelView(
+        intent=model.as_dict(), missingInputs=[_question_view(q) for q in missing]
+    )
+
+
+class CapabilityView(BaseModel):
+    """Per-phase tool coverage and the gap register for one flow."""
+
+    flowId: str  # noqa: N815
+    versionId: str | None = None  # noqa: N815
+    profile: str | None = None
+    report: dict[str, Any]
+
+
+def _served(profile: str | None) -> set[str] | None:
+    if not profile:
+        return None
+    from mcp_core.profiles import UnknownProfileError, tools_for_profile
+
+    try:
+        return set(tools_for_profile(profile))
+    except UnknownProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{flow_id}/capabilities", response_model=CapabilityView)
+async def flow_capabilities(flow_id: str, profile: str | None = None) -> CapabilityView:
+    """Can this template be run with the tools that exist and answer right now?
+
+    ``profile`` narrows coverage to the tools a client connected with that
+    MCP profile is served.
+    """
+    if flow_id not in FLOWS:
+        raise HTTPException(status_code=404, detail=f"unknown template '{flow_id}'")
+    report = await capability_report(get_flow(flow_id).phases, served=_served(profile))
+    return CapabilityView(flowId=flow_id, profile=profile, report=report.as_dict())
+
+
+@router.get("/versions/{version_id}/capabilities", response_model=CapabilityView)
+async def version_capabilities(version_id: str, profile: str | None = None) -> CapabilityView:
+    """The same assessment for a saved (tailored or edited) flow version."""
+    try:
+        version = get_version_store().get(version_id)
+    except VersionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    report = await capability_report(version.definition.phases, served=_served(profile))
+    return CapabilityView(
+        flowId=version.base_template_id,
+        versionId=version_id,
+        profile=profile,
+        report=report.as_dict(),
     )
