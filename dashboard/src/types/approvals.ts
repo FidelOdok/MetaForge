@@ -4,6 +4,7 @@ export type ApprovalKind =
   | 'gate'
   | 'flow_proposal'
   | 'flow_version'
+  | 'flow_patch'
   | 'tool_call'
   | 'human_authority'
   | 'design_change'
