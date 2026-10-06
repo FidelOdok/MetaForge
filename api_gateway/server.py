@@ -35,7 +35,10 @@ from api_gateway.component_selection.routes import router as component_selection
 from api_gateway.constraint.routes import router as constraint_router
 from api_gateway.convert.routes import router as convert_router
 from api_gateway.design_flows.mcp_bindings import (
+    make_capability_reader,
     make_catalogue_reader,
+    make_intent_compiler,
+    make_lifecycle_reader,
     make_proposer,
     make_run_starter,
     make_run_status_reader,
@@ -1253,6 +1256,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
         design_flow_proposer=make_proposer(),
         design_flow_status_reader=make_run_status_reader(),
         design_flow_run_starter=make_run_starter(),
+        # FORGE-539: read-only lifecycle tools; none proposes or approves.
+        design_flow_intent_compiler=make_intent_compiler(),
+        design_flow_capability_reader=make_capability_reader(),
+        design_flow_lifecycle_reader=make_lifecycle_reader(),
         # FORGE-355: the project brief as an MCP resource.
         brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness

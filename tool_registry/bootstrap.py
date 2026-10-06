@@ -284,6 +284,10 @@ async def bootstrap_tool_registry(
     design_flow_proposer: Any = None,
     design_flow_status_reader: Any = None,
     design_flow_run_starter: Any = None,
+    # FORGE-539: the lifecycle readers (intent, capabilities, run lifecycle).
+    design_flow_intent_compiler: Any = None,
+    design_flow_capability_reader: Any = None,
+    design_flow_lifecycle_reader: Any = None,
     brief_provider: Any = None,
     parameter_optimizer: Any = None,
     device_instance_registrar: Any = None,
@@ -655,6 +659,9 @@ async def bootstrap_tool_registry(
                     proposer=design_flow_proposer,
                     run_status_reader=design_flow_status_reader,
                     run_starter=design_flow_run_starter,
+                    intent_compiler=design_flow_intent_compiler,
+                    capability_reader=design_flow_capability_reader,
+                    lifecycle_reader=design_flow_lifecycle_reader,
                 )
                 await registry.register_adapter(flow_server)
                 registered.append("design_flow")

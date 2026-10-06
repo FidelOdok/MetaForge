@@ -1520,6 +1520,36 @@ class RunLifecycleResponse(BaseModel):
     live: bool
     limits: list[str] = Field(default_factory=list)
     lifecycle: dict[str, Any] = Field(default_factory=dict)
+    #: The sentence an agent should act on, written here once so every client
+    #: (dashboard, in-process MCP, remote MCP) says the same thing.
+    nextStep: str = ""  # noqa: N815
+
+
+_NEXT_STEP = {
+    "COMPLETED_VERIFIED": (
+        "Every mandatory requirement passes with current evidence. Report the run as "
+        "verified, with the requirement statuses."
+    ),
+    "COMPLETED_WITH_WARNINGS": (
+        "The run finished and nothing failed, but it is not fully verified: report the "
+        "warnings as limits of the result, not as success."
+    ),
+    "PARTIALLY_COMPLETED": (
+        "The run's phases finished but the intent is NOT satisfied. Do not report it as "
+        "done: list the unmet requirements and stale results, and propose the work that "
+        "would close them (a rework, a new analysis, or a decision the user must make)."
+    ),
+    "BLOCKED": (
+        "A gate found its phase not ready. A person must retry the phase, send the run "
+        "back to an earlier phase, or reject it; report the findings and stop."
+    ),
+    "IN_PROGRESS": "The run is still going. Report where it is; do not poll in a tight loop.",
+    "FAILED": (
+        "The run failed. Report the failure and its class; do not restart it without "
+        "the user asking."
+    ),
+    "CANCELLED": "The run was rejected or cancelled by a reviewer. Report who and why.",
+}
 
 
 def _in_process_state(run: Run) -> dict[str, Any]:
@@ -1606,4 +1636,10 @@ async def get_run_lifecycle(run_id: str) -> RunLifecycleResponse:
         requirements=len(requirements),
         limits=len(limits),
     )
-    return RunLifecycleResponse(runId=run_id, live=live, limits=limits, lifecycle=view.as_dict())
+    return RunLifecycleResponse(
+        runId=run_id,
+        live=live,
+        limits=limits,
+        lifecycle=view.as_dict(),
+        nextStep=_NEXT_STEP[view.completion.classification.value],
+    )

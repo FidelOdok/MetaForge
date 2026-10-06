@@ -10508,6 +10508,11 @@
             "title": "Live",
             "type": "boolean"
           },
+          "nextStep": {
+            "default": "",
+            "title": "Nextstep",
+            "type": "string"
+          },
           "runId": {
             "title": "Runid",
             "type": "string"

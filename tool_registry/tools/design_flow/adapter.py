@@ -52,12 +52,18 @@ class DesignFlowServer(McpToolServer):
         proposer: Any = None,
         run_status_reader: Any = None,
         run_starter: Any = None,
+        intent_compiler: Any = None,
+        capability_reader: Any = None,
+        lifecycle_reader: Any = None,
     ) -> None:
         super().__init__(adapter_id="design_flow", version="0.1.0")
         self._catalogue_reader = catalogue_reader
         self._proposer = proposer
         self._run_status_reader = run_status_reader
         self._run_starter = run_starter
+        self._intent_compiler = intent_compiler
+        self._capability_reader = capability_reader
+        self._lifecycle_reader = lifecycle_reader
 
         if catalogue_reader is not None:
             self._register_list_flows()
@@ -68,6 +74,14 @@ class DesignFlowServer(McpToolServer):
             self._register_run_resource()
         if run_starter is not None:
             self._register_start()
+        # FORGE-539: the lifecycle surface. All read-only: none of these
+        # proposes, approves or starts anything.
+        if intent_compiler is not None:
+            self._register_compile_intent()
+        if capability_reader is not None:
+            self._register_capabilities()
+        if lifecycle_reader is not None:
+            self._register_lifecycle()
 
     # ── tools ────────────────────────────────────────────────────────────
 
@@ -111,8 +125,8 @@ class DesignFlowServer(McpToolServer):
                     "questions -- never answer them yourself -- and call again with "
                     "the answers. 'undecided' (route) and 'unknown' (loads) are "
                     "valid answers.\n\n"
-                    "Optional caller-proposed tailoring: if you supply 'operations' "
-                    "(and optionally 'template'), the server makes NO model call. It "
+                    "Optional caller-proposed tailoring: if you supply 'template' "
+                    "and 'operations' together, the server makes NO model call. It "
                     "applies your operations with the deterministic generator, runs the "
                     "same invariants and holds the same single approval. Operations are "
                     "drop_phase, add_deliverable (value: artifact type), set_disciplines "
@@ -123,7 +137,19 @@ class DesignFlowServer(McpToolServer):
                     "and phase ids. An unknown operation, template or phase, or an "
                     "invariant violation (for example dropping verification with unknown "
                     "loads), is refused with the reason. The required questions still "
-                    "come from the server."
+                    "come from the server.\n\n"
+                    "IMPORTANT (FORGE-539): 'template' WITHOUT 'operations' also skips "
+                    "the server model and means 'use this template unchanged' -- no "
+                    "tailoring at all. To have the server tailor a template you chose, "
+                    "do not send 'template'; to keep it unchanged on purpose, send "
+                    "'operations': [] and say so. Phases may also be tailored with "
+                    "set_dependencies (value: list of phase ids it needs), set_condition "
+                    "(value: e.g. 'route == undecided') and set_outcome (value: one "
+                    "line).\n\n"
+                    "A proposal carries 'intent_model' (what was understood) and "
+                    "'capabilities' (whether the tools exist: READY, "
+                    "READY_WITH_WARNINGS or BLOCKED, with the gaps). Report blocking "
+                    "gaps to the user with the approval id."
                 ),
                 capability="design_flow_write",
                 input_schema={
@@ -272,6 +298,115 @@ class DesignFlowServer(McpToolServer):
             handler=self.start_run,
         )
 
+    def _register_compile_intent(self) -> None:
+        context_props = {
+            "intent": {"type": "string", "description": "What the user asked for."},
+            "requirements": {"type": "array", "items": {"type": "string"}},
+            "manufacturing_context": {"type": "object"},
+            "target_maturity": {"type": "string"},
+            "loads_and_use": {"type": "string"},
+            "budget": {"type": "string"},
+            "template": {"type": "string", "description": "Template id, to list its deliverables."},
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="flow.compile_intent",
+                adapter_id="design_flow",
+                name="Compile an intent",
+                description=(
+                    "Turn what the user asked for into a structured intent, BEFORE "
+                    "proposing a flow: the goal and what it is about, the immediate "
+                    "request versus the objective behind it, constraints sorted by kind, "
+                    "measurable success criteria (directed quantities with units), "
+                    "preferences, assumptions, and unknowns marked blocking or not. "
+                    "Deterministic: no model call, nothing stored, and no value appears "
+                    "that the user did not state. Ask the user about every blocking "
+                    "unknown; never fill one in yourself."
+                ),
+                capability="design_flow_read",
+                input_schema={
+                    "type": "object",
+                    "properties": context_props,
+                    "required": ["intent"],
+                },
+            ),
+            handler=self.compile_intent,
+        )
+
+    def _register_capabilities(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="flow.capabilities",
+                adapter_id="design_flow",
+                name="Check a flow's tool coverage",
+                description=(
+                    "Whether a flow can actually be run with the tools that exist and "
+                    "answer right now. For every deliverable each phase requires or "
+                    "expects: FULL, PARTIAL, UNAVAILABLE or UNKNOWN coverage, and a gap "
+                    "register with severity (BLOCKS_STEP, DEGRADES_CONFIDENCE, "
+                    "REQUIRES_USER_ACTION such as an adapter that is down or a tool not "
+                    "on your profile, REQUIRES_NEW_CAPABILITY) and workarounds. Pass "
+                    "exactly one of 'template' or 'version_id'; 'profile' narrows it to "
+                    "the tools your connection is served. 'limits' lists what was not "
+                    "checked: an unchecked input is not a clean bill of health."
+                ),
+                capability="design_flow_read",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "template": {"type": "string"},
+                        "version_id": {"type": "string"},
+                        "profile": {"type": "string"},
+                    },
+                },
+            ),
+            handler=self.capabilities,
+        )
+
+    def _register_lifecycle(self) -> None:
+        run_schema = {
+            "type": "object",
+            "properties": {"run_id": {"type": "string"}},
+            "required": ["run_id"],
+        }
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="flow.lifecycle",
+                adapter_id="design_flow",
+                name="Design-run lifecycle",
+                description=(
+                    "Where a design run stands, as separate answers per phase: "
+                    "execution_status (did it run), eligibility (can it run now), "
+                    "validity (is its result still current: STALE when an item it "
+                    "recorded was superseded, POTENTIALLY_INVALID downstream of that) "
+                    "and objective_status (did its gate find the objective met), plus "
+                    "capability gaps, the requirement statuses and the completion "
+                    "verdict. Read 'next_step' and do what it says."
+                ),
+                capability="design_flow_read",
+                input_schema=run_schema,
+            ),
+            handler=self.lifecycle,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="flow.verify_completion",
+                adapter_id="design_flow",
+                name="Verify a run satisfied its intent",
+                description=(
+                    "Whether a design run actually achieved what was asked: "
+                    "COMPLETED_VERIFIED only when every mandatory requirement passes with "
+                    "current evidence, no result is stale, every phase's objective was "
+                    "met and no blocking gap remains. A run whose phases all finished "
+                    "while a requirement still fails is PARTIALLY_COMPLETED, never done. "
+                    "Use this before telling the user a design is finished."
+                ),
+                capability="design_flow_read",
+                input_schema=run_schema,
+            ),
+            handler=self.verify_completion,
+        )
+
     # ── handlers ─────────────────────────────────────────────────────────
 
     async def list_flows(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -364,6 +499,62 @@ class DesignFlowServer(McpToolServer):
                 "text": render_run_markdown(state),
             }
         ]
+
+    async def compile_intent(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        intent = str(arguments.get("intent") or "").strip()
+        if not intent:
+            raise ValueError("flow.compile_intent: 'intent' is required")
+        with tracer.start_as_current_span("flow.compile_intent"):
+            result: dict[str, Any] = await self._intent_compiler(
+                intent=intent,
+                requirements=list(arguments.get("requirements") or []),
+                manufacturing_context=arguments.get("manufacturing_context"),
+                target_maturity=arguments.get("target_maturity"),
+                loads_and_use=arguments.get("loads_and_use"),
+                budget=arguments.get("budget"),
+                template=arguments.get("template"),
+            )
+        return result
+
+    async def capabilities(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("flow.capabilities") as span:
+            result: dict[str, Any] = await self._capability_reader(
+                template=arguments.get("template") or None,
+                version_id=arguments.get("version_id") or None,
+                profile=arguments.get("profile") or None,
+            )
+            span.set_attribute("flow.capability_status", str(result.get("status")))
+        return result
+
+    async def lifecycle(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(arguments.get("run_id") or "").strip()
+        if not run_id:
+            raise ValueError("flow.lifecycle: 'run_id' is required")
+        with tracer.start_as_current_span("flow.lifecycle"):
+            result: dict[str, Any] = await self._lifecycle_reader(run_id)
+        return result
+
+    async def verify_completion(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(arguments.get("run_id") or "").strip()
+        if not run_id:
+            raise ValueError("flow.verify_completion: 'run_id' is required")
+        with tracer.start_as_current_span("flow.verify_completion") as span:
+            view: dict[str, Any] = await self._lifecycle_reader(run_id)
+            completion = view.get("completion") or {}
+            span.set_attribute("flow.completion", str(completion.get("classification")))
+        logger.info(
+            "flow_completion_verified_over_mcp",
+            run_id=run_id,
+            classification=completion.get("classification"),
+        )
+        return {
+            "run_id": run_id,
+            "completion": completion,
+            "requirements": view.get("requirements", []),
+            "stale_item_keys": view.get("stale_item_keys", []),
+            "limits": view.get("limits", []),
+            "next_step": view.get("next_step", ""),
+        }
 
 
 def render_run_markdown(state: dict[str, Any]) -> str:

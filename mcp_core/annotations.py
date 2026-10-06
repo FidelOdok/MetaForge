@@ -42,6 +42,12 @@ READ_ONLY: frozenset[str] = frozenset(
         # every poll for a human.
         "flow.list",
         "flow.status",
+        # FORGE-539: the lifecycle readers. Compiling an intent stores nothing,
+        # and coverage, lifecycle and the completion verdict only read.
+        "flow.compile_intent",
+        "flow.capabilities",
+        "flow.lifecycle",
+        "flow.verify_completion",
         # Geometry and model inspection
         "cadquery.get_properties",
         "cadquery.validate_physics_stability",
