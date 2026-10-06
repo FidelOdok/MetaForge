@@ -136,9 +136,11 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 "type": "string",
                 "title": "Tool profile",
                 "description": (
-                    "Which tool set to load: core (project, twin reads, decisions), "
-                    "mechanical, simulation, electronics or robotics. Each is 25-30 "
-                    "tools. Leave as core unless you are working in one discipline; "
+                    "Which tool set to load: core (project, twin reads, decisions, "
+                    "flows), mechanical (stateless CAD), mechanical_product (CAD "
+                    "authored in a FreeCAD session), simulation, electronics or "
+                    "robotics. Each is 25-40 tools. Leave as core unless you are "
+                    "working in one discipline; "
                     "every profile includes health.check so /metaforge:doctor always "
                     "works. Clear it to load everything, which some harnesses will "
                     "truncate without saying so."
@@ -217,13 +219,12 @@ def write_skills(root: Path) -> list[str]:
             continue
 
         domain = str(definition.get("domain") or "").strip()
-        tools = [
-            t.get("tool_id") for t in definition.get("tools_required") or [] if t.get("tool_id")
-        ]
 
+        # FORGE-533: no `tools:` line. It is not a field any harness reads, and
+        # copied from tools_required it advertised ids no server serves
+        # (spice.run_simulation, distributor_search). The body names the real
+        # tools, and a test checks every one of them.
         front = [f"name: {name}", f"description: {_one_line(description)}"]
-        if tools:
-            front.append("tools: [" + ", ".join(sorted(tools)) + "]")
         if domain:
             front.append(f"domain: {domain}")
 

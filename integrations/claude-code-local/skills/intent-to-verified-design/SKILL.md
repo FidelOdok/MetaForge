@@ -38,9 +38,13 @@ Call `health.check` once at the start.
   | Stage | Tools | Profile that serves them |
   |---|---|---|
   | Project, requirements, flow, decisions | `project.*`, `twin.record_constraint_set`, `flow.*`, `twin.record_decision`, `twin.record_document` | `core` |
-  | Mechanical design | `freecad.*`, `cadquery.*`, `twin.commit_geometry` | `mechanical` |
-  | Simulation and FEA | `calculix.*`, `twin.stage_work_product_file` | `simulation` |
-  | Electronics checks | `kicad.*`, `component.*`, distributor tools | `electronics` |
+  | Mechanical design, stateless (`cadquery.*`, `freecad.create_parametric`) | + `twin.commit_geometry` | `mechanical` |
+  | Mechanical design in a FreeCAD session (`freecad.open_session` ... `freecad.export_model`) | + `twin.commit_geometry` | `mechanical_product` |
+  | Simulation and FEA, including recording the result | `calculix.*`, `twin.stage_work_product_file`, `twin.record_document` | `simulation` |
+  | Electronics checks | `kicad.*`, `component.*`, `distributors.resolve_offers` | `electronics` (recording a report needs `core`) |
+
+  A connection with no profile serves every tool, at the cost of a long
+  list that some clients truncate without saying so.
 
   When a stage needs a tool your list does not have, check the profile before
   concluding anything is broken, and tell the user which profile to connect

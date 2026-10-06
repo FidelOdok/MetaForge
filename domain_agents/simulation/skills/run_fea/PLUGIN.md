@@ -23,9 +23,11 @@ geometry yet (design it first with `generate_cad`).
 
 ## Tools and profile
 
-All of these are served on the **`simulation`** profile. If they are not in
-your tool list, check `health.check` → `profile` before assuming anything is
-broken, and ask the user to connect with `?profile=simulation`.
+Connect with the **`simulation`** profile (`?profile=simulation`). It serves
+every tool below except `calculix.cross_check_cantilever_frequency`, which is
+only served on a connection with no profile; skip that cross-check, or say it
+needs a full connection. If a tool is missing, check `health.check` →
+`profile` before assuming anything is broken.
 
 | Step | Tool |
 |---|---|

@@ -35,7 +35,7 @@
     "tool_profile": {
       "type": "string",
       "title": "Tool profile",
-      "description": "Which tool set to load: core (project, twin reads, decisions), mechanical, simulation, electronics or robotics. Each is 25-30 tools. Leave as core unless you are working in one discipline; every profile includes health.check so /metaforge:doctor always works. Clear it to load everything, which some harnesses will truncate without saying so.",
+      "description": "Which tool set to load: core (project, twin reads, decisions, flows), mechanical (stateless CAD), mechanical_product (CAD authored in a FreeCAD session), simulation, electronics or robotics. Each is 25-40 tools. Leave as core unless you are working in one discipline; every profile includes health.check so /metaforge:doctor always works. Clear it to load everything, which some harnesses will truncate without saying so.",
       "default": "core"
     }
   },

@@ -130,6 +130,14 @@ class TestProfileDefinitions:
         ]
         assert DEFAULT_PROFILE in PROFILES
 
+    def test_a_profile_that_can_solve_can_record_the_answer(self) -> None:
+        # FORGE-533: `simulation` served calculix.run_fea and not the tool
+        # that records a simulation_result, so a plugin client could produce
+        # a stress number and had no way to put it in the twin.
+        for name, tools in PROFILES.items():
+            if tools & {"calculix.run_fea", "calculix.run_thermal"}:
+                assert "twin.record_document" in tools, name
+
     def test_no_profile_names_a_tool_that_does_not_exist(self) -> None:
         # A typo here silently shrinks a profile rather than erroring.
         declared = declared_tool_ids()

@@ -150,7 +150,18 @@ class TestPluginSkills:
         # The bug this exists for: skills told clients to call tools that no
         # adapter registers, and a client reads a skill as the truth.
         registered = _registered_tool_ids()
+        # Namespaces the registry has, plus every one a skill definition
+        # claims as a tool: `spice.run_simulation` belongs to a namespace
+        # nothing registers (the spice adapter is empty), and checking only
+        # registered namespaces let it through. Dotted field paths such as
+        # `field.file` have no tool namespace and are left alone.
         namespaces = {t.split(".", 1)[0] for t in registered}
+        for definition in REPO.glob("domain_agents/*/skills/*/definition.json"):
+            for tool in (
+                json.loads(definition.read_text(encoding="utf-8")).get("tools_required") or []
+            ):
+                if "." in str(tool.get("tool_id") or ""):
+                    namespaces.add(str(tool["tool_id"]).split(".", 1)[0])
         unknown: set[str] = set()
         for root in packages:
             for skill in (root / "skills").glob("*/SKILL.md"):
