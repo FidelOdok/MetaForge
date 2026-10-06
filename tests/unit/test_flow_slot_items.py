@@ -469,6 +469,35 @@ class TestWritesResolveToSlots:
         assert (v1["item_key"], v1["revision"]) == ("CS-REQUIREMENTS", 1)
         assert (v2["item_key"], v2["revision"]) == ("CS-REQUIREMENTS", 2)
 
+    async def test_default_slot_revises_the_projects_existing_singleton(self, twin) -> None:
+        # Live (shelf, after the FORGE-529 migration): the project's requirements
+        # item is CS-WALL-SHELF-DERIVED-MECHANICAL-SIZING-CONSTRAINTS, while the
+        # flow's derived slot key is CS-REQUIREMENTS. A run must revise the real
+        # item, not open a second requirements item beside it.
+        record = make_constraint_recorder(twin, None)
+        c = [{"name": "load", "expression": "True"}]
+        legacy = await record(
+            title="Wall shelf derived mechanical sizing constraints",
+            constraints=c,
+            project_id=PROJECT,
+        )
+        slot = ("constraint_set", "requirements", "CS-REQUIREMENTS")
+        with with_context(_ctx("run-1", slot)):
+            out = await record(title="Shelf requirements", constraints=c, project_id=PROJECT)
+        assert out["item_key"] == legacy["item_key"] != "CS-REQUIREMENTS"
+        assert out["revision"] == 2
+        assert "undeclared_item" not in out
+
+    async def test_default_slot_key_stands_when_the_project_has_two(self, twin) -> None:
+        record = make_constraint_recorder(twin, None)
+        c = [{"name": "load", "expression": "True"}]
+        await record(title="Shelf loads", constraints=c, project_id=PROJECT)
+        await record(title="Shelf finish", constraints=c, project_id=PROJECT)
+        slot = ("constraint_set", "requirements", "CS-REQUIREMENTS")
+        with with_context(_ctx("run-1", slot)):
+            out = await record(title="Shelf requirements", constraints=c, project_id=PROJECT)
+        assert (out["item_key"], out["revision"]) == ("CS-REQUIREMENTS", 1)
+
     async def test_no_slots_is_forge_523_behaviour(self, twin) -> None:
         record = make_geometry_recorder(twin, None)
         with with_context(McpCallContext(run_id="run-1")):

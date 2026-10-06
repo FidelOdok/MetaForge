@@ -837,6 +837,16 @@ id cannot. So the same deliverable in the same project has the same key in
 every version, and a part a run before slots already recorded as
 `CAD-LEFT-BRACKET` is the slot's item from the first slotted run.
 
+A slot of a one-per-project type (`intent`, `constraint_set`, `bom`,
+`assembly`) whose own key names no item yet revises the project's existing
+item of that type when there is exactly one. A project migrated from legacy
+nodes (FORGE-529) keeps its requirements under a key derived from their old
+title, such as `CS-WALL-SHELF-DERIVED-MECHANICAL-SIZING-CONSTRAINTS`; the
+requirements phase's `CS-REQUIREMENTS` slot writes the next revision of that
+item rather than opening a second one. With two or more candidates nothing is
+guessed and the slot key stands. The write counts as the slot's, so it is not
+flagged as undeclared (`flow_slot_bound_to_existing_item` is logged).
+
 **Frozen at save.** `FlowVersionStore.save` binds the *declared* slots
 (`slots.bind_slots` fills in their keys) before freezing, so they and their
 keys are part of the version's content hash and an approval approves them.
