@@ -20,6 +20,11 @@ import { fetchDerivedPrd, fetchNodeFileText } from '../../../api/endpoints/twin'
 import { PreviewHost, hasInlinePreview } from '../PreviewHost';
 import { clearNodeFileTextCache } from '../useNodeFileText';
 
+// Preview engines load lazily (FORGE-531). Under the full suite's load the
+// first render of an engine can take longer than Testing Library's 1 s
+// default, which made these tests fail only when run with everything else.
+const LAZY_ENGINE = { timeout: 5000 };
+
 const mockFetch = vi.mocked(fetchNodeFileText);
 const mockPrd = vi.mocked(fetchDerivedPrd);
 
@@ -72,7 +77,7 @@ describe('PreviewHost: derived prd (FORGE-528)', () => {
     });
     const prd = node({ wp_type: 'prd', format: 'md', item_key: 'PRD-W', item_revision: 1 }, { projectId: 'p1' });
     render(<PreviewHost node={prd} mode="modal" />);
-    const view = await screen.findByTestId('preview-prd');
+    const view = await screen.findByTestId('preview-prd', {}, LAZY_ENGINE);
     expect(view).toHaveAttribute('data-derived', 'true');
     expect(mockPrd).toHaveBeenCalledWith('PRD-W@1', 'p1');
     expect(within(view).getByRole('table')).toBeInTheDocument();
@@ -84,7 +89,7 @@ describe('PreviewHost: derived prd (FORGE-528)', () => {
     mockFetch.mockResolvedValue('Stored prose only.');
     mockPrd.mockRejectedValue(new Error('down'));
     render(<PreviewHost node={node({ wp_type: 'prd', format: 'md', item_key: 'PRD-W', item_revision: 2 })} mode="modal" />);
-    const view = await screen.findByTestId('preview-prd');
+    const view = await screen.findByTestId('preview-prd', {}, LAZY_ENGINE);
     await screen.findByText('Stored prose only.');
     expect(view).toHaveAttribute('data-derived', 'false');
   });
@@ -112,7 +117,7 @@ describe('PreviewHost: tables', () => {
   it('renders a BOM with line items and total quantity', async () => {
     mockFetch.mockResolvedValue('Reference,Value,Qty\n"R1,R2",10k,2\nC1,100n,1\n');
     render(<PreviewHost node={node({ wp_type: 'bom', format: 'csv' })} mode="modal" />);
-    const bom = await screen.findByTestId('preview-bom');
+    const bom = await screen.findByTestId('preview-bom', {}, LAZY_ENGINE);
     expect(within(bom).getByText('Line items').nextSibling?.textContent).toBe('2');
     expect(within(bom).getByText('Total quantity').nextSibling?.textContent).toBe('3');
     expect(within(bom).getByText('R1,R2')).toBeInTheDocument();
@@ -123,7 +128,7 @@ describe('PreviewHost: tables', () => {
       '# Constraint set: Power\n\n## max_current (error, electronics)\nStay under budget.\n**Acceptance criteria:** below 2 A\n**Verification method:** bench test\n```python\nctx.i < 2\n```\n',
     );
     render(<PreviewHost node={node({ wp_type: 'constraint_set', format: 'md' })} mode="modal" />);
-    const req = await screen.findByTestId('preview-requirements');
+    const req = await screen.findByTestId('preview-requirements', {}, LAZY_ENGINE);
     expect(within(req).getByText('1 requirement')).toBeInTheDocument();
     expect(within(req).getByText('max_current')).toBeInTheDocument();
     expect(within(req).getByText('error')).toBeInTheDocument();
@@ -134,7 +139,7 @@ describe('PreviewHost: tables', () => {
   it('falls back to Markdown for a constraint set not in the recorder shape', async () => {
     mockFetch.mockResolvedValue('# Requirements\n\nJust prose.');
     render(<PreviewHost node={node({ wp_type: 'constraint_set', format: 'md' })} mode="modal" />);
-    expect(await screen.findByTestId('preview-markdown')).toBeInTheDocument();
+    expect(await screen.findByTestId('preview-markdown', {}, LAZY_ENGINE)).toBeInTheDocument();
   });
 });
 
@@ -145,7 +150,7 @@ describe('PreviewHost: decision card', () => {
   it('shows title, rationale, alternatives and status', async () => {
     mockFetch.mockResolvedValue(md);
     render(<PreviewHost node={node({ wp_type: 'design_decision', format: 'md' }, { status: 'approved' })} mode="modal" />);
-    const card = await screen.findByTestId('preview-decision');
+    const card = await screen.findByTestId('preview-decision', {}, LAZY_ENGINE);
     expect(within(card).getByRole('heading', { name: 'Use STM32F4' })).toBeInTheDocument();
     expect(within(card).getByText('It has an FPU.')).toBeInTheDocument();
     expect(within(card).getByText('Alternatives considered (1)')).toBeInTheDocument();
@@ -162,7 +167,7 @@ describe('PreviewHost: decision card', () => {
         mode="modal"
       />,
     );
-    const card = await screen.findByTestId('preview-decision');
+    const card = await screen.findByTestId('preview-decision', {}, LAZY_ENGINE);
     expect(within(card).getByRole('heading', { name: 'Pick LDO' })).toBeInTheDocument();
     expect(within(card).getByText('Cheaper part.')).toBeInTheDocument();
     expect(within(card).getByText('No alternatives were recorded.')).toBeInTheDocument();
@@ -173,7 +178,7 @@ describe('PreviewHost: JSON and code', () => {
   it('renders JSON as a collapsible tree', async () => {
     mockFetch.mockResolvedValue(JSON.stringify({ pins: { PA0: 'ADC', PA1: 'UART' }, rev: 2 }));
     render(<PreviewHost node={node({ wp_type: 'pinmap', format: 'json' })} mode="modal" />);
-    const tree = await screen.findByTestId('preview-json');
+    const tree = await screen.findByTestId('preview-json', {}, LAZY_ENGINE);
     expect(within(tree).getByText('"ADC"')).toBeInTheDocument();
     fireEvent.click(within(tree).getByRole('button', { name: /pins/ }));
     expect(within(tree).queryByText('"ADC"')).toBeNull();
@@ -182,13 +187,13 @@ describe('PreviewHost: JSON and code', () => {
   it('shows invalid JSON as text with a warning, not a crash', async () => {
     mockFetch.mockResolvedValue('{not json');
     render(<PreviewHost node={node({ format: 'json' })} mode="modal" />);
-    expect(await screen.findByTestId('preview-json-invalid')).toBeInTheDocument();
+    expect(await screen.findByTestId('preview-json-invalid', {}, LAZY_ENGINE)).toBeInTheDocument();
   });
 
   it('highlights firmware C', async () => {
     mockFetch.mockResolvedValue('#include "main.h"\nint main(void) { return 0; }\n');
     const { container } = render(<PreviewHost node={node({ wp_type: 'firmware_source', format: 'c' })} mode="modal" />);
-    const code = await screen.findByTestId('preview-code');
+    const code = await screen.findByTestId('preview-code', {}, LAZY_ENGINE);
     expect(code).toHaveAttribute('data-language', 'c');
     expect(container.querySelector('[data-token="preproc"]')?.textContent).toBe('#include "main.h"');
     expect(container.querySelector('[data-token="keyword"]')?.textContent).toBe('return');
@@ -199,14 +204,14 @@ describe('PreviewHost: vector engines', () => {
   it('renders a Gerber layer as an image', async () => {
     mockFetch.mockResolvedValue('%FSLAX26Y26*%\n%MOMM*%\n%ADD10C,0.5*%\nD10*\nX0Y0D02*\nX10000000Y0D01*\nM02*');
     render(<PreviewHost node={node({ wp_type: 'gerber', format: 'gtl' }, { name: 'Top copper' })} mode="modal" />);
-    const fig = await screen.findByTestId('preview-gerber');
+    const fig = await screen.findByTestId('preview-gerber', {}, LAZY_ENGINE);
     expect(within(fig).getByRole('img', { name: 'Top copper' }).getAttribute('src')).toMatch(/^data:image\/svg\+xml/);
   });
 
   it('falls back with a download when the Gerber renderer cannot draw it', async () => {
     mockFetch.mockResolvedValue('M02*');
     render(<PreviewHost node={node({ wp_type: 'gerber', format: 'gbr' })} mode="modal" />);
-    const fb = await screen.findByTestId('preview-unavailable');
+    const fb = await screen.findByTestId('preview-unavailable', {}, LAZY_ENGINE);
     expect(fb).toHaveAttribute('data-engine', 'gerber');
     expect(within(fb).getByRole('link', { name: /Download \.gbr/ })).toBeInTheDocument();
   });
@@ -216,7 +221,7 @@ describe('PreviewHost: vector engines', () => {
       ['0', 'SECTION', '2', 'ENTITIES', '0', 'LINE', '8', '0', '10', '0', '20', '0', '11', '10', '21', '5', '0', 'ENDSEC', '0', 'EOF', ''].join('\n'),
     );
     render(<PreviewHost node={node({ wp_type: 'technical_drawing', format: 'dxf' }, { name: 'Gasket' })} mode="modal" />);
-    const fig = await screen.findByTestId('preview-dxf');
+    const fig = await screen.findByTestId('preview-dxf', {}, LAZY_ENGINE);
     expect(within(fig).getByRole('img', { name: 'Gasket' })).toBeInTheDocument();
     expect(within(fig).getByText(/1 entities/)).toBeInTheDocument();
   });
@@ -263,10 +268,10 @@ describe('PreviewHost: fallbacks', () => {
 describe('PreviewHost: 3D, FEA and modes', () => {
   it('sends STEP to the CAD engine and STL to the mesh engine', async () => {
     const { unmount } = render(<PreviewHost node={node({ wp_type: 'cad_model', format: 'step' })} mode="modal" />);
-    expect(await screen.findByTestId('model-preview-stub')).toHaveAttribute('data-engine', 'cad3d');
+    expect(await screen.findByTestId('model-preview-stub', {}, LAZY_ENGINE)).toHaveAttribute('data-engine', 'cad3d');
     unmount();
     render(<PreviewHost node={node({ wp_type: 'cad_model', format: 'stl' })} mode="compact" />);
-    const stub = await screen.findByTestId('model-preview-stub');
+    const stub = await screen.findByTestId('model-preview-stub', {}, LAZY_ENGINE);
     expect(stub).toHaveAttribute('data-engine', 'mesh3d');
     expect(stub).toHaveAttribute('data-format', 'stl');
   });
