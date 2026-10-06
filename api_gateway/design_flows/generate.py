@@ -157,6 +157,13 @@ only changes that exist are:
   set_model         = run one phase on a named "provider:model" (use only when
                       the intent or project context asks for it; otherwise
                       phases are routed by role and you leave this alone)
+  set_dependencies  — the phases this phase needs (value: list of phase ids).
+                      Phases that do not need each other run in parallel, and
+                      a rework re-runs only what depends on its target.
+  set_condition     — run the phase only when a fact holds (value: e.g.
+                      "route == undecided"; facts: route, target_maturity,
+                      loads_known, budget_stated). Never on a release gate.
+  set_outcome       — the outcome the phase establishes (value: one line)
   declare_items     = name the parts a phase writes ("left bracket", "right
                       bracket"), one item each, so every run revises the same
                       parts instead of inventing new ones
@@ -181,7 +188,13 @@ Reply with ONLY JSON:
       "rationale": "<why this phase needs that model>"}},
     {{"op": "declare_items", "phase": "<phase id>",
       "value": [{{"type": "cad_model", "name": "left bracket"}}],
-      "rationale": "<why the product has these parts>"}}
+      "rationale": "<why the product has these parts>"}},
+    {{"op": "set_dependencies", "phase": "<phase id>", "value": ["<phase id>"],
+      "rationale": "<why it needs exactly these>"}},
+    {{"op": "set_condition", "phase": "<phase id>", "value": "route == undecided",
+      "rationale": "<why it only applies then>"}},
+    {{"op": "set_outcome", "phase": "<phase id>", "value": "<one line>",
+      "rationale": "<what this phase settles>"}}
   ]}}
 
 Every operation needs a rationale. An operation without one is discarded.
