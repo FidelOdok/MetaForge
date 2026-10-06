@@ -102,6 +102,21 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.query_cypher",
         "twin.record_claim",
         "twin.record_constraint_set",
+        # FORGE-415 follow-up: the Engineering Intent & Requirements Harness
+        # entry point -- intent, stakeholder_need, objective, assumption,
+        # risk, budget, invariant, verification_case and the rest. Wiring the
+        # collaborator made it *reachable*; without it in a profile a default
+        # plugin install still could not see it, which is the same gap one
+        # layer up.
+        #
+        # `core` rather than `_BASE`: this is what an engineer needs before
+        # picking a discipline, which is exactly what `core` is for, and
+        # `_BASE` is a tax every profile pays. The approver
+        # (`twin.approve_engineering_entity`) is deliberately not here -- a
+        # waiver or release_approval is a reviewer action, and the dashboard
+        # is where the approver is an authenticated principal rather than
+        # whoever the agent is running as.
+        "twin.record_engineering_entity",
         "twin.record_document",
         "twin.record_hierarchy_node",
         "web.fetch",
