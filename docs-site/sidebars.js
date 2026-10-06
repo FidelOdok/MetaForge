@@ -50,6 +50,7 @@ const sidebars = {
         'mcp_spec',
         'architecture/robust-harness-design',
         'architecture/design-flow-harness',
+        'architecture/workflow-lifecycle',
         'architecture/migrations',
         'roadmap',
         'testing-strategy',

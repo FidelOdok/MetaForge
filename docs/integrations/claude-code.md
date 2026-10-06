@@ -182,7 +182,20 @@ gateway that needs one; a local gateway started without auth does not.
 | `/metaforge:fea` | Run a load case and record the evidence against the revision it came from |
 | `/metaforge:gate` | Review whether the project can be promoted |
 | `/metaforge:flow` | Propose a design flow: ask for route, maturity and loads, tailor in caller mode, stop at the approval |
+| `/metaforge:verify` | Did a run achieve its intent (the completion verdict) |
+| `/metaforge:replan` | Patch a running flow, re-running only what changed |
 | `/metaforge:doctor` | Check the connection, and what is unreachable |
+
+### Hooks and agents (FORGE-539)
+
+The package ships two hooks and two subagents. SessionStart adds MetaForge's
+working rules to the session; PostToolUse on `flow.propose` and `flow.patch`
+restates that the result is held for a person. Both are a standard-library
+Python script that never fails a session; `METAFORGE_PLUGIN_HOOKS=off`
+disables them. `metaforge-flow-planner` plans a flow and stops at the
+approval; `metaforge-run-verifier` reports a run's completion verdict without
+rounding "the phases finished" into "done". See
+[Workflow Lifecycle](../architecture/workflow-lifecycle.md).
 
 ### Regenerating the package
 

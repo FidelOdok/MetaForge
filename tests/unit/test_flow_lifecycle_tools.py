@@ -15,14 +15,40 @@ import httpx
 import pytest
 
 from metaforge.mcp import remote_flows
-from tests.unit.test_sidecar_flow_tools import (  # noqa: F401 - fixtures
-    _MCP_CONTEXT,
-    GATEWAY,
-    _boot,
-    _listed,
-    gateway,
-    sidecar_env,
-)
+from tests.unit import test_sidecar_flow_tools as sidecar
+from tests.unit.test_sidecar_flow_tools import _MCP_CONTEXT, GATEWAY, _boot, _listed
+
+
+@pytest.fixture
+def gateway() -> httpx.AsyncClient:
+    """The gateway's flow, run and approval routes, as the sidecar reaches them."""
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=sidecar._gateway_app()), base_url=GATEWAY
+    )
+
+
+@pytest.fixture
+def sidecar_env(monkeypatch: pytest.MonkeyPatch, gateway: httpx.AsyncClient) -> None:
+    """The sidecar suite's environment: remote bindings into the ASGI gateway."""
+    import functools
+
+    import api_gateway.runs.routes as run_routes
+
+    for key in sidecar._SERVICE_ENV:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("METAFORGE_GATEWAY_URL", GATEWAY)
+    monkeypatch.delenv("METAFORGE_FLOW_ENGINE", raising=False)
+
+    async def _launcher() -> sidecar._RecordingLauncher:
+        return sidecar._RecordingLauncher()
+
+    monkeypatch.setattr(run_routes, "get_flow_launcher", _launcher)
+    monkeypatch.setattr(
+        remote_flows,
+        "build_remote_flow_bindings",
+        functools.partial(remote_flows.build_remote_flow_bindings, client=gateway),
+    )
+
 
 LIFECYCLE_TOOLS = {
     "flow.compile_intent",

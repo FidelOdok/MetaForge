@@ -29,7 +29,7 @@ The id is `<prefix>:<native id>`. The prefix says which store holds the item;
 | Id prefix | `kind` | Source | Decided by |
 |-----------|--------|--------|------------|
 | `gate:` | `gate` | A design-flow run parked at a gate | `POST /v1/runs/{id}/approval` |
-| `tool:` | `tool_call`, `human_authority`, `flow_proposal`, `flow_version` | The tool-approval ledger | `POST /v1/chat/tool_approvals/{id}` |
+| `tool:` | `tool_call`, `human_authority`, `flow_proposal`, `flow_version`, `flow_patch` (FORGE-539: a patch to a running flow, showing what re-runs and what is kept) | The tool-approval ledger | `POST /v1/chat/tool_approvals/{id}` |
 | `change:` | `design_change` | Assistant design-change proposals | `POST /v1/assistant/proposals/{id}/decide` |
 | `design_loop:` | `design_loop` | The winning candidate of a closed design loop | `POST /v1/design-loop/{id}/approve` |
 | `sketch:` | `sketch` | A design sketch work product | `POST /v1/twin/nodes/{id}/approve-sketch` |

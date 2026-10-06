@@ -10,6 +10,8 @@ inside each phase is delegated to the external harness (the ReAct loop driving
 MCP tools); MetaForge owns the **gated spine** — sequencing, gates, and the
 digital thread.
 
+Flows can also be dependency graphs with parallel and conditional phases, patched while running, and judged by a completion verdict: see [Workflow Lifecycle](workflow-lifecycle.md) (FORGE-539).
+
 ## Phases and gates
 
 A flow is an ordered list of phases; each phase has an objective (handed to the
