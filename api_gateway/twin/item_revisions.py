@@ -186,7 +186,50 @@ async def _resolve_slot(
     key = str(match.slot.item_key)
     if match.how == "only" and await _slot_taken_this_run(twin, key, project_id, name, run_id):
         return None, "taken_this_run"
+    existing = await _project_singleton(twin, key, item_type, project_id)
+    if existing is not None:
+        return existing, f"{match.how}+existing"
     return key, match.how
+
+
+async def _project_singleton(twin: Any, key: str, item_type: str, project_id: Any) -> str | None:
+    """The project's one existing item of a one-per-project type, if the slot's
+    own key names no item yet.
+
+    A slot key is derived from the deliverable (``INT-INTENT``), while a
+    project migrated from legacy nodes (FORGE-529) or written before slots
+    existed already has its intent or requirements under another key
+    (``INT-WALL-SHELF-INTENT``). Without this, the first run after the
+    migration would open a second intent item next to the real one, which is
+    the duplication items exist to stop. Only when there is exactly one
+    candidate: with two, the slot key stands and nothing is guessed.
+    """
+    from orchestrator.design_flow.slots import SINGLETON_TYPES
+    from twin_core.items import list_items
+
+    if item_type not in SINGLETON_TYPES:
+        return None
+    try:
+        if await find_item(twin, key, project_id) is not None:
+            return None
+        family = family_of(item_type)
+        candidates = [
+            it
+            for it in await list_items(twin, project_id, include_unheaded=True)
+            if it.item_type in family
+        ]
+    except Exception as exc:  # noqa: BLE001 - fall back to the slot key
+        logger.warning("flow_slot_singleton_lookup_failed", item_key=key, error=str(exc))
+        return None
+    if len(candidates) != 1:
+        return None
+    logger.info(
+        "flow_slot_bound_to_existing_item",
+        slot_key=key,
+        item_key=candidates[0].key,
+        item_type=item_type,
+    )
+    return str(candidates[0].key)
 
 
 async def plan_definition_revision(
@@ -244,7 +287,9 @@ async def plan_definition_revision(
     if plan is None or not family_slots:
         return plan
     declared = tuple(dict.fromkeys(str(s.item_key) for s in family_slots))
-    undeclared = plan.key not in declared
+    # A slot bound to the project's existing singleton item is still that slot.
+    bound_existing = how.endswith("+existing") and plan.key == slot_key
+    undeclared = plan.key not in declared and not bound_existing
     phase = getattr(_call_context(), "phase", None)
     if undeclared:
         logger.warning(
