@@ -257,16 +257,36 @@ class DesignFlowLauncher:
         )
 
     async def request_change(
-        self, run_id: str, *, flow: FrozenFlow, requested_by: str, rationale: str = ""
+        self,
+        run_id: str,
+        *,
+        flow: FrozenFlow,
+        requested_by: str,
+        rationale: str = "",
+        rerun: list[str] | None = None,
     ) -> None:
-        """Queue a flow change; the run applies it at its next gate boundary."""
+        """Queue a flow change; the run applies it at its next gate boundary.
+
+        ``rerun`` (FORGE-539) names the phases an approved patch re-runs; the
+        rest keep their results. Omitted, every completed phase is kept.
+        """
         flow.verify()
         handle = self.client.get_workflow_handle(workflow_id_for(run_id))
         await handle.signal(
             "request_change",
-            ChangeRequest(flow=flow, requested_by=requested_by, rationale=rationale),
+            ChangeRequest(
+                flow=flow,
+                requested_by=requested_by,
+                rationale=rationale,
+                rerun=list(rerun or []),
+            ),
         )
-        logger.info("design_flow_change_requested", run_id=run_id, requested_by=requested_by)
+        logger.info(
+            "design_flow_change_requested",
+            run_id=run_id,
+            requested_by=requested_by,
+            rerun=list(rerun or []),
+        )
 
     async def state(self, run_id: str) -> dict[str, Any]:
         """Current state, read from the workflow rather than a cache of it."""

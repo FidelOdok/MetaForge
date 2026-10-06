@@ -230,6 +230,7 @@ class RemoteFlowBindings:
     intent_compiler: Any = None
     capability_reader: Any = None
     lifecycle_reader: Any = None
+    patcher: Any = None
 
 
 class RemoteRunLauncher:
@@ -473,6 +474,51 @@ def build_remote_flow_bindings(
             "next_step": view.get("nextStep", ""),
         }
 
+    async def patch(
+        *,
+        action: str,
+        run_id: str,
+        expected_content_hash: str = "",
+        reason: str = "",
+        operations: list[dict[str, Any]] | None = None,
+        invalidate: list[str] | None = None,
+        version_id: str = "",
+    ) -> dict[str, Any]:
+        with tracer.start_as_current_span("remote_flows.patch") as span:
+            span.set_attribute("flow.patch_action", action)
+            if action == "propose":
+                view = await gateway.request(
+                    "POST",
+                    f"/v1/runs/{run_id}/patches",
+                    json={
+                        "expectedContentHash": expected_content_hash,
+                        "reason": reason,
+                        "operations": list(operations or []),
+                        "invalidate": list(invalidate or []),
+                    },
+                )
+                return {
+                    "status": "proposed",
+                    "run_id": view["runId"],
+                    "approval_id": view["approvalId"],
+                    "version_id": view["versionId"],
+                    "rerun": list(view.get("rerun", [])),
+                    "preserved": list(view.get("preserved", [])),
+                    "removed": list(view.get("removed", [])),
+                    "added": list(view.get("added", [])),
+                    "changes": list(view.get("changes", [])),
+                    "notes": list(view.get("notes", [])),
+                    "next_step": view.get("nextStep", ""),
+                }
+            applied = await gateway.request("POST", f"/v1/runs/{run_id}/patches/{version_id}/apply")
+        return {
+            "status": "applied",
+            "run_id": applied["runId"],
+            "version_id": applied["versionId"],
+            "rerun": list(applied.get("rerun", [])),
+            "next_step": applied.get("nextStep", ""),
+        }
+
     return RemoteFlowBindings(
         catalogue_reader=read_catalogue,
         proposer=propose,
@@ -482,4 +528,5 @@ def build_remote_flow_bindings(
         intent_compiler=compile_intent,
         capability_reader=read_capabilities,
         lifecycle_reader=read_lifecycle,
+        patcher=patch,
     )

@@ -190,6 +190,10 @@ class ChangeRequest:
     flow: FrozenFlow
     requested_by: str = ""
     rationale: str = ""
+    #: FORGE-539: the phases an approved patch must re-run. Their results
+    #: (and only theirs) are dropped; every other completed phase keeps its
+    #: result and approval. Empty for a plain flow swap, which keeps all.
+    rerun: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -886,6 +890,16 @@ class DesignFlowWorkflow:
         assert change is not None
         change.flow.verify()
         self._record("change_applied", detail=change.flow.content_hash[:12])
+        completed = list(self._completed)
+        skipped = list(self._skipped)
+        if change.rerun:
+            completed, skipped = _keep_for_patch(change.flow, completed, skipped, change.rerun)
+            self._record(
+                "patch_applied",
+                detail=f"re-running {', '.join(change.rerun)}",
+                rerun=list(change.rerun),
+                kept=[c["phase"] for c in completed],
+            )
         workflow.continue_as_new(
             DesignFlowInput(
                 run_id=inp.run_id,
@@ -894,11 +908,11 @@ class DesignFlowWorkflow:
                 project_id=inp.project_id,
                 session_id=inp.session_id,
                 gate_timeout_seconds=inp.gate_timeout_seconds,
-                completed=list(self._completed),
+                completed=completed,
                 max_phase_retries=inp.max_phase_retries,
                 max_rework_cycles=inp.max_rework_cycles,
                 rework_cycles=self._rework_cycles,
-                skipped=list(self._skipped),
+                skipped=skipped,
             )
         )
         raise AssertionError("unreachable: continue_as_new does not return")
@@ -945,3 +959,32 @@ class DesignFlowWorkflow:
                 "at": workflow.now().isoformat(),
             }
         )
+
+
+def _keep_for_patch(
+    flow: FrozenFlow,
+    completed: list[dict[str, Any]],
+    skipped: list[str],
+    rerun: list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The completed entries and skips an approved patch keeps (FORGE-539).
+
+    A graph flow keeps every completed phase that is still in the flow and
+    not re-run. A straight-line flow resumes by position, so it keeps the
+    longest prefix of the new phase order that is completed and not re-run;
+    everything after the first gap runs again, which for a line is exactly
+    the downstream of that gap.
+    """
+    drop = set(rerun)
+    ids = [p.id for p in flow.phases]
+    by_phase = {c["phase"]: c for c in completed}
+    if is_linear(build_graph(flow.phases)):
+        kept: list[dict[str, Any]] = []
+        for phase_id in ids:
+            entry = by_phase.get(phase_id)
+            if entry is None or phase_id in drop:
+                break
+            kept.append(entry)
+        return kept, []
+    kept_graph = [c for c in completed if c["phase"] in ids and c["phase"] not in drop]
+    return kept_graph, [s for s in skipped if s in ids and s not in drop]

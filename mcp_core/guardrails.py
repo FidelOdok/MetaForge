@@ -174,6 +174,9 @@ DOWNSTREAM_APPROVED: frozenset[str] = frozenset(
     {
         "flow.propose",
         "flow.start_run",
+        # FORGE-539: propose holds the patch for a person; apply is refused
+        # until that person approved it. A call hold would ask twice.
+        "flow.patch",
     }
 )
 

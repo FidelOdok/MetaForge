@@ -30,6 +30,9 @@ LIFECYCLE_TOOLS = {
     "flow.lifecycle",
     "flow.verify_completion",
 }
+#: The capped core profile carries these; flow.verify_completion's answer is
+#: part of flow.lifecycle, so it is served only on the full set.
+CORE_LIFECYCLE_TOOLS = {"flow.compile_intent", "flow.capabilities", "flow.lifecycle", "flow.patch"}
 
 pytestmark = pytest.mark.asyncio
 
@@ -41,8 +44,17 @@ def _strip_ids(result: dict[str, Any]) -> dict[str, Any]:
 class TestRegistered:
     @pytest.mark.usefixtures("sidecar_env")
     async def test_the_sidecar_lists_them_and_core_serves_them(self) -> None:
-        assert LIFECYCLE_TOOLS <= await _listed(await _boot())
-        assert LIFECYCLE_TOOLS <= await _listed(await _boot("--profile", "core"))
+        assert LIFECYCLE_TOOLS | {"flow.patch"} <= await _listed(await _boot())
+        assert CORE_LIFECYCLE_TOOLS <= await _listed(await _boot("--profile", "core"))
+
+    def test_flow_patch_writes_but_is_approved_downstream(self) -> None:
+        from mcp_core.annotations import annotations_for
+        from mcp_core.guardrails import DOWNSTREAM_APPROVED
+
+        annotations = annotations_for("flow.patch")
+        assert annotations["readOnlyHint"] is False
+        assert annotations["destructiveHint"] is False
+        assert "flow.patch" in DOWNSTREAM_APPROVED
 
     def test_they_are_read_only(self) -> None:
         from mcp_core.annotations import annotations_for
@@ -117,3 +129,36 @@ class TestVerifyCompletionTool:
         assert result["next_step"] == "do not report it as done"
         with pytest.raises(ValueError, match="run_id"):
             await server.verify_completion({})
+
+
+class TestPatchTool:
+    async def test_arguments_are_checked_before_anything_is_called(self) -> None:
+        from tool_registry.tools.design_flow.adapter import DesignFlowServer
+
+        calls: list[dict[str, Any]] = []
+
+        async def patcher(**kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            return {"status": "proposed"}
+
+        server = DesignFlowServer(patcher=patcher)
+        for bad, match in [
+            ({"action": "undo", "run_id": "r"}, "action"),
+            ({"action": "propose"}, "run_id"),
+            ({"action": "propose", "run_id": "r", "reason": "x"}, "expected_content_hash"),
+            ({"action": "propose", "run_id": "r", "expected_content_hash": "h"}, "reason"),
+            ({"action": "apply", "run_id": "r"}, "version_id"),
+        ]:
+            with pytest.raises(ValueError, match=match):
+                await server.patch(bad)
+        assert calls == []
+        await server.patch(
+            {
+                "action": "propose",
+                "run_id": "r",
+                "expected_content_hash": "h",
+                "reason": "x",
+                "invalidate": ["design"],
+            }
+        )
+        assert calls[0]["invalidate"] == ["design"]

@@ -250,3 +250,73 @@ async def Replayer_replay(history) -> None:  # noqa: N802 - reads as the call it
     await Replayer(
         workflows=[DesignFlowWorkflow], workflow_runner=design_flow_runner()
     ).replay_workflow(history)
+
+
+class TestPatchedRuns:
+    """FORGE-539: an approved patch re-runs only what it touches."""
+
+    async def _patched(
+        self, env, flow: FrozenFlow, new_flow: FrozenFlow, gate_phase: str, rerun: list[str]
+    ) -> tuple[_Phases, dict]:
+        phases = _Phases()
+        acts = DesignFlowActivities(
+            phase_runner=phases, gate_checker=_ok_gate, gate_announcer=_announced
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        run_id = str(uuid.uuid4())
+        handle = env.client.get_workflow_handle(f"design-flow-{run_id}")
+        async with build_design_flow_worker(env.client, acts):
+            await launcher.start(run_id=run_id, goal="g", flow=flow)
+            await _gate_on(launcher, run_id, gate_phase)
+            await launcher.request_change(
+                run_id,
+                flow=new_flow,
+                requested_by="user:r",
+                rationale="payload 15 kg",
+                rerun=rerun,
+            )
+            # The change applies at this gate boundary (continue-as-new); the
+            # re-run phases then reach their gates again.
+            for _ in range(300):
+                if phases.ran.count(gate_phase) >= 2:
+                    break
+                await asyncio.sleep(0.05)
+            for _ in range(10):
+                state = await launcher.state(run_id)
+                if state.get("status") in ("completed", "failed", "rejected"):
+                    break
+                if state.get("awaiting_gate"):
+                    await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+                await asyncio.sleep(0.3)
+            result = await handle.result()
+        return phases, result
+
+    async def test_a_graph_patch_keeps_the_untouched_branch(self, env) -> None:
+        flow = _flow(
+            [
+                _phase("req"),
+                _phase("mech", ["req"]),
+                _phase("elec", ["req"]),
+                _phase("verify", ["mech", "elec"], gated=True),
+            ]
+        )
+        new_flow = _flow(
+            [
+                _phase("req"),
+                _phase("mech", ["req"]),
+                _phase("elec", ["req"]),
+                _phase("verify", ["mech", "elec"], gated=True),
+            ],
+            facts={"loads_known": "true"},
+        )
+        phases, result = await self._patched(env, flow, new_flow, "verify", ["mech", "verify"])
+        assert result["status"] == "completed"
+        assert phases.ran.count("req") == 1 and phases.ran.count("elec") == 1
+        assert phases.ran.count("mech") == 2 and phases.ran.count("verify") == 2
+
+    async def test_a_linear_patch_reruns_from_the_first_touched_phase(self, env) -> None:
+        flow = _flow([_phase("a"), _phase("b"), _phase("c", gated=True)])
+        new_flow = _flow([_phase("a"), _phase("b"), _phase("c", gated=True)], facts={"x": "1"})
+        phases, result = await self._patched(env, flow, new_flow, "c", ["b", "c"])
+        assert result["status"] == "completed"
+        assert phases.ran == ["a", "b", "c", "b", "c"]

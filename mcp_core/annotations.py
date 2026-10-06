@@ -216,6 +216,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # data, which is the kind of inaccurate warning that gets ignored.
         "flow.propose",
         "flow.start_run",
+        # FORGE-539: proposing a patch writes a version and an approval;
+        # applying one needs that approval. Same shape as the two above.
+        "flow.patch",
         "knowledge.extract",
         "knowledge.ingest",
         "knowledge.populate_bom",

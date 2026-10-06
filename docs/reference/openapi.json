@@ -69,6 +69,36 @@
         "title": "AnalysedRef",
         "type": "object"
       },
+      "AppliedPatchView": {
+        "properties": {
+          "nextStep": {
+            "title": "Nextstep",
+            "type": "string"
+          },
+          "rerun": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rerun",
+            "type": "array"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
+          "versionId": {
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "versionId",
+          "nextStep"
+        ],
+        "title": "AppliedPatchView",
+        "type": "object"
+      },
       "ApprovalDecision": {
         "description": "Body for ``POST /api/v1/assistant/proposals/{change_id}/decide``.",
         "properties": {
@@ -187,6 +217,7 @@
               "gate",
               "flow_proposal",
               "flow_version",
+              "flow_patch",
               "tool_call",
               "human_authority",
               "design_change",
@@ -8533,6 +8564,76 @@
         "title": "PartRef",
         "type": "object"
       },
+      "PatchView": {
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "approvalId": {
+            "title": "Approvalid",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "nextStep": {
+            "title": "Nextstep",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "preserved": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Preserved",
+            "type": "array"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "rerun": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rerun",
+            "type": "array"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
+          "versionId": {
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "approvalId",
+          "versionId",
+          "nextStep"
+        ],
+        "title": "PatchView",
+        "type": "object"
+      },
       "PhaseView": {
         "properties": {
           "condition": {
@@ -8958,6 +9059,40 @@
           "intent"
         ],
         "title": "ProposeFlowRequest",
+        "type": "object"
+      },
+      "ProposePatchRequest": {
+        "description": "A change to a running flow, written against the flow it was read from.",
+        "properties": {
+          "expectedContentHash": {
+            "title": "Expectedcontenthash",
+            "type": "string"
+          },
+          "invalidate": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Invalidate",
+            "type": "array"
+          },
+          "operations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedContentHash",
+          "reason"
+        ],
+        "title": "ProposePatchRequest",
         "type": "object"
       },
       "ProposedItem": {
@@ -14094,6 +14229,7 @@
                     "gate",
                     "flow_proposal",
                     "flow_version",
+                    "flow_patch",
                     "tool_call",
                     "human_authority",
                     "design_change",
@@ -19485,6 +19621,111 @@
           }
         },
         "summary": "Get Run Lifecycle",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/patches": {
+      "post": {
+        "description": "Plan a change to a running flow and hold it for a person.\n\nNothing changes until somebody approves the approval this returns, and\nthen ``POST /v1/runs/{run_id}/patches/{version_id}/apply`` applies it at\nthe run's next gate. Only the phases the change touches re-run.",
+        "operationId": "propose_run_patch_v1_runs__run_id__patches_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposePatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatchView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Propose Run Patch",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/patches/{version_id}/apply": {
+      "post": {
+        "description": "Apply an approved patch. Refused unless approved and still current.",
+        "operationId": "apply_run_patch_v1_runs__run_id__patches__version_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppliedPatchView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Run Patch",
         "tags": [
           "runs"
         ]

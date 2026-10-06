@@ -39,6 +39,7 @@ from api_gateway.design_flows.mcp_bindings import (
     make_catalogue_reader,
     make_intent_compiler,
     make_lifecycle_reader,
+    make_patcher,
     make_proposer,
     make_run_starter,
     make_run_status_reader,
@@ -1260,6 +1261,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
         design_flow_intent_compiler=make_intent_compiler(),
         design_flow_capability_reader=make_capability_reader(),
         design_flow_lifecycle_reader=make_lifecycle_reader(),
+        design_flow_patcher=make_patcher(),
         # FORGE-355: the project brief as an MCP resource.
         brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness

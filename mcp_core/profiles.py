@@ -94,11 +94,13 @@ PROFILES: dict[str, frozenset[str]] = {
         "flow.propose",
         "flow.start_run",
         "flow.status",
-        # FORGE-539: intent, coverage, lifecycle and the completion verdict.
+        # FORGE-539: intent, coverage, the lifecycle (which carries the
+        # completion verdict, so flow.verify_completion stays off this capped
+        # profile), and patching a running flow.
         "flow.compile_intent",
         "flow.capabilities",
         "flow.lifecycle",
-        "flow.verify_completion",
+        "flow.patch",
         "run.get_status",
         "run.start_design_flow",
         "twin.compute_hierarchy_rollup",

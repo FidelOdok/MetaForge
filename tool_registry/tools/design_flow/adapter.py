@@ -55,6 +55,7 @@ class DesignFlowServer(McpToolServer):
         intent_compiler: Any = None,
         capability_reader: Any = None,
         lifecycle_reader: Any = None,
+        patcher: Any = None,
     ) -> None:
         super().__init__(adapter_id="design_flow", version="0.1.0")
         self._catalogue_reader = catalogue_reader
@@ -64,6 +65,7 @@ class DesignFlowServer(McpToolServer):
         self._intent_compiler = intent_compiler
         self._capability_reader = capability_reader
         self._lifecycle_reader = lifecycle_reader
+        self._patcher = patcher
 
         if catalogue_reader is not None:
             self._register_list_flows()
@@ -82,6 +84,8 @@ class DesignFlowServer(McpToolServer):
             self._register_capabilities()
         if lifecycle_reader is not None:
             self._register_lifecycle()
+        if patcher is not None:
+            self._register_patch()
 
     # ── tools ────────────────────────────────────────────────────────────
 
@@ -407,6 +411,43 @@ class DesignFlowServer(McpToolServer):
             handler=self.verify_completion,
         )
 
+    def _register_patch(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="flow.patch",
+                adapter_id="design_flow",
+                name="Patch a running design flow",
+                description=(
+                    "Change a RUNNING design flow without starting again, re-running only "
+                    "what the change touches. action='propose': pass run_id, "
+                    "expected_content_hash (the run's flowContentHash from flow.status, so "
+                    "a patch written against an older flow is refused), reason, and "
+                    "operations (the flow.propose set) and/or invalidate (phases whose "
+                    "results the new information makes wrong, e.g. design after a payload "
+                    "change). It returns what will re-run, what is kept, and an approval id "
+                    "-- the patch is HELD for a person and nothing changes yet; you cannot "
+                    "approve it. action='apply': pass run_id and version_id once a person "
+                    "has approved it; refused (expected, not a fault) until then, or if the "
+                    "run's flow changed since."
+                ),
+                capability="design_flow_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": ["propose", "apply"]},
+                        "run_id": {"type": "string"},
+                        "expected_content_hash": {"type": "string"},
+                        "reason": {"type": "string"},
+                        "operations": {"type": "array", "items": {"type": "object"}},
+                        "invalidate": {"type": "array", "items": {"type": "string"}},
+                        "version_id": {"type": "string"},
+                    },
+                    "required": ["action", "run_id"],
+                },
+            ),
+            handler=self.patch,
+        )
+
     # ── handlers ─────────────────────────────────────────────────────────
 
     async def list_flows(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -532,6 +573,36 @@ class DesignFlowServer(McpToolServer):
             raise ValueError("flow.lifecycle: 'run_id' is required")
         with tracer.start_as_current_span("flow.lifecycle"):
             result: dict[str, Any] = await self._lifecycle_reader(run_id)
+        return result
+
+    async def patch(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        action = str(arguments.get("action") or "").strip()
+        run_id = str(arguments.get("run_id") or "").strip()
+        if action not in ("propose", "apply"):
+            raise ValueError("flow.patch: 'action' must be 'propose' or 'apply'")
+        if not run_id:
+            raise ValueError("flow.patch: 'run_id' is required")
+        with tracer.start_as_current_span("flow.patch") as span:
+            span.set_attribute("flow.patch_action", action)
+            if action == "propose":
+                if not str(arguments.get("expected_content_hash") or "").strip():
+                    raise ValueError("flow.patch: propose needs 'expected_content_hash'")
+                if not str(arguments.get("reason") or "").strip():
+                    raise ValueError("flow.patch: propose needs a 'reason'")
+                result: dict[str, Any] = await self._patcher(
+                    action="propose",
+                    run_id=run_id,
+                    expected_content_hash=str(arguments["expected_content_hash"]),
+                    reason=str(arguments["reason"]),
+                    operations=list(arguments.get("operations") or []),
+                    invalidate=[str(p) for p in arguments.get("invalidate") or []],
+                )
+            else:
+                version_id = str(arguments.get("version_id") or "").strip()
+                if not version_id:
+                    raise ValueError("flow.patch: apply needs 'version_id'")
+                result = await self._patcher(action="apply", run_id=run_id, version_id=version_id)
+        logger.info("flow_patch_over_mcp", action=action, run_id=run_id)
         return result
 
     async def verify_completion(self, arguments: dict[str, Any]) -> dict[str, Any]:

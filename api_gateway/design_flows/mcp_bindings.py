@@ -26,6 +26,7 @@ __all__ = [
     "make_catalogue_reader",
     "make_intent_compiler",
     "make_lifecycle_reader",
+    "make_patcher",
     "make_proposer",
     "make_run_starter",
     "make_run_status_reader",
@@ -362,3 +363,62 @@ def make_lifecycle_reader() -> Any:
         }
 
     return read_lifecycle
+
+
+def make_patcher() -> Any:
+    """``flow.patch`` — propose a patch to a running flow, or apply an approved one."""
+
+    async def patch(
+        *,
+        action: str,
+        run_id: str,
+        expected_content_hash: str = "",
+        reason: str = "",
+        operations: list[dict[str, Any]] | None = None,
+        invalidate: list[str] | None = None,
+        version_id: str = "",
+    ) -> dict[str, Any]:
+        from fastapi import HTTPException
+
+        from api_gateway.runs.routes import (
+            ProposePatchRequest,
+            apply_run_patch,
+            propose_run_patch,
+        )
+
+        try:
+            if action == "propose":
+                view = await propose_run_patch(
+                    run_id,
+                    ProposePatchRequest(
+                        expectedContentHash=expected_content_hash,
+                        reason=reason,
+                        operations=list(operations or []),
+                        invalidate=list(invalidate or []),
+                    ),
+                )
+                return {
+                    "status": "proposed",
+                    "run_id": view.runId,
+                    "approval_id": view.approvalId,
+                    "version_id": view.versionId,
+                    "rerun": view.rerun,
+                    "preserved": view.preserved,
+                    "removed": view.removed,
+                    "added": view.added,
+                    "changes": view.changes,
+                    "notes": view.notes,
+                    "next_step": view.nextStep,
+                }
+            applied = await apply_run_patch(run_id, version_id)
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+        return {
+            "status": "applied",
+            "run_id": applied.runId,
+            "version_id": applied.versionId,
+            "rerun": applied.rerun,
+            "next_step": applied.nextStep,
+        }
+
+    return patch

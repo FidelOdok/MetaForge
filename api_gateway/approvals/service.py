@@ -223,6 +223,8 @@ def _tool_kind(req: dict[str, Any]) -> str:
         return "flow_proposal"
     if marker == "design_flow_version":
         return "flow_version"
+    if marker == "design_flow_patch":
+        return "flow_patch"
     tool = str(req.get("tool") or "")
     if requires_human_authority(tool) or requires_human_authority(tool.replace(".", "_")):
         return "human_authority"
@@ -242,7 +244,18 @@ def tool_item(run: Run) -> ApprovalItem:
             "this call is being answered in the client's own approval prompt; "
             "answer it there and it shows here as resolved"
         )
-    if kind in ("flow_proposal", "flow_version"):
+    if kind == "flow_patch":
+        # FORGE-539: what a patch re-runs and what it keeps is the decision.
+        detail = {
+            "flow_version_id": req.get("flow_version_id"),
+            "run_id": req.get("run_id"),
+            "reason": req.get("reason"),
+            "rerun": req.get("rerun") or [],
+            "preserved": req.get("preserved") or [],
+            "changes": req.get("changes") or [],
+        }
+        title = f"Patch to run {req.get('run_id') or ''}".strip()
+    elif kind in ("flow_proposal", "flow_version"):
         detail: dict[str, Any] = {
             "flow_version_id": req.get("flow_version_id"),
             "intent": req.get("intent") or req.get("goal") or req.get("flow"),

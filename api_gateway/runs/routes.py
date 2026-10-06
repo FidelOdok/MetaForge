@@ -1643,3 +1643,250 @@ async def get_run_lifecycle(run_id: str) -> RunLifecycleResponse:
         lifecycle=view.as_dict(),
         nextStep=_NEXT_STEP[view.completion.classification.value],
     )
+
+
+# ---------------------------------------------------------------------------
+# FORGE-539: patching a running flow (local replanning)
+# ---------------------------------------------------------------------------
+
+
+class ProposePatchRequest(BaseModel):
+    """A change to a running flow, written against the flow it was read from."""
+
+    #: The run's ``flowContentHash`` as the author read it. A patch written
+    #: against an older flow is refused rather than applied on top of a change
+    #: its author never saw.
+    expectedContentHash: str  # noqa: N815
+    #: Why: the new information (a changed requirement, a failed analysis).
+    reason: str
+    #: Tailoring operations, the same closed set as ``flow.propose``.
+    operations: list[dict[str, Any]] = Field(default_factory=list)
+    #: Phases whose results the new information invalidates even though their
+    #: definition did not change (the payload changed, so the load case is wrong).
+    invalidate: list[str] = Field(default_factory=list)
+
+
+class PatchView(BaseModel):
+    runId: str  # noqa: N815
+    approvalId: str  # noqa: N815
+    versionId: str  # noqa: N815
+    rerun: list[str] = Field(default_factory=list)
+    preserved: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    changes: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    nextStep: str  # noqa: N815
+
+
+class AppliedPatchView(BaseModel):
+    runId: str  # noqa: N815
+    versionId: str  # noqa: N815
+    rerun: list[str] = Field(default_factory=list)
+    nextStep: str  # noqa: N815
+
+
+async def _completed_phases(run: Run) -> tuple[list[str], str | None]:
+    if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+        return [str(c["phase"]) for c in _in_process_state(run)["completed"]], None
+    try:
+        launcher = await get_flow_launcher()
+        state = await launcher.state(run.id)
+    except Exception as exc:  # noqa: BLE001 - reported on the plan
+        return [], f"the run's progress could not be read ({exc}); preserved is a lower bound"
+    return [str(c.get("phase")) for c in state.get("completed", []) if c.get("phase")], None
+
+
+@router.post("/{run_id}/patches", response_model=PatchView, status_code=201)
+async def propose_run_patch(run_id: str, body: ProposePatchRequest) -> PatchView:
+    """Plan a change to a running flow and hold it for a person.
+
+    Nothing changes until somebody approves the approval this returns, and
+    then ``POST /v1/runs/{run_id}/patches/{version_id}/apply`` applies it at
+    the run's next gate. Only the phases the change touches re-run.
+    """
+    from orchestrator.design_flow.generator import TailoringError
+    from orchestrator.design_flow.patch import StalePatchError, plan_patch
+
+    try:
+        run = _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    if not _is_design_flow(run.request):
+        raise HTTPException(status_code=422, detail="only a design-flow run can be patched")
+    if run.is_terminal:
+        raise HTTPException(
+            status_code=409,
+            detail=f"run '{run_id}' is {run.status}; a finished run is not patched. Start a "
+            "new run on a new version instead.",
+        )
+    if not body.reason.strip():
+        raise HTTPException(status_code=400, detail="a patch needs a reason")
+    definition = _run_definition(run)
+    if definition is None:
+        raise HTTPException(status_code=409, detail="the run's flow could not be read back")
+    completed, note = await _completed_phases(run)
+    with tracer.start_as_current_span("runs.propose_patch") as span:
+        span.set_attribute("run.id", run_id)
+        try:
+            plan = plan_patch(
+                definition,
+                current_hash=str(run.request.get("flow_content_hash") or ""),
+                expected_hash=body.expectedContentHash,
+                operations=body.operations,
+                invalidate=body.invalidate,
+                completed=completed,
+            )
+        except StalePatchError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except TailoringError as exc:
+            raise HTTPException(status_code=422, detail=f"patch refused: {exc}") from exc
+        if not plan.valid:
+            raise HTTPException(
+                status_code=422,
+                detail="the patched flow breaks the flow rules: "
+                + "; ".join(str(v) for v in plan.validation.violations),
+            )
+        span.set_attribute("patch.rerun", len(plan.rerun))
+
+        store = get_version_store()
+        context, facts = "", {}
+        previous = run.request.get("flow_version_id")
+        if previous:
+            try:
+                prior = store.get(str(previous)).frozen
+                context, facts = prior.context, dict(prior.facts)
+            except VersionNotFoundError:
+                pass
+        changes = plan.diff(body.reason.strip())
+        version = store.save(
+            plan.definition,
+            base_template_id=str(run.request.get("flow_template_id") or run.request.get("flow")),
+            base_version=str(run.request.get("flow_version") or "unversioned"),
+            changes=changes,
+            origin="patch",
+            intent=body.reason.strip(),
+            context=context,
+            facts=facts,
+        )
+        from api_gateway.chat.tool_approvals import get_approval_store
+
+        approvals = get_approval_store()
+        approval = approvals.create(
+            {
+                "kind": "design_flow_patch",
+                "run_id": run_id,
+                "flow_version_id": version.id,
+                "base_content_hash": run.request.get("flow_content_hash"),
+                "rerun": list(plan.rerun),
+                "preserved": list(plan.preserved),
+                "changes": changes,
+                "reason": body.reason.strip(),
+                "project_id": run.request.get("project_id"),
+            }
+        )
+        approvals.start(approval.id)
+        approvals.request_approval(
+            approval.id,
+            reason=(
+                f"Patch run {run_id}: {body.reason.strip()} -- re-runs "
+                f"{', '.join(plan.rerun) or 'nothing'}; keeps "
+                f"{', '.join(plan.preserved) or 'nothing'}."
+            )[:2000],
+        )
+        store.attach_approval(version.id, approval.id)
+    logger.info(
+        "design_flow_patch_proposed",
+        run_id=run_id,
+        version_id=version.id,
+        approval_id=approval.id,
+        rerun=list(plan.rerun),
+        preserved=len(plan.preserved),
+    )
+    return PatchView(
+        runId=run_id,
+        approvalId=approval.id,
+        versionId=version.id,
+        rerun=list(plan.rerun),
+        preserved=list(plan.preserved),
+        removed=list(plan.removed),
+        added=list(plan.added),
+        changes=changes,
+        notes=[*plan.notes, *([note] if note else [])],
+        nextStep=(
+            f"This patch is held for a person. Nothing changes until somebody answers "
+            f"approval '{approval.id}'. Once approved, apply it with flow.apply_patch "
+            f"(version '{version.id}'); you cannot approve it yourself."
+        ),
+    )
+
+
+@router.post("/{run_id}/patches/{version_id}/apply", response_model=AppliedPatchView)
+async def apply_run_patch(run_id: str, version_id: str) -> AppliedPatchView:
+    """Apply an approved patch. Refused unless approved and still current."""
+    from api_gateway.chat.tool_approvals import get_approval_store
+
+    try:
+        run = _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    try:
+        version = get_version_store().get(version_id)
+    except VersionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    approval = next(
+        (
+            a
+            for a in get_approval_store().list()
+            if a.request.get("kind") == "design_flow_patch"
+            and a.request.get("flow_version_id") == version_id
+            and a.request.get("run_id") == run_id
+        ),
+        None,
+    )
+    if approval is None:
+        raise HTTPException(status_code=404, detail=f"no patch '{version_id}' for run '{run_id}'")
+    if not version.startable:
+        raise HTTPException(
+            status_code=409,
+            detail=f"patch '{version_id}' is {version.status.value}, not approved. That is the "
+            "expected answer until a person approves it.",
+        )
+    if run.is_terminal:
+        raise HTTPException(status_code=409, detail=f"run '{run_id}' is {run.status}")
+    if run.request.get("flow_content_hash") != approval.request.get("base_content_hash"):
+        raise HTTPException(
+            status_code=409,
+            detail="the run's flow changed after this patch was written; it is stale. Propose "
+            "it again against the current flow.",
+        )
+    if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+        raise HTTPException(
+            status_code=409,
+            detail="the in-process engine (a test double) cannot change a running flow; "
+            "patches apply on the Temporal engine.",
+        )
+    rerun = [str(p) for p in approval.request.get("rerun") or []]
+    launcher = await get_flow_launcher()
+    await launcher.request_change(
+        run_id,
+        flow=version.frozen,
+        requested_by=approval.approved_by or "",
+        rationale=str(approval.request.get("reason") or ""),
+        rerun=rerun,
+    )
+    # The run reads its flow from these from now on (lifecycle, gates).
+    run.request["flow_version_id"] = version_id
+    run.request["flow_content_hash"] = version.frozen.content_hash
+    run.request["flow_context"] = version.frozen.context
+    run.request["flow_facts"] = dict(version.frozen.facts)
+    logger.info("design_flow_patch_applied", run_id=run_id, version_id=version_id, rerun=rerun)
+    return AppliedPatchView(
+        runId=run_id,
+        versionId=version_id,
+        rerun=rerun,
+        nextStep=(
+            "The change is queued: the run applies it at its next gate, re-running "
+            f"{', '.join(rerun) or 'nothing'} and keeping every other result."
+        ),
+    )

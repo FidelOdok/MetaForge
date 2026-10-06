@@ -288,6 +288,7 @@ async def bootstrap_tool_registry(
     design_flow_intent_compiler: Any = None,
     design_flow_capability_reader: Any = None,
     design_flow_lifecycle_reader: Any = None,
+    design_flow_patcher: Any = None,
     brief_provider: Any = None,
     parameter_optimizer: Any = None,
     device_instance_registrar: Any = None,
@@ -662,6 +663,7 @@ async def bootstrap_tool_registry(
                     intent_compiler=design_flow_intent_compiler,
                     capability_reader=design_flow_capability_reader,
                     lifecycle_reader=design_flow_lifecycle_reader,
+                    patcher=design_flow_patcher,
                 )
                 await registry.register_adapter(flow_server)
                 registered.append("design_flow")
