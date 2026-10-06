@@ -372,7 +372,10 @@ async def closed_phase_revisions(
         except ValueError:
             pid = None
     found: list[tuple[str, str, int, UUID]] = []
-    for item in await list_items(twin, project_id=pid):
+    # include_unheaded: an item first written in this run has no head until a
+    # gate approves it, so its closed drafts are only reachable this way (live:
+    # a retried needs phase was told nothing about the two new items it lost).
+    for item in await list_items(twin, project_id=pid, include_unheaded=True):
         edges = await twin.graph.get_edges(
             item.id, direction="incoming", edge_type=EdgeType.REVISION_OF
         )

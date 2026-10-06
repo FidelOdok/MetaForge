@@ -411,6 +411,10 @@ async def build_current_view(
         rows: list[dict[str, Any]] = []
         for entry in entries:
             item, cur = entry.item, entry.current
+            if cur is None and not entry.drafts:
+                # Never approved and nothing open: every revision was rejected or
+                # abandoned (a run's retry closed it). It stays in history, not here.
+                continue
             evidence = evidence_by_item.get(item.key, {"current": 0, "out_of_date": 0})
             if evidence["current"]:
                 evidence_state = "current"

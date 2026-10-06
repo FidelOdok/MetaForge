@@ -259,6 +259,27 @@ async def test_closed_phase_revisions_is_scoped_to_run_and_phase(twin) -> None:
     assert await closed_phase_revisions(twin, run_id="run-a", phase_id="one") == []
 
 
+async def test_closed_drafts_of_a_new_item_are_found(twin) -> None:
+    # Live (shelf run, needs phase): the phase wrote two NEW need items, the
+    # retry abandoned them, and the retried phase was told nothing, because a
+    # new item has no head and list_items left unheaded items out.
+    from mcp_core.context import McpCallContext, with_context
+    from twin_core.items import close_change_set
+
+    record = make_geometry_recorder(twin, None)
+    with with_context(McpCallContext(actor_id="svc", run_id="run-n", phase="two")):
+        new = await record(
+            step_base64=_step("spacer"),
+            name="Spacer",
+            project_id=PROJECT,
+            properties={"volume_mm3": 500.0, "bounding_box": [20, 20, 5]},
+        )
+    await close_change_set(twin, "run-n", status="abandoned", reason="retried")
+
+    found = await closed_phase_revisions(twin, run_id="run-n", phase_id="two", project_id=PROJECT)
+    assert [str(n) for n in found] == [new["node_id"]]
+
+
 async def test_activity_returns_plain_notes() -> None:
     seen: list[tuple[Any, ...]] = []
 
