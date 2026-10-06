@@ -120,6 +120,10 @@ def _rule_release_gate_exists(phases: list[Any]) -> list[Violation]:
         gate = getattr(phase, "gate", None)
         if gate is None or getattr(gate, "auto_approve", False):
             continue
+        if getattr(phase, "condition", None):
+            # FORGE-539: a conditional phase may be skipped, and a release
+            # gate that may be skipped is not a guarantee anyone signs off.
+            continue
         name = (gate.name or "").lower()
         if any(marker in name for marker in RELEASE_GATE_MARKERS):
             return []
@@ -192,23 +196,52 @@ def _rule_deliverables_are_producible(phases: list[Any]) -> list[Violation]:
     it fails at the gate rather than at the point somebody could have noticed
     while writing it.
     """
+    from orchestrator.design_flow.graph import ConditionError, GraphError, build_graph
+
+    try:
+        graph = build_graph(phases)
+    except (GraphError, ConditionError):
+        # Reported by graph-is-valid; producibility cannot be judged without it.
+        return []
+    by_id = {phase.id: phase for phase in phases}
     out: list[Violation] = []
-    producible: set[str] = set()
     for phase in phases:
-        # A phase's own expected artifacts count toward its own gate: the
-        # phase runs before its gate is evaluated.
-        producible.update(getattr(phase, "expected_artifacts", ()) or ())
+        # FORGE-539: what the phase itself and the phases it depends on can
+        # produce. A phase's own expected artifacts count toward its own gate
+        # (it runs before its gate). A conditional upstream phase does not
+        # count: it may be skipped, and a skipped phase produced nothing.
+        producible: set[str] = set(getattr(phase, "expected_artifacts", ()) or ())
+        for upstream in graph.upstream(phase.id):
+            source = by_id[upstream]
+            if getattr(source, "condition", None):
+                continue
+            producible.update(getattr(source, "expected_artifacts", ()) or ())
         for required in getattr(phase, "required_deliverables", ()) or ():
             if required not in producible:
                 out.append(
                     Violation(
                         "deliverable-is-producible",
-                        f"requires '{required}', which no phase up to and including this "
-                        "one lists in expected_artifacts — the gate can never pass",
+                        f"requires '{required}', which neither this phase nor any phase it "
+                        "always depends on lists in expected_artifacts — the gate can never "
+                        "pass",
                         phase.id,
                     )
                 )
     return out
+
+
+def _rule_graph_is_valid(phases: list[Any]) -> list[Violation]:
+    """Dependencies name real phases, form no cycle, and conditions parse (FORGE-539)."""
+    from orchestrator.design_flow.graph import ConditionError, GraphError, build_graph
+
+    ids = [getattr(p, "id", None) for p in phases]
+    if len(set(ids)) != len(ids):
+        return []  # unique-phase-ids reports it once; no second copy here
+    try:
+        build_graph(phases)
+    except (GraphError, ConditionError) as exc:
+        return [Violation("graph-is-valid", str(exc))]
+    return []
 
 
 def _rule_phase_model_is_routable(phases: list[Any]) -> list[Violation]:
@@ -332,6 +365,7 @@ def _rule_physical_verification_kept(
 _RULES = (
     _rule_has_phases,
     _rule_unique_phase_ids,
+    _rule_graph_is_valid,
     _rule_release_gate_exists,
     _rule_gates_require_evidence,
     _rule_enforcement_not_disabled_at_a_gate,

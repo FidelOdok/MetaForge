@@ -106,6 +106,16 @@ class Phase:
     # Empty = derived at run time from the phase's definition-type deliverables
     # (one per type, named after the phase); see ``slots.effective_slots``.
     slots: tuple[DeliverableSlot, ...] = ()
+    # FORGE-539: the phases this one needs. ``None`` (the default) means "the
+    # phase before me", which is how every flow ran before graphs; a tuple,
+    # even an empty one, is the exact set. See ``orchestrator.design_flow.graph``.
+    depends_on: tuple[str, ...] | None = None
+    # FORGE-539: run this phase only when the condition holds over the flow's
+    # facts (``route == undecided``); otherwise it is skipped, never "done".
+    condition: str | None = None
+    # FORGE-539: the intermediate outcome this phase establishes, in one line
+    # ("drivetrain requirements established"). Outcomes come before tasks.
+    outcome: str = ""
 
 
 @dataclass(frozen=True)
@@ -214,6 +224,9 @@ def definition_from_frozen(frozen: FrozenFlow) -> FlowDefinition:
                 enforce_deliverables=p.enforce_deliverables,
                 disciplines=tuple(p.disciplines),
                 model=p.model,
+                depends_on=None if p.depends_on is None else tuple(p.depends_on),
+                condition=p.condition or None,
+                outcome=p.outcome or "",
                 slots=tuple(
                     DeliverableSlot(item_type=s.item_type, name=s.name, item_key=s.item_key)
                     for s in p.slots

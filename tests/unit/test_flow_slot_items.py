@@ -220,6 +220,9 @@ class TestSlotsInTheFlow:
             row.pop("slots")
             if row.get("model") is None:
                 row.pop("model")
+            # FORGE-539 fields did not exist before slots either.
+            for key in ("depends_on", "condition", "outcome"):
+                row.pop(key)
             rows.append(row)
         legacy = hashlib.sha256(
             json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()

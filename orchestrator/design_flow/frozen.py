@@ -69,6 +69,12 @@ class FrozenPhase:
     #: FORGE-524: the items this phase writes. Empty for flows frozen before
     #: slots existed and for template runs, whose slots are derived at run time.
     slots: list[FrozenSlot] = field(default_factory=list)
+    #: FORGE-539: explicit dependencies (``None`` = the phase before), a run
+    #: condition over the flow's facts, and the outcome the phase establishes.
+    #: All absent from the hash when unset, so earlier approvals still verify.
+    depends_on: list[str] | None = None
+    condition: str | None = None
+    outcome: str = ""
 
 
 @dataclass
@@ -94,6 +100,10 @@ class FrozenFlow:
     #: approval, and carried to every phase brain. Optional with a default so
     #: flows frozen before this field, and in-flight workflow inputs, still load.
     context: str = ""
+    #: FORGE-539: the facts phase conditions are evaluated against
+    #: (``route``, ``target_maturity``, ``loads_known``, ...). Hashed when
+    #: present, so a condition cannot be steered by editing facts later.
+    facts: dict[str, str] = field(default_factory=dict)
 
     def compute_hash(self) -> str:
         rows = []
@@ -106,9 +116,18 @@ class FrozenFlow:
             # Same for FORGE-524 slots: absent when empty.
             if not row.get("slots"):
                 row.pop("slots", None)
+            # FORGE-539 fields: absent when unset.
+            if row.get("depends_on") is None:
+                row.pop("depends_on", None)
+            if not row.get("condition"):
+                row.pop("condition", None)
+            if not row.get("outcome"):
+                row.pop("outcome", None)
             rows.append(row)
         # Absent when empty, so flows frozen before FORGE-491 keep their hash.
         body: object = {"phases": rows, "context": self.context} if self.context else rows
+        if self.facts:
+            body = {"phases": rows, "context": self.context, "facts": dict(self.facts)}
         payload = json.dumps(body, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -128,7 +147,13 @@ class FrozenFlow:
             )
 
 
-def freeze_flow(definition: object, *, version: str = "builtin", context: str = "") -> FrozenFlow:
+def freeze_flow(
+    definition: object,
+    *,
+    version: str = "builtin",
+    context: str = "",
+    facts: dict[str, str] | None = None,
+) -> FrozenFlow:
     """Convert a :class:`~orchestrator.design_flow.spec.FlowDefinition`.
 
     Takes ``object`` rather than the real type on purpose: this module is
@@ -148,6 +173,13 @@ def freeze_flow(definition: object, *, version: str = "builtin", context: str = 
                 enforce_deliverables=bool(getattr(phase, "enforce_deliverables", True)),
                 disciplines=list(getattr(phase, "disciplines", ()) or ()),
                 model=getattr(phase, "model", None) or None,
+                depends_on=(
+                    None
+                    if getattr(phase, "depends_on", None) is None
+                    else [str(d) for d in phase.depends_on]
+                ),
+                condition=getattr(phase, "condition", None) or None,
+                outcome=str(getattr(phase, "outcome", "") or ""),
                 slots=[
                     FrozenSlot(
                         item_type=str(slot.item_type),
@@ -175,6 +207,7 @@ def freeze_flow(definition: object, *, version: str = "builtin", context: str = 
         phases=phases,
         version=version,
         context=context,
+        facts={str(k): str(v) for k, v in (facts or {}).items()},
     )
     flow.content_hash = flow.compute_hash()
     return flow
