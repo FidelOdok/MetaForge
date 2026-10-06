@@ -43,6 +43,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
+    from orchestrator.design_flow.failures import classify_failure
     from orchestrator.design_flow.frozen import FrozenFlow, FrozenPhase
     from orchestrator.design_flow.graph import (
         FlowGraph,
@@ -96,6 +97,12 @@ REVISION_NOTES_PATCH_ID = "forge-530-revision-notes"
 #: target. Checked only for such flows, so a straight-line flow records no
 #: marker and replays exactly as before.
 GRAPH_PATCH_ID = "forge-539-graph"
+
+#: ``workflow.patched`` id for FORGE-539's failure taxonomy: a phase that
+#: could not run ends the run with its failure class and the response that
+#: class calls for. Histories that already hold a phase failure replay with
+#: the result they had.
+FAILURE_CLASS_PATCH_ID = "forge-539-failure-class"
 
 #: How long a gate waits before it is treated as refused. Long, because the
 #: reviewer is a person who may be asleep; finite, because a run that waits
@@ -377,9 +384,7 @@ class DesignFlowWorkflow:
                     # The phase could not run. End the run as failed with the
                     # reason rather than failing the workflow with an opaque
                     # "Activity task failed" nobody can read from run status.
-                    cause = exc.cause
-                    reason = str(cause) if cause is not None else str(exc)
-                    return self._fail(f"Phase '{phase.id}' failed: {reason}")
+                    return self._fail_phase(phase.id, exc)
                 # An ungrounded reply is never "completed", whatever the worker said.
                 result.status = phase_status(result.summary, result.status)
                 entry = {
@@ -491,9 +496,7 @@ class DesignFlowWorkflow:
             entries: dict[str, dict[str, Any]] = {}
             for phase, outcome in zip(runnable, outcomes, strict=True):
                 if isinstance(outcome, ActivityError):
-                    cause = outcome.cause
-                    reason = str(cause) if cause is not None else str(outcome)
-                    return self._fail(f"Phase '{phase.id}' failed: {reason}")
+                    return self._fail_phase(phase.id, outcome)
                 if isinstance(outcome, BaseException):
                     raise outcome
                 entries[phase.id] = self._finish_phase(phase, outcome)
@@ -551,9 +554,7 @@ class DesignFlowWorkflow:
                                 inp, phase, retry_feedback, attempts[phase.id]
                             )
                         except ActivityError as exc:
-                            cause = exc.cause
-                            reason = str(cause) if cause is not None else str(exc)
-                            return self._fail(f"Phase '{phase.id}' failed: {reason}")
+                            return self._fail_phase(phase.id, exc)
                         entry = self._finish_phase(phase, result)
                         continue
                     if self._change is not None:
@@ -903,6 +904,21 @@ class DesignFlowWorkflow:
         raise AssertionError("unreachable: continue_as_new does not return")
 
     # ── bookkeeping ──────────────────────────────────────────────────────
+
+    def _fail_phase(self, phase_id: str, exc: ActivityError) -> dict[str, Any]:
+        """End the run because ``phase_id`` could not run, with its failure class."""
+        cause = exc.cause
+        reason = str(cause) if cause is not None else str(exc)
+        result = self._fail(f"Phase '{phase_id}' failed: {reason}")
+        if workflow.patched(FAILURE_CLASS_PATCH_ID):
+            verdict = classify_failure(reason, error_type=str(getattr(cause, "type", "") or ""))
+            result["failure"] = {"phase": phase_id, **verdict.as_dict()}
+            self._record(
+                "phase_failure_classified",
+                phase=phase_id,
+                detail=f"{verdict.failure_class.value}: {verdict.guidance}",
+            )
+        return result
 
     def _fail(self, message: str) -> dict[str, Any]:
         self._status = "failed"

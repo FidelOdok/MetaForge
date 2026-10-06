@@ -26,6 +26,7 @@ from typing import Protocol, runtime_checkable
 import structlog
 
 from observability.tracing import get_tracer
+from orchestrator.design_flow.failures import classify_failure
 from orchestrator.design_flow.graph import (
     FlowGraph,
     build_graph,
@@ -442,9 +443,22 @@ class DesignFlowExecutor:
                 logger.info("design_flow_transition_stop", run_id=run_id, detail=str(exc))
             except Exception as exc:  # noqa: BLE001 - surface any failure onto the run
                 span.record_exception(exc)
-                logger.error("design_flow_failed", run_id=run_id, error=str(exc))
+                # FORGE-539: name the failure's class and what it calls for, so
+                # "retry" is never the implied answer to a design or config error.
+                verdict = classify_failure(str(exc), error_type=type(exc).__name__)
+                logger.error(
+                    "design_flow_failed",
+                    run_id=run_id,
+                    error=str(exc),
+                    failure_class=verdict.failure_class.value,
+                    response=verdict.response.value,
+                )
                 try:
-                    self._store.fail(run_id, str(exc))
+                    self._store.fail(
+                        run_id,
+                        f"{exc} [failure class: {verdict.failure_class.value}; "
+                        f"next: {verdict.guidance}]",
+                    )
                 except InvalidTransition:
                     pass
 
