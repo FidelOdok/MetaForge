@@ -243,3 +243,61 @@ class TestInvariants:
             ),
         ]
         assert "release-gate-exists" in self._rules(phases)
+
+
+class TestVersionStoreKeepsGraphs:
+    def test_a_graph_version_with_facts_survives_a_restart(self, tmp_path) -> None:
+        from orchestrator.design_flow.spec import Gate
+        from orchestrator.design_flow.versions import FlowVersionStore
+
+        flow = FlowDefinition(
+            id="g",
+            name="g",
+            phases=(
+                Phase(
+                    id="req",
+                    title="r",
+                    objective="r",
+                    expected_artifacts=("prd",),
+                    required_deliverables=("prd",),
+                    gate=Gate(name="Requirements sign-off"),
+                ),
+                Phase(
+                    id="a",
+                    title="a",
+                    objective="a",
+                    depends_on=("req",),
+                    outcome="option A assessed",
+                ),
+                Phase(
+                    id="b",
+                    title="b",
+                    objective="b",
+                    depends_on=("req",),
+                    condition="route == undecided",
+                ),
+                Phase(
+                    id="verify",
+                    title="v",
+                    objective="v",
+                    depends_on=("a",),
+                    expected_artifacts=("test_plan",),
+                    required_deliverables=("test_plan",),
+                    gate=Gate(name="V&V review"),
+                ),
+            ),
+        )
+        path = str(tmp_path / "versions.db")
+        saved = FlowVersionStore(path).save(
+            flow,
+            base_template_id="g",
+            base_version="1",
+            changes=["x"],
+            facts={"route": "undecided"},
+        )
+        restored = FlowVersionStore(path).get(saved.id)
+        assert restored.frozen.content_hash == saved.frozen.content_hash
+        assert restored.frozen.facts == {"route": "undecided"}
+        assert restored.definition.phases[2].condition == "route == undecided"
+        assert restored.definition.phases[1].depends_on == ("req",)
+        assert restored.definition.phases[1].outcome == "option A assessed"

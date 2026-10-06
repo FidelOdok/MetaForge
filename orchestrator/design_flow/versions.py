@@ -217,6 +217,10 @@ def _definition_from_dict(data: dict[str, Any]) -> FlowDefinition:
                 disciplines=tuple(p.get("disciplines", ())),
                 model=p.get("model"),
                 slots=slots_from(p.get("slots")),
+                # FORGE-539: absent in rows written before graphs existed.
+                depends_on=(None if p.get("depends_on") is None else tuple(p["depends_on"])),
+                condition=p.get("condition") or None,
+                outcome=str(p.get("outcome") or ""),
             )
         )
     return FlowDefinition(id=data["id"], name=data["name"], phases=tuple(phases))
@@ -270,6 +274,11 @@ class FlowVersionStore:
                 self._conn.execute(
                     "ALTER TABLE flow_versions ADD COLUMN flow_context TEXT NOT NULL DEFAULT ''"
                 )
+            # FORGE-539: the facts phase conditions read, frozen with the version.
+            if "flow_facts" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE flow_versions ADD COLUMN flow_facts TEXT NOT NULL DEFAULT '{}'"
+                )
             self._conn.commit()
             self._restore()
 
@@ -280,7 +289,10 @@ class FlowVersionStore:
             try:
                 definition = _definition_from_dict(json.loads(row["definition"]))
                 frozen = freeze_flow(
-                    definition, version=row["frozen_version"], context=row["flow_context"] or ""
+                    definition,
+                    version=row["frozen_version"],
+                    context=row["flow_context"] or "",
+                    facts=json.loads(row["flow_facts"] or "{}"),
                 )
                 if frozen.content_hash != row["content_hash"]:
                     raise ValueError(
@@ -316,8 +328,8 @@ class FlowVersionStore:
             INSERT INTO flow_versions (
                 id, status, definition, frozen_version, content_hash, base_template_id,
                 base_version, changes, origin, intent, created_at, decided_by, decided_at,
-                approval_id, flow_context
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                approval_id, flow_context, flow_facts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 decided_by=excluded.decided_by,
@@ -341,6 +353,7 @@ class FlowVersionStore:
                 decided_at,
                 version.approval_id,
                 version.frozen.context,
+                json.dumps(version.frozen.facts, sort_keys=True),
             ),
         )
         self._conn.commit()
@@ -356,6 +369,7 @@ class FlowVersionStore:
         intent: str = "",
         approval_id: str = "",
         context: str = "",
+        facts: dict[str, str] | None = None,
     ) -> FlowVersion:
         """Write a new version. Refuses one that breaks an invariant.
 
@@ -372,7 +386,12 @@ class FlowVersionStore:
         version = FlowVersion(
             id=version_id,
             definition=definition,
-            frozen=freeze_flow(definition, version=f"{base_version}+{version_id}", context=context),
+            frozen=freeze_flow(
+                definition,
+                version=f"{base_version}+{version_id}",
+                context=context,
+                facts=facts,
+            ),
             base_template_id=base_template_id,
             base_version=base_version,
             changes=changes,

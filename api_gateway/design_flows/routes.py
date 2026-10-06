@@ -545,6 +545,9 @@ async def propose_flow(
             origin="caller" if proposal.proposed_by else "generated",
             intent=proposal.intent,
             context=context.render_for_phases(),
+            # FORGE-539: what phase conditions are evaluated against, frozen
+            # with the version so a condition cannot be steered afterwards.
+            facts=context.facts(),
         )
     except FlowInvariantError as exc:
         # A proposal that cannot pass the rules is refused rather than stored

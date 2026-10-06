@@ -38,6 +38,7 @@ from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
 from orchestrator.design_flow.frozen import freeze_flow
+from orchestrator.design_flow.graph import build_graph, rework_candidates
 from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
 from orchestrator.design_flow.launcher import (
     DesignFlowLauncher,
@@ -598,7 +599,7 @@ def _resolve_in_process_flow(run: Run) -> FlowDefinition:
             raise FlowVersionUnrunnableError(str(version_id), str(exc)) from exc
         definition = definition_from_frozen(frozen)
         rebuilt = freeze_flow(
-            definition, version=frozen.version, context=frozen.context
+            definition, version=frozen.version, context=frozen.context, facts=frozen.facts
         ).content_hash
         if rebuilt != frozen.content_hash:
             raise FlowVersionUnrunnableError(
@@ -611,6 +612,7 @@ def _resolve_in_process_flow(run: Run) -> FlowDefinition:
         run.request["flow_version"] = frozen.version
         run.request["flow_content_hash"] = frozen.content_hash
         run.request["flow_context"] = frozen.context
+        run.request["flow_facts"] = dict(frozen.facts)
         return definition
 
     flow_id = str(run.request.get("flow") or DEFAULT_FLOW_ID)
@@ -689,7 +691,12 @@ async def _launch_flow(run_id: str) -> None:
         phases=[p.id for p in definition.phases],
     )
     task = asyncio.create_task(
-        executor.run(run_id, definition, flow_context=str(run.request.get("flow_context") or ""))
+        executor.run(
+            run_id,
+            definition,
+            flow_context=str(run.request.get("flow_context") or ""),
+            facts=dict(run.request.get("flow_facts") or {}),
+        )
     )
     _flow_tasks.add(task)
     task.add_done_callback(_flow_tasks.discard)
@@ -1242,6 +1249,9 @@ async def _refuse_undeliverable_decision(
     if decision is ApprovalDecision.REWORK:
         phase_ids = [p.id for p in definition.phases] if definition is not None else []
         current = gate.get("phase")
+        if definition is not None and current and str(current) in phase_ids:
+            # FORGE-539: a graph flow reworks only to a phase this one needs.
+            phase_ids = rework_candidates(build_graph(definition.phases), str(current))
         if phase_ids:
             error = rework_target_error(phase_ids, str(current) if current else None, to_phase)
             if error is not None:

@@ -40,6 +40,7 @@ __all__ = [
     "evaluate_condition",
     "is_linear",
     "parse_condition",
+    "rework_candidates",
 ]
 
 
@@ -232,6 +233,20 @@ def build_graph(phases: Sequence[Any]) -> FlowGraph:
         cyclic = sorted(set(order) - set(graph.topological()))
         raise GraphError(f"dependency cycle among phases: {', '.join(cyclic)}")
     return graph
+
+
+def rework_candidates(graph: FlowGraph, phase_id: str) -> list[str]:
+    """The phase ids to validate a rework from ``phase_id`` against, in order.
+
+    Pass the result to :func:`~orchestrator.design_flow.rework.rework_target_error`.
+    A straight-line flow keeps its whole phase list (every earlier phase is a
+    target, as before). A graph flow offers only the phases ``phase_id``
+    depends on: sending a run back to a phase this one never consumed would
+    re-run work that cannot have caused the problem.
+    """
+    if is_linear(graph):
+        return list(graph.order)
+    return [*graph.upstream(phase_id), phase_id]
 
 
 def is_linear(graph: FlowGraph) -> bool:
