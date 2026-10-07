@@ -34,9 +34,6 @@ def test_the_load_is_a_hard_constraint_with_its_value() -> None:
     assert any(c.value == bracket.LOAD_KG and c.unit == "kg" for c in loads)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="FORGE-569: a dimensionless 'at least 2' is not compiled as a criterion"
-)
 def test_the_safety_factor_is_a_measurable_criterion() -> None:
     model = bracket.compile()
     assert any(
@@ -44,10 +41,6 @@ def test_the_safety_factor_is_a_measurable_criterion() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FORGE-569: '80 x 60 x 40 mm' compiles to one '<= 40 mm' criterion, not three",
-)
 def test_the_envelope_keeps_every_dimension() -> None:
     model = bracket.compile(requirements=())
     limits = {s.limit for s in model.success_criteria if s.unit == "mm"}
@@ -65,10 +58,6 @@ def test_preferences_stay_separate_from_constraints() -> None:
     assert not any("aluminium" in c.text.lower() for c in model.constraints if c.source == "stated")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FORGE-569: 'Deliver CAD and validation evidence' is classed as a regulatory constraint",
-)
 def test_a_deliverable_request_is_not_a_constraint() -> None:
     model = bracket.compile()
     assert not any(c.text.startswith("Deliver CAD") for c in model.constraints)
