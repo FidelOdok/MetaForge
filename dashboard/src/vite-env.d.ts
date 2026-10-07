@@ -12,10 +12,6 @@
 interface ImportMetaEnv {
   /** Gateway to use when the user has not configured one in Settings. */
   readonly VITE_GATEWAY_URL?: string;
-  /** Supabase project URL. Required only for gateways with auth enabled. */
-  readonly VITE_SUPABASE_URL?: string;
-  /** Supabase anon/publishable key. Safe to ship — RLS is the boundary. */
-  readonly VITE_SUPABASE_ANON_KEY?: string;
   /** Opt-in Grafana Faro real-user monitoring. */
   readonly VITE_RUM_ENABLED?: string;
 }

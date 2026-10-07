@@ -56,8 +56,10 @@ class HealthResponse(BaseModel):
     components: list[ComponentHealth] = []
     timestamp: datetime
 
-    #: Which authentication mode this gateway is *actually* running with
-    #: (``off`` or ``supabase``).
+    #: Which authentication mode this gateway is *actually* running with:
+    #: ``off``, or the name of the auth provider it has installed. Not a closed
+    #: set — providers are plug-ins (FORGE-540), so the valid values depend on
+    #: this gateway's environment.
     #:
     #: Reported here because "is this gateway authenticated?" must be
     #: answerable by asking the running process, not by reading the config

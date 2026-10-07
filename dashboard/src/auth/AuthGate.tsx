@@ -1,8 +1,7 @@
+import { authClient } from 'metaforge:auth';
 import { useHealth } from '../hooks/use-health';
 import { getGatewayBase } from '../lib/gatewayConfig';
-import { isSupabaseConfigured, supabaseConfigHint } from '../lib/supabase';
 import { useAuth } from './AuthProvider';
-import { SignInPage } from './SignInPage';
 
 /**
  * Decides whether the app needs a signed-in user, by asking the gateway.
@@ -24,7 +23,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const { data: health, isLoading: healthLoading } = useHealth();
   const { status } = useAuth();
 
-  const gatewayRequiresAuth = health?.auth_mode === 'supabase';
+  const gatewayMode = health?.auth_mode;
+  const gatewayRequiresAuth = Boolean(gatewayMode) && gatewayMode !== 'off';
 
   if (!gatewayRequiresAuth) {
     // Local gateway, unknown, or unreachable. Also covers the window before
@@ -34,13 +34,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   // The gateway wants a token and this build cannot produce one. Say so
   // plainly: the alternative is an endless 401 loop with no explanation.
-  if (!isSupabaseConfigured) {
-    return (
-      <MisconfiguredBuild
-        hint={supabaseConfigHint()}
-        gatewayLabel={getGatewayBase() || 'same origin'}
-      />
-    );
+  const mismatch = describeMismatch(gatewayMode!);
+  if (mismatch) {
+    return <MisconfiguredBuild hint={mismatch} gatewayLabel={getGatewayBase() || 'same origin'} />;
   }
 
   if (status === 'loading' || healthLoading) {
@@ -48,10 +44,37 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (status === 'signed-out') {
-    return <SignInPage gatewayLabel={getGatewayBase() || undefined} />;
+    const SignInView = authClient!.SignInView;
+    return <SignInView gatewayLabel={getGatewayBase() || undefined} />;
   }
 
   return <>{children}</>;
+}
+
+/**
+ * Why this build cannot satisfy `gatewayMode`, or `null` if it can.
+ *
+ * Three distinct ways to be unable to sign in, and conflating them costs an
+ * operator real time: no provider compiled in at all, the wrong provider, or
+ * the right provider without its credentials.
+ */
+function describeMismatch(gatewayMode: string): string | null {
+  if (!authClient) {
+    return (
+      `This dashboard was built without an authentication provider, so it has no way ` +
+      `to obtain a ${gatewayMode} token.`
+    );
+  }
+  if (authClient.mode !== gatewayMode) {
+    return (
+      `This dashboard was built for ${authClient.mode} authentication, but the gateway ` +
+      `is using ${gatewayMode}.`
+    );
+  }
+  if (!authClient.isConfigured) {
+    return authClient.configHint();
+  }
+  return null;
 }
 
 function RestoringSession() {
@@ -72,11 +95,10 @@ function MisconfiguredBuild({ hint, gatewayLabel }: { hint: string; gatewayLabel
         <h1 className="text-sm font-semibold text-on-surface">Cannot sign in to this gateway</h1>
         <p className="mt-2 text-[13px] leading-relaxed text-on-surface-variant">
           The gateway at <code className="text-on-surface">{gatewayLabel}</code> is running with
-          authentication enabled, but this dashboard was built without Supabase credentials, so it
-          has no way to obtain a token. {hint}
+          authentication enabled. {hint}
         </p>
         <p className="mt-3 text-[13px] leading-relaxed text-on-surface-variant">
-          Either rebuild the dashboard with those variables set, or point it at a gateway running{' '}
+          Either rebuild the dashboard against that provider, or point it at a gateway running{' '}
           <code className="text-on-surface">METAFORGE_AUTH_MODE=off</code> from Settings.
         </p>
       </div>

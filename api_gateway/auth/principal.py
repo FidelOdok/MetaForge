@@ -22,16 +22,16 @@ __all__ = ["Principal"]
 class Principal:
     """A caller whose identity has been cryptographically verified."""
 
-    #: Stable user identifier — the JWT ``sub`` claim. For Supabase this is the
-    #: ``auth.users.id`` UUID, and it is the value to join on.
+    #: Stable user identifier, as the provider reports it — conventionally a
+    #: JWT ``sub`` claim. Opaque to MetaForge, and the value to join on.
     subject: str
 
     #: Email, when the token carries one. Display only: users can change it,
     #: so never key authorisation off this.
     email: str | None = None
 
-    #: Supabase ``role`` claim (typically ``authenticated``). Not a MetaForge
-    #: role — account-level roles live in ``account_members``.
+    #: The provider's own role claim, if it has one. Not a MetaForge role, and
+    #: not an authorisation decision — it is carried, not interpreted.
     role: str | None = None
 
     #: Remaining verified claims, for callers that need something niche without

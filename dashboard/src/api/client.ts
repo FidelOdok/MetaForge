@@ -29,10 +29,10 @@ apiClient.interceptors.request.use((config) => {
   // from Settings at any time and in-flight-after callers must see it.
   config.baseURL = apiBase();
 
-  // Bearer token for gateways running `auth_mode: supabase`. Read from a
-  // module-level holder that AuthProvider keeps in step with the session,
-  // including Supabase's silent refreshes — an async lookup here would put a
-  // promise in front of every request in the app.
+  // Bearer token for a gateway running an authentication provider. Read from
+  // a module-level holder that AuthProvider keeps in step with the session,
+  // including the provider's own silent refreshes — an async lookup here would
+  // put a promise in front of every request in the app.
   //
   // Null on a local gateway, which wants no Authorization header at all, so
   // the header is omitted rather than sent empty.

@@ -9,8 +9,14 @@ export interface ComponentHealth {
   message: string | null;
 }
 
-/** How the gateway authenticates callers (``METAFORGE_AUTH_MODE``). */
-export type GatewayAuthMode = 'off' | 'supabase';
+/**
+ * How the gateway authenticates callers (``METAFORGE_AUTH_MODE``).
+ *
+ * `off`, or the name of whichever provider that gateway has installed. Not a
+ * closed union: providers are plug-ins (FORGE-540), so the set of valid values
+ * is decided by the gateway's environment, not by this build.
+ */
+export type GatewayAuthMode = 'off' | (string & {});
 
 /** Response from ``GET /health`` (``HealthResponse``). */
 export interface HealthStatus {
@@ -25,7 +31,8 @@ export interface HealthStatus {
    *
    * The dashboard asks rather than assumes, because it is a static app that
    * can be pointed at any gateway: the same build serves a laptop running
-   * `auth_mode: off` and a hosted gateway running `supabase`. Optional because
+   * `auth_mode: off` and a hosted gateway running an installed provider.
+   * Optional because
    * a gateway older than this field simply omits it, which reads as `off` —
    * correct, since such a gateway has no authentication to satisfy.
    */

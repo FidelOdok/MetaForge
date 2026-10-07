@@ -78,7 +78,7 @@ const sidebars = {
       className: 'dx-group dx-group--deployment',
       collapsible: false,
       collapsed: false,
-      items: ['deployment/vercel', 'deployment/cloud'],
+      items: ['deployment/vercel', 'deployment/authentication'],
     },
     {
       type: 'category',

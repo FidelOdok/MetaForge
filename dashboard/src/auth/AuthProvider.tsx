@@ -1,31 +1,25 @@
-import type { Session, User } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { authClient } from 'metaforge:auth';
 import { logger } from '../lib/logger';
-import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { setAccessToken } from './accessToken';
+import type { AuthSession, AuthStatus, AuthUser } from './types';
 
 /**
- * Supabase session state for the dashboard.
+ * Session state for the dashboard, from whichever auth client this build has.
  *
- * Mounted unconditionally, including on local builds with no Supabase project
- * configured. In that case it settles immediately into
- * `{ status: 'unconfigured' }` and does nothing else — the provider existing is
- * not the same as authentication being required, and `AuthGate` decides the
- * latter by asking the gateway.
+ * Mounted unconditionally, including on local builds with no client at all
+ * (`metaforge:auth` → `src/auth/none.ts`). In that case it settles immediately
+ * into `{ status: 'unconfigured' }` and does nothing else — the provider
+ * existing is not the same as authentication being required, and `AuthGate`
+ * decides the latter by asking the gateway.
  */
 
-export type AuthStatus =
-  /** Restoring a persisted session; we do not yet know if there is one. */
-  | 'loading'
-  /** This build has no Supabase credentials. Local deployments live here. */
-  | 'unconfigured'
-  | 'signed-in'
-  | 'signed-out';
+export type { AuthStatus } from './types';
 
 export interface AuthContextValue {
   status: AuthStatus;
-  session: Session | null;
-  user: User | null;
+  session: AuthSession | null;
+  user: AuthUser | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
@@ -33,30 +27,33 @@ export interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const NO_CLIENT = 'This dashboard build has no authentication provider.';
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [status, setStatus] = useState<AuthStatus>(
-    isSupabaseConfigured ? 'loading' : 'unconfigured',
+    authClient?.isConfigured ? 'loading' : 'unconfigured',
   );
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!authClient?.isConfigured) return;
+    const client = authClient;
 
     let active = true;
 
-    const apply = (next: Session | null) => {
+    const apply = (next: AuthSession | null) => {
       if (!active) return;
       setSession(next);
       // Mirror into the module-level holder the Axios interceptor reads. Done
       // here rather than in a separate effect so the token can never lag the
       // session it came from.
-      setAccessToken(next?.access_token ?? null);
+      setAccessToken(next?.accessToken ?? null);
       setStatus(next ? 'signed-in' : 'signed-out');
     };
 
-    supabase.auth
-      .getSession()
-      .then(({ data }) => apply(data.session))
+    client
+      .restore()
+      .then(apply)
       .catch((err) => {
         logger.error('auth_session_restore_failed', { error: String(err) });
         apply(null);
@@ -64,36 +61,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Fires for sign-in, sign-out, silent token refresh, and for a sign-out
     // performed in another tab.
-    const { data: subscription } = supabase.auth.onAuthStateChange((event, next) => {
-      logger.debug('auth_state_change', { event });
-      apply(next);
-    });
+    const unsubscribe = client.subscribe(apply);
 
     return () => {
       active = false;
-      subscription.subscription.unsubscribe();
+      unsubscribe();
     };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!supabase) throw new Error('This dashboard build has no Supabase configuration.');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw new Error(error.message);
+    if (!authClient) throw new Error(NO_CLIENT);
+    await authClient.signIn(email, password);
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    if (!supabase) throw new Error('This dashboard build has no Supabase configuration.');
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) throw new Error(error.message);
-    // With email confirmation on, Supabase returns a user but no session. The
-    // caller has to say so rather than appearing to succeed into a blank app.
-    return { needsConfirmation: Boolean(data.user) && !data.session };
+    if (!authClient) throw new Error(NO_CLIENT);
+    return authClient.signUp(email, password);
   }, []);
 
   const signOut = useCallback(async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signOut();
-    if (error) throw new Error(error.message);
+    if (!authClient) return;
+    await authClient.signOut();
   }, []);
 
   const value = useMemo<AuthContextValue>(

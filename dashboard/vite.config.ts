@@ -45,10 +45,30 @@ function attachLiveTarget(options: ProxyOptions, toWs = false): void {
   refresh();
   setInterval(refresh, 5000);
 }
+
+/**
+ * FORGE-540: MetaForge is open core, and authentication is the seam.
+ *
+ * `metaforge:auth` resolves to `src/auth/none.ts` — no client, local-only —
+ * which is what this repository ships and what every `docker compose up`
+ * install wants. A build that has an authentication provider points
+ * `METAFORGE_AUTH_MODULE` at the module exporting it, relative to this
+ * directory. See `src/auth/types.ts` for the contract it must satisfy.
+ */
+function resolveAuthModule(): string {
+  const override = process.env.METAFORGE_AUTH_MODULE;
+  return override
+    ? path.resolve(__dirname, override)
+    : path.resolve(__dirname, './src/auth/none.ts');
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      'metaforge:auth': resolveAuthModule(),
+    },
   },
   server: {
     port: 5173,
