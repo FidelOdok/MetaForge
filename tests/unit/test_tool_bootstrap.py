@@ -90,13 +90,13 @@ class TestBootstrapToolRegistry:
         of whether a real `gz` binary is present) for 7 adapters.
         MET-635/636 added the Isaac Sim adapter (2 tools, opt-in like
         freecad/kicad) for 8. FORGE-544 added the in-process power budget
-        adapter for 9.
+        adapter for 9, and FORGE-542 the ngspice adapter for 10.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 9
+        assert len(adapters) == 10
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -108,6 +108,7 @@ class TestBootstrapToolRegistry:
             "gazebo",
             "isaac_sim",
             "power",
+            "spice",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -115,7 +116,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 9
+        assert len(registry.list_adapters()) == 10
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -222,12 +223,13 @@ class TestBootstrapToolRegistry:
         calculix.cross_check_cantilever_frequency for 83. FORGE-283 adds
         calculix.compute_joint_loads for 84. FORGE-282 adds
         calculix.cross_check_thermal_steady_state for 85. FORGE-544 adds
-        power.check_budget for 86.
+        power.check_budget for 86. FORGE-542 adds spice.run_simulation
+        for 87.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 86
+        assert len(tools) == 87
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

@@ -475,12 +475,13 @@ class SimulationAgent:
     async def _run_spice(self, request: TaskRequest) -> TaskResult:
         """Run SPICE circuit simulation."""
         netlist_path: str = request.parameters.get("netlist_path", "")
-        if not netlist_path:
+        netlist: str = request.parameters.get("netlist", "")
+        if not netlist_path and not netlist:
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
                 success=False,
-                errors=["Missing required parameter: netlist_path"],
+                errors=["Missing required parameter: netlist_path (or netlist)"],
             )
 
         self.logger.info("SPICE simulation requested", netlist_path=netlist_path)
@@ -488,9 +489,11 @@ class SimulationAgent:
         ctx = self._create_skill_context(request.branch)
         skill_input = RunSpiceInput(
             work_product_id=str(request.work_product_id),
-            netlist_path=netlist_path,
+            netlist_path=netlist_path or None,
+            netlist=netlist or None,
             analysis_type=request.parameters.get("analysis_type", "dc"),
             params=request.parameters.get("params", {}),
+            probes=request.parameters.get("probes", []),
         )
 
         handler = RunSpiceHandler(ctx)
@@ -513,12 +516,16 @@ class SimulationAgent:
                 {
                     "skill": "run_spice",
                     "results": output.results,
+                    "waveform_data": output.waveform_data,
+                    "scale": output.scale,
                     "waveforms": output.waveforms,
                     "convergence": output.convergence,
                     "sim_time_s": output.sim_time_s,
                 }
             ],
-            warnings=[] if output.convergence else ["SPICE simulation did not converge"],
+            warnings=[]
+            if output.convergence
+            else [f"SPICE simulation did not converge: {output.log}".rstrip(": ")],
         )
 
     async def _run_fea(self, request: TaskRequest) -> TaskResult:

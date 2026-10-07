@@ -1103,16 +1103,17 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge/adapter-spice:0.1` |
-| Base Image | `python:3.11-slim` + ngspice |
-| Transport | stdio |
-| Tools | `spice.simulate` |
+| Docker Image | `metaforge/spice-adapter:latest` (`tool_registry/tools/spice/Dockerfile`) |
+| Base Image | `python:3.11-slim` + Debian `ngspice` |
+| Transport | HTTP JSON-RPC on port 8104 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_SPICE_URL` |
+| Workspace | Shares `adapter-workspace` with the KiCad adapter, so a netlist from `kicad.export_netlist` is simulated by path |
+| Tools | `spice.run_simulation` |
 
-**Tools provided**:
+**Tools provided** (FORGE-542):
 
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
-| `spice.simulate` | `circuit_simulation` | Run SPICE simulation (DC, AC, transient analysis) |
+| `spice.run_simulation` | `circuit_simulation` | Run ngspice in batch mode on `netlist` text or a `netlist_path`, with one analysis card built from `analysis_type` (`op`, `dc`, `ac`, `transient`) and `params`. Parses ngspice's ASCII rawfile: per vector `final`/`min`/`max` (AC: magnitude in dB and phase), a decimated waveform keyed with the scale, `convergence`, and ngspice's errors in `log` when it fails |
 
 ---
 

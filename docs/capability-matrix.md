@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (120 across 19 adapters)
+## MCP tools (121 across 20 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -17,12 +17,12 @@ Gazebo, the OpenUSD conversion adapter, and Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-One hundred thirteen of the 120 are described in the table below. The seven
+One hundred fourteen of the 121 are described in the table below. The seven
 that are not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 120 does carry an MCP
+they simply have no row here yet. Every one of the 121 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -39,8 +39,8 @@ capability does not exist.
 |---|---|---|
 | `core` | 40 | Projects, sessions, twin reads, the records that are not domain-specific, and the design-flow lifecycle tools (FORGE-539) |
 | `mechanical` | 31 | CAD authoring across both kernels, plus geometry commit |
-| `simulation` | 32 | FEA, load cases, meshes and the evidence they produce, including `twin.record_document` to record a `simulation_result` or `load_case` (FORGE-533) |
-| `electronics` | 28 | Schematic and board checks, component search, sourcing, and the per-rail power budget (`power.check_budget`, FORGE-544) |
+| `simulation` | 33 | FEA, circuit simulation (`spice.run_simulation`, FORGE-542), load cases, meshes and the evidence they produce, including `twin.record_document` to record a `simulation_result` or `load_case` (FORGE-533) |
+| `electronics` | 29 | Schematic and board checks, component search, sourcing, the per-rail power budget (`power.check_budget`, FORGE-544) and circuit simulation (`spice.run_simulation`, FORGE-542) |
 | `robotics` | 32 | Assemblies, URDF/SDF/USD export, simulators |
 | `mechanical_product` | 36 | A mechanical product end to end (FORGE-479): the FreeCAD session tools (open, sketch, pad/pocket, assembly, export, close), geometry commit, component selection. No promotion tool: promotion is a human authority |
 
@@ -1377,6 +1377,7 @@ what the server will actually enforce.
 | `kicad` (opt-in) | `kicad.run_erc` | Electrical rules check | _none yet_ |
 | `kicad` | `kicad.run_drc` | Design rules check. `unconnected_items` counts unrouted connections from KiCad's `unconnected_items` report key (it read `unresolved`, which KiCad never writes, so an unrouted board counted zero). `rule_set` (a `.kicad_dru` path or its text) is applied: kicad-cli has no rules flag, so DRC runs on a copy of the board with the rules as its `<stem>.kicad_dru`, and `rule_set_applied` says so. `passed` is no error-severity violation and nothing unconnected, counted before `severity_filter`; warnings do not fail it, and the same rule holds for `kicad.run_erc` (FORGE-551). Needs a kicad adapter image rebuild to deploy | unit-verified; report keys checked against kicad-cli 9.0.2 (FORGE-551) |
 | `kicad` | `kicad.export_bom` | Bill of materials export | _none yet_ |
+| `spice` (container) | `spice.run_simulation` | ngspice circuit simulation in the `spice-adapter` container (reached through `METAFORGE_ADAPTER_SPICE_URL`; the gateway image has no ngspice). `netlist` text or a `netlist_path` on the adapter workspace it shares with KiCad, so `kicad.export_netlist`'s SPICE output is simulated by path. One analysis card from `analysis_type` op/dc/ac/transient and `params`, or the netlist's own single card. Returns per-vector final/min/max (AC: magnitude dB and phase), decimated waveforms keyed with the scale, `convergence`, and ngspice's errors in `log` on failure. Backs the `run_spice` skill, whose tool nothing served before (FORGE-542). Needs the new image built and started to deploy | unit-verified against real ngspice-44.2 rawfiles; checked in the container (divider 2.5 V, RC transient 1 - e^-5 at 5 tau, RC low-pass -55.96 dB at 100 kHz) (FORGE-542) |
 | `kicad` | `kicad.export_netlist` | Netlist export | _none yet_ |
 | `kicad` | `kicad.export_gerber` | Gerber set for fab | _none yet_ |
 | `kicad` | `kicad.get_pin_mapping` | Connector pinmap → JSON | _none yet_ |
