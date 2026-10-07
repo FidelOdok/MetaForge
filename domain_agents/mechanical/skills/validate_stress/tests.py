@@ -83,3 +83,32 @@ class TestValidateStressSkill:
         errors = await handler.validate_preconditions(sample_input)
 
         assert any("not found" in e for e in errors)
+
+
+class TestLimitVersusAllowableForge554:
+    """FORGE-554: the safety factor is applied exactly once."""
+
+    def test_a_limit_stress_is_divided_by_the_safety_factor(self) -> None:
+        from domain_agents.mechanical.skills.validate_stress.schema import StressConstraint
+
+        c = StressConstraint(max_von_mises_mpa=240.0, safety_factor=2.0, material="al6061")
+        assert c.allowable == 120.0
+        assert c.limit == 240.0
+
+    def test_an_allowable_is_used_as_given(self) -> None:
+        from domain_agents.mechanical.skills.validate_stress.schema import StressConstraint
+
+        c = StressConstraint(allowable_mpa=120.0, safety_factor=2.0, material="al6061")
+        assert c.allowable == 120.0  # not 60: the factor is already in it
+        assert c.limit == 240.0  # so an achieved factor is still measured against the limit
+
+    def test_exactly_one_of_them(self) -> None:
+        import pytest
+        from pydantic import ValidationError
+
+        from domain_agents.mechanical.skills.validate_stress.schema import StressConstraint
+
+        with pytest.raises(ValidationError, match="exactly one"):
+            StressConstraint(material="al6061")
+        with pytest.raises(ValidationError, match="exactly one"):
+            StressConstraint(max_von_mises_mpa=240, allowable_mpa=120, material="al6061")

@@ -4,17 +4,63 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class StressConstraint(BaseModel):
-    """A constraint on allowable stress values."""
+    """A stress limit and the safety factor to hold it with.
 
-    max_von_mises_mpa: float = Field(
-        ..., gt=0, description="Maximum allowable von Mises stress in MPa"
+    FORGE-554: ``max_von_mises_mpa`` is the material's *limit* stress (yield,
+    or ultimate where that is the criterion), before any safety factor; the
+    allowable is ``max_von_mises_mpa / safety_factor``. It used to be
+    described as "maximum allowable", so a caller passing an already derated
+    allowable had the factor applied twice. A caller who has the allowable
+    itself passes ``allowable_mpa`` instead, which is used as given.
+    """
+
+    max_von_mises_mpa: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Limit stress in MPa (e.g. yield strength) BEFORE the safety factor; the "
+            "allowable is this divided by safety_factor"
+        ),
+    )
+    allowable_mpa: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Allowable stress in MPa with the safety factor ALREADY applied; used as given. "
+            "Pass this or max_von_mises_mpa, not both"
+        ),
     )
     safety_factor: float = Field(default=1.5, ge=1.0, description="Required safety factor")
     material: str = Field(..., description="Material name for property lookup")
+
+    @model_validator(mode="after")
+    def _one_limit(self) -> StressConstraint:
+        if (self.max_von_mises_mpa is None) == (self.allowable_mpa is None):
+            raise ValueError(
+                "give exactly one of max_von_mises_mpa (limit stress, divided by the safety "
+                "factor) or allowable_mpa (already derated, used as given)"
+            )
+        return self
+
+    @property
+    def allowable(self) -> float:
+        """The stress the result must stay at or below."""
+        if self.allowable_mpa is not None:
+            return self.allowable_mpa
+        assert self.max_von_mises_mpa is not None  # noqa: S101 - guaranteed by _one_limit
+        return self.max_von_mises_mpa / self.safety_factor
+
+    @property
+    def limit(self) -> float:
+        """The limit stress the achieved safety factor is measured against."""
+        if self.max_von_mises_mpa is not None:
+            return self.max_von_mises_mpa
+        assert self.allowable_mpa is not None  # noqa: S101
+        return self.allowable_mpa * self.safety_factor
 
 
 class ValidateStressInput(BaseModel):
