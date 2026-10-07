@@ -462,3 +462,119 @@ def test_authorize_wrong_secret_rejected(client) -> None:
         follow_redirects=False,
     )
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Where the server thinks it lives (FORGE-574)
+# ---------------------------------------------------------------------------
+
+
+class TestIssuerDerivation:
+    """The OAuth metadata must advertise the URL the *client* used.
+
+    This is what makes a bring-your-own-gateway setup work without
+    configuration. Behind a tunnel, TLS terminates at the edge and the
+    request this app sees is plain HTTP against an internal hostname --
+    so an issuer taken from the request as-received would advertise
+    ``http://mcp-http:8765`` to claude.ai, and discovery would fail.
+
+    The derivation existed and was load-bearing, but nothing tested it,
+    and ``docs/runbooks/cloudflare-mcp-tunnel.md`` told operators to set
+    ``METAFORGE_OAUTH_ISSUER`` by hand as though it were required. On a
+    quick tunnel that pins a hostname which changes on the next restart,
+    breaking the connector in a way that looks like a server fault. These
+    tests exist so the automatic path stays the one that works.
+    """
+
+    @staticmethod
+    def _client(issuer: str | None = None):
+        starlette_testclient = pytest.importorskip("starlette.testclient")
+        from metaforge.mcp.__main__ import build_http_app
+
+        class _FakeServer:
+            adapters: dict = {}
+            tool_ids: list = []
+
+            def declare_auth_posture(self, posture) -> None:
+                pass
+
+            def declare_caller(self, caller) -> None:
+                pass
+
+            def attach_elicitor(self, elicitor) -> None:
+                pass
+
+            def attach_notifier(self, notifier) -> None:
+                pass
+
+            def attach_service_auth(self, key, verifier) -> bool:
+                return False
+
+            async def authenticate_service_caller(self, ctx, presented_key, inbound):
+                return ctx
+
+            async def handle_request(self, raw: str) -> str:
+                return '{"jsonrpc":"2.0","id":"health","result":{"status":"ok"}}'
+
+        provider = OAuthProvider(OAuthConfig(login_secret="s3cret", issuer=issuer))
+        app = build_http_app(_FakeServer(), enable_sse=False, oauth=provider)
+        return starlette_testclient.TestClient(app)
+
+    def test_forwarded_headers_give_the_public_https_url(self) -> None:
+        """A tunnel terminates TLS at the edge, so the scheme must come
+        from the forwarded header, not from this request."""
+        client = self._client()
+        meta = client.get(
+            "/.well-known/oauth-authorization-server",
+            headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "mcp.example.com"},
+        ).json()
+        assert meta["issuer"] == "https://mcp.example.com"
+        assert meta["authorization_endpoint"] == "https://mcp.example.com/authorize"
+        assert meta["token_endpoint"] == "https://mcp.example.com/token"
+        assert meta["registration_endpoint"] == "https://mcp.example.com/register"
+
+    def test_protected_resource_metadata_uses_the_same_origin(self) -> None:
+        """Both documents must agree, or the client cannot follow the chain."""
+        client = self._client()
+        meta = client.get(
+            "/.well-known/oauth-protected-resource",
+            headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "mcp.example.com"},
+        ).json()
+        assert meta["resource"] == "https://mcp.example.com"
+        assert meta["authorization_servers"] == ["https://mcp.example.com"]
+
+    def test_an_explicit_issuer_overrides_the_headers(self) -> None:
+        """For a deployment whose proxy does not set X-Forwarded-*."""
+        client = self._client(issuer="https://pinned.example.com/")
+        meta = client.get(
+            "/.well-known/oauth-authorization-server",
+            headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "ignored.example.com"},
+        ).json()
+        assert meta["issuer"] == "https://pinned.example.com"
+
+    def test_host_header_is_used_when_nothing_is_forwarded(self) -> None:
+        """Direct exposure, no proxy in front."""
+        client = self._client()
+        meta = client.get(
+            "/.well-known/oauth-authorization-server",
+            headers={"Host": "gateway.example.com"},
+        ).json()
+        assert meta["issuer"].endswith("gateway.example.com")
+
+    def test_the_challenge_points_at_the_public_metadata_url(self) -> None:
+        """The 401 is where discovery starts; a wrong host here strands
+        the client before it ever reads the metadata."""
+        client = self._client()
+        resp = client.post(
+            "/mcp",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "mcp.example.com",
+                "Content-Type": "application/json",
+            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        )
+        assert resp.status_code == 401
+        assert "https://mcp.example.com/.well-known/oauth-protected-resource" in resp.headers.get(
+            "www-authenticate", ""
+        )

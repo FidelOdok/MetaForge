@@ -65,7 +65,7 @@ const sidebars = {
       collapsible: false,
       collapsed: false,
       items: [
-        'integrations/claude-code',
+        'integrations/hosted-harness', 'integrations/claude-code',
         'integrations/codex',
         'integrations/mcp-config-examples',
         'integrations/lightrag-ui',

@@ -84,10 +84,23 @@ The web connector UI can't send a static bearer token — it runs OAuth 2.1
 + PKCE against the MCP server, which is implemented in **MET-480**
 (`metaforge/mcp/oauth.py`). To enable it:
 
-1. In `.env`, set `METAFORGE_OAUTH_LOGIN_SECRET` (the shared access secret
-   the `/authorize` page asks for) and `METAFORGE_OAUTH_ISSUER` to the
-   public tunnel URL (e.g. `https://mcp.yourdomain.com`). Restart
-   `mcp-http`.
+1. In `.env`, set `METAFORGE_OAUTH_LOGIN_SECRET` — the shared access secret
+   the `/authorize` page asks for. Restart `mcp-http`.
+
+   :::tip[You do not need to set `METAFORGE_OAUTH_ISSUER`]
+
+   The server works out its own public URL from the `X-Forwarded-Proto` and
+   `X-Forwarded-Host` headers Cloudflare sets, so the OAuth metadata
+   advertises the hostname the client actually used. Leaving it unset is the
+   better default: on a *quick* tunnel the hostname changes every restart, and
+   a pinned issuer then advertises an address that no longer exists — which
+   looks like a server fault rather than stale configuration.
+
+   Set it only when something in front of the server does not send
+   `X-Forwarded-*`, in which case it overrides the derived value.
+   `tests/unit/test_mcp_oauth.py::TestIssuerDerivation` covers both paths.
+
+   :::
 2. In claude.ai → **Settings → Connectors → Add custom connector**, enter
    the MCP URL `https://mcp.yourdomain.com/mcp`.
 3. claude.ai auto-discovers the OAuth endpoints (via the
