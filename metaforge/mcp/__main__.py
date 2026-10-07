@@ -1781,12 +1781,20 @@ def _build_flow_bindings() -> dict[str, Any]:
             "design_flow_proposer": remote.proposer,
             "design_flow_status_reader": remote.status_reader,
             "design_flow_run_starter": remote.run_starter,
+            "design_flow_intent_compiler": remote.intent_compiler,
+            "design_flow_capability_reader": remote.capability_reader,
+            "design_flow_lifecycle_reader": remote.lifecycle_reader,
+            "design_flow_patcher": remote.patcher,
             "run_launcher": remote.run_launcher,
         }
 
     try:
         from api_gateway.design_flows.mcp_bindings import (
+            make_capability_reader,
             make_catalogue_reader,
+            make_intent_compiler,
+            make_lifecycle_reader,
+            make_patcher,
             make_proposer,
             make_run_starter,
             make_run_status_reader,
@@ -1810,6 +1818,10 @@ def _build_flow_bindings() -> dict[str, Any]:
         "design_flow_proposer": make_proposer(),
         "design_flow_status_reader": make_run_status_reader(),
         "design_flow_run_starter": make_run_starter(),
+        "design_flow_intent_compiler": make_intent_compiler(),
+        "design_flow_capability_reader": make_capability_reader(),
+        "design_flow_lifecycle_reader": make_lifecycle_reader(),
+        "design_flow_patcher": make_patcher(),
         "run_launcher": make_run_launcher(),
     }
 

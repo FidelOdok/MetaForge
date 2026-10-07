@@ -70,6 +70,14 @@ class OperationKind(StrEnum):
     #: FORGE-524: name the items (parts, requirement sets) a phase writes.
     #: Each becomes a deliverable slot with a fixed item key.
     DECLARE_ITEMS = "declare_items"
+    #: FORGE-539: the phases a phase needs (value: list of phase ids). Lets
+    #: independent work run in parallel and keeps rework local.
+    SET_DEPENDENCIES = "set_dependencies"
+    #: FORGE-539: run the phase only when a condition over the flow's facts
+    #: holds (value: e.g. "route == undecided"). A false condition skips it.
+    SET_CONDITION = "set_condition"
+    #: FORGE-539: the intermediate outcome the phase establishes (value: one line).
+    SET_OUTCOME = "set_outcome"
     #: Server-only (FORGE-463): inserted when the manufacturing route is
     #: "undecided", so the route becomes a gated decision rather than a guess.
     #: Not in :data:`MODEL_OPERATIONS` -- a model cannot add phases.
@@ -84,6 +92,9 @@ MODEL_OPERATIONS: frozenset[OperationKind] = frozenset(
         OperationKind.SET_DISCIPLINES,
         OperationKind.SET_MODEL,
         OperationKind.DECLARE_ITEMS,
+        OperationKind.SET_DEPENDENCIES,
+        OperationKind.SET_CONDITION,
+        OperationKind.SET_OUTCOME,
     }
 )
 
@@ -180,6 +191,13 @@ class Operation:
         if self.kind is OperationKind.DECLARE_ITEMS:
             names = ", ".join(f"{t} '{n}'" for t, n in _declared_items(self.value, ()))
             return f"phase '{self.phase_id}' declares {names}"
+        if self.kind is OperationKind.SET_DEPENDENCIES:
+            needs = ", ".join(str(v) for v in self.value or []) or "nothing (a root)"
+            return f"phase '{self.phase_id}' depends on {needs}"
+        if self.kind is OperationKind.SET_CONDITION:
+            return f"run phase '{self.phase_id}' only when {self.value}"
+        if self.kind is OperationKind.SET_OUTCOME:
+            return f"phase '{self.phase_id}' establishes: {self.value}"
         return f"assign {self.value} to phase '{self.phase_id}'"
 
 
@@ -353,6 +371,24 @@ def parse_caller_operations(raw: Any, base: FlowDefinition) -> list[Operation]:
             raise TailoringError(
                 f"{where}: set_model value '{value}' is not a usable provider:model"
             )
+        if kind is OperationKind.SET_DEPENDENCIES:
+            if not isinstance(value, list):
+                raise TailoringError(f"{where}: set_dependencies needs a list of phase ids")
+            unknown = [str(v) for v in value if str(v) not in phase_ids]
+            if unknown or phase_id in [str(v) for v in value]:
+                raise TailoringError(
+                    f"{where}: set_dependencies names unknown or self phase(s) "
+                    f"{unknown or [phase_id]}; phases: {', '.join(sorted(phase_ids))}"
+                )
+        if kind is OperationKind.SET_CONDITION:
+            from orchestrator.design_flow.graph import ConditionError, parse_condition
+
+            try:
+                parse_condition(str(value or ""))
+            except ConditionError as exc:
+                raise TailoringError(f"{where}: {exc}") from exc
+        if kind is OperationKind.SET_OUTCOME and not str(value or "").strip():
+            raise TailoringError(f"{where}: set_outcome needs a one-line 'value'")
         operations.append(Operation(kind=kind, phase_id=phase_id, rationale=rationale, value=value))
     return operations
 
@@ -419,6 +455,9 @@ def apply_operations(
     disciplines: dict[str, list[str]] = {}
     models: dict[str, str] = {}
     declared: dict[str, list[DeliverableSlot]] = {}
+    dependencies: dict[str, tuple[str, ...]] = {}
+    conditions: dict[str, str] = {}
+    outcomes: dict[str, str] = {}
     applied: list[Operation] = []
     add_route_selection = False
 
@@ -470,15 +509,72 @@ def apply_operations(
                 continue
             disciplines[op.phase_id] = names
             applied.append(op)
+        elif op.kind is OperationKind.SET_DEPENDENCIES:
+            needs = tuple(
+                str(v)
+                for v in (op.value if isinstance(op.value, list) else [])
+                if str(v) in by_id and str(v) != op.phase_id
+            )
+            dependencies[op.phase_id] = tuple(dict.fromkeys(needs))
+            applied.append(op)
+        elif op.kind is OperationKind.SET_CONDITION:
+            from orchestrator.design_flow.graph import ConditionError, parse_condition
+
+            text = str(op.value or "").strip()
+            try:
+                parse_condition(text)
+            except ConditionError:
+                logger.info("flow_generator_bad_condition", phase=op.phase_id, condition=text)
+                continue
+            conditions[op.phase_id] = text
+            applied.append(op)
+        elif op.kind is OperationKind.SET_OUTCOME:
+            text = " ".join(str(op.value or "").split())
+            if not text:
+                continue
+            outcomes[op.phase_id] = text
+            applied.append(op)
+
+    # FORGE-539: a dropped phase hands its own dependencies to whatever
+    # depended on it, so the graph keeps its ordering instead of pointing at a
+    # phase that no longer exists. Implicit (sequential) phases need nothing:
+    # "the phase before me" moves along by itself.
+    effective_deps = {pid: dependencies.get(pid, by_id[pid].depends_on) for pid in by_id}
+
+    def _resolve(needs: tuple[str, ...]) -> tuple[str, ...]:
+        out: list[str] = []
+        for need in needs:
+            if need in dropped:
+                inherited = effective_deps.get(need)
+                if inherited is None:
+                    index = [p.id for p in base.phases].index(need)
+                    inherited = (base.phases[index - 1].id,) if index else ()
+                out.extend(_resolve(tuple(inherited)))
+            else:
+                out.append(need)
+        return tuple(dict.fromkeys(out))
 
     phases: list[Phase] = []
     for phase in base.phases:
         if phase.id in dropped:
             continue
+        explicit = effective_deps[phase.id]
+        if explicit is not None:
+            phase = replace(phase, depends_on=_resolve(tuple(explicit)))
+        if phase.id in conditions:
+            phase = replace(phase, condition=conditions[phase.id])
+        if phase.id in outcomes:
+            phase = replace(phase, outcome=outcomes[phase.id])
         if add_route_selection and "cad_model" in phase.expected_artifacts:
             # Before the first phase that commits geometry: the route decides
             # what that geometry may assume.
-            phases.append(_route_selection_phase())
+            route_phase = _route_selection_phase()
+            if phase.depends_on is not None:
+                # FORGE-539: in a graph the geometry phase must explicitly
+                # wait for the decision, or the two would run side by side.
+                route_phase = replace(route_phase, depends_on=phase.depends_on)
+                phase = replace(phase, depends_on=(*phase.depends_on, ROUTE_SELECTION_PHASE_ID))
+            phases.append(route_phase)
             add_route_selection = False
         added = extra_deliverables.get(phase.id, [])
         assigned = disciplines.get(phase.id)
@@ -501,11 +597,14 @@ def apply_operations(
         if not added and assigned is None:
             phases.append(phase)
             continue
+        # ``replace`` rather than a rebuilt Phase: every field this does not
+        # name (gate, enforcement, model, slots, and FORGE-539's graph fields)
+        # is carried through untouched. There is no operation that can switch
+        # enforcement off, and copying it is what makes that true rather than
+        # a rule somebody has to remember.
         phases.append(
-            Phase(
-                id=phase.id,
-                title=phase.title,
-                objective=phase.objective,
+            replace(
+                phase,
                 # A phase now required to deliver something is a phase asked to
                 # produce it; otherwise deliverable-is-producible rejects the
                 # very tightening the operation exists for (e.g. a test_plan
@@ -517,26 +616,25 @@ def apply_operations(
                     ]
                 ),
                 required_deliverables=tuple([*phase.required_deliverables, *added]),
-                # Deliberately carried through untouched: there is no
-                # operation that can switch enforcement off, and copying the
-                # original value is what makes that true rather than a rule
-                # somebody has to remember.
-                enforce_deliverables=phase.enforce_deliverables,
-                gate=phase.gate,
                 disciplines=(
                     merge_disciplines(phase, assigned)
                     if assigned is not None
                     else phase.disciplines
                 ),
-                model=phase.model,
-                slots=phase.slots,
             )
         )
 
     if add_route_selection:
         # No geometry phase to precede: the decision goes last but one, still
         # ahead of whatever verifies and releases.
-        phases.insert(max(len(phases) - 1, 0), _route_selection_phase())
+        route_phase = _route_selection_phase()
+        if phases and phases[-1].depends_on is not None:
+            last = phases[-1]
+            route_phase = replace(route_phase, depends_on=last.depends_on)
+            phases[-1] = replace(
+                last, depends_on=(*(last.depends_on or ()), ROUTE_SELECTION_PHASE_ID)
+            )
+        phases.insert(max(len(phases) - 1, 0), route_phase)
 
     tailored = FlowDefinition(id=base.id, name=base.name, phases=tuple(phases))
     return tailored, applied

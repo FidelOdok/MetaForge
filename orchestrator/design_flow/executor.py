@@ -26,6 +26,14 @@ from typing import Protocol, runtime_checkable
 import structlog
 
 from observability.tracing import get_tracer
+from orchestrator.design_flow.failures import classify_failure
+from orchestrator.design_flow.graph import (
+    FlowGraph,
+    build_graph,
+    evaluate_condition,
+    is_linear,
+    rework_candidates,
+)
 from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
 from orchestrator.design_flow.retry import build_retry_feedback, max_phase_retries
 from orchestrator.design_flow.rework import (
@@ -53,6 +61,8 @@ class ReworkJump:
 
     to_index: int
     feedback: str
+    #: FORGE-539: the target's id, which a graph walk re-runs from by id.
+    to_phase: str = ""
 
 
 class FlowCanceled(Exception):
@@ -87,6 +97,10 @@ class FlowContext:
     retry_feedback: str = ""
     attempt: int = 1
     completed: list[tuple[Phase, PhaseOutcome]] = field(default_factory=list)
+    #: FORGE-539: the facts phase conditions are evaluated against, and the
+    #: phases skipped because their condition did not hold.
+    facts: dict[str, str] = field(default_factory=dict)
+    skipped: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -383,7 +397,12 @@ class DesignFlowExecutor:
         self._consistency_gate_checker = consistency_gate_checker
 
     async def run(
-        self, run_id: str, flow: FlowDefinition | None = None, *, flow_context: str = ""
+        self,
+        run_id: str,
+        flow: FlowDefinition | None = None,
+        *,
+        flow_context: str = "",
+        facts: dict[str, str] | None = None,
     ) -> None:
         """Drive ``run_id`` through its flow to a terminal state.
 
@@ -411,6 +430,7 @@ class DesignFlowExecutor:
                     project_id=run.request.get("project_id"),
                     session_id=run.request.get("session_id"),
                     flow_context=flow_context,
+                    facts=dict(facts or {}),
                 )
                 if run.status is RunStatus.QUEUED:
                     self._store.start(run_id)
@@ -423,13 +443,30 @@ class DesignFlowExecutor:
                 logger.info("design_flow_transition_stop", run_id=run_id, detail=str(exc))
             except Exception as exc:  # noqa: BLE001 - surface any failure onto the run
                 span.record_exception(exc)
-                logger.error("design_flow_failed", run_id=run_id, error=str(exc))
+                # FORGE-539: name the failure's class and what it calls for, so
+                # "retry" is never the implied answer to a design or config error.
+                verdict = classify_failure(str(exc), error_type=type(exc).__name__)
+                logger.error(
+                    "design_flow_failed",
+                    run_id=run_id,
+                    error=str(exc),
+                    failure_class=verdict.failure_class.value,
+                    response=verdict.response.value,
+                )
                 try:
-                    self._store.fail(run_id, str(exc))
+                    self._store.fail(
+                        run_id,
+                        f"{exc} [failure class: {verdict.failure_class.value}; "
+                        f"next: {verdict.guidance}]",
+                    )
                 except InvalidTransition:
                     pass
 
     async def _walk(self, run_id: str, flow: FlowDefinition, ctx: FlowContext) -> None:
+        graph = build_graph(flow.phases)
+        if not is_linear(graph):
+            await self._walk_graph(run_id, flow, ctx, graph)
+            return
         max_retries = max_phase_retries()
         max_rework = max_rework_cycles()
         cycles = 0
@@ -466,6 +503,72 @@ class DesignFlowExecutor:
             if self._store.get(run_id).is_terminal:
                 return
             index += 1
+        ctx.retry_feedback = ""
+        self._store.complete(run_id, result=self._summarize(flow, ctx))
+
+    async def _walk_graph(
+        self, run_id: str, flow: FlowDefinition, ctx: FlowContext, graph: FlowGraph
+    ) -> None:
+        """Walk a graph flow (FORGE-539): conditions, dependency order, selective rework.
+
+        The test double runs one phase at a time in dependency order; the
+        Temporal engine runs independent phases together. Both decide the
+        same things: which phases run, which are skipped, and which a rework
+        re-runs (the target and what depends on it, nothing else).
+        """
+        max_retries = max_phase_retries()
+        max_rework = max_rework_cycles()
+        by_id = {p.id: p for p in flow.phases}
+        done: list[str] = []
+        cycles = 0
+        feedback: dict[str, str] = {}
+        while True:
+            ready = graph.ready(done=done, skipped=ctx.skipped)
+            if not ready:
+                break
+            phase = by_id[ready[0]]
+            if not evaluate_condition(phase.condition, ctx.facts):
+                ctx.skipped.append(phase.id)
+                logger.info(
+                    "design_flow_phase_skipped",
+                    run_id=run_id,
+                    phase=phase.id,
+                    condition=phase.condition,
+                )
+                continue
+            attempt = 1
+            ctx.retry_feedback = feedback.pop(phase.id, "")
+            ctx.attempt = 1
+            jump: ReworkJump | None = None
+            while True:
+                result = await self._attempt_phase(
+                    run_id, phase, ctx, attempt, max_retries, flow, cycles, max_rework
+                )
+                if isinstance(result, ReworkJump):
+                    jump = result
+                    break
+                if result:
+                    break
+                attempt += 1
+                ctx.attempt = attempt
+            if jump is not None:
+                cycles += 1
+                rerun = set(graph.downstream(jump.to_phase)) | {phase.id}
+                ctx.completed = [(p, o) for p, o in ctx.completed if p.id not in rerun]
+                done = [d for d in done if d not in rerun]
+                ctx.skipped = [s for s in ctx.skipped if s not in rerun]
+                feedback[jump.to_phase] = jump.feedback
+                logger.info(
+                    "design_flow_selective_rework",
+                    run_id=run_id,
+                    to=jump.to_phase,
+                    rerun=sorted(rerun),
+                    kept=done,
+                )
+                continue
+            if self._store.get(run_id).is_terminal:
+                return
+            done.append(phase.id)
         ctx.retry_feedback = ""
         self._store.complete(run_id, result=self._summarize(flow, ctx))
 
@@ -608,7 +711,9 @@ class DesignFlowExecutor:
             noted = self._coordinator.take_rework(run_id)
             to_phase, reviewer = noted if noted is not None else ("", "")
             phase_ids = [p.id for p in flow.phases]
-            error = rework_target_error(phase_ids, phase.id, to_phase)
+            # FORGE-539: a graph flow only reworks to a phase this one depends on.
+            candidates = rework_candidates(build_graph(flow.phases), phase.id)
+            error = rework_target_error(candidates, phase.id, to_phase)
             if error is None and rework_cycles >= max_rework:
                 error = f"the run already used its {max_rework} rework cycle(s) (the per-run cap)"
             if error is not None:
@@ -623,6 +728,7 @@ class DesignFlowExecutor:
             )
             return ReworkJump(
                 to_index=phase_ids.index(to_phase),
+                to_phase=to_phase,
                 feedback=build_rework_feedback(
                     from_phase=phase.id,
                     to_phase=to_phase,
@@ -724,4 +830,6 @@ class DesignFlowExecutor:
                 }
                 for phase, outcome in ctx.completed
             ],
+            # FORGE-539: phases whose condition did not hold. Never "done".
+            "skipped": list(ctx.skipped),
         }

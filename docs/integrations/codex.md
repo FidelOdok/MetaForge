@@ -220,6 +220,10 @@ a flow with `template` and `operations` together; stop at the approval) live
 in `AGENTS.md` and that skill. The package's README covers the marketplace
 layout Codex expects.
 
+Codex has no slash commands and no plugin hooks, so each workflow (`flow`,
+`verify`, `replan`, ...) ships as a `<name>-workflow` skill, and the session
+rules live in `AGENTS.md` (FORGE-539).
+
 The plugin's `.mcp.json` points at `http://localhost:8765/mcp?profile=core`.
 Codex has no install-time settings, so to work in another discipline edit the
 `profile` in that URL: `mechanical` or `mechanical_product` for CAD,

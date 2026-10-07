@@ -42,6 +42,12 @@ READ_ONLY: frozenset[str] = frozenset(
         # every poll for a human.
         "flow.list",
         "flow.status",
+        # FORGE-539: the lifecycle readers. Compiling an intent stores nothing,
+        # and coverage, lifecycle and the completion verdict only read.
+        "flow.compile_intent",
+        "flow.capabilities",
+        "flow.lifecycle",
+        "flow.verify_completion",
         # Geometry and model inspection
         "cadquery.get_properties",
         "cadquery.validate_physics_stability",
@@ -210,6 +216,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # data, which is the kind of inaccurate warning that gets ignored.
         "flow.propose",
         "flow.start_run",
+        # FORGE-539: proposing a patch writes a version and an approval;
+        # applying one needs that approval. Same shape as the two above.
+        "flow.patch",
         "knowledge.extract",
         "knowledge.ingest",
         "knowledge.populate_bom",

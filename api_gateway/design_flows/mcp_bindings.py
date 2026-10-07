@@ -21,11 +21,23 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "INTENT_NEXT_STEP",
+    "make_capability_reader",
     "make_catalogue_reader",
+    "make_intent_compiler",
+    "make_lifecycle_reader",
+    "make_patcher",
     "make_proposer",
     "make_run_starter",
     "make_run_status_reader",
 ]
+
+#: Said after ``flow.compile_intent``, word for word on both binding paths.
+INTENT_NEXT_STEP = (
+    "This is what was understood; nothing was stored or proposed. Ask the user about "
+    "every blocking unknown (do not answer it yourself), confirm the success criteria, "
+    "then call flow.propose with the answers."
+)
 
 
 def make_catalogue_reader() -> Any:
@@ -56,9 +68,14 @@ def make_catalogue_reader() -> Any:
                             "required_deliverables": p.requiredDeliverables,
                             "gate": p.gate.name if p.gate else None,
                             "disciplines": p.disciplines,
+                            # FORGE-539: the graph, so a caller can tailor it.
+                            "depends_on": p.dependsOn,
+                            "condition": p.condition,
+                            "outcome": p.outcome,
                         }
                         for p in flow.phases
                     ],
+                    "graph": flow.graph,
                 }
                 for flow in listing.flows
             ],
@@ -173,6 +190,9 @@ def make_proposer() -> Any:
                 {"id": p.id, "title": p.title, "gate": p.gate.name if p.gate else None}
                 for p in view.flow.phases
             ],
+            # FORGE-539: what was understood, and whether it can be done.
+            "intent_model": view.intentModel,
+            "capabilities": view.capabilities,
             # The sentence the agent should repeat, rather than a status code
             # it has to interpret into one.
             "next_step": (
@@ -246,3 +266,159 @@ def make_run_starter() -> Any:
         }
 
     return start_run
+
+
+def make_intent_compiler() -> Any:
+    """``flow.compile_intent`` — the structured intent, nothing stored (FORGE-539)."""
+
+    async def compile_intent(
+        *,
+        intent: str,
+        requirements: list[str] | None = None,
+        manufacturing_context: dict[str, Any] | None = None,
+        target_maturity: str | None = None,
+        loads_and_use: str | None = None,
+        budget: str | None = None,
+        template: str | None = None,
+    ) -> dict[str, Any]:
+        from fastapi import HTTPException
+        from pydantic import ValidationError
+
+        from api_gateway.design_flows.routes import ProposeFlowRequest, compile_flow_intent
+
+        try:
+            body = ProposeFlowRequest.model_validate(
+                {
+                    "intent": intent,
+                    "requirements": requirements or [],
+                    "manufacturing_context": manufacturing_context,
+                    "target_maturity": target_maturity,
+                    "loads_and_use": loads_and_use,
+                    "budget": budget,
+                    "template": template,
+                }
+            )
+            view = compile_flow_intent(body)
+        except ValidationError as exc:
+            raise RuntimeError(f"flow.compile_intent: invalid input: {exc}") from exc
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+        return {
+            "intent": view.intent,
+            "missing_inputs": [q.model_dump() for q in view.missingInputs],
+            "next_step": INTENT_NEXT_STEP,
+        }
+
+    return compile_intent
+
+
+def make_capability_reader() -> Any:
+    """``flow.capabilities`` — tool coverage and the gap register (FORGE-539)."""
+
+    async def read_capabilities(
+        *, template: str | None = None, version_id: str | None = None, profile: str | None = None
+    ) -> dict[str, Any]:
+        from fastapi import HTTPException
+
+        from api_gateway.design_flows.routes import flow_capabilities, version_capabilities
+
+        if bool(template) == bool(version_id):
+            raise RuntimeError("flow.capabilities: pass exactly one of template or version_id")
+        try:
+            view = (
+                await version_capabilities(str(version_id), profile)
+                if version_id
+                else await flow_capabilities(str(template), profile)
+            )
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+        return {
+            "flow_id": view.flowId,
+            "version_id": view.versionId,
+            "profile": view.profile,
+            **view.report,
+        }
+
+    return read_capabilities
+
+
+def make_lifecycle_reader() -> Any:
+    """``flow.lifecycle`` / ``flow.verify_completion`` — a run's lifecycle (FORGE-539)."""
+
+    async def read_lifecycle(run_id: str) -> dict[str, Any]:
+        from fastapi import HTTPException
+
+        from api_gateway.runs.routes import get_run_lifecycle
+
+        try:
+            view = await get_run_lifecycle(run_id)
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+        return {
+            "run_id": view.runId,
+            "live": view.live,
+            "limits": view.limits,
+            **view.lifecycle,
+            "next_step": view.nextStep,
+        }
+
+    return read_lifecycle
+
+
+def make_patcher() -> Any:
+    """``flow.patch`` — propose a patch to a running flow, or apply an approved one."""
+
+    async def patch(
+        *,
+        action: str,
+        run_id: str,
+        expected_content_hash: str = "",
+        reason: str = "",
+        operations: list[dict[str, Any]] | None = None,
+        invalidate: list[str] | None = None,
+        version_id: str = "",
+    ) -> dict[str, Any]:
+        from fastapi import HTTPException
+
+        from api_gateway.runs.routes import (
+            ProposePatchRequest,
+            apply_run_patch,
+            propose_run_patch,
+        )
+
+        try:
+            if action == "propose":
+                view = await propose_run_patch(
+                    run_id,
+                    ProposePatchRequest(
+                        expectedContentHash=expected_content_hash,
+                        reason=reason,
+                        operations=list(operations or []),
+                        invalidate=list(invalidate or []),
+                    ),
+                )
+                return {
+                    "status": "proposed",
+                    "run_id": view.runId,
+                    "approval_id": view.approvalId,
+                    "version_id": view.versionId,
+                    "rerun": view.rerun,
+                    "preserved": view.preserved,
+                    "removed": view.removed,
+                    "added": view.added,
+                    "changes": view.changes,
+                    "notes": view.notes,
+                    "next_step": view.nextStep,
+                }
+            applied = await apply_run_patch(run_id, version_id)
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+        return {
+            "status": "applied",
+            "run_id": applied.runId,
+            "version_id": applied.versionId,
+            "rerun": applied.rerun,
+            "next_step": applied.nextStep,
+        }
+
+    return patch

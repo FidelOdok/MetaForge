@@ -37,7 +37,7 @@ capability does not exist.
 
 | Profile | Tools | For |
 |---|---|---|
-| `core` | 36 | Projects, sessions, twin reads and the records that are not domain-specific |
+| `core` | 40 | Projects, sessions, twin reads, the records that are not domain-specific, and the design-flow lifecycle tools (FORGE-539) |
 | `mechanical` | 31 | CAD authoring across both kernels, plus geometry commit |
 | `simulation` | 32 | FEA, load cases, meshes and the evidence they produce, including `twin.record_document` to record a `simulation_result` or `load_case` (FORGE-533) |
 | `electronics` | 27 | Schematic and board checks, component search, sourcing |
@@ -1336,6 +1336,11 @@ what the server will actually enforce.
 | `design_flow` | `flow.propose` | Tailor a template to an intent and hold it for a person: returns the changes, a flow version id and an approval id, and starts nothing. Missing route, maturity or loads returns `status: needs_input` with questions instead (FORGE-463); the sidecar passes `manufacturing_context`, `target_maturity`, `loads_and_use` and `budget` through unchanged. Writes, but the call is not held: the version it creates is the one approval (FORGE-471). The sidecar posts it to `POST /v1/design-flows/propose`, so the approval lands in the gateway's ledger | unit-verified (FORGE-400/462) |
 | `design_flow` | `flow.start_run` | Start a run on a flow version a person has approved; refused with an explanatory message until then, on either flow engine. Not held at the call, since the version approval is the authorisation (FORGE-471). Via `POST /v1/runs` from the sidecar | unit-verified (FORGE-400/462) |
 | `design_flow` | `flow.status` | Phase-by-phase state of one run, `unknown` when the engine cannot be queried (read), via `GET /v1/runs/{id}/flow-state` from the sidecar | unit-verified (FORGE-400/462) |
+| `design_flow` | `flow.compile_intent` | The structured intent: goal versus immediate request, categorised constraints, measurable success criteria, unknowns marked blocking. Deterministic, stores nothing (read). `POST /v1/design-flows/intent` | unit-verified (FORGE-539) |
+| `design_flow` | `flow.capabilities` | Per-phase tool coverage and the gap register with severities and workarounds, against the live registry and adapter health, optionally for a profile (read). `GET /v1/design-flows/{flow}/capabilities` | unit-verified (FORGE-539) |
+| `design_flow` | `flow.lifecycle` | Per-phase execution, eligibility, validity (stale from twin item history) and objective status, gaps, requirements and the completion verdict (read). `GET /v1/runs/{id}/lifecycle` | unit-verified (FORGE-539) |
+| `design_flow` | `flow.verify_completion` | The completion verdict alone: `COMPLETED_VERIFIED` only when every mandatory requirement passes with current evidence (read). Full tool set only | unit-verified (FORGE-539) |
+| `design_flow` | `flow.patch` | Propose a patch to a running flow (held for a person; re-runs only what it touches) or apply an approved one. `POST /v1/runs/{id}/patches` | unit-verified; Temporal path integration-tested (FORGE-539) |
 | `constraint` (default) | `constraint.validate` | Pre-flight validate proposed graph changes | [`tier1/constraint-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/constraint-hp.md) |
 | `cadquery` (default) | `cadquery.create_parametric` | Generate a parametric solid (box, cylinder, …) → STEP | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |
 | `cadquery` | `cadquery.boolean_operation` | Union / cut / intersect two solids | [`tier1/cad-hp.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/cad-hp.md) |

@@ -22,6 +22,7 @@ const KINDS: { value: ApprovalKind; label: string }[] = [
   { value: 'gate', label: 'Gate' },
   { value: 'flow_proposal', label: 'Flow proposal' },
   { value: 'flow_version', label: 'Flow version' },
+  { value: 'flow_patch', label: 'Flow patch' },
   { value: 'tool_call', label: 'Tool call' },
   { value: 'human_authority', label: 'Human authority' },
   { value: 'design_change', label: 'Design change' },

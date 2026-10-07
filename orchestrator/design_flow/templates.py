@@ -118,6 +118,12 @@ def _phase_from(raw: dict[str, Any]) -> Phase:
         disciplines=tuple(raw.get("disciplines") or ()),
         model=raw.get("model") or None,
         slots=slots_from(raw.get("slots")),
+        # FORGE-539: absent means "the phase before"; present (even []) is exact.
+        depends_on=(
+            None if raw.get("depends_on") is None else tuple(str(d) for d in raw["depends_on"])
+        ),
+        condition=str(raw["condition"]) if raw.get("condition") else None,
+        outcome=str(raw.get("outcome") or ""),
     )
 
 
@@ -160,6 +166,12 @@ def to_mapping(
             entry["disciplines"] = list(phase.disciplines)
         if phase.model:
             entry["model"] = phase.model
+        if phase.outcome:
+            entry["outcome"] = phase.outcome
+        if phase.depends_on is not None:
+            entry["depends_on"] = list(phase.depends_on)
+        if phase.condition:
+            entry["condition"] = phase.condition
         if phase.slots:
             entry["slots"] = [
                 {"type": s.item_type, "name": s.name, **({"key": s.item_key} if s.item_key else {})}

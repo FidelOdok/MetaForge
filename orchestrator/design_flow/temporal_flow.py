@@ -33,6 +33,7 @@ that passes every test and then fails on replay in production:
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -42,7 +43,15 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
+    from orchestrator.design_flow.failures import classify_failure
     from orchestrator.design_flow.frozen import FrozenFlow, FrozenPhase
+    from orchestrator.design_flow.graph import (
+        FlowGraph,
+        build_graph,
+        evaluate_condition,
+        is_linear,
+        rework_candidates,
+    )
     from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
     from orchestrator.design_flow.retry import DEFAULT_MAX_PHASE_RETRIES, build_retry_feedback
     from orchestrator.design_flow.rework import (
@@ -81,6 +90,19 @@ REWORK_PATCH_ID = "forge-500-rework"
 #: building its feedback. Histories recorded before it replay without the
 #: activity and get the feedback they had.
 REVISION_NOTES_PATCH_ID = "forge-530-revision-notes"
+
+#: ``workflow.patched`` id for FORGE-539. A flow whose phases declare
+#: dependencies or conditions runs as a graph: independent phases together,
+#: false conditions skipped, rework re-running only what depends on the
+#: target. Checked only for such flows, so a straight-line flow records no
+#: marker and replays exactly as before.
+GRAPH_PATCH_ID = "forge-539-graph"
+
+#: ``workflow.patched`` id for FORGE-539's failure taxonomy: a phase that
+#: could not run ends the run with its failure class and the response that
+#: class calls for. Histories that already hold a phase failure replay with
+#: the result they had.
+FAILURE_CLASS_PATCH_ID = "forge-539-failure-class"
 
 #: How long a gate waits before it is treated as refused. Long, because the
 #: reviewer is a person who may be asleep; finite, because a run that waits
@@ -168,6 +190,10 @@ class ChangeRequest:
     flow: FrozenFlow
     requested_by: str = ""
     rationale: str = ""
+    #: FORGE-539: the phases an approved patch must re-run. Their results
+    #: (and only theirs) are dropped; every other completed phase keeps its
+    #: result and approval. Empty for a plain flow swap, which keeps all.
+    rerun: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -187,6 +213,8 @@ class DesignFlowInput:
     #: and how many it already has (carried across a continue-as-new).
     max_rework_cycles: int = DEFAULT_MAX_REWORK_CYCLES
     rework_cycles: int = 0
+    #: FORGE-539: phases a graph run skipped, carried across a continue-as-new.
+    skipped: list[str] = field(default_factory=list)
 
 
 @workflow.defn(name="DesignFlow")
@@ -235,6 +263,11 @@ class DesignFlowWorkflow:
         self._max_rework_cycles = DEFAULT_MAX_REWORK_CYCLES
         self._rework_to: str | None = None
         self._rework_feedback = ""
+        #: FORGE-539: "graph" for a flow with dependencies or conditions;
+        #: the phases running right now, and the ones skipped.
+        self._mode = "linear"
+        self._running: list[str] = []
+        self._skipped: list[str] = []
 
     # ── signals ──────────────────────────────────────────────────────────
 
@@ -279,6 +312,9 @@ class DesignFlowWorkflow:
             "rework_cycles": self._rework_cycles,
             "max_rework_cycles": self._max_rework_cycles,
             "reworks_left": max(self._max_rework_cycles - self._rework_cycles, 0),
+            "mode": self._mode,
+            "running": list(self._running),
+            "skipped": list(self._skipped),
         }
 
     @workflow.query
@@ -302,6 +338,9 @@ class DesignFlowWorkflow:
         self._max_rework_cycles = inp.max_rework_cycles
         self._rework_cycles = inp.rework_cycles
         phases = inp.flow.phases
+        graph = build_graph(phases)
+        if not is_linear(graph) and workflow.patched(GRAPH_PATCH_ID):
+            return await self._run_graph(inp, graph)
         while self._phase_index < len(phases):
             phase = phases[self._phase_index]
             self._current_phase = phase.id
@@ -349,9 +388,7 @@ class DesignFlowWorkflow:
                     # The phase could not run. End the run as failed with the
                     # reason rather than failing the workflow with an opaque
                     # "Activity task failed" nobody can read from run status.
-                    cause = exc.cause
-                    reason = str(cause) if cause is not None else str(exc)
-                    return self._fail(f"Phase '{phase.id}' failed: {reason}")
+                    return self._fail_phase(phase.id, exc)
                 # An ungrounded reply is never "completed", whatever the worker said.
                 result.status = phase_status(result.summary, result.status)
                 entry = {
@@ -416,8 +453,175 @@ class DesignFlowWorkflow:
             "phases": self._completed,
         }
 
+    async def _run_graph(self, inp: DesignFlowInput, graph: FlowGraph) -> dict[str, Any]:
+        """Walk a graph flow (FORGE-539).
+
+        Repeatedly: take every phase whose dependencies have settled, skip
+        the ones whose condition is false, run the rest as parallel
+        activities, then hold their gates one at a time in flow order (so a
+        reviewer answers one gate at a time, and every gate behaves exactly as
+        in a straight-line run). A rework re-runs the target and what depends
+        on it; every other phase keeps its result and its approval.
+        """
+        self._mode = "graph"
+        by_id = {p.id: p for p in inp.flow.phases}
+        self._skipped = list(inp.skipped)
+        done = [c["phase"] for c in self._completed if c.get("status") != "failed"]
+        feedback: dict[str, str] = {}
+        attempts: dict[str, int] = {}
+        while True:
+            ready = graph.ready(done=done, skipped=self._skipped)
+            if not ready:
+                break
+            runnable: list[FrozenPhase] = []
+            for phase_id in ready:
+                phase = by_id[phase_id]
+                if evaluate_condition(phase.condition, inp.flow.facts):
+                    runnable.append(phase)
+                else:
+                    self._skipped.append(phase_id)
+                    self._record("phase_skipped", phase=phase_id, detail=phase.condition or "")
+            if not runnable:
+                continue
+
+            self._running = [p.id for p in runnable]
+            self._current_phase = runnable[0].id
+            for phase in runnable:
+                attempts.setdefault(phase.id, 1)
+                self._record("phase_started", phase=phase.id)
+            outcomes = await asyncio.gather(
+                *(
+                    self._execute_phase(inp, phase, feedback.pop(phase.id, ""), attempts[phase.id])
+                    for phase in runnable
+                ),
+                return_exceptions=True,
+            )
+            self._running = []
+            entries: dict[str, dict[str, Any]] = {}
+            for phase, outcome in zip(runnable, outcomes, strict=True):
+                if isinstance(outcome, ActivityError):
+                    return self._fail_phase(phase.id, outcome)
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                entries[phase.id] = self._finish_phase(phase, outcome)
+
+            rerun: set[str] = set()
+            for phase in runnable:
+                if phase.id in rerun:
+                    continue  # a rework in this wave sent it back; it runs again
+                entry = entries[phase.id]
+                while True:
+                    gate = phase.gate
+                    if gate is None or gate.auto_approve:
+                        done.append(phase.id)
+                        break
+                    self._current_phase = phase.id
+                    self._attempt = attempts[phase.id]
+                    self._retry_reason = None
+                    verdict = await self._run_gate(
+                        inp, phase, entry, rework_ids=rework_candidates(graph, phase.id)
+                    )
+                    if verdict is not None:
+                        return verdict
+                    if self._rework_to is not None:
+                        target = self._rework_to
+                        self._rework_to = None
+                        rerun = set(graph.downstream(target)) | {phase.id}
+                        self._completed = [c for c in self._completed if c["phase"] not in rerun]
+                        done = [d for d in done if d not in rerun]
+                        self._skipped = [s for s in self._skipped if s not in rerun]
+                        feedback[target] = self._rework_feedback
+                        self._rework_feedback = ""
+                        for phase_id in rerun:
+                            attempts.pop(phase_id, None)
+                        self._record(
+                            "selective_rework",
+                            phase=phase.id,
+                            detail=f"re-running {', '.join(sorted(rerun))}",
+                            rerun=sorted(rerun),
+                        )
+                        break
+                    if self._retry_reason is not None:
+                        self._completed.remove(entry)
+                        retry_feedback = build_retry_feedback(
+                            findings=self._gate_findings,
+                            reason=self._retry_reason,
+                            attempt=attempts[phase.id] + 1,
+                            revisions=await self._turned_down(inp, phase, self._retry_reason),
+                        )
+                        attempts[phase.id] += 1
+                        self._record(
+                            "phase_started", phase=phase.id, detail=f"attempt {attempts[phase.id]}"
+                        )
+                        try:
+                            result = await self._execute_phase(
+                                inp, phase, retry_feedback, attempts[phase.id]
+                            )
+                        except ActivityError as exc:
+                            return self._fail_phase(phase.id, exc)
+                        entry = self._finish_phase(phase, result)
+                        continue
+                    if self._change is not None:
+                        return await self._apply_change(inp)
+                    done.append(phase.id)
+                    break
+            self._phase_index = len(done)
+
+        self._status = "completed"
+        self._record("run_completed")
+        return {
+            "status": "completed",
+            "flow": inp.flow.template_id,
+            "version": inp.flow.version,
+            "content_hash": inp.flow.content_hash,
+            "phases": self._completed,
+            "skipped": list(self._skipped),
+        }
+
+    async def _execute_phase(
+        self, inp: DesignFlowInput, phase: FrozenPhase, retry_feedback: str, attempt: int
+    ) -> PhaseResult:
+        """One ``run_phase`` activity for ``phase``, with the run's usual policy."""
+        result: PhaseResult = await workflow.execute_activity(
+            "run_phase",
+            PhaseRequest(
+                run_id=inp.run_id,
+                goal=inp.goal,
+                phase=phase,
+                project_id=inp.project_id,
+                session_id=inp.session_id,
+                flow_id=inp.flow.template_id,
+                prior=[c["summary"] for c in self._completed],
+                flow_context=inp.flow.context,
+                retry_feedback=retry_feedback,
+                attempt=attempt,
+            ),
+            start_to_close_timeout=_PHASE_TIMEOUT,
+            heartbeat_timeout=_PHASE_HEARTBEAT,
+            retry_policy=RetryPolicy(maximum_attempts=3),
+            result_type=PhaseResult,
+        )
+        return result
+
+    def _finish_phase(self, phase: FrozenPhase, result: PhaseResult) -> dict[str, Any]:
+        result.status = phase_status(result.summary, result.status)
+        entry = {
+            "phase": phase.id,
+            "summary": result.summary,
+            "artifacts": result.artifacts,
+            "status": result.status,
+        }
+        self._completed.append(entry)
+        self._record("phase_finished", phase=phase.id, detail=result.status)
+        return entry
+
     async def _run_gate(
-        self, inp: DesignFlowInput, phase: FrozenPhase, entry: dict[str, Any]
+        self,
+        inp: DesignFlowInput,
+        phase: FrozenPhase,
+        entry: dict[str, Any],
+        *,
+        rework_ids: list[str] | None = None,
     ) -> dict[str, Any] | None:
         """Hold at ``phase``'s gate. Returns a terminal result, or ``None`` to go on."""
         gate = phase.gate
@@ -493,7 +697,9 @@ class DesignFlowWorkflow:
             answer = self._answer
             if answer is not None and answer.rework_to:
                 error = rework_target_error(
-                    [p.id for p in inp.flow.phases], phase.id, answer.rework_to
+                    rework_ids if rework_ids is not None else [p.id for p in inp.flow.phases],
+                    phase.id,
+                    answer.rework_to,
                 )
                 if error is not None:
                     # Refused, not applied: the gate stays open and answerable.
@@ -684,6 +890,16 @@ class DesignFlowWorkflow:
         assert change is not None
         change.flow.verify()
         self._record("change_applied", detail=change.flow.content_hash[:12])
+        completed = list(self._completed)
+        skipped = list(self._skipped)
+        if change.rerun:
+            completed, skipped = _keep_for_patch(change.flow, completed, skipped, change.rerun)
+            self._record(
+                "patch_applied",
+                detail=f"re-running {', '.join(change.rerun)}",
+                rerun=list(change.rerun),
+                kept=[c["phase"] for c in completed],
+            )
         workflow.continue_as_new(
             DesignFlowInput(
                 run_id=inp.run_id,
@@ -692,15 +908,31 @@ class DesignFlowWorkflow:
                 project_id=inp.project_id,
                 session_id=inp.session_id,
                 gate_timeout_seconds=inp.gate_timeout_seconds,
-                completed=list(self._completed),
+                completed=completed,
                 max_phase_retries=inp.max_phase_retries,
                 max_rework_cycles=inp.max_rework_cycles,
                 rework_cycles=self._rework_cycles,
+                skipped=skipped,
             )
         )
         raise AssertionError("unreachable: continue_as_new does not return")
 
     # ── bookkeeping ──────────────────────────────────────────────────────
+
+    def _fail_phase(self, phase_id: str, exc: ActivityError) -> dict[str, Any]:
+        """End the run because ``phase_id`` could not run, with its failure class."""
+        cause = exc.cause
+        reason = str(cause) if cause is not None else str(exc)
+        result = self._fail(f"Phase '{phase_id}' failed: {reason}")
+        if workflow.patched(FAILURE_CLASS_PATCH_ID):
+            verdict = classify_failure(reason, error_type=str(getattr(cause, "type", "") or ""))
+            result["failure"] = {"phase": phase_id, **verdict.as_dict()}
+            self._record(
+                "phase_failure_classified",
+                phase=phase_id,
+                detail=f"{verdict.failure_class.value}: {verdict.guidance}",
+            )
+        return result
 
     def _fail(self, message: str) -> dict[str, Any]:
         self._status = "failed"
@@ -727,3 +959,32 @@ class DesignFlowWorkflow:
                 "at": workflow.now().isoformat(),
             }
         )
+
+
+def _keep_for_patch(
+    flow: FrozenFlow,
+    completed: list[dict[str, Any]],
+    skipped: list[str],
+    rerun: list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The completed entries and skips an approved patch keeps (FORGE-539).
+
+    A graph flow keeps every completed phase that is still in the flow and
+    not re-run. A straight-line flow resumes by position, so it keeps the
+    longest prefix of the new phase order that is completed and not re-run;
+    everything after the first gap runs again, which for a line is exactly
+    the downstream of that gap.
+    """
+    drop = set(rerun)
+    ids = [p.id for p in flow.phases]
+    by_phase = {c["phase"]: c for c in completed}
+    if is_linear(build_graph(flow.phases)):
+        kept: list[dict[str, Any]] = []
+        for phase_id in ids:
+            entry = by_phase.get(phase_id)
+            if entry is None or phase_id in drop:
+                break
+            kept.append(entry)
+        return kept, []
+    kept_graph = [c for c in completed if c["phase"] in ids and c["phase"] not in drop]
+    return kept_graph, [s for s in skipped if s in ids and s not in drop]

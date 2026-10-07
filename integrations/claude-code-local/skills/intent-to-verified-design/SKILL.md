@@ -74,6 +74,14 @@ Call `health.check` once at the start.
 
 Turn what the user said into requirements a gate can evaluate.
 
+0. Call `flow.compile_intent` with what the user said and the context you
+   have. It returns the structured intent: the goal versus the immediate
+   request, constraints by category, measurable success criteria (directed
+   quantities with units), preferences, assumptions and `unknowns`. Ask the
+   user about every unknown marked `blocking`, and about the success criteria
+   if none are measurable. Never fill an unknown in yourself. The general
+   reasoning behind this (outcomes before tasks, gaps before execution) is the
+   `workflow-lifecycle` skill.
 1. Separate **prose** (background, scope, what is out of scope) from **values**
    (mass, load, size, power, cost, safety factor, cycle count).
 2. Prose goes to `twin.record_document` with `document_type: "prd"`. Values do
@@ -120,6 +128,13 @@ Current templates:
 Pick by what the product contains, not by size. A shelf is `mech_v1`. A
 product with a PCB or firmware is `hardware_v1`.
 
+Then check the tools exist before proposing: `flow.capabilities` with the
+template id (and `profile` set to your connection's profile). A `BLOCKED`
+status or a gap with `blocking: true` means a phase cannot pass its gate with
+the tools available. Tell the user which, and the workarounds the gap lists,
+before you propose. `limits` lists what was not checked; that is not a clean
+bill of health.
+
 ### 3b. Get the three required inputs from the user
 
 `flow.propose` refuses to propose without these, and returns
@@ -153,6 +168,9 @@ and, where needed, `value`:
 | `set_disciplines` | list of disciplines | A phase must also involve another discipline. The server keeps the disciplines the phase's own deliverables need. |
 | `set_model` | `provider:model` | Only when the user asked for a specific model on a phase. |
 | `declare_items` | list of `{type, name}` | The product has several named deliverables of one type, e.g. two brackets. |
+| `set_dependencies` | list of phase ids | The phase needs only these (e.g. electronics needs the concept, not the mechanical design). Independent phases run in parallel, and a later change re-runs only what depends on it. |
+| `set_condition` | e.g. `route == undecided` | The phase only applies when a fact holds. Facts: `route`, `target_maturity`, `loads_known`, `budget_stated`. Never on the release phase. |
+| `set_outcome` | one line | Name the outcome the phase establishes ("drivetrain requirements established"). |
 
 Rules for operations:
 
@@ -181,6 +199,8 @@ Rules for operations:
 - A `422` / refusal names the operation, phase or invariant that failed. Fix
   that one thing and call again. Stop after two failed attempts and show the
   user the server's reason.
+- `status: "proposed"` also carries `intent_model` and `capabilities`.
+  Report any blocking gap with the approval id.
 - `status: "proposed"` returns `approval_id`, `version_id`, `changes` and
   `phases`. Report all four, list each change with its rationale, and state
   that nothing runs until a person approves it in the MetaForge dashboard
@@ -207,6 +227,16 @@ Only after the user tells you the proposal was approved:
    never translate it into "not started".
 3. Each phase ends at a gate a person answers. When a run is waiting on a
    gate, say which gate, what it checks, and that it is waiting for a person.
+4. `flow.lifecycle <run_id>` gives each phase's execution, eligibility,
+   validity and objective status, the gaps and the completion verdict. Do
+   what its `next_step` says. A phase whose result is `STALE` was produced
+   before a later change superseded what it recorded.
+5. When something changes mid-run (a requirement, a load, a failed analysis),
+   do not start again. `flow.patch` with `action: "propose"`, the run's
+   `flowContentHash` as `expected_content_hash`, a `reason`, and either
+   `operations` or `invalidate` (the phases the new information makes wrong).
+   It returns what re-runs and what is kept, and is held for a person. Once
+   they approve, `flow.patch` with `action: "apply"` and the `version_id`.
 
 `run.start_design_flow` starts a run directly from a named template with no
 tailoring and no proposal step. Use it only when the user explicitly asks to
@@ -271,6 +301,10 @@ next step is the fix, not the claim.
 
 ## Stage 7: Gate review and release
 
+0. `flow.verify_completion <run_id>` (or `flow.lifecycle`'s `completion`) is
+   the verdict. Only `COMPLETED_VERIFIED` means the intent is satisfied.
+   `PARTIALLY_COMPLETED` means the phases finished and the intent did NOT:
+   never report that as done. List the unmet requirements and stale results.
 1. Read the requirements matrix and list every requirement that is not
    `pass`. `uncertain`, `stale` and `no_data` all block a gate. A `fail` is
    overridden only by a waiver a person approved for that requirement.

@@ -43,6 +43,14 @@ __all__ = ["RemoteFlowBindings", "RemoteRunLauncher", "build_remote_flow_binding
 #: httpx timeout (5s) would turn a slow model into a spurious tool failure.
 DEFAULT_TIMEOUT_SECONDS = 120.0
 
+#: Word for word the in-process binding's sentence (``mcp_bindings``), kept
+#: here because this side of the wire must not import the gateway.
+INTENT_NEXT_STEP = (
+    "This is what was understood; nothing was stored or proposed. Ask the user about "
+    "every blocking unknown (do not answer it yourself), confirm the success criteria, "
+    "then call flow.propose with the answers."
+)
+
 
 class GatewayRefusedError(RuntimeError):
     """The gateway answered, and the answer was no.
@@ -131,9 +139,13 @@ def _catalogue(listing: dict[str, Any]) -> dict[str, Any]:
                         "required_deliverables": p.get("requiredDeliverables", []),
                         "gate": (p.get("gate") or {}).get("name"),
                         "disciplines": p.get("disciplines", []),
+                        "depends_on": p.get("dependsOn"),
+                        "condition": p.get("condition"),
+                        "outcome": p.get("outcome", ""),
                     }
                     for p in flow.get("phases", [])
                 ],
+                "graph": flow.get("graph"),
             }
             for flow in listing.get("flows", [])
         ],
@@ -191,6 +203,8 @@ def _proposal(view: dict[str, Any]) -> dict[str, Any]:
             {"id": p["id"], "title": p.get("title"), "gate": (p.get("gate") or {}).get("name")}
             for p in (view.get("flow") or {}).get("phases", [])
         ],
+        "intent_model": view.get("intentModel"),
+        "capabilities": view.get("capabilities"),
         # Word for word what the in-process binding says. The agent's next
         # move depends on this sentence, so it must not depend on the host.
         "next_step": (
@@ -212,6 +226,11 @@ class RemoteFlowBindings:
     status_reader: Any
     run_starter: Any
     run_launcher: RemoteRunLauncher
+    #: FORGE-539: the lifecycle readers.
+    intent_compiler: Any = None
+    capability_reader: Any = None
+    lifecycle_reader: Any = None
+    patcher: Any = None
 
 
 class RemoteRunLauncher:
@@ -395,10 +414,119 @@ def build_remote_flow_bindings(
             "resource": f"metaforge://flow/run/{run['id']}",
         }
 
+    async def compile_intent(
+        *,
+        intent: str,
+        requirements: list[str] | None = None,
+        manufacturing_context: dict[str, Any] | None = None,
+        target_maturity: str | None = None,
+        loads_and_use: str | None = None,
+        budget: str | None = None,
+        template: str | None = None,
+    ) -> dict[str, Any]:
+        body = {
+            "intent": intent,
+            "requirements": requirements or [],
+            "manufacturingContext": manufacturing_context,
+            "targetMaturity": target_maturity,
+            "loadsAndUse": loads_and_use,
+            "budget": budget,
+            "template": template,
+        }
+        with tracer.start_as_current_span("remote_flows.compile_intent"):
+            view = await gateway.request("POST", "/v1/design-flows/intent", json=body)
+        return {
+            "intent": view["intent"],
+            "missing_inputs": list(view.get("missingInputs", [])),
+            "next_step": INTENT_NEXT_STEP,
+        }
+
+    async def read_capabilities(
+        *, template: str | None = None, version_id: str | None = None, profile: str | None = None
+    ) -> dict[str, Any]:
+        if bool(template) == bool(version_id):
+            raise RuntimeError("flow.capabilities: pass exactly one of template or version_id")
+        path = (
+            f"/v1/design-flows/versions/{version_id}/capabilities"
+            if version_id
+            else f"/v1/design-flows/{template}/capabilities"
+        )
+        if profile:
+            path += f"?profile={profile}"
+        with tracer.start_as_current_span("remote_flows.capabilities"):
+            view = await gateway.request("GET", path)
+        return {
+            "flow_id": view.get("flowId"),
+            "version_id": view.get("versionId"),
+            "profile": view.get("profile"),
+            **view.get("report", {}),
+        }
+
+    async def read_lifecycle(run_id: str) -> dict[str, Any]:
+        with tracer.start_as_current_span("remote_flows.lifecycle") as span:
+            span.set_attribute("run.id", run_id)
+            view = await gateway.request("GET", f"/v1/runs/{run_id}/lifecycle")
+        return {
+            "run_id": view.get("runId"),
+            "live": view.get("live", False),
+            "limits": list(view.get("limits", [])),
+            **view.get("lifecycle", {}),
+            "next_step": view.get("nextStep", ""),
+        }
+
+    async def patch(
+        *,
+        action: str,
+        run_id: str,
+        expected_content_hash: str = "",
+        reason: str = "",
+        operations: list[dict[str, Any]] | None = None,
+        invalidate: list[str] | None = None,
+        version_id: str = "",
+    ) -> dict[str, Any]:
+        with tracer.start_as_current_span("remote_flows.patch") as span:
+            span.set_attribute("flow.patch_action", action)
+            if action == "propose":
+                view = await gateway.request(
+                    "POST",
+                    f"/v1/runs/{run_id}/patches",
+                    json={
+                        "expectedContentHash": expected_content_hash,
+                        "reason": reason,
+                        "operations": list(operations or []),
+                        "invalidate": list(invalidate or []),
+                    },
+                )
+                return {
+                    "status": "proposed",
+                    "run_id": view["runId"],
+                    "approval_id": view["approvalId"],
+                    "version_id": view["versionId"],
+                    "rerun": list(view.get("rerun", [])),
+                    "preserved": list(view.get("preserved", [])),
+                    "removed": list(view.get("removed", [])),
+                    "added": list(view.get("added", [])),
+                    "changes": list(view.get("changes", [])),
+                    "notes": list(view.get("notes", [])),
+                    "next_step": view.get("nextStep", ""),
+                }
+            applied = await gateway.request("POST", f"/v1/runs/{run_id}/patches/{version_id}/apply")
+        return {
+            "status": "applied",
+            "run_id": applied["runId"],
+            "version_id": applied["versionId"],
+            "rerun": list(applied.get("rerun", [])),
+            "next_step": applied.get("nextStep", ""),
+        }
+
     return RemoteFlowBindings(
         catalogue_reader=read_catalogue,
         proposer=propose,
         status_reader=read_status,
         run_starter=start_run,
         run_launcher=RemoteRunLauncher(gateway),
+        intent_compiler=compile_intent,
+        capability_reader=read_capabilities,
+        lifecycle_reader=read_lifecycle,
+        patcher=patch,
     )

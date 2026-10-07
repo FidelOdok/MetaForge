@@ -110,6 +110,27 @@ class FlowContext:
     def route(self) -> ManufacturingRoute | None:
         return self.manufacturing.route if self.manufacturing else None
 
+    def facts(self) -> dict[str, str]:
+        """The facts a phase ``condition`` may test (FORGE-539).
+
+        Only what was stated: an unstated route is absent, not ``"undecided"``,
+        so a condition naming it is false rather than true on a guess. Values
+        are strings because conditions compare literals.
+        """
+        out: dict[str, str] = {}
+        if self.route is not None:
+            out["route"] = self.route.value
+        if self.target_maturity is not None:
+            out["target_maturity"] = self.target_maturity.value
+        if (self.loads_and_use or "").strip():
+            out["loads_known"] = "true" if self.loads_known else "false"
+        m = self.manufacturing
+        if m is not None and m.production_quantity is not None:
+            out["production_quantity"] = str(m.production_quantity)
+        out["budget_stated"] = "true" if (self.budget or "").strip() else "false"
+        out["requirements_recorded"] = "false" if self.requirements_pending else "true"
+        return out
+
     def capability_basis(self) -> str:
         """The stated capabilities, in one line, for each change's rationale.
 

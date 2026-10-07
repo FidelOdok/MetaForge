@@ -193,10 +193,10 @@ def test_unset_phase_model_keeps_frozen_hash_stable() -> None:
     from orchestrator.design_flow.frozen import freeze_flow
 
     flow = freeze_flow(FLOWS[DEFAULT_FLOW_ID])
-    # Neither ``model`` (FORGE-477) nor ``slots`` (FORGE-524) existed then.
-    legacy = [
-        {k: v for k, v in asdict(p).items() if k not in ("model", "slots")} for p in flow.phases
-    ]
+    # Neither ``model`` (FORGE-477), ``slots`` (FORGE-524) nor the graph fields
+    # (FORGE-539) existed then.
+    absent = ("model", "slots", "depends_on", "condition", "outcome")
+    legacy = [{k: v for k, v in asdict(p).items() if k not in absent} for p in flow.phases]
     payload = json.dumps(legacy, sort_keys=True, separators=(",", ":"))
     # The hash a flow frozen before FORGE-477 was approved with.
     assert flow.content_hash == hashlib.sha256(payload.encode("utf-8")).hexdigest()

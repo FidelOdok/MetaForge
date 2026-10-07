@@ -86,6 +86,27 @@ describe('ApprovalCard', () => {
     expect(screen.getByText('wp-1')).toBeInTheDocument();
   });
 
+  it('renders a flow patch: what re-runs and what it keeps', () => {
+    render(
+      <ApprovalCard
+        item={makeApproval({
+          kind: 'flow_patch',
+          detail: {
+            run_id: 'run-7',
+            reason: 'payload is now 15 kg',
+            rerun: ['design', 'simulation'],
+            preserved: ['electronics'],
+            changes: ['re-run design, simulation'],
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText('payload is now 15 kg')).toBeInTheDocument();
+    expect(screen.getByText('re-run design')).toBeInTheDocument();
+    expect(screen.getByText('keep electronics')).toBeInTheDocument();
+    expect(screen.getByText('run run-7')).toBeInTheDocument();
+  });
+
   it('offers exactly the allowed decisions', () => {
     render(<ApprovalCard item={makeApproval({ allowed_decisions: ['approve', 'reject'] })} />);
     expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument();

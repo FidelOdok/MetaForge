@@ -115,6 +115,23 @@ class TestPluginSkills:
                 shipped = root / "skills" / source.parent.name / "SKILL.md"
                 assert shipped.read_bytes() == source.read_bytes(), shipped
 
+    def test_a_plugin_skill_ships_its_whole_folder_and_its_links_resolve(
+        self, packages: list[Path]
+    ) -> None:
+        # workflow-lifecycle links its contract under references/; a skill
+        # whose link points nowhere is a broken skill.
+        for source_dir in (p.parent for p in PLUGIN_SKILLS.glob("*/SKILL.md")):
+            files = [
+                f for f in source_dir.rglob("*") if f.is_file() and "__pycache__" not in f.parts
+            ]
+            for root in packages:
+                target = root / "skills" / source_dir.name
+                for f in files:
+                    assert (target / f.relative_to(source_dir)).read_bytes() == f.read_bytes()
+                text = (target / "SKILL.md").read_text(encoding="utf-8")
+                for link in re.findall(r"\]\((?!https?:)([^)#]+)(?:#[^)]*)?\)", text):
+                    assert (target / link).is_file(), f"{root.name}/{source_dir.name}: {link}"
+
     def test_plugin_skill_names_match_their_folders(self) -> None:
         # A harness loads a skill by its frontmatter name; docs and the folder
         # use the folder name. Disagreeing means the skill is unreachable by
@@ -260,8 +277,9 @@ class TestCodexPackage:
     def test_the_same_skills_ship(self, root: Path) -> None:
         defined = {p.parent.name for p in REPO.glob("domain_agents/*/skills/*/definition.json")}
         plugin_only = {p.parent.name for p in PLUGIN_SKILLS.glob("*/SKILL.md")}
+        workflows = {f"{name}-workflow" for name in WORKFLOWS}  # FORGE-539: no slash commands
         bundled = {p.name for p in (root / "skills").iterdir() if p.is_dir()}
-        assert bundled == defined | plugin_only
+        assert bundled == defined | plugin_only | workflows
 
     def test_the_manifest_is_sourced_not_guessed(self, root: Path) -> None:
         # This used to assert the manifest's *absence*: Codex plugins
@@ -542,3 +560,104 @@ class TestCodexPlugin:
         assert "project.list" in readme and "project.create" in readme
         assert "approval_required" in readme
         assert "did not run" in readme
+
+
+class TestLifecycleSurface:
+    """Hooks, agents and Codex workflow skills (FORGE-539)."""
+
+    def test_claude_code_packages_ship_hooks_and_agents(self) -> None:
+        for root in (
+            build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL),
+            build_claude_code_local(),
+        ):
+            config = json.loads((root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+            assert set(config["hooks"]) == {"SessionStart", "PostToolUse"}
+            for groups in config["hooks"].values():
+                for group in groups:
+                    for hook in group["hooks"]:
+                        assert "${CLAUDE_PLUGIN_ROOT}/hooks/metaforge_hook.py" in hook["command"]
+            assert (root / "hooks" / "metaforge_hook.py").is_file()
+            agents = {p.stem for p in (root / "agents").glob("*.md")}
+            assert agents == {"metaforge-flow-planner", "metaforge-run-verifier"}
+            manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+            assert "hooks" not in manifest, "the standard location loads by itself"
+
+    def test_every_agent_says_when_to_use_it(self) -> None:
+        for source in (REPO / "mcp_core" / "plugin_agents").glob("*.md"):
+            front, body = split_frontmatter(source.read_text(encoding="utf-8"))
+            assert front.get("name") == source.stem
+            assert "Use when" in front.get("description", "")
+            assert "never" in body.lower() or "do not" in body.lower()
+
+    def test_codex_gets_every_workflow_as_a_skill(self) -> None:
+        root = build_codex(default_gateway_url=DEFAULT_GATEWAY_URL)
+        for name, (_description, body) in WORKFLOWS.items():
+            text = (root / "skills" / f"{name}-workflow" / "SKILL.md").read_text(encoding="utf-8")
+            front, _ = split_frontmatter(text)
+            assert front["name"] == f"{name}-workflow"
+            assert "Use when" in front["description"]
+            assert body.split("\n", 1)[0] in text
+
+
+class TestHookScript:
+    def _hook(self):  # type: ignore[no-untyped-def]
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "metaforge_hook", REPO / "mcp_core" / "plugin_hooks" / "metaforge_hook.py"
+        )
+        module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        return module
+
+    def test_a_held_proposal_gets_a_reminder(self) -> None:
+        hook = self._hook()
+        envelope = {
+            "tool_id": "flow.propose",
+            "status": "success",
+            "data": {"status": "proposed", "approval_id": "run_9"},
+        }
+        message = hook.post_tool_use(
+            {
+                "tool_name": "mcp__plugin_metaforge_metaforge__flow_propose",
+                "tool_response": {"content": [{"type": "text", "text": json.dumps(envelope)}]},
+            }
+        )
+        assert message and "run_9" in message and "do not poll" in message
+
+    def test_a_patch_names_what_reruns(self) -> None:
+        hook = self._hook()
+        message = hook.post_tool_use(
+            {
+                "tool_name": "mcp__metaforge__flow_patch",
+                "tool_response": {"status": "proposed", "approval_id": "a", "rerun": ["design"]},
+            }
+        )
+        assert message and "re-run: design" in message
+
+    def test_anything_else_adds_nothing(self) -> None:
+        hook = self._hook()
+        assert hook.post_tool_use({"tool_name": "mcp__metaforge__flow_list"}) is None
+        assert (
+            hook.post_tool_use(
+                {
+                    "tool_name": "mcp__metaforge__flow_propose",
+                    "tool_response": {"status": "needs_input"},
+                }
+            )
+            is None
+        )
+
+    def test_it_never_fails_and_can_be_turned_off(self, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+        import io
+
+        hook = self._hook()
+        monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
+        assert hook.main(["x", "post-tool-use"]) == 0
+        monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
+        assert hook.main(["x", "session-start"]) == 0
+        assert "MetaForge plugin rules" in capsys.readouterr().out
+        monkeypatch.setenv("METAFORGE_PLUGIN_HOOKS", "off")
+        monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
+        assert hook.main(["x", "session-start"]) == 0
+        assert capsys.readouterr().out == ""

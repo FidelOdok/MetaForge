@@ -36,8 +36,10 @@ from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_w
 from api_gateway.twin.baseline import create_item_baseline
 from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector
+from observability.tracing import get_tracer
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
 from orchestrator.design_flow.frozen import freeze_flow
+from orchestrator.design_flow.graph import build_graph, rework_candidates
 from orchestrator.design_flow.invariants import FlowInvariantError, validate_flow
 from orchestrator.design_flow.launcher import (
     DesignFlowLauncher,
@@ -69,6 +71,7 @@ from orchestrator.harness.runs import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/runs", tags=["runs"])
+tracer = get_tracer("api_gateway.runs.routes")
 
 # Process-local store + SSE manager + gate coordinator (mirrors the chat backend
 # pattern). The store notifies BOTH the SSE stream and the gate coordinator so a
@@ -598,7 +601,7 @@ def _resolve_in_process_flow(run: Run) -> FlowDefinition:
             raise FlowVersionUnrunnableError(str(version_id), str(exc)) from exc
         definition = definition_from_frozen(frozen)
         rebuilt = freeze_flow(
-            definition, version=frozen.version, context=frozen.context
+            definition, version=frozen.version, context=frozen.context, facts=frozen.facts
         ).content_hash
         if rebuilt != frozen.content_hash:
             raise FlowVersionUnrunnableError(
@@ -611,6 +614,7 @@ def _resolve_in_process_flow(run: Run) -> FlowDefinition:
         run.request["flow_version"] = frozen.version
         run.request["flow_content_hash"] = frozen.content_hash
         run.request["flow_context"] = frozen.context
+        run.request["flow_facts"] = dict(frozen.facts)
         return definition
 
     flow_id = str(run.request.get("flow") or DEFAULT_FLOW_ID)
@@ -689,7 +693,12 @@ async def _launch_flow(run_id: str) -> None:
         phases=[p.id for p in definition.phases],
     )
     task = asyncio.create_task(
-        executor.run(run_id, definition, flow_context=str(run.request.get("flow_context") or ""))
+        executor.run(
+            run_id,
+            definition,
+            flow_context=str(run.request.get("flow_context") or ""),
+            facts=dict(run.request.get("flow_facts") or {}),
+        )
     )
     _flow_tasks.add(task)
     task.add_done_callback(_flow_tasks.discard)
@@ -1242,6 +1251,9 @@ async def _refuse_undeliverable_decision(
     if decision is ApprovalDecision.REWORK:
         phase_ids = [p.id for p in definition.phases] if definition is not None else []
         current = gate.get("phase")
+        if definition is not None and current and str(current) in phase_ids:
+            # FORGE-539: a graph flow reworks only to a phase this one needs.
+            phase_ids = rework_candidates(build_graph(definition.phases), str(current))
         if phase_ids:
             error = rework_target_error(phase_ids, str(current) if current else None, to_phase)
             if error is not None:
@@ -1487,3 +1499,394 @@ async def decide_run_gate(
         approver_verified=approver.verified,
     )
     return run
+
+
+# ---------------------------------------------------------------------------
+# FORGE-539: the lifecycle view and the completion verdict
+# ---------------------------------------------------------------------------
+
+
+class RunLifecycleResponse(BaseModel):
+    """Where a design run stands, as separate answers per phase, plus a verdict.
+
+    ``lifecycle`` holds the per-phase execution, eligibility, validity and
+    objective status, the capability gaps, the requirement statuses and the
+    completion verdict (``COMPLETED_VERIFIED`` only when every mandatory
+    requirement passes with current evidence). ``limits`` lists anything that
+    could not be read; an empty list means nothing was skipped.
+    """
+
+    runId: str  # noqa: N815
+    live: bool
+    limits: list[str] = Field(default_factory=list)
+    lifecycle: dict[str, Any] = Field(default_factory=dict)
+    #: The sentence an agent should act on, written here once so every client
+    #: (dashboard, in-process MCP, remote MCP) says the same thing.
+    nextStep: str = ""  # noqa: N815
+
+
+_NEXT_STEP = {
+    "COMPLETED_VERIFIED": (
+        "Every mandatory requirement passes with current evidence. Report the run as "
+        "verified, with the requirement statuses."
+    ),
+    "COMPLETED_WITH_WARNINGS": (
+        "The run finished and nothing failed, but it is not fully verified: report the "
+        "warnings as limits of the result, not as success."
+    ),
+    "PARTIALLY_COMPLETED": (
+        "The run's phases finished but the intent is NOT satisfied. Do not report it as "
+        "done: list the unmet requirements and stale results, and propose the work that "
+        "would close them (a rework, a new analysis, or a decision the user must make)."
+    ),
+    "BLOCKED": (
+        "A gate found its phase not ready. A person must retry the phase, send the run "
+        "back to an earlier phase, or reject it; report the findings and stop."
+    ),
+    "IN_PROGRESS": "The run is still going. Report where it is; do not poll in a tight loop.",
+    "FAILED": (
+        "The run failed. Report the failure and its class; do not restart it without "
+        "the user asking."
+    ),
+    "CANCELLED": "The run was rejected or cancelled by a reviewer. Report who and why.",
+}
+
+
+def _in_process_state(run: Run) -> dict[str, Any]:
+    """The in-process engine's run record, shaped like the Temporal ``state`` query."""
+    result = run.result if isinstance(run.result, dict) else {}
+    status = str(getattr(run.status, "value", run.status))
+    return {
+        "status": "awaiting_approval" if status == "awaiting_approval" else status,
+        "completed": [
+            {"phase": str(p.get("id")), "status": str(p.get("status") or "completed")}
+            for p in result.get("phases") or []
+        ],
+        "skipped": list(result.get("skipped") or []),
+        "error": run.error,
+        "mode": "graph" if result.get("skipped") is not None else "linear",
+    }
+
+
+@router.get("/{run_id}/lifecycle", response_model=RunLifecycleResponse)
+async def get_run_lifecycle(run_id: str) -> RunLifecycleResponse:
+    """The lifecycle view of one design run, with its completion verdict."""
+    from api_gateway.design_flows.lifecycle_service import (
+        capability_report,
+        requirement_rows,
+        stale_items_for_run,
+    )
+    from orchestrator.design_flow.lifecycle import lifecycle_view
+
+    try:
+        run = _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    if not _is_design_flow(run.request):
+        raise HTTPException(status_code=422, detail="this run is not a design flow")
+    definition = _run_definition(run)
+    if definition is None:
+        raise HTTPException(status_code=409, detail="the run's flow version could not be read back")
+
+    limits: list[str] = []
+    live = True
+    with tracer.start_as_current_span("runs.lifecycle") as span:
+        span.set_attribute("run.id", run_id)
+        if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+            state = _in_process_state(run)
+        else:
+            try:
+                launcher = await get_flow_launcher()
+                state = await launcher.state(run_id)
+            except Exception as exc:  # noqa: BLE001 - a view reports, it does not raise
+                live = False
+                limits.append(
+                    f"the workflow could not be queried ({exc}); phase state is from the run "
+                    "record and may be behind"
+                )
+                state = _in_process_state(run)
+
+        project_id = run.request.get("project_id")
+        twin = None
+        try:
+            from api_gateway.twin.routes import get_twin
+
+            twin = get_twin()
+        except Exception as exc:  # noqa: BLE001
+            limits.append(f"the twin is not available ({exc})")
+        stale, stale_limit = await stale_items_for_run(twin, run_id, project_id)
+        requirements, req_limit = await requirement_rows(twin, project_id)
+        capabilities = await capability_report(definition.phases)
+        limits.extend(x for x in (stale_limit, req_limit) if x)
+        limits.extend(capabilities.limits)
+
+        view = lifecycle_view(
+            definition.phases,
+            state,
+            stale_item_keys=stale,
+            requirements=requirements,
+            gaps=[g.as_dict() for g in capabilities.gaps],
+        )
+        span.set_attribute("lifecycle.completion", view.completion.classification.value)
+    logger.info(
+        "design_flow_lifecycle_read",
+        run_id=run_id,
+        completion=view.completion.classification.value,
+        stale=len(stale),
+        requirements=len(requirements),
+        limits=len(limits),
+    )
+    return RunLifecycleResponse(
+        runId=run_id,
+        live=live,
+        limits=limits,
+        lifecycle=view.as_dict(),
+        nextStep=_NEXT_STEP[view.completion.classification.value],
+    )
+
+
+# ---------------------------------------------------------------------------
+# FORGE-539: patching a running flow (local replanning)
+# ---------------------------------------------------------------------------
+
+
+class ProposePatchRequest(BaseModel):
+    """A change to a running flow, written against the flow it was read from."""
+
+    #: The run's ``flowContentHash`` as the author read it. A patch written
+    #: against an older flow is refused rather than applied on top of a change
+    #: its author never saw.
+    expectedContentHash: str  # noqa: N815
+    #: Why: the new information (a changed requirement, a failed analysis).
+    reason: str
+    #: Tailoring operations, the same closed set as ``flow.propose``.
+    operations: list[dict[str, Any]] = Field(default_factory=list)
+    #: Phases whose results the new information invalidates even though their
+    #: definition did not change (the payload changed, so the load case is wrong).
+    invalidate: list[str] = Field(default_factory=list)
+
+
+class PatchView(BaseModel):
+    runId: str  # noqa: N815
+    approvalId: str  # noqa: N815
+    versionId: str  # noqa: N815
+    rerun: list[str] = Field(default_factory=list)
+    preserved: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    changes: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    nextStep: str  # noqa: N815
+
+
+class AppliedPatchView(BaseModel):
+    runId: str  # noqa: N815
+    versionId: str  # noqa: N815
+    rerun: list[str] = Field(default_factory=list)
+    nextStep: str  # noqa: N815
+
+
+async def _completed_phases(run: Run) -> tuple[list[str], str | None]:
+    if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+        return [str(c["phase"]) for c in _in_process_state(run)["completed"]], None
+    try:
+        launcher = await get_flow_launcher()
+        state = await launcher.state(run.id)
+    except Exception as exc:  # noqa: BLE001 - reported on the plan
+        return [], f"the run's progress could not be read ({exc}); preserved is a lower bound"
+    return [str(c.get("phase")) for c in state.get("completed", []) if c.get("phase")], None
+
+
+@router.post("/{run_id}/patches", response_model=PatchView, status_code=201)
+async def propose_run_patch(run_id: str, body: ProposePatchRequest) -> PatchView:
+    """Plan a change to a running flow and hold it for a person.
+
+    Nothing changes until somebody approves the approval this returns, and
+    then ``POST /v1/runs/{run_id}/patches/{version_id}/apply`` applies it at
+    the run's next gate. Only the phases the change touches re-run.
+    """
+    from orchestrator.design_flow.generator import TailoringError
+    from orchestrator.design_flow.patch import StalePatchError, plan_patch
+
+    try:
+        run = _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    if not _is_design_flow(run.request):
+        raise HTTPException(status_code=422, detail="only a design-flow run can be patched")
+    if run.is_terminal:
+        raise HTTPException(
+            status_code=409,
+            detail=f"run '{run_id}' is {run.status}; a finished run is not patched. Start a "
+            "new run on a new version instead.",
+        )
+    if not body.reason.strip():
+        raise HTTPException(status_code=400, detail="a patch needs a reason")
+    definition = _run_definition(run)
+    if definition is None:
+        raise HTTPException(status_code=409, detail="the run's flow could not be read back")
+    completed, note = await _completed_phases(run)
+    with tracer.start_as_current_span("runs.propose_patch") as span:
+        span.set_attribute("run.id", run_id)
+        try:
+            plan = plan_patch(
+                definition,
+                current_hash=str(run.request.get("flow_content_hash") or ""),
+                expected_hash=body.expectedContentHash,
+                operations=body.operations,
+                invalidate=body.invalidate,
+                completed=completed,
+            )
+        except StalePatchError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except TailoringError as exc:
+            raise HTTPException(status_code=422, detail=f"patch refused: {exc}") from exc
+        if not plan.valid:
+            raise HTTPException(
+                status_code=422,
+                detail="the patched flow breaks the flow rules: "
+                + "; ".join(str(v) for v in plan.validation.violations),
+            )
+        span.set_attribute("patch.rerun", len(plan.rerun))
+
+        store = get_version_store()
+        context, facts = "", {}
+        previous = run.request.get("flow_version_id")
+        if previous:
+            try:
+                prior = store.get(str(previous)).frozen
+                context, facts = prior.context, dict(prior.facts)
+            except VersionNotFoundError:
+                pass
+        changes = plan.diff(body.reason.strip())
+        version = store.save(
+            plan.definition,
+            base_template_id=str(run.request.get("flow_template_id") or run.request.get("flow")),
+            base_version=str(run.request.get("flow_version") or "unversioned"),
+            changes=changes,
+            origin="patch",
+            intent=body.reason.strip(),
+            context=context,
+            facts=facts,
+        )
+        from api_gateway.chat.tool_approvals import get_approval_store
+
+        approvals = get_approval_store()
+        approval = approvals.create(
+            {
+                "kind": "design_flow_patch",
+                "run_id": run_id,
+                "flow_version_id": version.id,
+                "base_content_hash": run.request.get("flow_content_hash"),
+                "rerun": list(plan.rerun),
+                "preserved": list(plan.preserved),
+                "changes": changes,
+                "reason": body.reason.strip(),
+                "project_id": run.request.get("project_id"),
+            }
+        )
+        approvals.start(approval.id)
+        approvals.request_approval(
+            approval.id,
+            reason=(
+                f"Patch run {run_id}: {body.reason.strip()} -- re-runs "
+                f"{', '.join(plan.rerun) or 'nothing'}; keeps "
+                f"{', '.join(plan.preserved) or 'nothing'}."
+            )[:2000],
+        )
+        store.attach_approval(version.id, approval.id)
+    logger.info(
+        "design_flow_patch_proposed",
+        run_id=run_id,
+        version_id=version.id,
+        approval_id=approval.id,
+        rerun=list(plan.rerun),
+        preserved=len(plan.preserved),
+    )
+    return PatchView(
+        runId=run_id,
+        approvalId=approval.id,
+        versionId=version.id,
+        rerun=list(plan.rerun),
+        preserved=list(plan.preserved),
+        removed=list(plan.removed),
+        added=list(plan.added),
+        changes=changes,
+        notes=[*plan.notes, *([note] if note else [])],
+        nextStep=(
+            f"This patch is held for a person. Nothing changes until somebody answers "
+            f"approval '{approval.id}'. Once approved, apply it with flow.apply_patch "
+            f"(version '{version.id}'); you cannot approve it yourself."
+        ),
+    )
+
+
+@router.post("/{run_id}/patches/{version_id}/apply", response_model=AppliedPatchView)
+async def apply_run_patch(run_id: str, version_id: str) -> AppliedPatchView:
+    """Apply an approved patch. Refused unless approved and still current."""
+    from api_gateway.chat.tool_approvals import get_approval_store
+
+    try:
+        run = _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    try:
+        version = get_version_store().get(version_id)
+    except VersionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    approval = next(
+        (
+            a
+            for a in get_approval_store().list()
+            if a.request.get("kind") == "design_flow_patch"
+            and a.request.get("flow_version_id") == version_id
+            and a.request.get("run_id") == run_id
+        ),
+        None,
+    )
+    if approval is None:
+        raise HTTPException(status_code=404, detail=f"no patch '{version_id}' for run '{run_id}'")
+    if not version.startable:
+        raise HTTPException(
+            status_code=409,
+            detail=f"patch '{version_id}' is {version.status.value}, not approved. That is the "
+            "expected answer until a person approves it.",
+        )
+    if run.is_terminal:
+        raise HTTPException(status_code=409, detail=f"run '{run_id}' is {run.status}")
+    if run.request.get("flow_content_hash") != approval.request.get("base_content_hash"):
+        raise HTTPException(
+            status_code=409,
+            detail="the run's flow changed after this patch was written; it is stale. Propose "
+            "it again against the current flow.",
+        )
+    if run.request.get("flow_engine") == FlowEngine.IN_PROCESS.value:
+        raise HTTPException(
+            status_code=409,
+            detail="the in-process engine (a test double) cannot change a running flow; "
+            "patches apply on the Temporal engine.",
+        )
+    rerun = [str(p) for p in approval.request.get("rerun") or []]
+    launcher = await get_flow_launcher()
+    await launcher.request_change(
+        run_id,
+        flow=version.frozen,
+        requested_by=approval.approved_by or "",
+        rationale=str(approval.request.get("reason") or ""),
+        rerun=rerun,
+    )
+    # The run reads its flow from these from now on (lifecycle, gates).
+    run.request["flow_version_id"] = version_id
+    run.request["flow_content_hash"] = version.frozen.content_hash
+    run.request["flow_context"] = version.frozen.context
+    run.request["flow_facts"] = dict(version.frozen.facts)
+    logger.info("design_flow_patch_applied", run_id=run_id, version_id=version_id, rerun=rerun)
+    return AppliedPatchView(
+        runId=run_id,
+        versionId=version_id,
+        rerun=rerun,
+        nextStep=(
+            "The change is queued: the run applies it at its next gate, re-running "
+            f"{', '.join(rerun) or 'nothing'} and keeping every other result."
+        ),
+    )

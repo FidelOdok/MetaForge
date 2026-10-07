@@ -28,6 +28,7 @@ const KIND_LABELS: Record<ApprovalItem['kind'], string> = {
   gate: 'Gate',
   flow_proposal: 'Flow proposal',
   flow_version: 'Flow version',
+  flow_patch: 'Flow patch',
   tool_call: 'Tool call',
   human_authority: 'Human authority',
   design_change: 'Design change',
@@ -132,6 +133,30 @@ function KindDetail({ item }: { item: ApprovalItem }) {
           {d.intent != null && (
             <p style={{ color: KC.onSurfaceVariant, margin: 0 }}>{String(d.intent)}</p>
           )}
+          <CodeBox lines={changes.map((c) => ({ text: show(c) }))} />
+        </div>
+      );
+    }
+    case 'flow_patch': {
+      // FORGE-539: a change to a running flow. What it re-runs and what it
+      // keeps is the decision, so both are shown, not just the diff.
+      const rerun = Array.isArray(d.rerun) ? d.rerun : [];
+      const kept = Array.isArray(d.preserved) ? d.preserved : [];
+      const changes = Array.isArray(d.changes) ? d.changes : [];
+      return (
+        <div className="space-y-1.5" data-testid="approval-detail">
+          {d.reason != null && (
+            <p style={{ color: KC.onSurfaceVariant, margin: 0 }}>{String(d.reason)}</p>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            <Chip>run {String(d.run_id ?? '')}</Chip>
+            {rerun.map((p) => (
+              <Chip key={`rerun-${String(p)}`}>re-run {String(p)}</Chip>
+            ))}
+            {kept.map((p) => (
+              <Chip key={`keep-${String(p)}`}>keep {String(p)}</Chip>
+            ))}
+          </div>
           <CodeBox lines={changes.map((c) => ({ text: show(c) }))} />
         </div>
       );

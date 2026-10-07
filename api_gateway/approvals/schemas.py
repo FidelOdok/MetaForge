@@ -10,6 +10,7 @@ ApprovalKind = Literal[
     "gate",
     "flow_proposal",
     "flow_version",
+    "flow_patch",  # FORGE-539: a change to a running flow
     "tool_call",
     "human_authority",
     "design_change",

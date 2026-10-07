@@ -184,7 +184,9 @@ def init_approval_ledger(ledger: SqliteRunLedger | None) -> None:
 
 
 #: Approvals whose answer is also the decision on a stored flow version.
-_FLOW_VERSION_KINDS = frozenset({"design_flow_proposal", "design_flow_version"})
+_FLOW_VERSION_KINDS = frozenset(
+    {"design_flow_proposal", "design_flow_version", "design_flow_patch"}  # FORGE-539
+)
 
 
 def _decide_flow_version(run: Run, *, approved: bool) -> None:
