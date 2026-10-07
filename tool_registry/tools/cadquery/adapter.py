@@ -962,7 +962,18 @@ class CadqueryServer(McpToolServer):
                                 "properties": {
                                     "name": {"type": "string"},
                                     "file": {"type": "string"},
-                                    "location": {"type": "object"},
+                                    "location": {
+                                        "type": "object",
+                                        "description": (
+                                            "x, y, z in mm; rx, ry, rz in degrees, "
+                                            "applied about the part's origin X then Y "
+                                            "then Z, before the translation"
+                                        ),
+                                        "properties": {
+                                            k: {"type": "number"}
+                                            for k in ("x", "y", "z", "rx", "ry", "rz")
+                                        },
+                                    },
                                 },
                                 "required": ["name", "file"],
                             },
@@ -998,7 +1009,24 @@ class CadqueryServer(McpToolServer):
                         "total_volume": {"type": "number"},
                         "volume_mm3": {"type": "number"},
                         "mass_kg": {"type": "number"},
-                        "interference_check_passed": {"type": "boolean"},
+                        "interference_check_passed": {
+                            "type": "boolean",
+                            "description": (
+                                "FORGE-547: false when any two placed parts overlap; "
+                                "see interferences"
+                            ),
+                        },
+                        "interferences": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "part_a": {"type": "string"},
+                                    "part_b": {"type": "string"},
+                                    "volume_mm3": {"type": "number"},
+                                },
+                            },
+                        },
                     },
                 },
                 phase=2,

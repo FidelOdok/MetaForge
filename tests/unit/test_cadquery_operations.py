@@ -1909,3 +1909,60 @@ class TestGetShapePropertiesEmptyShapeGuard:
             "max_y": 5.0,
             "max_z": 5.0,
         }
+
+
+class TestAssemblyInterferenceForge547:
+    """FORGE-547: real interference check, and rotations honoured."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_cadquery(self) -> None:
+        pytest.importorskip("cadquery")
+
+    def _box(self, ops: CadqueryOperations, tmp_path: Path, name: str) -> str:
+        path = str(tmp_path / f"{name}.step")
+        ops.create_parametric(
+            "box", {"length": 20.0, "width": 10.0, "height": 10.0}, output_path=path
+        )
+        return path
+
+    def test_overlapping_parts_fail_the_check_with_the_overlap(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        a, b = self._box(ops, tmp_path, "a"), self._box(ops, tmp_path, "b")
+        result = ops.create_assembly(
+            parts=[{"name": "a", "file": a}, {"name": "b", "file": b, "location": {"x": 10}}],
+            output_path=str(tmp_path / "assy.step"),
+        )
+        assert result["interference_check_passed"] is False
+        (hit,) = result["interferences"]
+        assert {hit["part_a"], hit["part_b"]} == {"a", "b"}
+        assert hit["volume_mm3"] == pytest.approx(10 * 10 * 10, rel=1e-3)
+
+    def test_separated_parts_pass(self, tmp_path):
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        a, b = self._box(ops, tmp_path, "a"), self._box(ops, tmp_path, "b")
+        result = ops.create_assembly(
+            parts=[{"name": "a", "file": a}, {"name": "b", "file": b, "location": {"x": 50}}],
+            output_path=str(tmp_path / "assy.step"),
+        )
+        assert result["interference_check_passed"] is True
+        assert result["interferences"] == []
+
+    def test_a_rotation_moves_a_part_out_of_the_way(self, tmp_path):
+        # Two 20x10x10 boxes side by side along y overlap; rotating b 90
+        # degrees about z swings it out of a. Without rotation support the
+        # overlap would remain.
+        ops = CadqueryOperations(work_dir=str(tmp_path))
+        a, b = self._box(ops, tmp_path, "a"), self._box(ops, tmp_path, "b")
+        overlapping = ops.create_assembly(
+            parts=[{"name": "a", "file": a}, {"name": "b", "file": b, "location": {"x": 15}}],
+            output_path=str(tmp_path / "one.step"),
+        )
+        rotated = ops.create_assembly(
+            parts=[
+                {"name": "a", "file": a},
+                {"name": "b", "file": b, "location": {"x": 15, "y": 20, "rz": 90}},
+            ],
+            output_path=str(tmp_path / "two.step"),
+        )
+        assert overlapping["interference_check_passed"] is False
+        assert rotated["interference_check_passed"] is True
