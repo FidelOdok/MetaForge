@@ -11,7 +11,7 @@ Find and rank alternate parts for supply-chain risk mitigation, based on compati
 
 ## Tools Required
 
-- `distributor_search` -- fetch candidate parts + stock/pricing from distributors
+- `component.search_parametric` or `distributors.resolve_offers` (optional) -- candidate parts and their stock/pricing, passed in as `distributor_results`. The ranker calls no tool itself
 
 ## Input
 
@@ -26,7 +26,7 @@ Find and rank alternate parts for supply-chain risk mitigation, based on compati
 
 ## Limitations
 
-- Only as good as the `specs` supplied — it does not read the datasheet to infer
+- Only as good as the `specs` supplied, it does not read the datasheet to infer
   compatibility beyond the provided fields
 - Availability/pricing reflect the distributor snapshot passed in, not live stock
 - Ranks alternates; it does not commit a substitution to the BOM

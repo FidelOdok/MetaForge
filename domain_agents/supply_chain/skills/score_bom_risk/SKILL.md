@@ -11,7 +11,8 @@ Score supply-chain risk for a BOM across single-source, lead time, lifecycle, pr
 
 ## Tools Required
 
-- `distributor_search` -- stock, lead-time, lifecycle, and pricing signals per part
+- `distributors.resolve_offers` (optional) -- sources, stock, MOQ, lead time and prices per part, passed in as `distributor_data`. The scorer calls no tool itself
+- A factor with no data scores 50 and is listed in the part's `unknown_factors`
 
 ## Input
 

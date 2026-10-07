@@ -46,8 +46,9 @@ Gathering the candidates and their data you can do with real tools.
 | Commit the chosen part | `twin.record_component_selection` | `electronics` |
 | Record why | `twin.record_decision` | every profile |
 
-The skill's definition names a tool `distributor_search`; no tool has that
-id. The real sources are the ones above.
+The skill's definition lists `distributors.resolve_offers` and
+`component.search_parametric` (both optional): the ranker itself calls no
+tool, and ranks the candidates you pass it.
 
 ## Inputs you need before you start
 
