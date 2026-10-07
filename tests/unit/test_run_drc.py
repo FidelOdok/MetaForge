@@ -542,3 +542,69 @@ class TestSkillRunPipeline:
         # But the DRC itself failed
         assert result.data.passed is False
         assert result.data.total_errors == 1
+
+
+class TestDrcSkillVerdictForge551:
+    """The skill reads the real tool shape (FORGE-551)."""
+
+    def _setup(self, ctx: SkillContext, response: dict) -> None:
+        ctx.twin.get_work_product.return_value = {"id": "x"}
+        ctx.mcp.register_tool("kicad.run_drc", "drc_validation")
+        ctx.mcp.register_tool_response("kicad.run_drc", response)
+
+    async def test_object_location_from_the_tool_is_accepted(
+        self, mock_context: SkillContext, sample_input: RunDrcInput
+    ) -> None:
+        viol = {
+            "rule_id": "clearance",
+            "severity": "error",
+            "message": "Clearance violation",
+            "location": {"x": 10.5, "y": 20.3, "layer": "F.Cu"},
+        }
+        self._setup(mock_context, _make_drc_response([viol], passed=False))
+        out = await RunDrcHandler(mock_context).execute(sample_input)
+        assert out.violations[0].location == "(10.5, 20.3) mm"
+        assert out.violations[0].layer == "F.Cu"
+        assert out.passed is False
+
+    async def test_unconnected_items_fail(
+        self, mock_context: SkillContext, sample_input: RunDrcInput
+    ) -> None:
+        self._setup(mock_context, {**_make_drc_response(), "unconnected_items": 3})
+        out = await RunDrcHandler(mock_context).execute(sample_input)
+        assert out.unconnected_items == 3
+        assert out.passed is False
+        assert "3 unconnected" in out.summary
+
+    async def test_warning_filter_cannot_pass_a_board_with_errors(
+        self, mock_context: SkillContext
+    ) -> None:
+        viols = [
+            {"rule_id": "clearance", "severity": "error", "message": "e"},
+            {"rule_id": "silk", "severity": "warning", "message": "w"},
+        ]
+        self._setup(mock_context, _make_drc_response(viols, passed=False))
+        inp = RunDrcInput(
+            work_product_id=str(uuid4()), pcb_file="b.kicad_pcb", severity_filter="warning"
+        )
+        out = await RunDrcHandler(mock_context).execute(inp)
+        assert out.total_errors == 0
+        assert out.passed is False
+
+    async def test_rule_set_is_forwarded(self, mock_context: SkillContext) -> None:
+        calls: list[dict] = []
+        self._setup(mock_context, {**_make_drc_response(), "rule_set_applied": True})
+        original = mock_context.mcp.invoke
+
+        async def spy(tool_id, arguments, **kw):
+            calls.append(arguments)
+            return await original(tool_id, arguments, **kw)
+
+        mock_context.mcp.invoke = spy  # type: ignore[method-assign]
+        inp = RunDrcInput(
+            work_product_id=str(uuid4()), pcb_file="b.kicad_pcb", rule_set="(version 1)"
+        )
+        out = await RunDrcHandler(mock_context).execute(inp)
+        assert calls[0]["rule_set"] == "(version 1)"
+        assert calls[0]["severity_filter"] == "all"
+        assert out.rule_set_applied is True

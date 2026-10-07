@@ -302,7 +302,7 @@ SAMPLE_DRC_REPORT = {
             ],
         },
     ],
-    "unresolved": [
+    "unconnected_items": [
         {
             "type": "unconnected",
             "description": "Unconnected pad",
@@ -1261,3 +1261,84 @@ class TestRealKicadExecution:
         # Temp file should have been cleaned up
         assert len(created_files) == 1
         assert not os.path.exists(created_files[0])
+
+
+class TestDrcVerdictForge551:
+    """kicad.run_drc counts unrouted nets and applies a custom rule_set (FORGE-551)."""
+
+    @staticmethod
+    async def _drc(
+        server: KicadServer, report: dict[str, Any], pcb: str, filt: str, rules: str | None
+    ) -> tuple[dict[str, Any], list[str]]:
+        seen: list[str] = []
+
+        async def fake_cli(_binary: str, args: list[str], _timeout: float):
+            board = args[-1]
+            seen.append(board)
+            dru = os.path.splitext(board)[0] + ".kicad_dru"
+            if os.path.exists(dru):
+                with open(dru) as f:
+                    seen.append(f.read())
+            with open(args[args.index("--output") + 1], "w") as f:
+                json.dump(report, f)
+            return 0, "", ""
+
+        with (
+            patch(
+                "tool_registry.tools.kicad.adapter._check_kicad_cli",
+                AsyncMock(return_value="kicad-cli"),
+            ),
+            patch("tool_registry.tools.kicad.adapter._run_kicad_cli", side_effect=fake_cli),
+        ):
+            result = await server._execute_drc(pcb, filt, rules)
+        return result, seen
+
+    async def test_unconnected_items_fail_the_board(self, server: KicadServer, tmp_path) -> None:
+        report = {"violations": [], "unconnected_items": [{"type": "unconnected_items"}]}
+        result, _ = await self._drc(server, report, str(tmp_path / "b.kicad_pcb"), "all", None)
+        assert result["unconnected_items"] == 1
+        assert result["passed"] is False
+
+    async def test_warnings_pass_and_filter_cannot_hide_errors(
+        self, server: KicadServer, tmp_path
+    ) -> None:
+        pcb = str(tmp_path / "b.kicad_pcb")
+        warn_only = {"violations": [SAMPLE_DRC_REPORT["violations"][1]]}
+        result, _ = await self._drc(server, warn_only, pcb, "all", None)
+        assert result["passed"] is True
+        result, _ = await self._drc(server, SAMPLE_DRC_REPORT, pcb, "warning", None)
+        assert result["errors"] == 0
+        assert result["passed"] is False
+
+    async def test_rule_set_text_is_placed_beside_a_copy_of_the_board(
+        self, server: KicadServer, tmp_path
+    ) -> None:
+        pcb = tmp_path / "b.kicad_pcb"
+        pcb.write_text("(kicad_pcb)")
+        rules = "(version 1)\n(rule big (constraint clearance (min 5mm)))"
+        result, seen = await self._drc(server, {"violations": []}, str(pcb), "all", rules)
+        assert seen[0] != str(pcb)
+        assert seen[0].endswith("b.kicad_pcb")
+        assert seen[1] == rules
+        assert result["rule_set_applied"] is True
+        assert not os.path.exists(seen[0])
+
+    async def test_rule_set_path_is_read(self, server: KicadServer, tmp_path) -> None:
+        pcb = tmp_path / "b.kicad_pcb"
+        pcb.write_text("(kicad_pcb)")
+        dru = tmp_path / "custom.kicad_dru"
+        dru.write_text("(version 1)")
+        _, seen = await self._drc(server, {"violations": []}, str(pcb), "all", str(dru))
+        assert seen[1] == "(version 1)"
+
+    async def test_missing_rule_file_is_refused(self, server: KicadServer, tmp_path) -> None:
+        pcb = tmp_path / "b.kicad_pcb"
+        pcb.write_text("(kicad_pcb)")
+        with pytest.raises(ValueError, match="rule_set"):
+            await self._drc(server, {}, str(pcb), "all", str(tmp_path / "nope.kicad_dru"))
+
+    def test_legacy_unresolved_key_still_counts(self) -> None:
+        from tool_registry.tools.kicad.adapter import _count_drc_unconnected
+
+        assert _count_drc_unconnected({"unresolved": [{}, {}]}) == 2
+        assert _count_drc_unconnected({"unconnected_items": [{}]}) == 1

@@ -21,7 +21,7 @@ Runs Electrical Rules Check (ERC) on a KiCad schematic and returns categorised v
 
 ## Output
 
-- `passed` -- Whether the schematic passed ERC (no errors; warnings are acceptable)
+- `passed` -- Whether the schematic passed ERC: no errors, counted before the severity filter; warnings are acceptable
 - `total_violations` -- Total number of violations found
 - `total_errors` -- Number of error-severity violations
 - `total_warnings` -- Number of warning-severity violations

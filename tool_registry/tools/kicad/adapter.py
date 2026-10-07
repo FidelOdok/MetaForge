@@ -6,6 +6,7 @@ import asyncio
 import csv
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -216,7 +217,11 @@ class KicadServer(McpToolServer):
                         },
                         "rule_set": {
                             "type": "string",
-                            "description": "Optional custom rule set file",
+                            "description": (
+                                "Optional custom design rules: a path to a "
+                                ".kicad_dru file, or its text. DRC runs on a "
+                                "copy of the board with these rules beside it"
+                            ),
                         },
                     },
                     "required": ["pcb_file"],
@@ -229,7 +234,15 @@ class KicadServer(McpToolServer):
                         "errors": {"type": "integer"},
                         "warnings": {"type": "integer"},
                         "violations": {"type": "array"},
-                        "passed": {"type": "boolean"},
+                        "unconnected_items": {"type": "integer"},
+                        "rule_set_applied": {"type": "boolean"},
+                        "passed": {
+                            "type": "boolean",
+                            "description": (
+                                "No error-severity violation and nothing "
+                                "unconnected, counted before severity_filter"
+                            ),
+                        },
                     },
                 },
                 phase=1,
@@ -598,6 +611,12 @@ class KicadServer(McpToolServer):
 
                 # Extract violations from KiCad JSON report format
                 violations = _parse_erc_violations(report_data, severity_filter)
+                # FORGE-551: the verdict is taken before the severity filter
+                # (filtering errors out must not turn a failing sheet into a
+                # pass), and warnings do not fail it, matching the run_erc skill.
+                all_errors = sum(
+                    1 for v in _parse_erc_violations(report_data, "all") if v["severity"] == "error"
+                )
 
                 errors = sum(1 for v in violations if v["severity"] == "error")
                 warnings = sum(1 for v in violations if v["severity"] == "warning")
@@ -608,7 +627,7 @@ class KicadServer(McpToolServer):
                     "errors": errors,
                     "warnings": warnings,
                     "violations": violations,
-                    "passed": len(violations) == 0,
+                    "passed": all_errors == 0,
                 }
 
                 span.set_attribute("kicad.erc.total_violations", len(violations))
@@ -648,6 +667,15 @@ class KicadServer(McpToolServer):
 
             report_fd, report_path = tempfile.mkstemp(suffix=".json", prefix="kicad_drc_")
             os.close(report_fd)
+            rules_dir: tempfile.TemporaryDirectory[str] | None = None
+            board = pcb_file
+            if rule_set:
+                # FORGE-551: rule_set was accepted and never reached KiCad.
+                # kicad-cli has no rules flag; it applies the <stem>.kicad_dru
+                # beside the board, so DRC runs on a copy with the rules there.
+                rules_dir = tempfile.TemporaryDirectory(prefix="kicad_drc_rules_")
+                board = _stage_board_with_rules(pcb_file, rule_set, rules_dir.name)
+                span.set_attribute("kicad.drc.rule_set_applied", True)
 
             try:
                 cli_args = [
@@ -658,7 +686,7 @@ class KicadServer(McpToolServer):
                     "--severity-all",
                     "--output",
                     report_path,
-                    pcb_file,
+                    board,
                 ]
                 timeout = float(self.config.max_operation_time)
 
@@ -678,6 +706,9 @@ class KicadServer(McpToolServer):
 
                 violations = _parse_drc_violations(report_data, severity_filter)
                 unconnected = _count_drc_unconnected(report_data)
+                all_errors = sum(
+                    1 for v in _parse_drc_violations(report_data, "all") if v["severity"] == "error"
+                )
 
                 errors = sum(1 for v in violations if v["severity"] == "error")
                 warnings = sum(1 for v in violations if v["severity"] == "warning")
@@ -689,7 +720,9 @@ class KicadServer(McpToolServer):
                     "warnings": warnings,
                     "violations": violations,
                     "unconnected_items": unconnected,
-                    "passed": len(violations) == 0 and unconnected == 0,
+                    "rule_set_applied": bool(rule_set),
+                    # Before the severity filter, warnings allowed (FORGE-551).
+                    "passed": all_errors == 0 and unconnected == 0,
                 }
 
                 span.set_attribute("kicad.drc.total_violations", len(violations))
@@ -714,6 +747,8 @@ class KicadServer(McpToolServer):
             finally:
                 if os.path.exists(report_path):
                     os.unlink(report_path)
+                if rules_dir is not None:
+                    rules_dir.cleanup()
 
     async def _execute_bom_export(
         self, schematic_file: str, output_format: str, group_by: str
@@ -1093,9 +1128,41 @@ def _parse_drc_violations(report: dict[str, Any], severity_filter: str) -> list[
 
 
 def _count_drc_unconnected(report: dict[str, Any]) -> int:
-    """Count unconnected items from DRC report."""
-    unresolved = report.get("unresolved", [])
-    return len(unresolved)
+    """Count unconnected items from a DRC report.
+
+    kicad-cli 8 and 9 write them under ``unconnected_items``; this read
+    ``unresolved``, a key KiCad never writes, so an unrouted board always
+    counted zero (FORGE-551). ``unresolved`` is still read for old fixtures.
+    """
+    items = report.get("unconnected_items")
+    if items is None:
+        items = report.get("unresolved", [])
+    return len(items)
+
+
+def _stage_board_with_rules(pcb_file: str, rule_set: str, directory: str) -> str:
+    """Copy ``pcb_file`` into ``directory`` with ``rule_set`` as its ``.kicad_dru``.
+
+    ``rule_set`` is a path to a rules file, or the rules text itself (it
+    starts with ``(``). A project file beside the board is copied too, so
+    its other settings still apply. Returns the staged board path.
+    """
+    source = Path(pcb_file)
+    if not source.is_file():
+        raise ValueError(f"pcb_file not found: {pcb_file}")
+    text = rule_set.strip()
+    if not text.startswith("("):
+        rules_path = Path(rule_set)
+        if not rules_path.is_file():
+            raise ValueError(f"rule_set is neither a rules file nor rules text: {rule_set}")
+        text = rules_path.read_text(encoding="utf-8")
+    staged = Path(directory) / source.name
+    shutil.copyfile(source, staged)
+    project = source.with_suffix(".kicad_pro")
+    if project.is_file():
+        shutil.copyfile(project, staged.with_suffix(".kicad_pro"))
+    staged.with_suffix(".kicad_dru").write_text(text, encoding="utf-8")
+    return str(staged)
 
 
 def _parse_bom_csv(file_path: str) -> tuple[int, int]:
