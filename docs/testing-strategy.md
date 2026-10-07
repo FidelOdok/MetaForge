@@ -203,7 +203,24 @@ pytest --cov=. --cov-report=term-missing
 # Lint + type check
 ruff check .
 mypy .
+
+# The skills' own tests.py, beside each handler (FORGE-560)
+pytest domain_agents/ -v
 ```
+
+### Skill tests beside their handlers
+
+Each skill directory under `domain_agents/<discipline>/skills/<skill>/` has its
+own `tests.py`. Until FORGE-560 none of them ran: pytest's default
+`python_files` never matches `tests.py`, and `testpaths` held only `tests/`.
+Several had gone stale or empty while their handlers drifted; FORGE-561 (a
+`run_fea` skill that could never succeed) was found that way.
+
+`pyproject.toml` now adds `tests.py` to `python_files` and `domain_agents` to
+`testpaths`. Every skill directory is a package, so the same-named modules
+import under distinct names, and CI runs `pytest domain_agents/` after
+`tests/unit/`. The `tool_registry/tools/*/tests.py` files are re-exports of
+`tests/unit` and are left out, so nothing runs twice.
 
 ## Coverage Gaps (Relative to Taxonomy)
 

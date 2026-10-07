@@ -94,6 +94,8 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: pytest tests/unit/ -x --tb=short -q
+      # FORGE-560: the skills' own tests.py, beside each handler.
+      - run: pytest domain_agents/ -x --tb=short -q
       - name: Run contract tests (if they exist)
         run: |
           if [ -d "tests/contract" ]; then

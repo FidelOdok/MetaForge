@@ -102,8 +102,9 @@ multi-physics simulation.
 
 You have access to the following tools:
 
-- **run_fea**: Run FEA structural analysis using CalculiX. Provide mesh_file, \
-load_cases, analysis_type (static/modal/thermal), and material.
+- **run_fea**: Run FEA with CalculiX. Provide mesh_file, load_case, material, \
+fixed_node_set, and for static_stress load_node_set and load_force_n [Fx, Fy, Fz] \
+(N); modal takes num_modes. Give a cited yield_strength_mpa for a safety factor.
 - **run_spice**: Run SPICE circuit simulation. Provide netlist_path, \
 analysis_type (dc/ac/transient), and optional params.
 - **run_cfd**: Steady conduction to a fixed-temperature sink (CalculiX). \
@@ -146,17 +147,27 @@ def _get_or_create_pydantic_agent() -> Any:
     async def run_fea(
         ctx: RunContext[AgentDependencies],
         mesh_file: str,
-        load_cases: list[dict[str, Any]] | None = None,
-        analysis_type: str = "static",
-        material: str = "steel_1018",
+        load_case: str,
+        material: dict[str, Any],
+        fixed_node_set: str,
+        analysis_type: str = "static_stress",
+        load_node_set: str | None = None,
+        load_force_n: list[float] | None = None,
+        num_modes: int = 3,
+        yield_strength_mpa: float | None = None,
     ) -> dict[str, Any]:
-        """Run FEA structural analysis using CalculiX.
+        """Run FEA with CalculiX: calculix.run_fea's own arguments (FORGE-561).
 
         Args:
-            mesh_file: Path to the mesh file (.inp format).
-            load_cases: List of load case definitions.
-            analysis_type: Type of analysis ('static', 'modal', 'thermal').
-            material: Material identifier.
+            mesh_file: Volume mesh (.inp), e.g. from generate_mesh.
+            load_case: Name of the load case.
+            material: {'name': ...} or explicit youngs_modulus_mpa/poissons_ratio.
+            fixed_node_set: Face held fixed (a surface set from generate_mesh).
+            analysis_type: 'static_stress' or 'modal'.
+            load_node_set: Loaded face (static_stress).
+            load_force_n: [Fx, Fy, Fz] in N (static_stress).
+            num_modes: Modes to extract (modal).
+            yield_strength_mpa: Cited yield strength; gives a safety factor.
         """
         skill_ctx = SkillContext(
             twin=ctx.deps.twin,
@@ -169,9 +180,14 @@ def _get_or_create_pydantic_agent() -> Any:
         skill_input = RunFeaInput(
             work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             mesh_file=mesh_file,
-            load_cases=load_cases or [],
+            load_case=load_case,
             analysis_type=analysis_type,
             material=material,
+            fixed_node_set=fixed_node_set,
+            load_node_set=load_node_set,
+            load_force_n=load_force_n,
+            num_modes=num_modes,
+            yield_strength_mpa=yield_strength_mpa,
         )
 
         handler = RunFeaHandler(skill_ctx)
@@ -184,9 +200,12 @@ def _get_or_create_pydantic_agent() -> Any:
         return {
             "skill": "run_fea",
             "success": True,
+            "analysis_type": output.analysis_type,
             "max_stress_mpa": output.max_stress_mpa,
             "max_displacement_mm": output.max_displacement_mm,
             "safety_factor": output.safety_factor,
+            "frequencies_hz": output.frequencies_hz,
+            "frd_path": output.frd_path,
             "solver_time_s": output.solver_time_s,
         }
 
@@ -532,9 +551,9 @@ class SimulationAgent:
         )
 
     async def _run_fea(self, request: TaskRequest) -> TaskResult:
-        """Run FEA structural analysis."""
-        mesh_file: str = request.parameters.get("mesh_file", "")
-        if not mesh_file:
+        """Run FEA with calculix.run_fea's own arguments (FORGE-561)."""
+        params = request.parameters
+        if not params.get("mesh_file"):
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
@@ -542,16 +561,29 @@ class SimulationAgent:
                 errors=["Missing required parameter: mesh_file"],
             )
 
-        self.logger.info("FEA simulation requested", mesh_file=mesh_file)
+        self.logger.info("FEA simulation requested", mesh_file=params.get("mesh_file"))
 
         ctx = self._create_skill_context(request.branch)
-        skill_input = RunFeaInput(
-            work_product_id=str(request.work_product_id),
-            mesh_file=mesh_file,
-            load_cases=request.parameters.get("load_cases", []),
-            analysis_type=request.parameters.get("analysis_type", "static"),
-            material=request.parameters.get("material", "steel_1018"),
-        )
+        try:
+            skill_input = RunFeaInput(
+                work_product_id=str(request.work_product_id),
+                mesh_file=params["mesh_file"],
+                load_case=params.get("load_case", ""),
+                analysis_type=params.get("analysis_type", "static_stress"),
+                material=params.get("material") or {},
+                fixed_node_set=params.get("fixed_node_set", ""),
+                load_node_set=params.get("load_node_set"),
+                load_force_n=params.get("load_force_n"),
+                num_modes=params.get("num_modes", 3),
+                yield_strength_mpa=params.get("yield_strength_mpa"),
+            )
+        except ValueError as exc:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=[str(exc)],
+            )
 
         handler = RunFeaHandler(ctx)
         result = await handler.run(skill_input)
@@ -565,23 +597,19 @@ class SimulationAgent:
             )
 
         output = result.data
-        passed = output.safety_factor >= 1.0
+        warnings: list[str] = []
+        passed = True
+        if output.safety_factor is not None and output.safety_factor < 1.0:
+            passed = False
+            warnings.append(f"Safety factor {output.safety_factor:.2f} is below 1.0")
+        if output.analysis_type == "static_stress" and output.safety_factor is None:
+            warnings.append("No safety factor: give a cited yield_strength_mpa")
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
             success=passed,
-            skill_results=[
-                {
-                    "skill": "run_fea",
-                    "max_stress_mpa": output.max_stress_mpa,
-                    "max_displacement_mm": output.max_displacement_mm,
-                    "safety_factor": output.safety_factor,
-                    "solver_time_s": output.solver_time_s,
-                }
-            ],
-            warnings=(
-                [f"Safety factor {output.safety_factor:.2f} is below 1.0"] if not passed else []
-            ),
+            skill_results=[{"skill": "run_fea", **output.model_dump(mode="json")}],
+            warnings=warnings,
         )
 
     async def _run_cfd(self, request: TaskRequest) -> TaskResult:

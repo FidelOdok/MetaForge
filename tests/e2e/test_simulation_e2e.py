@@ -39,18 +39,31 @@ SPICE_NON_CONVERGENT: dict[str, Any] = {
     "sim_time_s": 5.0,
 }
 
+# FORGE-561: calculix.run_fea's real result shape. The tool has no yield
+# data; the safety factor comes from the case's cited yield (276 MPa,
+# Al 6061-T6) over the reported peak stress.
 FEA_STATIC_RESULT: dict[str, Any] = {
-    "max_stress_mpa": 85.3,
-    "max_displacement_mm": 0.12,
-    "safety_factor": 3.24,
-    "solver_time_s": 12.5,
+    "max_von_mises": {"global": 85.3},
+    "displacement": {"max": 0.12},
+    "solver_time": 12.5,
+    "frd_path": "/workspace/motor_mount_bracket_solved.frd",
 }
 
 FEA_UNSAFE_RESULT: dict[str, Any] = {
-    "max_stress_mpa": 310.0,
-    "max_displacement_mm": 2.8,
-    "safety_factor": 0.89,
-    "solver_time_s": 15.0,
+    "max_von_mises": {"global": 310.0},
+    "displacement": {"max": 2.8},
+    "solver_time": 15.0,
+    "frd_path": "/workspace/motor_mount_bracket_solved.frd",
+}
+
+FEA_CASE = {
+    "mesh_file": "models/motor_mount_bracket.inp",
+    "load_case": "hover_3g",
+    "material": {"name": "aluminium_6061"},
+    "fixed_node_set": "Surface1",
+    "load_node_set": "Surface4",
+    "load_force_n": [0.0, 0.0, -30.0],
+    "yield_strength_mpa": 276.0,
 }
 
 # FORGE-543: calculix.run_thermal's real result shape (conduction only).
@@ -224,17 +237,12 @@ class TestFeaSimulationE2E:
             TaskRequest(
                 task_type="run_fea",
                 work_product_id=s["work_product"].id,
-                parameters={
-                    "mesh_file": "models/motor_mount_bracket.inp",
-                    "load_cases": [{"name": "hover_3g", "force_n": 30, "direction": "z"}],
-                    "analysis_type": "static",
-                    "material": "Al6061-T6",
-                },
+                parameters=FEA_CASE,
             )
         )
 
         assert result.success is True
-        assert result.skill_results[0]["safety_factor"] == 3.24
+        assert result.skill_results[0]["safety_factor"] == round(276.0 / 85.3, 3)
         assert result.skill_results[0]["max_stress_mpa"] == 85.3
 
     async def test_fea_unsafe_fails(self):
@@ -248,10 +256,7 @@ class TestFeaSimulationE2E:
             TaskRequest(
                 task_type="run_fea",
                 work_product_id=work_product.id,
-                parameters={
-                    "mesh_file": "models/motor_mount_bracket.inp",
-                    "analysis_type": "static",
-                },
+                parameters=FEA_CASE,
             )
         )
 
@@ -366,7 +371,7 @@ class TestFullSimulationE2E:
                 work_product_id=work_product.id,
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
-                    "mesh_file": "models/motor_mount_bracket.inp",
+                    **FEA_CASE,
                     "conduction": CONDUCTION,
                 },
             )
@@ -410,7 +415,7 @@ class TestFullSimulationE2E:
                 work_product_id=work_product.id,
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
-                    "mesh_file": "models/motor_mount_bracket.inp",
+                    **FEA_CASE,
                 },
             )
         )
@@ -472,7 +477,7 @@ class TestSimulationAgentCommonE2E:
             TaskRequest(
                 task_type="run_fea",
                 work_product_id=work_product.id,
-                parameters={"mesh_file": "models/motor_mount_bracket.inp"},
+                parameters=FEA_CASE,
             )
         )
         assert result.success is True
@@ -487,4 +492,4 @@ class TestSimulationAgentCommonE2E:
             },
         )
         assert "fea_results" in updated.metadata
-        assert updated.metadata["fea_results"]["safety_factor"] == 3.24
+        assert updated.metadata["fea_results"]["safety_factor"] == round(276.0 / 85.3, 3)

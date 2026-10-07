@@ -27,17 +27,27 @@ def _spice_response(convergence: bool = True) -> dict:
     }
 
 
-def _fea_response(
-    safety_factor: float = 2.5,
-    max_stress: float = 150.0,
-) -> dict:
-    """Build a mock FEA tool response."""
+def _fea_response(max_stress: float = 100.0) -> dict:
+    """calculix.run_fea's real result shape (FORGE-561)."""
     return {
-        "max_stress_mpa": max_stress,
-        "max_displacement_mm": 0.12,
-        "safety_factor": safety_factor,
-        "solver_time_s": 8.3,
+        "max_von_mises": {"global": max_stress},
+        "displacement": {"max": 0.12},
+        "solver_time": 8.3,
+        "frd_path": "/workspace/bracket_solved.frd",
     }
+
+
+# A static case with every argument calculix.run_fea requires; 250 MPa yield
+# over the 100 MPa default stress gives a safety factor of 2.5.
+FEA_CASE = {
+    "mesh_file": "mesh/bracket.inp",
+    "load_case": "tip_load",
+    "material": {"name": "aluminium_6061"},
+    "fixed_node_set": "Surface1",
+    "load_node_set": "Surface6",
+    "load_force_n": [0.0, 0.0, -100.0],
+    "yield_strength_mpa": 250.0,
+}
 
 
 def _cfd_response() -> dict:
@@ -202,12 +212,7 @@ class TestRunFea:
         request = TaskRequest(
             task_type="run_fea",
             work_product_id=work_product_id,
-            parameters={
-                "mesh_file": "mesh/bracket.inp",
-                "load_cases": [{"name": "gravity", "force_n": 100}],
-                "analysis_type": "static",
-                "material": "steel_1018",
-            },
+            parameters=FEA_CASE,
         )
         result = await agent.run_task(request)
 
@@ -215,24 +220,55 @@ class TestRunFea:
         assert result.task_type == "run_fea"
         assert len(result.skill_results) == 1
         assert result.skill_results[0]["skill"] == "run_fea"
-        assert result.skill_results[0]["safety_factor"] >= 1.0
+        assert result.skill_results[0]["safety_factor"] == 2.5
+        assert result.skill_results[0]["max_stress_mpa"] == 100.0
 
     async def test_fea_fails_low_safety(self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge):
         """FEA with low safety factor should report failure."""
         mcp_bridge.register_tool_response(
             "calculix.run_fea",
-            _fea_response(safety_factor=0.5, max_stress=500.0),
+            _fea_response(max_stress=500.0),
         )
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
             task_type="run_fea",
             work_product_id=uuid4(),
-            parameters={"mesh_file": "mesh/bracket.inp"},
+            parameters=FEA_CASE,
         )
         result = await agent.run_task(request)
 
         assert result.success is False
         assert any("safety factor" in w.lower() for w in result.warnings)
+
+    async def test_fea_sends_the_tools_own_arguments(
+        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
+    ):
+        """FORGE-561: it used to send load_cases / 'static' / a material name."""
+        calls: list[dict] = []
+        original = mcp_bridge.invoke
+
+        async def spy(tool_id, arguments, **kw):
+            calls.append(arguments)
+            return await original(tool_id, arguments, **kw)
+
+        mcp_bridge.invoke = spy  # type: ignore[method-assign]
+        agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
+        await agent.run_task(
+            TaskRequest(task_type="run_fea", work_product_id=uuid4(), parameters=FEA_CASE)
+        )
+        sent = calls[0]
+        assert sent["analysis_type"] == "static_stress"
+        assert sent["material"] == {"name": "aluminium_6061"}
+        assert sent["load_force_n"] == [0.0, 0.0, -100.0]
+        assert "load_cases" not in sent and "yield_strength_mpa" not in sent
+
+    async def test_static_case_without_a_load_is_refused(self, agent: SimulationAgent):
+        params = {k: v for k, v in FEA_CASE.items() if k != "load_force_n"}
+        result = await agent.run_task(
+            TaskRequest(task_type="run_fea", work_product_id=uuid4(), parameters=params)
+        )
+        assert result.success is False
+        assert any("load_force_n" in e for e in result.errors)
 
     async def test_fea_missing_mesh_file(self, agent: SimulationAgent):
         """FEA should fail when mesh_file is missing."""
@@ -310,7 +346,7 @@ class TestFullSimulation:
             work_product_id=work_product_id,
             parameters={
                 "netlist_path": "sim/power_supply.cir",
-                "mesh_file": "mesh/bracket.inp",
+                **FEA_CASE,
                 "conduction": CONDUCTION,
             },
         )
@@ -355,7 +391,7 @@ class TestFullSimulation:
         # SPICE converges, FEA has low safety factor
         mcp_bridge.register_tool_response(
             "calculix.run_fea",
-            _fea_response(safety_factor=0.3),
+            _fea_response(max_stress=833.0),
         )
         agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
@@ -363,7 +399,7 @@ class TestFullSimulation:
             work_product_id=uuid4(),
             parameters={
                 "netlist_path": "sim/power_supply.cir",
-                "mesh_file": "mesh/bracket.inp",
+                **FEA_CASE,
             },
         )
         result = await agent.run_task(request)

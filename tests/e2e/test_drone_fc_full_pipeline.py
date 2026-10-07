@@ -37,6 +37,7 @@ MOCK_FEA_RESULT = {
         "bracket_body": 85.3,
         "bracket_mount": 42.1,
         "fillet_region": 120.7,
+        "global": 120.7,
     },
     "solver_time": 14.2,
     "mesh_elements": 52000,
@@ -108,27 +109,18 @@ MOCK_ERC_RESULT = {
     ],
 }
 
-MOCK_SIM_FEA_RESULT = {
-    "max_stress_mpa": 95.4,
-    "max_displacement_mm": 0.12,
-    "safety_factor": 2.89,
-    "solver_time_s": 18.3,
-}
-
 
 @pytest.fixture()
 def mcp() -> InMemoryMcpBridge:
     bridge = InMemoryMcpBridge()
-    bridge.register_tool_response("calculix.run_fea", MOCK_FEA_RESULT)
+    # FORGE-561: one calculix.run_fea shape for both agents. The simulation
+    # agent used to read keys the tool never returns, and this fixture merged
+    # a second, imaginary key set in to satisfy it.
+    bridge.register_tool_response(
+        "calculix.run_fea",
+        {**MOCK_FEA_RESULT, "displacement": {"max": 0.12}, "frd_path": "/workspace/b.frd"},
+    )
     bridge.register_tool_response("kicad.run_erc", MOCK_ERC_RESULT)
-    # Simulation agent's FEA handler also uses calculix.run_fea but expects
-    # different keys; register a second response that satisfies the schema.
-    # Since InMemoryMcpBridge uses a dict, the last registration wins.
-    # We need to provide a response that works for BOTH the mechanical agent
-    # (which reads max_von_mises) and the simulation agent (which reads
-    # max_stress_mpa). Merge both sets of keys.
-    merged_fea = {**MOCK_FEA_RESULT, **MOCK_SIM_FEA_RESULT}
-    bridge.register_tool_response("calculix.run_fea", merged_fea)
     return bridge
 
 
@@ -334,16 +326,19 @@ class TestSimulationAgent:
                 work_product_id=work_products["cad"].id,
                 parameters={
                     "mesh_file": "models/bracket.inp",
-                    "analysis_type": "static",
-                    "material": "aluminum_6061",
+                    "load_case": "hover_3g",
+                    "material": {"name": "aluminium_6061"},
+                    "fixed_node_set": "Surface1",
+                    "load_node_set": "Surface4",
+                    "load_force_n": [0.0, 0.0, -30.0],
+                    "yield_strength_mpa": 276.0,
                 },
             )
         )
         assert result.task_type == "run_fea"
-        assert len(result.skill_results) > 0
         sr = result.skill_results[0]
-        assert "max_stress_mpa" in sr
-        assert "safety_factor" in sr
+        assert sr["max_stress_mpa"] == 120.7
+        assert sr["safety_factor"] == round(276.0 / 120.7, 3)
 
 
 class TestSupplyChainAgent:
