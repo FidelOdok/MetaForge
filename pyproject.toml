@@ -208,7 +208,14 @@ gateway = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+# FORGE-560: each skill keeps its own tests.py beside its handler. pytest's
+# default python_files never matches that name and testpaths held only
+# tests/, so none of them ran anywhere (several had gone stale or empty).
+# Every skill directory is a package, so the 27 same-named modules import
+# under distinct names. tool_registry/tools/*/tests.py stay out: they are
+# re-exports of tests/unit and would run twice.
+testpaths = ["tests", "domain_agents"]
+python_files = ["test_*.py", "*_test.py", "tests.py"]
 markers = [
     "perf: opt-in latency/throughput baselines; not run in default CI (MET-477 Phase 6)",
 ]
