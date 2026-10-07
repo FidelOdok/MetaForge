@@ -974,7 +974,7 @@ class MechanicalAgent:
             element_size=request.parameters.get("element_size", 1.0),
             algorithm=request.parameters.get("algorithm", "netgen"),
             output_format=request.parameters.get("output_format", "inp"),
-            min_angle_threshold=request.parameters.get("min_angle_threshold", 15.0),
+            min_angle_threshold=request.parameters.get("min_angle_threshold", 10.0),
             max_aspect_ratio_threshold=request.parameters.get("max_aspect_ratio_threshold", 10.0),
             refinement_regions=request.parameters.get("refinement_regions", []),
         )

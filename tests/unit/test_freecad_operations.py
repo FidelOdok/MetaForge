@@ -1501,3 +1501,56 @@ class TestListNamedFaces:
         ops = FreecadOperations()
         with pytest.raises(ValueError, match="only supports .inp"):
             ops.list_named_faces(str(stl))
+
+
+class TestInpTetQualityForge548:
+    """``generate_mesh`` measures element quality from the ``.inp`` (FORGE-548)."""
+
+    @staticmethod
+    def _write(tmp_path: Path, nodes: str, elements: str, etype: str = "C3D4") -> str:
+        path = tmp_path / "mesh.inp"
+        path.write_text(f"*NODE\n{nodes}\n*ELEMENT, TYPE={etype}, ELSET=Volume1\n{elements}\n")
+        return str(path)
+
+    def test_regular_tetrahedron_is_ideal(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        nodes = "1, 1, 1, 1\n2, 1, -1, -1\n3, -1, 1, -1\n4, -1, -1, 1"
+        q = _inp_tet_quality(self._write(tmp_path, nodes, "1, 1, 2, 3, 4"))
+        assert q["min_angle"] == pytest.approx(70.529, abs=1e-2)
+        assert q["max_aspect_ratio"] == pytest.approx(1.0)
+        assert q["avg_quality"] == pytest.approx(1.0, abs=1e-3)
+        assert q["degenerate_elements"] == 0
+
+    def test_sliver_scores_badly(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        nodes = "1, 0, 0, 0\n2, 1, 0, 0\n3, 0, 1, 0\n4, 1, 1, 0.01"
+        q = _inp_tet_quality(self._write(tmp_path, nodes, "1, 1, 2, 3, 4"))
+        assert q["min_angle"] < 5.0
+        assert q["avg_quality"] < 0.05
+
+    def test_flat_element_counts_as_degenerate(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        nodes = "1, 0, 0, 0\n2, 1, 0, 0\n3, 0, 1, 0\n4, 1, 1, 0"
+        q = _inp_tet_quality(self._write(tmp_path, nodes, "1, 1, 2, 3, 4"))
+        assert q["degenerate_elements"] == 1
+        assert q["elements_measured"] == 0
+
+    def test_quadratic_elements_use_corner_nodes(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        nodes = "1, 1, 1, 1\n2, 1, -1, -1\n3, -1, 1, -1\n4, -1, -1, 1\n" + "\n".join(
+            f"{i}, 0, 0, 0" for i in range(5, 11)
+        )
+        elem = "1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+        q = _inp_tet_quality(self._write(tmp_path, nodes, elem, etype="C3D10"))
+        assert q["avg_quality"] == pytest.approx(1.0, abs=1e-3)
+
+    def test_no_tetrahedra_returns_nothing(self, tmp_path: Path) -> None:
+        from tool_registry.tools.freecad.operations import _inp_tet_quality
+
+        path = tmp_path / "mesh.inp"
+        path.write_text("*NODE\n1, 0, 0, 0\n")
+        assert _inp_tet_quality(str(path)) == {}
