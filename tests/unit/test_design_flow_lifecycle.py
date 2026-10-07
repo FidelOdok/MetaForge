@@ -194,3 +194,23 @@ def test_matrix_statuses_map_onto_the_contract() -> None:
     assert normalize_requirement_status("no_data").value == "NOT_EVALUATED"
     assert normalize_requirement_status("stale").value == "STALE"
     assert normalize_requirement_status("something new").value == "NOT_EVALUATED"
+
+
+class TestBlockingGapsBlockTheirNodeForge572:
+    def test_a_blocking_gap_blocks_the_pending_node_it_names(self) -> None:
+        view = lifecycle_view(
+            PHASES,
+            {"status": "running", "completed": _done("req", "elec")},
+            gaps=[{"phase": "mech", "capability": "cad_model", "blocking": True}],
+        )
+        mech = view.node("mech")
+        assert mech.eligibility is Eligibility.BLOCKED
+        assert any("cad_model" in r for r in mech.reasons)
+
+    def test_a_non_blocking_gap_leaves_the_node_eligible(self) -> None:
+        view = lifecycle_view(
+            PHASES,
+            {"status": "running", "completed": _done("req", "elec")},
+            gaps=[{"phase": "mech", "capability": "cad_model", "blocking": False}],
+        )
+        assert view.node("mech").eligibility is Eligibility.ELIGIBLE

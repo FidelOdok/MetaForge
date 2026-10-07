@@ -189,21 +189,11 @@ def test_a_lost_solver_is_reported_with_alternatives(accepted_bracket: bracket.A
     assert gaps[0].workarounds
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FORGE-572: twin.record_document still counts as a simulation_result producer, "
-    "so losing every solver only degrades the analysis node instead of blocking it",
-)
 def test_a_lost_solver_blocks_the_analysis(accepted_bracket: bracket.Accepted) -> None:
     report = _report(accepted_bracket, _without_solver())
     assert "simulation" in {g.phase_id for g in report.blocking_gaps}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FORGE-572: lifecycle eligibility ignores capability gaps; a blocking gap only "
-    "shows in the completion verdict",
-)
 def test_a_blocking_gap_makes_the_affected_node_blocked(
     accepted_bracket: bracket.Accepted,
 ) -> None:
