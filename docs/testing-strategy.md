@@ -137,6 +137,59 @@ Each E2E file exercises a complete vertical — from the agent entry point throu
 | TestProposalEndpointsE2E | 2 | GET /v1/assistant/proposals (empty list, 404) |
 | TestFullRoundTripE2E | 2 | Submit → poll → verify (stress, full validation) |
 
+## Workflow generation and lifecycle suites (FORGE-562)
+
+`tests/workflow/` tests the design-flow workflow in two suites, with an
+accepted workflow as the contract between them. CI runs it as its own step.
+
+| Suite | Question | Starts from | Runs domain tools |
+|---|---|---|---|
+| `generation/` | Did we create the right workflow? | Intent, project context, available tools | No |
+| `lifecycle/` | Did we manage it correctly as things changed? | A fixed, accepted workflow plus scripted events | No |
+
+- **Scenario.** `scenarios/bracket.py` fixes everything the expected
+  behaviour depends on: a 10 kg (98.1 N) tip load, two M5 bolts on the back
+  face, Al 6061-T6 at 276 MPa yield, a minimum factor of safety of 2, and an
+  80 x 60 x 40 mm envelope. It generates through the real path:
+  `compile_intent`, then `build_proposal` tailoring `mech_v1`.
+- **Contract.** It is accepted through the real path too:
+  `FlowVersionStore.save` binds slots, validates and freezes the workflow,
+  then `decide` approves it. `test_bracket_contract.py` pins down what
+  "accepted" means, so a lifecycle failure is never a broken fixture.
+- **Generation tests** assert properties, never one exact task list:
+  - hard constraints keep their values, and preferences stay separate;
+  - unknowns are recorded rather than invented;
+  - outcomes are defined;
+  - dependencies follow engineering order;
+  - every requirement is verified by evidence required at a gate;
+  - readiness is reported, and missing providers become explicit gaps with
+    alternatives.
+- **Lifecycle tests** inject one event each into the accepted workflow:
+  - an objective failure is distinct from an execution failure, and is
+    repaired locally;
+  - a load change re-runs only the affected work, as a new version, and a
+    stale patch is refused;
+  - transient failures get bounded retries;
+  - a capability is lost and then regained;
+  - stale evidence keeps its history but is never current;
+  - a failing requirement refuses `COMPLETED_VERIFIED`;
+  - repair iterations are bounded.
+
+  `harness.py` only holds run state. Every judgement comes from the real
+  `lifecycle_view`, `plan_patch`, `classify_failure`, the rework helpers and
+  `assess_capabilities`.
+- **End to end.** `test_bracket_end_to_end.py` runs the generated, accepted
+  workflow on the real in-process engine with scripted phase work. It
+  injects a failing factor of safety at V&V, reworks the design, re-analyses,
+  and reads the verdict from the real run record.
+- **Known gaps** are `xfail(strict=True)` tests naming their ticket
+  (FORGE-569 to FORGE-572). The suite stays green while the gap stays
+  visible, and the marker must come off when the gap closes.
+
+The bracket diagnoses correctness. The motor-driven mechanism (FORGE-567)
+and the quadruped (FORGE-568) will check that the same properties hold as
+complexity grows.
+
 ## Stubbing Strategy
 
 E2E tests stub **only external solver binaries** — all internal interfaces are real.
