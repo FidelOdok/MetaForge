@@ -1,28 +1,30 @@
 # scaffold_driver
 
-Scaffold a peripheral driver -- header, source, and register map -- for a firmware project.
+Generate a register-level driver from the part's datasheet registers (FORGE-545).
 
 ## What it does
 
-1. Takes the firmware work_product and the target peripheral/interface
-2. Emits a driver skeleton: header, source stub, and a register map for the peripheral
-3. Records the scaffolded driver onto the work_product in the twin
+1. Takes the part's register list (name, address, access, reset, expected value) from its datasheet
+2. Checks addresses fit the address width and no name or address repeats
+3. Returns `<name>_regs.h`, `<name>.h` and `<name>.c`: register read/write over bus callbacks the board supplies, and an `init` that checks the identity register when one has an `expected` value
 
 ## Tools Required
 
-- (none) -- deterministic scaffolding from the peripheral/interface spec
+- (none) -- deterministic generation from the register list
 
 ## Input
 
 - `work_product_id` -- twin work_product id for the firmware project
-- peripheral + communication interface (e.g. I2C, SPI, UART)
+- `peripheral_type`, `interface` (spi, i2c, uart, parallel), `driver_name`
+- `registers` -- required; the skill refuses rather than using a generic map
+- `address_bits` (default 8), `source` (datasheet and revision, cited in the files)
 
 ## Output
 
-- `work_product_id` -- the firmware work_product the driver was written to
-- generated header/source/register-map files + `interface_type`
+- `files` -- each generated file's path and content
+- `driver_files`, `interface_type`, `register_map`
 
 ## Limitations
 
-- Generates a skeleton with register definitions, not a functional/tested driver
-- Register map coverage depends on the peripheral definition provided
+- Registers are taken as 8 bits wide; bit fields and configuration sequences are not generated
+- The files are returned, not written or recorded; the caller stages them

@@ -8,12 +8,12 @@ Give a firmware project a small, stable interface over its MCU's peripherals,
 with every pin taken from the board's actual schematic, so the application
 and drivers above it never touch registers or vendor calls directly.
 
-**No MetaForge tool generates HAL code.** The server-side skill only returns
-a list of file names and a placeholder pin map (`<family>_DEFAULT` for every
-peripheral); it writes no file, reads no schematic and records nothing. Do
-not use or repeat its output. You write the HAL yourself in the user's
-repository, take the pins from the schematic with a real tool, and record
-the result in the twin. Tell the user this plainly.
+**No MCP tool generates HAL code.** The server-side skill (used by the
+in-process firmware agent, not exposed over MCP) generates only the board's
+pin definition headers, from a pin map it is given, and records nothing.
+You write the HAL yourself in the user's repository, take the pins from the
+schematic with a real tool, and record the result in the twin. Tell the
+user this plainly.
 
 ## When to use it
 

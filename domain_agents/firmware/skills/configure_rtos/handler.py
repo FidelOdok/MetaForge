@@ -2,23 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
-
+from domain_agents.firmware.codegen import GENERATED_RTOS, CodegenError, generate_rtos_files
 from skill_registry.skill_base import SkillBase
 
 from .schema import ConfigureRtosInput, ConfigureRtosOutput
 
-SUPPORTED_RTOS = {"FreeRTOS", "Zephyr", "ChibiOS", "ThreadX", "RTEMS"}
-
-# Default stack size per task (KB) if not specified
-DEFAULT_STACK_SIZE_KB = 4
-
 
 class ConfigureRtosHandler(SkillBase[ConfigureRtosInput, ConfigureRtosOutput]):
-    """Generates RTOS configuration based on task definitions.
+    """Generates the RTOS kernel configuration and task table (FORGE-545).
 
-    This skill is pure computation -- it produces configuration files
-    without invoking external MCP tools.
+    FreeRTOS: ``FreeRTOSConfig.h`` and ``app_tasks.c`` (an ``xTaskCreate``
+    table, depths in stack words). Zephyr: ``prj.conf`` and
+    ``app_threads.c`` (``K_THREAD_DEFINE`` per task, priority inverted to
+    Zephyr's lower-is-higher order). Other RTOSes are refused: the handler
+    used to return a conventional path for any of five RTOSes and generate
+    nothing. The files are returned, not written.
     """
 
     input_type = ConfigureRtosInput
@@ -35,7 +33,7 @@ class ConfigureRtosHandler(SkillBase[ConfigureRtosInput, ConfigureRtosOutput]):
         return errors
 
     async def execute(self, input_data: ConfigureRtosInput) -> ConfigureRtosOutput:
-        """Generate RTOS configuration from task definitions."""
+        """Generate the RTOS configuration from the task definitions."""
         self.logger.info(
             "Configuring RTOS",
             work_product_id=input_data.work_product_id,
@@ -43,51 +41,35 @@ class ConfigureRtosHandler(SkillBase[ConfigureRtosInput, ConfigureRtosOutput]):
             num_tasks=len(input_data.task_definitions),
             heap_size_kb=input_data.heap_size_kb,
         )
-
-        if input_data.rtos_name not in SUPPORTED_RTOS:
+        if input_data.rtos_name not in GENERATED_RTOS:
             raise ValueError(
-                f"Unsupported RTOS '{input_data.rtos_name}'. "
-                f"Supported: {', '.join(sorted(SUPPORTED_RTOS))}"
+                f"Unsupported RTOS '{input_data.rtos_name}'. Supported: {', '.join(GENERATED_RTOS)}"
             )
-
-        # Compute memory estimate: heap + sum of stack sizes
-        total_stack_kb = self._compute_total_stack(input_data.task_definitions)
-        memory_estimate_kb = input_data.heap_size_kb + total_stack_kb
-
-        # Generate config file path based on RTOS
-        config_file = self._config_file_path(input_data.rtos_name)
+        try:
+            files, ram_bytes = generate_rtos_files(
+                input_data.rtos_name,
+                input_data.task_definitions,
+                input_data.heap_size_kb,
+                input_data.tick_rate_hz,
+                input_data.output_dir,
+                input_data.stack_word_bytes,
+            )
+        except CodegenError as exc:
+            raise ValueError(str(exc)) from exc
 
         return ConfigureRtosOutput(
             work_product_id=input_data.work_product_id,
-            config_file=config_file,
+            files=files,
+            config_file=files[0].path,
             tasks_configured=len(input_data.task_definitions),
-            memory_estimate_kb=memory_estimate_kb,
+            memory_estimate_kb=-(-ram_bytes // 1024),
         )
 
     async def validate_output(self, output: ConfigureRtosOutput) -> list[str]:
-        """Verify that at least one task was configured."""
+        """Verify that at least one task was configured and files have content."""
         errors: list[str] = []
         if output.tasks_configured <= 0:
             errors.append("No tasks were configured")
+        if not output.files or any(not f.content for f in output.files):
+            errors.append("No RTOS configuration content was generated")
         return errors
-
-    @staticmethod
-    def _compute_total_stack(task_definitions: list[dict[str, Any]]) -> int:
-        """Sum the stack sizes from all task definitions."""
-        total = 0
-        for task_def in task_definitions:
-            stack_bytes = task_def.get("stack_size", DEFAULT_STACK_SIZE_KB * 1024)
-            total += stack_bytes // 1024 if stack_bytes >= 1024 else DEFAULT_STACK_SIZE_KB
-        return total
-
-    @staticmethod
-    def _config_file_path(rtos_name: str) -> str:
-        """Return the conventional configuration file path for the RTOS."""
-        paths = {
-            "FreeRTOS": "firmware/rtos/FreeRTOSConfig.h",
-            "Zephyr": "firmware/rtos/prj.conf",
-            "ChibiOS": "firmware/rtos/chconf.h",
-            "ThreadX": "firmware/rtos/tx_user.h",
-            "RTEMS": "firmware/rtos/rtems_config.h",
-        }
-        return paths.get(rtos_name, f"firmware/rtos/{rtos_name.lower()}_config.h")

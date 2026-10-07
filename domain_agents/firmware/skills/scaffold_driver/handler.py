@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from domain_agents.firmware.codegen import CodegenError, c_ident, generate_driver_files
 from skill_registry.skill_base import SkillBase
 
 from .schema import ScaffoldDriverInput, ScaffoldDriverOutput
@@ -10,10 +11,13 @@ SUPPORTED_INTERFACES = {"spi", "i2c", "uart", "parallel"}
 
 
 class ScaffoldDriverHandler(SkillBase[ScaffoldDriverInput, ScaffoldDriverOutput]):
-    """Scaffolds a peripheral driver with header, source, and register map.
+    """Generates a register-level driver from the part's datasheet registers (FORGE-545).
 
-    This skill is pure computation -- it generates driver boilerplate
-    without invoking external MCP tools.
+    ``<name>_regs.h`` (addresses, reset and expected values), ``<name>.h``
+    and ``<name>.c``: register read/write over bus callbacks the board
+    supplies, and an ``init`` that checks the identity register when one is
+    given. Registers are taken as 8 bits wide. The files are returned, not
+    written; the caller stages or records them.
     """
 
     input_type = ScaffoldDriverInput
@@ -30,46 +34,42 @@ class ScaffoldDriverHandler(SkillBase[ScaffoldDriverInput, ScaffoldDriverOutput]
         return errors
 
     async def execute(self, input_data: ScaffoldDriverInput) -> ScaffoldDriverOutput:
-        """Generate driver scaffold files."""
+        """Generate the driver files from the register list."""
         self.logger.info(
             "Scaffolding driver",
             work_product_id=input_data.work_product_id,
             peripheral_type=input_data.peripheral_type,
             interface=input_data.interface,
             driver_name=input_data.driver_name,
+            registers=len(input_data.registers),
         )
-
         if input_data.interface not in SUPPORTED_INTERFACES:
             raise ValueError(
                 f"Unsupported interface '{input_data.interface}'. "
                 f"Supported: {', '.join(sorted(SUPPORTED_INTERFACES))}"
             )
-
-        base_dir = f"firmware/drivers/{input_data.driver_name}"
-        driver_files = [
-            f"{base_dir}/{input_data.driver_name}.h",
-            f"{base_dir}/{input_data.driver_name}.c",
-            f"{base_dir}/{input_data.driver_name}_regs.h",
-        ]
-
-        # Generate a basic register map template
-        register_map = {
-            "WHO_AM_I": {"address": "0x00", "access": "read-only"},
-            "CTRL_REG1": {"address": "0x20", "access": "read-write"},
-            "STATUS_REG": {"address": "0x27", "access": "read-only"},
-            "DATA_OUT": {"address": "0x28", "access": "read-only"},
-        }
+        try:
+            files, register_map = generate_driver_files(
+                input_data.driver_name,
+                input_data.interface,
+                input_data.registers,
+                input_data.address_bits,
+                f"firmware/drivers/{c_ident(input_data.driver_name).lower()}",
+                input_data.source,
+            )
+        except CodegenError as exc:
+            raise ValueError(str(exc)) from exc
 
         return ScaffoldDriverOutput(
             work_product_id=input_data.work_product_id,
-            driver_files=driver_files,
+            files=files,
+            driver_files=[f.path for f in files],
             interface_type=input_data.interface,
             register_map=register_map,
         )
 
     async def validate_output(self, output: ScaffoldDriverOutput) -> list[str]:
-        """Verify that driver files were generated."""
-        errors: list[str] = []
-        if not output.driver_files:
-            errors.append("No driver files were generated")
-        return errors
+        """Verify that every listed file has content."""
+        if not output.files or any(not f.content for f in output.files):
+            return ["No driver file content was generated"]
+        return []

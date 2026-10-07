@@ -92,6 +92,17 @@ class TestFirmwareAgent:
 # --- HAL generation ---
 
 
+PIN_MAP = [
+    {"signal": "IMU_CS", "pin": "PA4", "peripheral": "SPI1"},
+    {"signal": "IMU_SCK", "pin": "PA5", "peripheral": "SPI1"},
+    {"signal": "BARO_SDA", "pin": "PB7", "peripheral": "I2C1"},
+]
+BMI088_REGS = [
+    {"name": "ACC_CHIP_ID", "address": "0x00", "access": "r", "expected": "0x1E"},
+    {"name": "ACC_PWR_CTRL", "address": "0x7D", "access": "rw", "reset": "0x00"},
+]
+
+
 class TestGenerateHal:
     """Tests for the generate_hal task type."""
 
@@ -101,10 +112,7 @@ class TestGenerateHal:
         request = TaskRequest(
             task_type="generate_hal",
             work_product_id=work_product_id,
-            parameters={
-                "mcu_family": "STM32F4",
-                "peripherals": ["GPIO", "SPI", "I2C"],
-            },
+            parameters={"mcu_family": "STM32F4", "pin_map": PIN_MAP},
         )
         result = await agent.run_task(request)
 
@@ -112,10 +120,16 @@ class TestGenerateHal:
         assert result.task_type == "generate_hal"
         assert result.work_product_id == work_product_id
         assert len(result.skill_results) == 1
-        assert result.skill_results[0]["skill"] == "generate_hal"
-        # 3 peripherals x 2 files each = 6 files
-        assert len(result.skill_results[0]["generated_files"]) == 6
-        assert result.skill_results[0]["hal_version"] == "0.1.0"
+        out = result.skill_results[0]
+        assert out["skill"] == "generate_hal"
+        # FORGE-545: real content from the pin map, not paths with nothing behind them
+        assert out["generated_files"] == [
+            "firmware/hal/board_pins.h",
+            "firmware/hal/board_peripherals.h",
+        ]
+        pins_h = out["files"][0]["content"]
+        assert "#define BOARD_IMU_CS_PORT GPIOA" in pins_h
+        assert "#define BOARD_IMU_CS_PIN GPIO_PIN_4" in pins_h
 
     async def test_hal_missing_mcu_family(self, agent: FirmwareAgent):
         """HAL should fail when mcu_family is missing."""
@@ -129,8 +143,8 @@ class TestGenerateHal:
         assert result.success is False
         assert any("mcu_family" in e for e in result.errors)
 
-    async def test_hal_missing_peripherals(self, agent: FirmwareAgent):
-        """HAL should fail when peripherals is missing."""
+    async def test_hal_missing_pin_map(self, agent: FirmwareAgent):
+        """HAL should fail when the pin map is missing; pins are never invented."""
         request = TaskRequest(
             task_type="generate_hal",
             work_product_id=uuid4(),
@@ -139,24 +153,26 @@ class TestGenerateHal:
         result = await agent.run_task(request)
 
         assert result.success is False
-        assert any("peripherals" in e for e in result.errors)
+        assert any("pin_map" in e for e in result.errors)
 
     async def test_hal_pin_mappings(self, agent: FirmwareAgent):
-        """HAL should produce pin mappings per peripheral."""
+        """pin_mappings are the board's own signal to pin assignments."""
         request = TaskRequest(
             task_type="generate_hal",
             work_product_id=uuid4(),
             parameters={
                 "mcu_family": "ESP32",
-                "peripherals": ["SPI", "UART"],
+                "pin_map": [
+                    {"signal": "GPS_TX", "pin": "GPIO17", "peripheral": "UART2"},
+                    {"signal": "LED", "pin": "IO2"},
+                ],
             },
         )
         result = await agent.run_task(request)
 
         assert result.success is True
-        pin_mappings = result.skill_results[0]["pin_mappings"]
-        assert "SPI" in pin_mappings
-        assert "UART" in pin_mappings
+        assert result.skill_results[0]["pin_mappings"] == {"GPS_TX": "GPIO17", "LED": "IO2"}
+        assert "GPIO_NUM_17" in result.skill_results[0]["files"][0]["content"]
 
 
 # --- Driver scaffolding ---
@@ -175,6 +191,7 @@ class TestScaffoldDriver:
                 "peripheral_type": "accelerometer",
                 "interface": "spi",
                 "driver_name": "bmi088",
+                "registers": BMI088_REGS,
             },
         )
         result = await agent.run_task(request)
@@ -182,10 +199,24 @@ class TestScaffoldDriver:
         assert result.success is True
         assert result.task_type == "scaffold_driver"
         assert len(result.skill_results) == 1
-        assert result.skill_results[0]["skill"] == "scaffold_driver"
-        assert len(result.skill_results[0]["driver_files"]) == 3
-        assert result.skill_results[0]["interface_type"] == "spi"
-        assert "WHO_AM_I" in result.skill_results[0]["register_map"]
+        out = result.skill_results[0]
+        assert out["skill"] == "scaffold_driver"
+        assert len(out["driver_files"]) == 3
+        assert out["interface_type"] == "spi"
+        # FORGE-545: the part's own registers, not one hard-coded WHO_AM_I map
+        assert set(out["register_map"]) == {"ACC_CHIP_ID", "ACC_PWR_CTRL"}
+        assert "#define BMI088_REG_ACC_CHIP_ID 0x00u" in out["files"][0]["content"]
+
+    async def test_driver_missing_registers(self, agent: FirmwareAgent):
+        request = TaskRequest(
+            task_type="scaffold_driver",
+            work_product_id=uuid4(),
+            parameters={"peripheral_type": "accelerometer", "driver_name": "bmi088"},
+        )
+        result = await agent.run_task(request)
+
+        assert result.success is False
+        assert any("registers" in e for e in result.errors)
 
     async def test_driver_missing_peripheral_type(self, agent: FirmwareAgent):
         """Driver should fail when peripheral_type is missing."""
@@ -285,9 +316,10 @@ class TestFullBuild:
             work_product_id=work_product_id,
             parameters={
                 "mcu_family": "STM32F4",
-                "peripherals": ["GPIO", "SPI"],
+                "pin_map": PIN_MAP,
                 "peripheral_type": "accelerometer",
                 "driver_name": "bmi088",
+                "registers": BMI088_REGS,
                 "rtos_name": "FreeRTOS",
                 "task_definitions": [
                     {"name": "main_task", "priority": 1, "stack_size": 4096},
@@ -308,10 +340,7 @@ class TestFullBuild:
         request = TaskRequest(
             task_type="full_build",
             work_product_id=uuid4(),
-            parameters={
-                "mcu_family": "STM32F4",
-                "peripherals": ["GPIO"],
-            },
+            parameters={"mcu_family": "STM32F4", "pin_map": PIN_MAP},
         )
         result = await agent.run_task(request)
 
@@ -430,10 +459,7 @@ class TestFirmwareHardcodedFallback:
             request = TaskRequest(
                 task_type="generate_hal",
                 work_product_id=uuid4(),
-                parameters={
-                    "mcu_family": "STM32F4",
-                    "peripherals": ["GPIO", "SPI"],
-                },
+                parameters={"mcu_family": "STM32F4", "pin_map": PIN_MAP},
             )
             result = await agent.run_task(request)
 

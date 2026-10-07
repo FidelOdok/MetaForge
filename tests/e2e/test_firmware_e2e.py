@@ -38,6 +38,21 @@ def _make_firmware_artifact() -> WorkProduct:
     )
 
 
+# FORGE-545: the skills generate from real inputs and refuse without them.
+FC_PIN_MAP = [
+    {"signal": "IMU_CS", "pin": "PA4", "peripheral": "SPI1", "direction": "out"},
+    {"signal": "IMU_SCK", "pin": "PA5", "peripheral": "SPI1"},
+    {"signal": "BARO_SCL", "pin": "PB6", "peripheral": "I2C1"},
+    {"signal": "BARO_SDA", "pin": "PB7", "peripheral": "I2C1"},
+]
+BMI088_ACC_REGS = [
+    {"name": "ACC_CHIP_ID", "address": "0x00", "access": "r", "expected": "0x1E"},
+    {"name": "ACC_CONF", "address": "0x40", "access": "rw", "reset": "0xA8"},
+    {"name": "ACC_SOFTRESET", "address": "0x7E", "access": "w"},
+]
+BMP280_REGS = [{"name": "ID", "address": "0xD0", "access": "r", "expected": "0x58"}]
+
+
 # ---------------------------------------------------------------------------
 # Test class: HAL generation through FirmwareAgent
 # ---------------------------------------------------------------------------
@@ -63,7 +78,8 @@ class TestGenerateHalE2E:
                 work_product_id=s["work_product"].id,
                 parameters={
                     "mcu_family": "STM32F4",
-                    "peripherals": ["GPIO", "SPI", "I2C"],
+                    "pin_map": FC_PIN_MAP,
+                    "peripherals": ["SPI1", "I2C1"],
                     "output_dir": "firmware/hal",
                 },
             )
@@ -75,11 +91,14 @@ class TestGenerateHalE2E:
 
         hal_result = result.skill_results[0]
         assert hal_result["skill"] == "generate_hal"
-        assert len(hal_result["generated_files"]) == 6  # 3 peripherals * 2 files each
-        assert "GPIO" in hal_result["pin_mappings"]
-        assert "SPI" in hal_result["pin_mappings"]
-        assert "I2C" in hal_result["pin_mappings"]
-        assert hal_result["hal_version"] == "0.1.0"
+        assert hal_result["generated_files"] == [
+            "firmware/hal/board_pins.h",
+            "firmware/hal/board_peripherals.h",
+        ]
+        assert hal_result["pin_mappings"]["BARO_SDA"] == "PB7"
+        peripherals_h = hal_result["files"][1]["content"]
+        assert "#define BOARD_USES_SPI1 1" in peripherals_h
+        assert "#define BOARD_USES_I2C1 1" in peripherals_h
 
     async def test_generate_hal_esp32(self, stack):
         """HAL generation works for ESP32 family."""
@@ -90,14 +109,14 @@ class TestGenerateHalE2E:
                 work_product_id=s["work_product"].id,
                 parameters={
                     "mcu_family": "ESP32",
-                    "peripherals": ["GPIO", "UART", "ADC"],
+                    "pin_map": [{"signal": "GPS_RX", "pin": "GPIO16", "peripheral": "UART2"}],
                 },
             )
         )
 
         assert result.success is True
         hal_result = result.skill_results[0]
-        assert "ESP32_DEFAULT" in hal_result["pin_mappings"]["GPIO"]
+        assert "#define BOARD_GPS_RX_PIN GPIO_NUM_16" in hal_result["files"][0]["content"]
 
     async def test_generate_hal_unsupported_mcu(self, stack):
         """HAL generation fails for unsupported MCU family."""
@@ -108,7 +127,7 @@ class TestGenerateHalE2E:
                 work_product_id=s["work_product"].id,
                 parameters={
                     "mcu_family": "PIC32MX",
-                    "peripherals": ["GPIO"],
+                    "pin_map": [{"signal": "LED", "pin": "RB0"}],
                 },
             )
         )
@@ -122,15 +141,15 @@ class TestGenerateHalE2E:
             TaskRequest(
                 task_type="generate_hal",
                 work_product_id=s["work_product"].id,
-                parameters={"peripherals": ["GPIO"]},
+                parameters={"pin_map": FC_PIN_MAP},
             )
         )
 
         assert result.success is False
         assert any("mcu_family" in e for e in result.errors)
 
-    async def test_generate_hal_missing_peripherals(self, stack):
-        """Missing peripherals parameter returns error."""
+    async def test_generate_hal_missing_pin_map(self, stack):
+        """Missing pin map returns an error; pins are never invented."""
         s = stack
         result = await s["agent"].run_task(
             TaskRequest(
@@ -141,7 +160,7 @@ class TestGenerateHalE2E:
         )
 
         assert result.success is False
-        assert any("peripherals" in e for e in result.errors)
+        assert any("pin_map" in e for e in result.errors)
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +190,8 @@ class TestScaffoldDriverE2E:
                     "peripheral_type": "accelerometer",
                     "interface": "spi",
                     "driver_name": "bmi088",
+                    "registers": BMI088_ACC_REGS,
+                    "registers_source": "BMI088 datasheet rev 1.9, table 6",
                 },
             )
         )
@@ -180,7 +201,8 @@ class TestScaffoldDriverE2E:
         driver_result = result.skill_results[0]
         assert driver_result["skill"] == "scaffold_driver"
         assert driver_result["interface_type"] == "spi"
-        assert len(driver_result["driver_files"]) > 0
+        assert len(driver_result["driver_files"]) == 3
+        assert "BMI088 datasheet rev 1.9" in driver_result["files"][0]["content"]
 
     async def test_scaffold_i2c_driver(self, stack):
         """Scaffold an I2C temperature sensor driver."""
@@ -193,6 +215,7 @@ class TestScaffoldDriverE2E:
                     "peripheral_type": "temperature_sensor",
                     "interface": "i2c",
                     "driver_name": "bmp280",
+                    "registers": BMP280_REGS,
                 },
             )
         )
@@ -324,10 +347,11 @@ class TestFullBuildE2E:
                 work_product_id=work_product.id,
                 parameters={
                     "mcu_family": "STM32F4",
-                    "peripherals": ["GPIO", "SPI"],
+                    "pin_map": FC_PIN_MAP,
                     "peripheral_type": "accelerometer",
                     "interface": "spi",
                     "driver_name": "bmi088",
+                    "registers": BMI088_ACC_REGS,
                     "rtos_name": "FreeRTOS",
                     "task_definitions": [
                         {"name": "imu_read", "priority": 5, "stack_size": 512},
@@ -354,10 +378,7 @@ class TestFullBuildE2E:
             TaskRequest(
                 task_type="full_build",
                 work_product_id=work_product.id,
-                parameters={
-                    "mcu_family": "STM32F4",
-                    "peripherals": ["GPIO"],
-                },
+                parameters={"mcu_family": "STM32F4", "pin_map": FC_PIN_MAP},
             )
         )
 
@@ -402,7 +423,7 @@ class TestFirmwareAgentCommonE2E:
             TaskRequest(
                 task_type="generate_hal",
                 work_product_id=uuid4(),
-                parameters={"mcu_family": "STM32F4", "peripherals": ["GPIO"]},
+                parameters={"mcu_family": "STM32F4", "pin_map": FC_PIN_MAP},
             )
         )
 
@@ -437,10 +458,7 @@ class TestFirmwareAgentCommonE2E:
             TaskRequest(
                 task_type="generate_hal",
                 work_product_id=work_product.id,
-                parameters={
-                    "mcu_family": "STM32F4",
-                    "peripherals": ["GPIO", "SPI"],
-                },
+                parameters={"mcu_family": "STM32F4", "pin_map": FC_PIN_MAP},
             )
         )
         assert result.success is True
@@ -456,4 +474,4 @@ class TestFirmwareAgentCommonE2E:
             },
         )
         assert updated.metadata["hal_generated"] is True
-        assert len(updated.metadata["hal_files"]) == 4  # 2 peripherals * 2 files
+        assert len(updated.metadata["hal_files"]) == 2  # board_pins.h, board_peripherals.h
