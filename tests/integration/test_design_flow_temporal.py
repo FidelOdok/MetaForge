@@ -996,3 +996,46 @@ class TestReworkPhase:
         await Replayer(
             workflows=[DesignFlowWorkflow], workflow_runner=design_flow_runner()
         ).replay_workflow(final)
+
+
+class TestRepairStallForge573:
+    """The Temporal engine flags and stops a repair that is not converging."""
+
+    async def test_identical_findings_stop_the_run_before_the_retry_cap(self, env) -> None:
+        run_id = str(uuid.uuid4())
+
+        async def never_ready(payload: dict) -> GateCheck:
+            if payload["phase"]["id"] == "phase1":
+                return GateCheck(ready=False, checked=True, missing=["cad_model"])
+            return GateCheck(ready=True, checked=True, constraints_checked=True)
+
+        phases = _Phases()
+        acts = DesignFlowActivities(
+            phase_runner=phases, gate_checker=never_ready, gate_announcer=_announced
+        )
+        launcher = DesignFlowLauncher(client=env.client)
+        stalled: list[bool] = []
+        async with _worker(env, acts):
+            await launcher.start(
+                run_id=run_id, goal="g", flow=TestRetryPhase._flow3(), max_phase_retries=5
+            )
+            await TestRetryPhase._wait_gate_n(launcher, run_id, "gate0")
+            await launcher.answer_gate(run_id, approved=True, decided_by="user:r")
+            for attempt in (1, 2, 3):
+                for _ in range(400):
+                    state = await launcher.state(run_id)
+                    if state["status"] == "failed" or (
+                        state["awaiting_gate"] == "gate1" and state["attempt"] == attempt
+                    ):
+                        break
+                    await asyncio.sleep(0.05)
+                if state["status"] == "failed":
+                    break
+                stalled.append(bool(state.get("stalled")))
+                await launcher.answer_gate(run_id, approved=False, retry=True, decided_by="user:r")
+            result = await env.client.get_workflow_handle(f"design-flow-{run_id}").result()
+
+        assert result["status"] == "failed"
+        assert "not converging" in result["error"]
+        assert stalled == [False, True]
+        assert phases.ran.count("phase1") == 3

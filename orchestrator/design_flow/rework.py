@@ -24,6 +24,11 @@ from collections.abc import Sequence
 from orchestrator.design_flow.rework_context import RevisionNote, revision_note_lines
 
 __all__ = [
+    "STALL_STOP_ENV",
+    "DEFAULT_STALL_STOP",
+    "findings_streak",
+    "stall_note",
+    "stall_stop",
     "DEFAULT_MAX_REWORK_CYCLES",
     "MAX_REWORK_CYCLES_ENV",
     "build_rework_feedback",
@@ -39,6 +44,56 @@ MAX_REWORK_CYCLES_ENV = "METAFORGE_DESIGN_FLOW_MAX_REWORK_CYCLES"
 
 #: The failing phase's summary is context, not the payload; keep the prompt small.
 _SUMMARY_LIMIT = 1500
+
+
+#: FORGE-573: identical gate findings this many times in a row end the run.
+#: Retries and reworks are capped, but a repair that changes nothing used
+#: every one of them before stopping; the same verdict twice is the signal.
+DEFAULT_STALL_STOP = 3
+STALL_STOP_ENV = "METAFORGE_DESIGN_FLOW_STALL_STOP"
+
+
+def stall_stop() -> int:
+    """How many identical not-ready verdicts in a row end the run (min 2)."""
+    raw = (os.environ.get(STALL_STOP_ENV) or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_STALL_STOP
+    return max(value, 2)
+
+
+def findings_streak(history: Sequence[Sequence[str]]) -> int:
+    """How many of the latest not-ready verdicts in a row had the same findings.
+
+    ``history`` is one phase's findings, one entry per not-ready gate, oldest
+    first (cleared when the gate passes). Order within an entry does not
+    matter. 0 for an empty history, 1 when the latest differs from the one
+    before: the attempt changed something.
+    """
+    if not history:
+        return 0
+    last = frozenset(history[-1])
+    streak = 0
+    for entry in reversed(history):
+        if frozenset(entry) != last:
+            break
+        streak += 1
+    return streak
+
+
+def stall_note(phase_id: str, streak: int, stop_at: int) -> str:
+    """The line a reviewer reads when attempts stop improving."""
+    if streak >= stop_at:
+        return (
+            f"Phase '{phase_id}' stopped: its last {streak} attempts drew the same gate "
+            "findings, so repairing it the same way is not converging. Change the approach "
+            "(requirements, concept or material) and start a new run."
+        )
+    return (
+        f"NO IMPROVEMENT: the same findings as the previous attempt ({streak} in a row; "
+        f"the run stops at {stop_at}). Change the approach, rework an earlier phase, or reject"
+    )
 
 
 def max_rework_cycles() -> int:

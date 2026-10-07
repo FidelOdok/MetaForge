@@ -191,12 +191,74 @@ _OPERATORS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "maximum",
             "within",
             "up to",
+            "<=",
+            "≤",
         ),
     ),
     (
         ">=",
-        ("over", "above", "at least", "more than", "minimum", "min ", "support", "hold", "carry"),
+        (
+            "over",
+            "above",
+            "at least",
+            "more than",
+            "minimum",
+            "min ",
+            "support",
+            "hold",
+            "carry",
+            ">=",
+            "≥",
+        ),
     ),
+)
+
+#: FORGE-569: named dimensionless quantities. "A factor of safety of at least
+#: 2" has no unit, so the unit scan dropped it and the one requirement that
+#: decides the bracket was not measurable. The name is the unit.
+_RATIO = re.compile(
+    r"\b(?P<name>factor of safety|safety factor|margin of safety|fos)\b"
+    r"(?P<between>[^0-9.;]{0,48}?)(?P<value>\d+(?:\.\d+)?)(?!\s*(?:%|[a-z]))",
+    re.IGNORECASE,
+)
+#: The unit a ratio is recorded in, and the operator it takes when none is
+#: said: a factor of safety is a minimum by definition, never a ceiling.
+_RATIO_UNIT = {
+    "factor of safety": "FoS",
+    "safety factor": "FoS",
+    "fos": "FoS",
+    "margin of safety": "MoS",
+}
+
+#: FORGE-569: "80 x 60 x 40 mm" is three limits, one per axis. Scanning it as
+#: quantities kept only the last number, the one next to the unit.
+_ENVELOPE = re.compile(
+    r"(?P<a>\d+(?:\.\d+)?)\s*(?:mm|cm|m|in)?\s*[x×*]\s*"
+    r"(?P<b>\d+(?:\.\d+)?)"
+    r"(?:\s*(?:mm|cm|m|in)?\s*[x×*]\s*(?P<c>\d+(?:\.\d+)?))?"
+    r"\s*(?P<unit>mm|cm|m|in)\b",
+    re.IGNORECASE,
+)
+_AXES = ("length", "width", "height")
+
+#: FORGE-569: a clause asking for an output ("Deliver CAD and validation
+#: evidence") names deliverables; it does not constrain the design.
+_REQUEST_VERBS = ("deliver", "provide", "produce", "supply", "hand over", "include", "output")
+_REQUESTED: tuple[tuple[str, str], ...] = (
+    ("cad", "cad_model"),
+    ("step file", "cad_model"),
+    ("3d model", "cad_model"),
+    ("drawing", "technical_drawing"),
+    ("validation evidence", "simulation_result"),
+    ("verification evidence", "simulation_result"),
+    ("simulation", "simulation_result"),
+    ("analysis", "simulation_result"),
+    ("fea", "simulation_result"),
+    ("test report", "verification_report"),
+    ("bill of materials", "bom"),
+    ("bom", "bom"),
+    ("schematic", "schematic"),
+    ("firmware", "firmware_source"),
 )
 
 _DISCIPLINE_WORDS: dict[str, tuple[str, ...]] = {
@@ -218,6 +280,8 @@ class IntentConstraint:
     source: str = "stated"
     value: float | None = None
     unit: str = ""
+    #: The axis a geometric limit applies to ("length", "width", "height").
+    dimension: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -228,6 +292,8 @@ class IntentConstraint:
         if self.value is not None:
             out["value"] = self.value
             out["unit"] = self.unit
+        if self.dimension:
+            out["dimension"] = self.dimension
         return out
 
 
@@ -237,19 +303,23 @@ class SuccessCriterion:
     operator: str = ""
     limit: float | None = None
     unit: str = ""
+    dimension: str = ""
 
     @property
     def measurable(self) -> bool:
         return self.limit is not None and bool(self.unit)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "text": self.text,
             "operator": self.operator,
             "limit": self.limit,
             "unit": self.unit,
             "measurable": self.measurable,
         }
+        if self.dimension:
+            out["dimension"] = self.dimension
+        return out
 
 
 @dataclass(frozen=True)
@@ -278,6 +348,8 @@ class IntentModel:
     underlying_objective: str
     desired_outcomes: tuple[str, ...] = ()
     deliverables: tuple[str, ...] = ()
+    #: Deliverables the person asked for by name ("deliver CAD and ...").
+    requested_deliverables: tuple[str, ...] = ()
     constraints: tuple[IntentConstraint, ...] = ()
     preferences: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ()
@@ -306,6 +378,7 @@ class IntentModel:
             "underlying_objective": self.underlying_objective,
             "desired_outcomes": list(self.desired_outcomes),
             "deliverables": list(self.deliverables),
+            "requested_deliverables": list(self.requested_deliverables),
             "constraints": [c.as_dict() for c in self.constraints],
             "preferences": list(self.preferences),
             "assumptions": list(self.assumptions),
@@ -358,10 +431,17 @@ def _object_phrase(text: str) -> str:
 def _clauses(texts: Iterable[str]) -> list[str]:
     out: list[str] = []
     for text in texts:
-        for part in re.split(r"[;\n]|(?<=[.!?])\s+|,\s+(?=[a-z])", text):
-            part = part.strip(" .")
-            if part:
-                out.append(part)
+        for sentence in re.split(r"[;\n]|(?<=[.!?])\s+", text):
+            # A request lists its deliverables with commas ("deliver CAD, a
+            # drawing and ..."); splitting it would orphan all but the first.
+            if sentence.strip().lower().startswith(_REQUEST_VERBS):
+                parts = [sentence]
+            else:
+                parts = re.split(r",\s+(?=[a-z])", sentence)
+            for part in parts:
+                part = part.strip(" .")
+                if part:
+                    out.append(part)
     return out
 
 
@@ -382,14 +462,31 @@ def _operator(clause: str, index: int) -> str:
 
 def _scan(clause: str) -> list[tuple[float, str, str]]:
     """(value, unit, operator) for every quantity with a unit in ``clause``."""
-    found: list[tuple[float, str, str]] = []
+    return [(v, u, op) for v, u, op, _pos in _scan_spans(clause)]
+
+
+def _scan_spans(clause: str) -> list[tuple[float, str, str, int]]:
+    """As :func:`_scan`, with where each quantity starts."""
+    found: list[tuple[float, str, str, int]] = []
     for match in _QUANTITY.finditer(clause):
         unit = _unit(match.group("unit"), match.group("prefix"))
         if not unit:
             continue
         value = float(match.group("value").replace(",", ""))
-        found.append((value, unit, _operator(clause, match.start())))
+        found.append((value, unit, _operator(clause, match.start()), match.start("value")))
     return found
+
+
+def _keyword_hit(lowered: str, word: str) -> bool:
+    """``word`` as a word, not a substring (FORGE-569).
+
+    ``"ce "`` matched inside "eviden*ce* ", which filed "Deliver CAD and
+    validation evidence" as a regulatory constraint. A keyword ending in a
+    space is a whole word; one without is a stem ("certif", "machin") and
+    only has to start a word.
+    """
+    tail = r"\b" if word.endswith(" ") else ""
+    return re.search(r"\b" + re.escape(word.strip()) + tail, lowered) is not None
 
 
 def _category_for(clause: str, units: Sequence[str]) -> ConstraintCategory | None:
@@ -399,9 +496,45 @@ def _category_for(clause: str, units: Sequence[str]) -> ConstraintCategory | Non
             return category
     lowered = f" {clause.lower()} "
     for category, words in _KEYWORD_CATEGORY:
-        if any(w in lowered for w in words):
+        if any(_keyword_hit(lowered, w) for w in words):
             return category
     return None
+
+
+def _requested(clause: str) -> tuple[str, ...] | None:
+    """The deliverables a request clause names, or ``None`` if it is not one."""
+    lowered = clause.lower().strip()
+    if not lowered.startswith(_REQUEST_VERBS):
+        return None
+    found = [kind for words, kind in _REQUESTED if _keyword_hit(f" {lowered} ", words)]
+    return tuple(dict.fromkeys(found))
+
+
+def _ratios(clause: str) -> list[tuple[float, str, str, int]]:
+    """(value, unit, operator, start) for every named dimensionless quantity."""
+    out: list[tuple[float, str, str, int]] = []
+    for m in _RATIO.finditer(clause):
+        unit = _RATIO_UNIT[m.group("name").lower()]
+        between = m.group("between").lower()
+        op = next((o for o, words in _OPERATORS if any(w in between for w in words)), "")
+        out.append((float(m.group("value")), unit, op or ">=", m.start("value")))
+    return out
+
+
+def _envelopes(clause: str) -> list[tuple[list[tuple[str, float]], str, str, tuple[int, int]]]:
+    """([(axis, value)], unit, operator, span) for every "a x b [x c] unit"."""
+    out = []
+    for m in _ENVELOPE.finditer(clause):
+        values = [float(m.group(k)) for k in ("a", "b", "c") if m.group(k)]
+        out.append(
+            (
+                list(zip(_AXES, values, strict=False)),
+                m.group("unit").lower(),
+                _operator(clause, m.start()),
+                m.span(),
+            )
+        )
+    return out
 
 
 def compile_intent(
@@ -428,13 +561,36 @@ def compile_intent(
     constraints: list[IntentConstraint] = []
     criteria: list[SuccessCriterion] = []
     preferences: list[str] = []
+    requested: list[str] = []
     for clause in _clauses([text, *requirements]):
         if any(m in clause.lower() for m in _PREFERENCE_MARKERS):
             preferences.append(clause)
             continue
-        quantities = _scan(clause)
-        if quantities:
-            for value, unit, op in quantities:
+        asked = _requested(clause)
+        if asked is not None:
+            requested.extend(asked)
+            continue
+        envelopes = _envelopes(clause)
+        for axes, unit, op, _span in envelopes:
+            for axis, value in axes:
+                constraints.append(
+                    IntentConstraint(
+                        ConstraintCategory.GEOMETRIC, clause, value=value, unit=unit, dimension=axis
+                    )
+                )
+                if op:
+                    criteria.append(
+                        SuccessCriterion(clause, op, limit=value, unit=unit, dimension=axis)
+                    )
+        for value, unit, op, _start in _ratios(clause):
+            constraints.append(
+                IntentConstraint(ConstraintCategory.SAFETY, clause, value=value, unit=unit)
+            )
+            criteria.append(SuccessCriterion(clause, op, limit=value, unit=unit))
+        spans = [span for *_rest, span in envelopes]
+        quantities = [q for q in _scan_spans(clause) if not any(a <= q[3] < b for a, b in spans)]
+        if quantities or envelopes or _ratios(clause):
+            for value, unit, op, _pos in quantities:
                 # Each quantity is categorised by its own unit: a budget and a
                 # mass in one sentence are a cost and a mass.
                 category = _category_for(clause, [unit]) or ConstraintCategory.PERFORMANCE
@@ -452,7 +608,7 @@ def compile_intent(
             # ("outdoor, waterproof and UKCA compliant"); record each.
             lowered_clause = f" {clause.lower()} "
             for keyword, words in _KEYWORD_CATEGORY:
-                if any(w in lowered_clause for w in words):
+                if any(_keyword_hit(lowered_clause, w) for w in words):
                     constraints.append(IntentConstraint(category=keyword, text=clause))
 
     unknowns: list[Unknown] = []
@@ -518,7 +674,7 @@ def compile_intent(
         scope = WorkflowScope.SMALL
 
     deliverables = tuple(
-        dict.fromkeys([*template_deliverables, *_DEFAULT_DELIVERABLES[underlying_type]])
+        dict.fromkeys([*template_deliverables, *_DEFAULT_DELIVERABLES[underlying_type], *requested])
     )
     outcomes = _outcomes(underlying_type, goal_object, bool(criteria))
 
@@ -530,6 +686,7 @@ def compile_intent(
         underlying_objective=underlying,
         desired_outcomes=outcomes,
         deliverables=deliverables,
+        requested_deliverables=tuple(dict.fromkeys(requested)),
         constraints=tuple(constraints),
         preferences=tuple(preferences),
         assumptions=tuple(context_assumptions),

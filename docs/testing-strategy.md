@@ -182,9 +182,10 @@ accepted workflow as the contract between them. CI runs it as its own step.
   workflow on the real in-process engine with scripted phase work. It
   injects a failing factor of safety at V&V, reworks the design, re-analyses,
   and reads the verdict from the real run record.
-- **Known gaps** are `xfail(strict=True)` tests naming their ticket
-  (FORGE-569 to FORGE-572). The suite stays green while the gap stays
-  visible, and the marker must come off when the gap closes.
+- **Known gaps** are `xfail(strict=True)` tests naming their ticket. The
+  suite stays green while a gap stays visible, and the marker must come off
+  when the gap closes. The five gaps the bracket found (FORGE-569 to
+  FORGE-573) are fixed, and their tests now pass outright.
 
 The bracket diagnoses correctness. The motor-driven mechanism (FORGE-567)
 and the quadruped (FORGE-568) will check that the same properties hold as

@@ -144,6 +144,33 @@ async def stale_items_for_run(
         return [], f"staleness could not be read ({exc})"
 
 
+async def current_item_types(twin: Any, project_id: str | None) -> tuple[str, ...] | None:
+    """Which reusable definition items already have a current revision (FORGE-571).
+
+    ``None`` when it could not be checked (no project, no twin, no item
+    support, a read error): the generator then reuses nothing, because a
+    missing fact would make a reuse condition skip the phase on a guess.
+    """
+    if not project_id or twin is None:
+        return None
+    try:
+        from orchestrator.design_flow.context import REUSABLE_ITEM_TYPES
+        from twin_core.items.service import list_items, supports_items
+
+        if not supports_items(twin):
+            return None
+        current = {
+            item.item_type
+            for item in await list_items(twin, project_id)
+            if item.item_type in REUSABLE_ITEM_TYPES
+        }
+    except Exception as exc:  # noqa: BLE001 - "not checked", never "nothing exists"
+        logger.warning("flow_current_items_unavailable", project_id=project_id, error=str(exc))
+        return None
+    logger.info("flow_current_items_read", project_id=project_id, current=sorted(current))
+    return tuple(sorted(current))
+
+
 async def requirement_rows(
     twin: Any, project_id: str | None
 ) -> tuple[list[dict[str, Any]], str | None]:

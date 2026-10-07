@@ -120,3 +120,58 @@ def test_as_dict_is_json() -> None:
 
     data = json.loads(json.dumps(compile_intent("Design a 2 kg bracket under 50 mm").as_dict()))
     assert data["primary_goal"]["type"] == "design"
+
+
+class TestCriteriaTheCompilerUsedToLoseForge569:
+    @staticmethod
+    def _crit(text: str):  # type: ignore[no-untyped-def]
+        from orchestrator.design_flow.intent import compile_intent
+
+        return compile_intent(text).success_criteria
+
+    def test_safety_factor_phrasings(self) -> None:
+        for text, limit in (
+            ("Design a hook with a factor of safety of at least 3", 3.0),
+            ("Design a hook; safety factor >= 1.5", 1.5),
+            ("Design a hook with FoS 2.5", 2.5),
+        ):
+            crit = [c for c in self._crit(text) if c.unit == "FoS"]
+            assert [(c.operator, c.limit) for c in crit] == [(">=", limit)], text
+
+    def test_an_envelope_keeps_each_axis(self) -> None:
+        crit = self._crit("Design a box that fits within 120 × 80 mm")
+        assert [(c.dimension, c.limit, c.unit) for c in crit] == [
+            ("length", 120.0, "mm"),
+            ("width", 80.0, "mm"),
+        ]
+
+    def test_a_stated_envelope_without_direction_is_a_fact_not_a_criterion(self) -> None:
+        from orchestrator.design_flow.intent import compile_intent
+
+        model = compile_intent("Design a 100 x 50 x 20 mm enclosure")
+        assert not [c for c in model.success_criteria if c.unit == "mm"]
+        assert {c.dimension for c in model.constraints if c.unit == "mm"} == {
+            "length",
+            "width",
+            "height",
+        }
+
+    def test_keywords_match_words_not_substrings(self) -> None:
+        from orchestrator.design_flow.intent import ConstraintCategory, compile_intent
+
+        model = compile_intent("Design a bracket. It needs CE marking.")
+        assert any(c.category is ConstraintCategory.REGULATORY for c in model.constraints)
+        model = compile_intent("Design a bracket. Keep the evidence trail tidy.")
+        assert not any(c.category is ConstraintCategory.REGULATORY for c in model.constraints)
+
+    def test_a_delivery_request_names_deliverables_not_constraints(self) -> None:
+        from orchestrator.design_flow.intent import compile_intent
+
+        model = compile_intent("Design a bracket. Deliver CAD, a drawing and validation evidence.")
+        assert model.requested_deliverables == (
+            "cad_model",
+            "technical_drawing",
+            "simulation_result",
+        )
+        assert not any("Deliver" in c.text for c in model.constraints)
+        assert "technical_drawing" in model.deliverables

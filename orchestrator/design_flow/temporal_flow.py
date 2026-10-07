@@ -56,8 +56,11 @@ with workflow.unsafe.imports_passed_through():
     from orchestrator.design_flow.retry import DEFAULT_MAX_PHASE_RETRIES, build_retry_feedback
     from orchestrator.design_flow.rework import (
         DEFAULT_MAX_REWORK_CYCLES,
+        DEFAULT_STALL_STOP,
         build_rework_feedback,
+        findings_streak,
         rework_target_error,
+        stall_note,
     )
     from orchestrator.design_flow.rework_context import RevisionNote, notes_from_dicts
 
@@ -103,6 +106,12 @@ GRAPH_PATCH_ID = "forge-539-graph"
 #: class calls for. Histories that already hold a phase failure replay with
 #: the result they had.
 FAILURE_CLASS_PATCH_ID = "forge-539-failure-class"
+
+#: ``workflow.patched`` id for FORGE-573. A not-ready gate whose findings
+#: repeat the previous verdict is marked stalled, and the run stops when they
+#: repeat ``DEFAULT_STALL_STOP`` times. Checked only at a not-ready gate, so
+#: histories recorded before it replay with the decisions they had.
+STALL_PATCH_ID = "forge-573-stall"
 
 #: How long a gate waits before it is treated as refused. Long, because the
 #: reviewer is a person who may be asleep; finite, because a run that waits
@@ -255,6 +264,10 @@ class DesignFlowWorkflow:
         #: False while parked at a gate that is not ready; approve is refused.
         self._gate_ready = True
         self._gate_findings: list[str] = []
+        #: FORGE-573: each phase's not-ready findings across retries and
+        #: reworks, and whether the open gate repeats the last verdict.
+        self._gate_history: dict[str, list[tuple[str, ...]]] = {}
+        self._stalled = False
         #: Set by a retry decision; consumed by the phase loop.
         self._retry_reason: str | None = None
         #: FORGE-500: rework cycles used / allowed, and the pending jump set by a
@@ -309,6 +322,7 @@ class DesignFlowWorkflow:
             "retries_left": max(self._max_retries - (self._attempt - 1), 0),
             "gate_ready": self._gate_ready,
             "gate_findings": list(self._gate_findings) if self._gate_open else [],
+            "stalled": self._stalled and bool(self._gate_open),
             "rework_cycles": self._rework_cycles,
             "max_rework_cycles": self._max_rework_cycles,
             "reworks_left": max(self._max_rework_cycles - self._rework_cycles, 0),
@@ -657,12 +671,30 @@ class DesignFlowWorkflow:
                 return self._legacy_not_ready(phase, gate, check, entry)
             entry["status"] = "failed"
             self._record("gate_not_ready", phase=phase.id, detail="; ".join(findings))
+            if workflow.patched(STALL_PATCH_ID):
+                history = self._gate_history.setdefault(phase.id, [])
+                history.append(tuple(findings))
+                streak = findings_streak(history)
+                if streak >= DEFAULT_STALL_STOP:
+                    self._gate_ready = True
+                    self._record("repair_stalled", phase=phase.id, detail=f"{streak} in a row")
+                    return self._fail(
+                        f"{stall_note(phase.id, streak, DEFAULT_STALL_STOP)} "
+                        "[failure class: design]"
+                    )
+                self._stalled = streak >= 2
+        else:
+            self._gate_history.pop(phase.id, None)
+            self._stalled = False
 
         reason = check.reason
         if blocking:
             reason = f"NOT READY (retry the phase or reject): {'; '.join(findings)}" + (
                 f" | {check.reason}" if check.reason else ""
             )
+            if self._stalled:
+                streak = findings_streak(self._gate_history.get(phase.id, []))
+                reason = f"{stall_note(phase.id, streak, DEFAULT_STALL_STOP)} | {reason}"
         self._gate_open = gate.name
         self._gate_reason = reason
         self._status = "awaiting_approval"

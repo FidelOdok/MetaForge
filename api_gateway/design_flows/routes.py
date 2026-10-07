@@ -519,6 +519,19 @@ async def propose_flow(
         raise HTTPException(status_code=400, detail="intent is required")
 
     context = body.flow_context()
+    if body.projectId:
+        # FORGE-571: what the project already has current, so generation can
+        # reuse it rather than plan it again. None when it cannot be read.
+        from dataclasses import replace
+
+        from api_gateway.design_flows.lifecycle_service import current_item_types
+        from api_gateway.twin.routes import get_twin
+
+        try:
+            twin = get_twin()
+        except Exception:  # noqa: BLE001 - no twin: nothing is reused
+            twin = None
+        context = replace(context, current_items=await current_item_types(twin, body.projectId))
     missing = missing_inputs(context)
     if missing:
         response.status_code = 200
