@@ -640,6 +640,50 @@ def apply_operations(
     return tailored, applied
 
 
+#: Evidence that shows a physical part carries its stated loads.
+ANALYSIS_EVIDENCE = "simulation_result"
+
+
+def _require_analysis_evidence(
+    base: FlowDefinition, ops: list[Operation], basis: str
+) -> list[Operation]:
+    """Require the analysis result at the gate that only expected it (FORGE-570).
+
+    A template's V&V phase *expects* a ``simulation_result`` but its gate
+    *requires* only a decision, so a run could sign off a factor-of-safety
+    requirement with no analysis at all. When the generator is told the
+    loads, and the flow designs a physical part, the analysis becomes
+    required at that gate: a server change in the diff, with its reason, like
+    the route-selection step. Unknown loads leave it alone: there is no load
+    case to analyse yet, which the physical-verification invariant reports.
+    """
+    if not any("cad_model" in p.expected_artifacts for p in base.phases):
+        return []
+    # A phase the caller already made require it, or dropped (choosing a
+    # required test_plan instead, which the invariants check), is left alone.
+    already = {
+        op.phase_id
+        for op in ops
+        if op.kind is OperationKind.DROP_PHASE
+        or (op.kind is OperationKind.ADD_DELIVERABLE and op.value == ANALYSIS_EVIDENCE)
+    }
+    return [
+        Operation(
+            OperationKind.ADD_DELIVERABLE,
+            phase.id,
+            "the loads are stated and the flow designs a physical part, so the analysis that "
+            "shows it carries them is required at this gate, not merely expected",
+            value=ANALYSIS_EVIDENCE,
+            basis=basis,
+        )
+        for phase in base.phases
+        if phase.gate is not None
+        and ANALYSIS_EVIDENCE in phase.expected_artifacts
+        and ANALYSIS_EVIDENCE not in phase.required_deliverables
+        and phase.id not in already
+    ]
+
+
 def build_proposal(
     base: FlowDefinition,
     *,
@@ -662,6 +706,8 @@ def build_proposal(
     if context is not None:
         basis = context.capability_basis()
         ops = [replace(op, basis=op.basis or basis) for op in ops]
+        if context.loads_known:
+            ops.extend(_require_analysis_evidence(base, ops, basis))
         if context.route is ManufacturingRoute.UNDECIDED:
             ops.append(
                 Operation(

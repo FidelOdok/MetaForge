@@ -37,6 +37,15 @@ person did not state.
 - `POST /v1/design-flows/intent`, MCP `flow.compile_intent`
 - Every proposal carries it as `intentModel`.
 
+When a proposal is told the loads and the flow designs a physical part, the
+generator makes the analysis result (`simulation_result`) *required* at the
+gate whose phase only expected it, as a server change in the diff with its
+reason (FORGE-570). Before, a template's V&V gate required only a decision, so
+a factor-of-safety requirement could be signed off with no analysis. A phase
+the caller dropped (choosing a required `test_plan` instead) or already
+tailored is left alone, and unknown loads change nothing, since there is no
+load case to analyse yet.
+
 ## Flows as graphs (`graph.py`)
 
 A phase may declare:
@@ -72,6 +81,15 @@ severity (`BLOCKS_STEP`, `DEGRADES_CONFIDENCE`, `REQUIRES_USER_ACTION`,
 verification method intact. The report's status (`READY`,
 `READY_WITH_WARNINGS`, `BLOCKED`) is the readiness gate; anything not
 checked is listed in `limits`.
+
+The twin's own tools (`twin.record_document`, `twin.stage_work_product_file`,
+`twin.commit_geometry`, ...) record, stage or persist what another tool
+produced. When a deliverable has a non-twin producer (a solver, a CAD kernel,
+a component search), it is `UNAVAILABLE` unless one of those can run: the
+twin storing a result nobody produced does not count (FORGE-572). The twin's
+tools still count towards `FULL`, since a result that cannot be recorded
+cannot reach the gate either. A deliverable only the twin produces (a
+decision, an intent) is judged on the twin's tools.
 
 - `GET /v1/design-flows/{flow}/capabilities`, `GET /v1/design-flows/versions/{id}/capabilities` (`?profile=`), MCP `flow.capabilities`
 - Every proposal, and the approval a person answers, carries it.
@@ -112,7 +130,9 @@ Each phase gets four separate answers: `execution_status` (did it run),
 `eligibility` (can it run now), `validity` (is its result current: `STALE`
 when a twin item it approved has since been superseded, `POTENTIALLY_INVALID`
 downstream of that) and `objective_status` (did its gate find the objective
-met). The run gets a completion verdict against the requirement matrix:
+met). A pending phase with a blocking capability gap is `BLOCKED`, with the
+gap in its reasons, rather than `ELIGIBLE` (FORGE-572). The run gets a
+completion verdict against the requirement matrix:
 
 | Classification | Meaning |
 |---|---|

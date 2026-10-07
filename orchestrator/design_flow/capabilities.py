@@ -206,12 +206,15 @@ def assess_capabilities(
                 if t not in unreachable and served_set is not None and t not in served_set
             )
             usable = [t for t in present if t not in unreachable and t not in unserved]
+            producing = _producing_tools(tools)
             if len(usable) == len(tools):
                 coverage = Coverage.FULL
-            elif usable:
-                coverage = Coverage.PARTIAL
-            else:
+            elif not any(t in usable for t in producing):
+                # Nothing that produces it can run; the twin could only store
+                # a result nobody made (FORGE-572).
                 coverage = Coverage.UNAVAILABLE
+            else:
+                coverage = Coverage.PARTIAL
             rows.append(_row(deliverable, coverage, is_required))
             worst = max(worst, coverage, key=_RANK.__getitem__)
             if coverage is Coverage.FULL:
@@ -230,6 +233,30 @@ def assess_capabilities(
             )
         nodes.append(NodeCoverage(phase_id=phase.id, coverage=worst, deliverables=tuple(rows)))
     return CapabilityReport(nodes=tuple(nodes), gaps=tuple(gaps), limits=tuple(limits))
+
+
+#: The twin's own tools (``twin.record_document``, ``twin.stage_work_product_file``,
+#: ``twin.commit_geometry`` ...) record, stage or persist what another tool
+#: produced. FORGE-572: counting them as producers meant that with every
+#: solver gone, ``twin.record_document`` alone still "covered" a
+#: ``simulation_result`` -- partial coverage, a warning, never a block -- so
+#: an analysis with nothing to run it looked startable.
+_RECORDER_PREFIX = "twin."
+
+
+def _producing_tools(tools: Iterable[str]) -> tuple[str, ...]:
+    """The tools that actually produce a deliverable.
+
+    When some non-twin tool produces it (a solver, a CAD kernel, a component
+    search), the deliverable is available only if one of those can run: the
+    twin storing a result nobody produced does not count. The twin's tools
+    still count towards *full* coverage, since a result that cannot be
+    recorded cannot reach the gate either. When the twin's tools are the only
+    producers (a decision, an intent), they are the producers.
+    """
+    every = tuple(sorted(set(tools)))
+    producing = tuple(t for t in every if not t.startswith(_RECORDER_PREFIX))
+    return producing or every
 
 
 def _row(deliverable: str, coverage: Coverage, required: bool) -> dict[str, str]:

@@ -104,3 +104,35 @@ def test_as_dict() -> None:
 
     report = assess_capabilities([_sim()], producers=PRODUCERS, registered=set())
     assert json.loads(json.dumps(report.as_dict()))["status"] == "BLOCKED"
+
+
+class TestRecordersAreNotProducersForge572:
+    def test_only_the_recorder_left_is_unavailable_and_blocking(self) -> None:
+        report = assess_capabilities(
+            [_sim()],
+            producers=PRODUCERS,
+            registered={"twin.record_document", "twin.record_decision"},
+        )
+        gap = next(g for g in report.gaps if g.capability == "simulation_result")
+        assert gap.blocking
+        assert report.status == "BLOCKED"
+
+    def test_one_solver_left_is_partial_not_blocking(self) -> None:
+        report = assess_capabilities(
+            [_sim()], producers=PRODUCERS, registered=ALL - {"freecad.generate_mesh"}
+        )
+        gap = next(g for g in report.gaps if g.capability == "simulation_result")
+        assert not gap.blocking
+
+    def test_a_twin_only_deliverable_is_produced_by_the_twin(self) -> None:
+        phase = Phase(
+            id="req",
+            title="r",
+            objective="r",
+            required_deliverables=("design_decision",),
+            gate=Gate(name="g"),
+        )
+        report = assess_capabilities(
+            [phase], producers=PRODUCERS, registered={"twin.record_decision"}
+        )
+        assert report.status == "READY"

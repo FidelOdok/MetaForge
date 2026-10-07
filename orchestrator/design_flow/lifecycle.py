@@ -341,14 +341,30 @@ def lifecycle_view(
     # Eligibility: settled parents make a pending phase eligible.
     terminal = status in _TERMINAL_FAILED | _TERMINAL_STOPPED
     ready = set(graph.ready(done=approved, skipped=skipped, running=running))
+    # FORGE-572: a blocking capability gap blocks the phase it belongs to. It
+    # used to show only in the completion verdict, so a phase nothing could
+    # run read as ELIGIBLE right up until it failed.
+    gap_blocked: dict[str, list[str]] = {}
+    for g in gaps:
+        if g.get("blocking") and g.get("phase"):
+            gap_blocked.setdefault(str(g["phase"]), []).append(
+                str(g.get("capability") or "a required capability")
+            )
     resolved: list[NodeView] = []
     for node in nodes:
+        reasons_out = node.reasons
         if node.execution_status is ExecutionStatus.WAITING:
             eligibility = Eligibility.WAITING_FOR_APPROVAL
         elif node.execution_status is not ExecutionStatus.PENDING:
             eligibility = Eligibility.NOT_APPLICABLE
         elif terminal:
             eligibility = Eligibility.BLOCKED
+        elif node.id in gap_blocked:
+            eligibility = Eligibility.BLOCKED
+            reasons_out = (
+                *node.reasons,
+                "no available tool produces " + ", ".join(gap_blocked[node.id]),
+            )
         elif node.id in ready:
             eligibility = Eligibility.ELIGIBLE
         else:
@@ -361,7 +377,7 @@ def lifecycle_view(
                 validity=node.validity,
                 objective_status=node.objective_status,
                 item_keys=node.item_keys,
-                reasons=node.reasons,
+                reasons=reasons_out,
             )
         )
 

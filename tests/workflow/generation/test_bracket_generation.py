@@ -120,11 +120,6 @@ def test_every_requirement_gets_validation_with_required_evidence() -> None:
         assert req["verified_by"] in required_at_gates, req["id"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FORGE-570: with no tailoring the V&V gate only expects simulation_result, so a "
-    "factor-of-safety requirement can pass G7 with no analysis",
-)
 def test_generation_alone_requires_analysis_evidence_for_analysed_requirements() -> None:
     proposal = bracket.generate(operations=[])
     sim = next(p for p in proposal.definition.phases if p.id == "simulation")
@@ -167,12 +162,13 @@ def test_a_missing_solver_is_an_explicit_blocking_gap_with_alternatives() -> Non
     )
     sim_gaps = [g for g in report.gaps if g.phase_id == "simulation"]
     assert sim_gaps and all(g.capability == "simulation_result" for g in sim_gaps)
-    # Partial coverage (twin.record_document still registered) degrades, it does not
-    # pretend the analysis can run; the gap names the missing tools and alternatives.
+    # FORGE-572: the twin can still store a result, but nothing can produce one,
+    # so the required analysis is blocked, with the missing tools and alternatives.
     gap = sim_gaps[0]
+    assert gap.blocking
     assert "calculix.run_fea" in gap.missing_tools
     assert gap.workarounds
-    assert report.status in {"READY_WITH_WARNINGS", "BLOCKED"}
+    assert report.status == "BLOCKED"
 
 
 def test_an_unreachable_adapter_blocks_the_phase_that_needs_it() -> None:
