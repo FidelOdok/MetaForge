@@ -120,11 +120,6 @@ def test_every_requirement_gets_validation_with_required_evidence() -> None:
         assert req["verified_by"] in required_at_gates, req["id"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FORGE-570: with no tailoring the V&V gate only expects simulation_result, so a "
-    "factor-of-safety requirement can pass G7 with no analysis",
-)
 def test_generation_alone_requires_analysis_evidence_for_analysed_requirements() -> None:
     proposal = bracket.generate(operations=[])
     sim = next(p for p in proposal.definition.phases if p.id == "simulation")
