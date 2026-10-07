@@ -9,6 +9,7 @@ to every domain-scoped selection while looking perfectly fine on disk.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -16,9 +17,12 @@ import pytest
 from mcp_core.workflows import WORKFLOWS
 from scripts.build_integrations import (
     DEFAULT_GATEWAY_URL,
+    PLUGIN_SKILLS,
     build_claude_code,
+    build_claude_code_local,
     build_codex,
     plugin_manifest,
+    split_frontmatter,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -91,6 +95,105 @@ class TestGeneratedPackage:
         assert before == after
 
 
+class TestPluginSkills:
+    """Skills written for MCP clients rather than for the harness (FORGE-533)."""
+
+    @pytest.fixture(scope="class")
+    def packages(self) -> list[Path]:
+        return [
+            build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL),
+            build_claude_code_local(),
+            build_codex(default_gateway_url=DEFAULT_GATEWAY_URL),
+        ]
+
+    def test_the_lifecycle_skill_exists(self) -> None:
+        assert (PLUGIN_SKILLS / "intent-to-verified-design" / "SKILL.md").is_file()
+
+    def test_every_plugin_skill_ships_in_every_package(self, packages: list[Path]) -> None:
+        for source in PLUGIN_SKILLS.glob("*/SKILL.md"):
+            for root in packages:
+                shipped = root / "skills" / source.parent.name / "SKILL.md"
+                assert shipped.read_bytes() == source.read_bytes(), shipped
+
+    def test_plugin_skill_names_match_their_folders(self) -> None:
+        # A harness loads a skill by its frontmatter name; docs and the folder
+        # use the folder name. Disagreeing means the skill is unreachable by
+        # the name everything else uses.
+        for source in PLUGIN_SKILLS.glob("*/SKILL.md"):
+            front, _ = split_frontmatter(source.read_text(encoding="utf-8"))
+            assert front.get("name") == source.parent.name, source
+            assert "Use when" in front.get("description", ""), (
+                f"{source}: the description is what a client matches on, so it "
+                "must say when to use the skill"
+            )
+
+    def test_plugin_md_ships_instead_of_skill_md(self, packages: list[Path]) -> None:
+        for plugin_md in REPO.glob("domain_agents/*/skills/*/PLUGIN.md"):
+            _, body = split_frontmatter(plugin_md.read_text(encoding="utf-8"))
+            for root in packages:
+                shipped = (root / "skills" / plugin_md.parent.name / "SKILL.md").read_text(
+                    encoding="utf-8"
+                )
+                assert body.strip() in shipped, f"{root.name}: {plugin_md.parent.name}"
+
+    def test_plugin_md_does_not_reach_the_harness(self) -> None:
+        # The harness budget is why PLUGIN.md exists. If load_skill_cards ever
+        # started reading it, mechanical's procedures would be trimmed again.
+        from skill_registry.skill_context import load_skill_cards
+
+        cards = {c.name: c for c in load_skill_cards([str(REPO / "domain_agents")])}
+        for plugin_md in REPO.glob("domain_agents/*/skills/*/PLUGIN.md"):
+            source = (plugin_md.parent / "SKILL.md").read_text(encoding="utf-8").strip()
+            assert cards[plugin_md.parent.name].skill_md == source
+
+    def test_every_tool_a_shipped_skill_names_is_registered(self, packages: list[Path]) -> None:
+        # The bug this exists for: skills told clients to call tools that no
+        # adapter registers, and a client reads a skill as the truth.
+        registered = _registered_tool_ids()
+        # Namespaces the registry has, plus every one a skill definition
+        # claims as a tool: `spice.run_simulation` belongs to a namespace
+        # nothing registers (the spice adapter is empty), and checking only
+        # registered namespaces let it through. Dotted field paths such as
+        # `field.file` have no tool namespace and are left alone.
+        namespaces = {t.split(".", 1)[0] for t in registered}
+        for definition in REPO.glob("domain_agents/*/skills/*/definition.json"):
+            for tool in (
+                json.loads(definition.read_text(encoding="utf-8")).get("tools_required") or []
+            ):
+                if "." in str(tool.get("tool_id") or ""):
+                    namespaces.add(str(tool["tool_id"]).split(".", 1)[0])
+        unknown: set[str] = set()
+        for root in packages:
+            for skill in (root / "skills").glob("*/SKILL.md"):
+                text = skill.read_text(encoding="utf-8")
+                for ref in re.findall(r"`([a-z_]+\.[a-z_]+)`", text):
+                    if ref.split(".", 1)[0] in namespaces and ref not in registered:
+                        unknown.add(f"{skill.parent.name}: {ref}")
+        assert sorted(unknown) == []
+
+
+def _registered_tool_ids() -> set[str]:
+    """Every tool id this repo can register, the way test_mcp_tool_annotations
+    builds it: a source scan, the distributor ids an adapter assembles, and
+    the bootstrapped registry for ids registered in a loop (freecad.*)."""
+    import asyncio
+
+    from tool_registry.bootstrap import bootstrap_tool_registry
+    from tool_registry.tools.distributors.mcp_adapter import distributor_tool_ids
+
+    ids: set[str] = set()
+    for root in ("tool_registry", "metaforge"):
+        for path in (REPO / root).rglob("*.py"):
+            ids.update(
+                re.findall(
+                    r'tool_id="([a-z0-9_.]+)"', path.read_text(encoding="utf-8", errors="replace")
+                )
+            )
+    ids |= distributor_tool_ids()
+    ids |= {m.tool_id for m in asyncio.run(bootstrap_tool_registry()).list_tools()}
+    return ids
+
+
 class TestTheSourceSkillsAreLeftAlone:
     def test_no_domain_skill_md_gained_frontmatter(self) -> None:
         # load_skill_cards reads these files as raw body text and injects them
@@ -156,7 +259,9 @@ class TestCodexPackage:
 
     def test_the_same_skills_ship(self, root: Path) -> None:
         defined = {p.parent.name for p in REPO.glob("domain_agents/*/skills/*/definition.json")}
-        assert {p.name for p in (root / "skills").iterdir() if p.is_dir()} == defined
+        plugin_only = {p.parent.name for p in PLUGIN_SKILLS.glob("*/SKILL.md")}
+        bundled = {p.name for p in (root / "skills").iterdir() if p.is_dir()}
+        assert bundled == defined | plugin_only
 
     def test_the_manifest_is_sourced_not_guessed(self, root: Path) -> None:
         # This used to assert the manifest's *absence*: Codex plugins

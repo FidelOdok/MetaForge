@@ -25,7 +25,7 @@ Claude Code asks for your gateway URL on first enable. The default suits a gatew
 
 ## Skills
 
-30 engineering skills are bundled — the same procedures the MetaForge agents follow, with their metadata taken from each skill's `definition.json`.
+31 engineering skills are bundled — the same procedures the MetaForge agents follow, with their metadata taken from each skill's `definition.json`.
 
 ## Writes wait for a human
 

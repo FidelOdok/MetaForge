@@ -157,8 +157,9 @@ Routes through `calculix.run_fea`. Captures the run via the MET-331
 ## Install as a plugin
 
 The MCP config below is the manual route. There is also a generated plugin
-that brings the MCP server, the 29 engineering skills and the slash
-commands in one install:
+that brings the MCP server, the 30 engineering skills, the
+`intent-to-verified-design` lifecycle skill and the slash commands in one
+install:
 
 ```
 /plugin marketplace add FidelOdok/MetaForge
@@ -180,6 +181,7 @@ gateway that needs one; a local gateway started without auth does not.
 | `/metaforge:design` | Design or revise a part, committed to the twin |
 | `/metaforge:fea` | Run a load case and record the evidence against the revision it came from |
 | `/metaforge:gate` | Review whether the project can be promoted |
+| `/metaforge:flow` | Propose a design flow: ask for route, maturity and loads, tailor in caller mode, stop at the approval |
 | `/metaforge:doctor` | Check the connection, and what is unreachable |
 
 ### Regenerating the package
@@ -196,6 +198,28 @@ Skill frontmatter is generated from each skill's `definition.json` rather
 than written into the source `SKILL.md` files. Those files are read as raw
 body text and injected as procedural context, so frontmatter added there
 would appear in the model's prompt as part of the procedure.
+
+Two more sources feed the package's skills (FORGE-533):
+
+- **`PLUGIN.md`** beside a skill's `SKILL.md` is the detailed version written
+  for an MCP client: when to use it, the profile that serves each tool, the
+  inputs to ask the user for, the exact tool sequence, checks and failure
+  handling. When present it ships instead of `SKILL.md`, and its frontmatter
+  `description` (which says *when* to use the skill) replaces the
+  definition's. The harness keeps reading the short `SKILL.md`: it packs each
+  discipline's procedures into a fixed character budget, which longer files
+  would overflow.
+- **`mcp_core/plugin_skills/<name>/SKILL.md`** holds skills that exist only
+  for plugin clients, such as `intent-to-verified-design`, the lifecycle from
+  intent through requirements, flow, design, verification and the release
+  gate. These carry their own frontmatter and ship verbatim.
+
+A test checks that every tool a shipped skill names is one the repo
+registers, so a skill cannot send a client to a tool that does not exist.
+Some registered tools (`twin.record_evidence`, `twin.attempt_promotion`, the
+`twin.commit_*` recorders) are only served when the server is wired with
+their stores, which the standalone MCP sidecar is not; the skills say what to
+do when one is missing from the client's list.
 
 ## Keeping the tool list a size Claude Code can use
 

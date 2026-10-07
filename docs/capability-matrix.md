@@ -39,10 +39,10 @@ capability does not exist.
 |---|---|---|
 | `core` | 36 | Projects, sessions, twin reads and the records that are not domain-specific |
 | `mechanical` | 31 | CAD authoring across both kernels, plus geometry commit |
-| `simulation` | 31 | FEA, load cases, meshes and the evidence they produce |
+| `simulation` | 32 | FEA, load cases, meshes and the evidence they produce, including `twin.record_document` to record a `simulation_result` or `load_case` (FORGE-533) |
 | `electronics` | 27 | Schematic and board checks, component search, sourcing |
 | `robotics` | 32 | Assemblies, URDF/SDF/USD export, simulators |
-| `mechanical_product` | 37 | A mechanical product end to end (FORGE-479): the FreeCAD session tools (open, sketch, pad/pocket, assembly, export, close), geometry commit, component selection. No promotion tool: promotion is a human authority |
+| `mechanical_product` | 36 | A mechanical product end to end (FORGE-479): the FreeCAD session tools (open, sketch, pad/pocket, assembly, export, close), geometry commit, component selection. No promotion tool: promotion is a human authority |
 
 Each profile also includes `health.check`, so `/metaforge:doctor` works on
 the connection most likely to need it — a capped one, on a harness that

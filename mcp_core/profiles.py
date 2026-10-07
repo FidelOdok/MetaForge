@@ -187,6 +187,11 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.execute_revalidation_plan",
         "twin.rank_sensitivity",
         "twin.record_claim",
+        # FORGE-533: the recorder for a simulation_result and a load_case.
+        # Phases got it through PHASE_COMMON (FORGE-494); a plugin client on
+        # this profile did not, so it could run an analysis and then had no
+        # way to record the answer.
+        "twin.record_document",
         "twin.stage_work_product_file",
     },
     # Schematic and board work, plus the sourcing that decides what goes on

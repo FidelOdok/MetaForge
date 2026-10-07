@@ -208,6 +208,23 @@ single `event: done` block.
   same dashboard applies whether the calls came over stdio, HTTP, or
   SSE.
 
+## Install as a plugin
+
+`integrations/codex/` is a generated Codex plugin (build output of
+`scripts/build_integrations.py`). It brings the MCP server, an `AGENTS.md`
+and the same skills as the Claude Code package: the 30 engineering skills,
+shipped from each skill's detailed `PLUGIN.md`, plus the
+`intent-to-verified-design` lifecycle skill (FORGE-533). Codex has no slash
+commands, so the lifecycle rules (ask for values you were not given; propose
+a flow with `template` and `operations` together; stop at the approval) live
+in `AGENTS.md` and that skill. The package's README covers the marketplace
+layout Codex expects.
+
+The plugin's `.mcp.json` points at `http://localhost:8765/mcp?profile=core`.
+Codex has no install-time settings, so to work in another discipline edit the
+`profile` in that URL: `mechanical` or `mechanical_product` for CAD,
+`simulation` for FEA, `electronics` for KiCad and sourcing.
+
 ## Keeping the tool list a size Codex can use
 
 All 97 tools are served by default. If that is more than you want in
