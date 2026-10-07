@@ -105,6 +105,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "memory.retrieve_similar_experience",
         "web.fetch",
         "web.search",
+        # FORGE-544: arithmetic over the arguments; reads and writes nothing.
+        "power.check_budget",
         # Twin reads
         "constraint.validate",
         "project.get",
@@ -309,6 +311,8 @@ PRODUCING: frozenset[str] = frozenset(
         "freecad.generate_mesh",
         "calculix.run_fea",
         "calculix.run_thermal",
+        # FORGE-542: writes its deck and rawfile to the adapter workspace only.
+        "spice.run_simulation",
         "gazebo.run_simulation",
         "isaac_sim.render_scene",
         "isaac_sim.run_physics",

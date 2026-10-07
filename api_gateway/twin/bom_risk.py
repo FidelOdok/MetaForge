@@ -77,7 +77,8 @@ def _build_distributor_data(
     lead_time_days = top.get("lead_time_days")
     return {
         "num_sources": len(all_offers),
-        "lead_time_weeks": (lead_time_days / 7.0) if lead_time_days is not None else 0.0,
+        # None, not 0.0: an unreported lead time is unknown, not short (FORGE-550).
+        "lead_time_weeks": (lead_time_days / 7.0) if lead_time_days is not None else None,
         "lifecycle": lifecycle_status or "unknown",
         "prices": prices,
         "stock": top.get("stock_qty", 0),

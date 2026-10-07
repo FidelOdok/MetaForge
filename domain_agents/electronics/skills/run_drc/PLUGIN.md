@@ -83,14 +83,16 @@ adapter container is running.
 Call `kicad.run_drc` with:
 
 - `pcb_file`: the path from step 2
-- `severity_filter`: `"all"`. Filtering hides findings, and the tool's
-  `passed` is computed after the filter.
-- `rule_set`: the server accepts this argument but does **not** pass it to
-  KiCad today. Do not rely on it to apply custom rules, and do not tell the
-  user a rule file was applied because you passed it.
+- `severity_filter`: `"all"`. Filtering hides findings from the list. It
+  does not change `passed`, which counts every error.
+- `rule_set` (optional): custom design rules, either a path to a
+  `.kicad_dru` file on the adapter or the rules text itself. KiCad has no
+  rules flag, so the tool runs DRC on a copy of the board with these rules
+  as its `.kicad_dru`. The result's `rule_set_applied` says whether that
+  happened; only say custom rules were applied when it is `true`.
 
 Read from the result: `total_violations`, `errors`, `warnings`,
-`unconnected_items`, `passed`, and `violations`. Each violation has
+`unconnected_items`, `rule_set_applied`, `passed`, and `violations`. Each violation has
 `rule_id` (KiCad's type, for example `clearance` or `track_width`),
 `severity`, `message`, and `location` as an object with `x`, `y` (board
 coordinates in KiCad's report units, millimetres by default) and `layer`.
@@ -100,10 +102,10 @@ coordinates in KiCad's report units, millimetres by default) and `layer`.
 - `unconnected_items` counts nets KiCad considers unrouted. They are not in
   `violations` and not in `errors`, but a board with any is not ready for
   manufacture. Report the count every time.
-- The tool's `passed` is true only with zero violations of any severity and
-  zero unconnected items. This skill's rule is zero errors and zero unrouted
-  connections, with warnings reported. Compute the verdict yourself and state
-  the rule. If the user set a stricter one, use theirs.
+- `passed` is true with zero error-severity violations and zero unconnected
+  items, counted before any severity filter. Warnings do not fail it; report
+  them. This is the same rule the `run_drc` skill applies. If the user set a
+  stricter one (zero warnings), apply theirs and say so.
 - If `total_violations` is not `errors + warnings`, list the violations with
   another severity separately.
 - Group by `rule_id` and layer; give the location of each error so the user
@@ -146,7 +148,7 @@ Only when the user asked for it, or a flow phase needs it:
 - [ ] Ran with `severity_filter: "all"`
 - [ ] `unconnected_items` reported, and counted against the verdict
 - [ ] `total_violations` equals `errors + warnings`, or the rest are listed
-- [ ] You did not claim a custom `rule_set` was applied
+- [ ] Custom rules claimed only when `rule_set_applied` is `true`
 
 ## Failure handling
 
@@ -164,7 +166,8 @@ Only when the user asked for it, or a flow phase needs it:
 ## Limits
 
 - Detection only; MetaForge cannot edit the layout in this phase.
-- Custom rule files are not applied through `rule_set` today.
+- A `rule_set` replaces any `.kicad_dru` beside the board for that run; it
+  is not merged with it.
 - Standard DRC only: no controlled-impedance, length matching beyond what
   the board's own rules encode, thermal or current-capacity analysis.
 - A result belongs to the revision it ran on. After the board changes, run

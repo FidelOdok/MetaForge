@@ -8,7 +8,7 @@ from skill_registry.skill_base import SkillBase
 
 from .schema import RunSpiceInput, RunSpiceOutput
 
-SUPPORTED_ANALYSIS_TYPES = {"dc", "ac", "transient"}
+SUPPORTED_ANALYSIS_TYPES = {"op", "dc", "ac", "transient"}
 
 
 class RunSpiceHandler(SkillBase[RunSpiceInput, RunSpiceOutput]):
@@ -53,22 +53,28 @@ class RunSpiceHandler(SkillBase[RunSpiceInput, RunSpiceOutput]):
             )
 
         # Invoke SPICE simulator via MCP
+        arguments: dict[str, Any] = {
+            "analysis_type": input_data.analysis_type,
+            "params": input_data.params,
+            "probes": input_data.probes,
+        }
+        if input_data.netlist:
+            arguments["netlist"] = input_data.netlist
+        else:
+            arguments["netlist_path"] = input_data.netlist_path
         sim_result: dict[str, Any] = await self.context.mcp.invoke(
-            "spice.run_simulation",
-            {
-                "netlist_path": input_data.netlist_path,
-                "analysis_type": input_data.analysis_type,
-                "params": input_data.params,
-            },
-            timeout=180,
+            "spice.run_simulation", arguments, timeout=180
         )
 
         return RunSpiceOutput(
             work_product_id=input_data.work_product_id,
             results=sim_result.get("results", {}),
+            waveform_data=sim_result.get("waveform_data", {}),
+            scale=sim_result.get("scale"),
             waveforms=sim_result.get("waveforms", []),
-            convergence=sim_result.get("convergence", False),
+            convergence=bool(sim_result.get("convergence", False)),
             sim_time_s=float(sim_result.get("sim_time_s", 0.0)),
+            log=str(sim_result.get("log", "")),
         )
 
     async def validate_output(self, output: RunSpiceOutput) -> list[str]:

@@ -47,6 +47,8 @@ services:
       # calculix.* ran in-process here where the ccx solver binary isn't
       # installed (only calculix-adapter's own image bundles it).
       - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
+      # FORGE-542: ngspice is only in spice-adapter's image.
+      - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -516,6 +518,38 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── SPICE Adapter (FORGE-542: ngspice circuit simulation) ──────
+  # Shares adapter-workspace with kicad-adapter, so a netlist exported by
+  # kicad.export_netlist can be simulated by path.
+  spice-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/spice/Dockerfile
+    image: metaforge/spice-adapter:latest
+    ports:
+      - "8104:8104"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - SPICE_WORK_DIR=/workspace
+      - SPICE_HTTP_PORT=8104
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8104/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - metaforge
     restart: unless-stopped

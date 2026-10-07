@@ -10,10 +10,9 @@ Start a driver for one peripheral chip on the board: a header with the
 public API, a source file with bus access and init, and a register map, all
 traceable to the part's datasheet and to how the board actually wires it.
 
-**No MetaForge tool scaffolds drivers.** The server-side skill returns three
-file names and a fixed placeholder register map (`WHO_AM_I` at 0x00,
-`CTRL_REG1` at 0x20, `STATUS_REG` at 0x27, `DATA_OUT` at 0x28) that is the
-same for every part and comes from no datasheet. Never use or repeat it. You
+**No MCP tool scaffolds drivers.** The server-side skill (used by the
+in-process firmware agent, not exposed over MCP) generates a register-level
+skeleton only from a register list it is given, and records nothing. You
 write the driver yourself in the user's repository, read the register map
 from the real datasheet with real tools, and record the result in the twin.
 Tell the user this plainly.

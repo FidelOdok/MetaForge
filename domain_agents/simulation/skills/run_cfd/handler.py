@@ -8,22 +8,29 @@ from skill_registry.skill_base import SkillBase
 
 from .schema import RunCfdInput, RunCfdOutput
 
-SUPPORTED_MESH_RESOLUTIONS = {"coarse", "medium", "fine"}
+NO_FLOW_SOLVER = (
+    "MetaForge has no flow solver, so velocity, pressure drop and convection "
+    "cannot be computed. For heat conducted through the part to a fixed-"
+    "temperature sink, pass `conduction` (solved with calculix.run_thermal)."
+)
 
 
 class RunCfdHandler(SkillBase[RunCfdInput, RunCfdOutput]):
-    """Runs CFD thermal/flow analysis via the MCP bridge.
+    """Answers the conduction part of a thermal question; refuses flow (FORGE-543).
 
-    Invokes the ``calculix.run_thermal`` tool through the MCP bridge
-    for computational fluid dynamics analysis, returning velocity,
-    pressure, and temperature data.
+    It used to call ``calculix.run_thermal`` with arguments that tool does
+    not take (geometry_file, fluid_properties, ...), and read velocity and
+    pressure keys it never returns, so the skill could not succeed and any
+    reply would have been zeros. CalculiX solves steady conduction to a
+    fixed-temperature sink; that is what this skill runs, and its result is
+    labelled ``conduction_only``.
     """
 
     input_type = RunCfdInput
     output_type = RunCfdOutput
 
     async def validate_preconditions(self, input_data: RunCfdInput) -> list[str]:
-        """Check that the work_product exists and CFD tool is available."""
+        """Check that the work_product exists and the thermal tool is available."""
         errors: list[str] = []
 
         work_product = await self.context.twin.get_work_product(
@@ -33,50 +40,41 @@ class RunCfdHandler(SkillBase[RunCfdInput, RunCfdOutput]):
             errors.append(f"WorkProduct {input_data.work_product_id} not found in Twin")
 
         if not await self.context.mcp.is_available("calculix.run_thermal"):
-            errors.append("CalculiX thermal/CFD tool is not available")
+            errors.append("calculix.run_thermal is not available")
 
         return errors
 
     async def execute(self, input_data: RunCfdInput) -> RunCfdOutput:
-        """Run CFD via CalculiX MCP tool and return structured results."""
+        """Run the conduction case, or refuse a flow question."""
         self.logger.info(
-            "Running CFD",
+            "Running thermal (conduction only)",
             work_product_id=input_data.work_product_id,
             geometry_file=input_data.geometry_file,
-            mesh_resolution=input_data.mesh_resolution,
+            flow_requested=bool(input_data.fluid_properties or input_data.boundary_conditions),
         )
+        if input_data.fluid_properties or input_data.boundary_conditions:
+            raise ValueError(NO_FLOW_SOLVER)
+        if input_data.conduction is None:
+            raise ValueError(NO_FLOW_SOLVER)
 
-        if input_data.mesh_resolution not in SUPPORTED_MESH_RESOLUTIONS:
-            raise ValueError(
-                f"Unsupported mesh resolution '{input_data.mesh_resolution}'. "
-                f"Supported: {', '.join(sorted(SUPPORTED_MESH_RESOLUTIONS))}"
-            )
-
-        # Invoke CalculiX thermal/CFD via MCP
-        cfd_result: dict[str, Any] = await self.context.mcp.invoke(
+        result: dict[str, Any] = await self.context.mcp.invoke(
             "calculix.run_thermal",
-            {
-                "geometry_file": input_data.geometry_file,
-                "fluid_properties": input_data.fluid_properties,
-                "boundary_conditions": input_data.boundary_conditions,
-                "mesh_resolution": input_data.mesh_resolution,
-            },
+            {"analysis_mode": "steady_state", **input_data.conduction.model_dump()},
             timeout=600,
         )
+        if "max_temperature_c" not in result:
+            raise ValueError("calculix.run_thermal returned no max_temperature_c")
 
         return RunCfdOutput(
             work_product_id=input_data.work_product_id,
-            max_velocity_ms=float(cfd_result.get("max_velocity_ms", 0.0)),
-            pressure_drop_pa=float(cfd_result.get("pressure_drop_pa", 0.0)),
-            max_temperature_c=float(cfd_result.get("max_temperature_c", 0.0)),
-            convergence_residual=float(cfd_result.get("convergence_residual", 1.0)),
+            max_temperature_c=float(result["max_temperature_c"]),
+            min_temperature_c=(
+                float(result["min_temperature_c"])
+                if result.get("min_temperature_c") is not None
+                else None
+            ),
+            warnings=[
+                "conduction only: no convection to air and no flow field",
+                *[str(w) for w in result.get("warnings", [])],
+            ],
         )
-
-    async def validate_output(self, output: RunCfdOutput) -> list[str]:
-        """Verify output consistency."""
-        errors: list[str] = []
-        if output.convergence_residual >= 1.0:
-            errors.append(
-                f"CFD residual {output.convergence_residual:.2e} indicates no convergence"
-            )
-        return errors

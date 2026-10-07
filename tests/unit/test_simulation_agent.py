@@ -40,14 +40,19 @@ def _fea_response(
     }
 
 
-def _cfd_response(convergence_residual: float = 1e-5) -> dict:
-    """Build a mock CFD tool response."""
-    return {
-        "max_velocity_ms": 12.5,
-        "pressure_drop_pa": 350.0,
-        "max_temperature_c": 85.2,
-        "convergence_residual": convergence_residual,
-    }
+def _cfd_response() -> dict:
+    """calculix.run_thermal's real result shape (FORGE-543: conduction only)."""
+    return {"max_temperature_c": 58.0, "min_temperature_c": 25.0, "result_files": []}
+
+
+CONDUCTION = {
+    "mesh_file": "mesh/enclosure.inp",
+    "material": {"thermal_conductivity_w_mk": 167.0},
+    "heat_source_node_set": "Surface4",
+    "power_dissipation_w": 1.5,
+    "sink_node_set": "Surface1",
+    "sink_temp_c": 25.0,
+}
 
 
 @pytest.fixture
@@ -247,56 +252,48 @@ class TestRunFea:
 class TestRunCfd:
     """Tests for the run_cfd task type."""
 
-    async def test_cfd_passes_convergence(self, agent: SimulationAgent):
-        """CFD with good convergence should succeed."""
-        work_product_id = uuid4()
+    async def test_conduction_case_reaches_run_thermal(
+        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
+    ):
+        """FORGE-543: the handler sends run_thermal its own arguments."""
+        calls: list[dict] = []
+        original = mcp_bridge.invoke
+
+        async def spy(tool_id, arguments, **kw):
+            calls.append(arguments)
+            return await original(tool_id, arguments, **kw)
+
+        mcp_bridge.invoke = spy  # type: ignore[method-assign]
+        agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
         request = TaskRequest(
-            task_type="run_cfd",
-            work_product_id=work_product_id,
-            parameters={
-                "geometry_file": "cad/enclosure.step",
-                "fluid_properties": {"density_kg_m3": 1.225, "viscosity_pa_s": 1.8e-5},
-                "boundary_conditions": {"inlet_velocity_ms": 5.0},
-                "mesh_resolution": "medium",
-            },
+            task_type="run_cfd", work_product_id=uuid4(), parameters={"conduction": CONDUCTION}
         )
         result = await agent.run_task(request)
 
         assert result.success is True
-        assert result.task_type == "run_cfd"
-        assert len(result.skill_results) == 1
-        assert result.skill_results[0]["skill"] == "run_cfd"
-        assert result.skill_results[0]["convergence_residual"] < 1e-3
+        assert result.skill_results[0]["analysis"] == "conduction_only"
+        assert result.skill_results[0]["max_temperature_c"] == 58.0
+        assert calls[0] == {"analysis_mode": "steady_state", **CONDUCTION}
 
-    async def test_cfd_fails_no_convergence(
-        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
-    ):
-        """CFD with high residual should report failure."""
-        mcp_bridge.register_tool_response(
-            "calculix.run_thermal",
-            _cfd_response(convergence_residual=0.1),
-        )
-        agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
+    async def test_flow_quantities_are_refused(self, agent: SimulationAgent):
         request = TaskRequest(
             task_type="run_cfd",
             work_product_id=uuid4(),
-            parameters={"geometry_file": "cad/enclosure.step"},
+            parameters={
+                "geometry_file": "cad/enclosure.step",
+                "boundary_conditions": {"inlet_velocity_ms": 5.0},
+            },
         )
         result = await agent.run_task(request)
 
         assert result.success is False
-        assert any("residual" in w.lower() for w in result.warnings)
+        assert any("no flow solver" in e for e in result.errors)
 
-    async def test_cfd_missing_geometry_file(self, agent: SimulationAgent):
-        """CFD should fail when geometry_file is missing."""
-        request = TaskRequest(
-            task_type="run_cfd",
-            work_product_id=uuid4(),
-        )
-        result = await agent.run_task(request)
+    async def test_no_case_is_refused(self, agent: SimulationAgent):
+        result = await agent.run_task(TaskRequest(task_type="run_cfd", work_product_id=uuid4()))
 
         assert result.success is False
-        assert any("geometry_file" in e for e in result.errors)
+        assert any("no flow solver" in e for e in result.errors)
 
 
 # --- Full simulation ---
@@ -314,7 +311,7 @@ class TestFullSimulation:
             parameters={
                 "netlist_path": "sim/power_supply.cir",
                 "mesh_file": "mesh/bracket.inp",
-                "geometry_file": "cad/enclosure.step",
+                "conduction": CONDUCTION,
             },
         )
         result = await agent.run_task(request)

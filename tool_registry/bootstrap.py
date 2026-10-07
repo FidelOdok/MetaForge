@@ -75,6 +75,16 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.kicad.config",
         "config_class": "KicadConfig",
     },
+    # FORGE-542: ngspice. Registers so tools/list is stable; a call needs the
+    # spice-adapter container (METAFORGE_ADAPTER_SPICE_URL), since the
+    # gateway and sidecar images have no ngspice and raise
+    # SpiceNotAvailableError in-process.
+    "spice": {
+        "module": "tool_registry.tools.spice.adapter",
+        "class": "SpiceServer",
+        "config_module": "tool_registry.tools.spice.config",
+        "config_class": "SpiceConfig",
+    },
     # MET-633: opt-in like freecad/kicad above -- needs a real `gz` binary
     # (Gazebo Sim) in the container/host PATH to execute; the adapter
     # registers regardless so tools/list is stable, but handlers raise
@@ -129,6 +139,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"digikey", "mouser", "nexar"}
     | {"component", "offer_resolver"}
     | {"web"}
+    # FORGE-544: in-process, no container, no credentials.
+    | {"power"}
 )
 
 
@@ -1079,6 +1091,32 @@ async def bootstrap_tool_registry(
                 reason=(
                     "not in adapter_ids"
                     if adapter_ids and "web" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Power budget MCP adapter (FORGE-544) -----
+        # Pure arithmetic over figures the caller supplies, so nothing to
+        # inject and nothing that can be missing: it registers wherever it
+        # is asked for, which is every server that does not narrow the list.
+        if _is_adapter_enabled("power") and (not adapter_ids or "power" in adapter_ids):
+            try:
+                from tool_registry.tools.power.adapter import PowerServer
+
+                await registry.register_adapter(PowerServer())
+                registered.append("power")
+                logger.info("power_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("power_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("power")
+        else:
+            skipped.append("power")
+            logger.info(
+                "power_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "power" not in adapter_ids
                     else "disabled via config"
                 ),
             )

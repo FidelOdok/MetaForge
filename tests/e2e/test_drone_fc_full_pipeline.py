@@ -285,7 +285,10 @@ class TestFirmwareAgent:
                 work_product_id=work_products["firmware"].id,
                 parameters={
                     "mcu_family": "STM32F4",
-                    "peripherals": ["GPIO", "SPI", "I2C"],
+                    "pin_map": [
+                        {"signal": "IMU_CS", "pin": "PA4", "peripheral": "SPI1"},
+                        {"signal": "BARO_SDA", "pin": "PB7", "peripheral": "I2C1"},
+                    ],
                 },
             )
         )
@@ -303,7 +306,10 @@ class TestFirmwareAgent:
                 work_product_id=work_products["firmware"].id,
                 parameters={
                     "mcu_family": "STM32F4",
-                    "peripherals": ["GPIO", "SPI"],
+                    "pin_map": [
+                        {"signal": "IMU_CS", "pin": "PA4", "peripheral": "SPI1"},
+                        {"signal": "BARO_SDA", "pin": "PB7", "peripheral": "I2C1"},
+                    ],
                 },
             )
         )
@@ -311,6 +317,7 @@ class TestFirmwareAgent:
         assert sr["skill"] == "generate_hal"
         assert "generated_files" in sr
         assert len(sr["generated_files"]) > 0
+        assert all(f["content"] for f in sr["files"])  # FORGE-545: content, not just paths
 
 
 class TestSimulationAgent:

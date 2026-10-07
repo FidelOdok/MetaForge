@@ -2143,9 +2143,17 @@ class CadqueryOperations:
         """Create a multi-part assembly from STEP files.
 
         Args:
-            parts: List of dicts with 'name', 'file', and optional 'location' (x, y, z, rx, ry, rz).
+            parts: List of dicts with 'name', 'file', and optional 'location' (x, y, z in
+                mm; rx, ry, rz in degrees, applied about the part's own origin in X then
+                Y then Z order, before the translation).
             constraints: Assembly constraints (name, type, args).
             output_path: Output STEP file path.
+
+        FORGE-547: ``interference_check_passed`` used to be ``True`` whatever
+        the parts did, and rotations were dropped. Every pair of placed parts
+        is now intersected after any constraint solve; overlapping volume
+        above ``_INTERFERENCE_TOLERANCE_MM3`` is reported per pair and fails
+        the check.
         """
         self._require_cadquery()
 
@@ -2168,13 +2176,7 @@ class CadqueryOperations:
                 props = self._get_shape_properties(part_shape)
                 total_volume += props["volume_mm3"]
 
-                location = cq.Location(
-                    cq.Vector(
-                        loc.get("x", 0.0),
-                        loc.get("y", 0.0),
-                        loc.get("z", 0.0),
-                    )
-                )
+                location = _part_location(loc)
                 assy.add(part_shape, name=name, loc=location)
 
             # Apply constraints if provided
@@ -2186,6 +2188,9 @@ class CadqueryOperations:
                         constraint_def["type"],
                     )
                 assy.solve()
+
+            interferences = _pairwise_interferences(assy, [p["name"] for p in parts])
+            span.set_attribute("assembly.interferences", len(interferences))
 
             assy.save(output_path)
 
@@ -2205,7 +2210,8 @@ class CadqueryOperations:
                 "part_count": len(parts),
                 "total_volume": round(total_volume, 2),
                 "volume_mm3": round(total_volume, 2),
-                "interference_check_passed": True,
+                "interference_check_passed": not interferences,
+                "interferences": interferences,
             }
             if material:
                 density = resolve_density_kg_m3(material)
@@ -2359,3 +2365,55 @@ class CadqueryOperations:
                 "material": material,
                 **props,
             }
+
+
+#: Overlap below this is treated as touching, not interference: coincident
+#: faces of mated parts intersect with a numerically tiny volume.
+_INTERFERENCE_TOLERANCE_MM3 = 1e-3
+
+
+def _part_location(loc: dict[str, Any]) -> Any:
+    """A CadQuery Location from x/y/z (mm) and rx/ry/rz (degrees), FORGE-547.
+
+    Rotations apply about the part's own origin, X then Y then Z, and the
+    translation after them; a location with no rotations is the plain
+    translation it always was.
+    """
+    location = cq.Location(
+        cq.Vector(float(loc.get("x", 0.0)), float(loc.get("y", 0.0)), float(loc.get("z", 0.0)))
+    )
+    rotation = cq.Location(cq.Vector(0, 0, 0))
+    for axis, key in (((1, 0, 0), "rx"), ((0, 1, 0), "ry"), ((0, 0, 1), "rz")):
+        angle = float(loc.get(key, 0.0) or 0.0)
+        if angle:
+            rotation = cq.Location(cq.Vector(0, 0, 0), cq.Vector(*axis), angle) * rotation
+    return location * rotation
+
+
+def _pairwise_interferences(assy: Any, names: list[str]) -> list[dict[str, Any]]:
+    """Every pair of placed parts whose solids overlap, with the overlap volume."""
+    placed: list[tuple[str, Any]] = []
+    for name in names:
+        child = assy.objects.get(name)
+        if child is None or child.obj is None:
+            continue
+        shape = child.obj.val() if hasattr(child.obj, "val") else child.obj
+        placed.append((name, shape.moved(child.loc)))
+    found: list[dict[str, Any]] = []
+    for i, (name_a, shape_a) in enumerate(placed):
+        box_a = shape_a.BoundingBox()
+        for name_b, shape_b in placed[i + 1 :]:
+            box_b = shape_b.BoundingBox()
+            if (
+                box_a.xmax < box_b.xmin
+                or box_b.xmax < box_a.xmin
+                or box_a.ymax < box_b.ymin
+                or box_b.ymax < box_a.ymin
+                or box_a.zmax < box_b.zmin
+                or box_b.zmax < box_a.zmin
+            ):
+                continue
+            volume = float(shape_a.intersect(shape_b).Volume())
+            if volume > _INTERFERENCE_TOLERANCE_MM3:
+                found.append({"part_a": name_a, "part_b": name_b, "volume_mm3": round(volume, 3)})
+    return found

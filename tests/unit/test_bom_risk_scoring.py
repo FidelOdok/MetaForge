@@ -108,9 +108,16 @@ class TestSingleSourceScoring:
         factor = scorer._score_single_source({"num_sources": 10})
         assert factor.score == 0
 
-    def test_missing_num_sources_defaults_to_1(self, scorer: BOMRiskScorer) -> None:
+    def test_missing_num_sources_is_unknown(self, scorer: BOMRiskScorer) -> None:
+        # FORGE-550: was scored as single-source (100) on no data.
         factor = scorer._score_single_source({})
+        assert factor.score == 50
+        assert factor.known is False
+
+    def test_zero_sources_is_worst_case(self, scorer: BOMRiskScorer) -> None:
+        factor = scorer._score_single_source({"num_sources": 0})
         assert factor.score == 100
+        assert factor.known is True
 
     def test_weight_is_correct(self, scorer: BOMRiskScorer) -> None:
         factor = scorer._score_single_source({"num_sources": 1})
@@ -239,13 +246,16 @@ class TestPriceVolatilityScoring:
         factor = scorer._score_price_volatility({"prices": [1.0, 5.0, 10.0]})
         assert factor.score == 100
 
-    def test_no_prices_scores_0(self, scorer: BOMRiskScorer) -> None:
+    def test_no_prices_is_unknown(self, scorer: BOMRiskScorer) -> None:
+        # FORGE-550: was scored as stable (0) on no data.
         factor = scorer._score_price_volatility({"prices": []})
-        assert factor.score == 0
+        assert factor.score == 50
+        assert factor.known is False
 
-    def test_single_price_scores_0(self, scorer: BOMRiskScorer) -> None:
+    def test_single_price_is_unknown(self, scorer: BOMRiskScorer) -> None:
         factor = scorer._score_price_volatility({"prices": [5.0]})
-        assert factor.score == 0
+        assert factor.score == 50
+        assert factor.known is False
 
 
 # ===========================================================================
@@ -725,3 +735,42 @@ class TestModels:
         report = BOMRiskReport(project_id="test")
         assert report.total_parts == 0
         assert report.overall_score == 0
+
+
+class TestMissingDataIsUnknownForge550:
+    """Missing inputs score the same neutral unknown, and say so (FORGE-550)."""
+
+    def test_part_with_no_data_reports_every_factor_unknown(self, scorer: BOMRiskScorer) -> None:
+        result = scorer.score_part({"mpn": "X"})
+        assert sorted(result.unknown_factors) == sorted(f.name for f in result.factors)
+        assert result.overall_score == 50
+
+    def test_missing_lead_time_is_not_short(self, scorer: BOMRiskScorer) -> None:
+        factor = scorer._score_lead_time({})
+        assert (factor.score, factor.known) == (50, False)
+
+    def test_missing_stock_is_not_out_of_stock(self, scorer: BOMRiskScorer) -> None:
+        factor = scorer._score_stock_level({"moq": 10})
+        assert (factor.score, factor.known) == (50, False)
+
+    def test_unreported_compliance_is_not_non_compliant(self, scorer: BOMRiskScorer) -> None:
+        factor = scorer._score_compliance({})
+        assert (factor.score, factor.known) == (50, False)
+        assert scorer._score_compliance({"rohs_compliant": False}).score == 100
+
+    def test_fully_known_part_has_no_unknowns(self, scorer: BOMRiskScorer) -> None:
+        result = scorer.score_part(
+            {
+                "mpn": "X",
+                "num_sources": 3,
+                "lead_time_weeks": 1,
+                "lifecycle": "active",
+                "prices": [1.0, 1.01],
+                "stock": 10000,
+                "moq": 1,
+                "rohs_compliant": True,
+                "reach_compliant": True,
+            }
+        )
+        assert result.unknown_factors == []
+        assert result.overall_score == 0

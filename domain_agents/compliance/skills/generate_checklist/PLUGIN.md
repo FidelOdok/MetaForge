@@ -47,8 +47,9 @@ Ask the user for anything missing. Do not fill these in with defaults.
 
 | Input | Why it matters | Example |
 |---|---|---|
-| Target markets | Selects the regimes; order decides which regime keeps a shared standard | `UKCA, CE` |
-| Product category | Recorded with the checklist; the catalogue does not vary by it | `consumer_electronics` |
+| Target markets | Selects the regimes | `UKCA, CE` |
+| Product features | Decide which conditional items apply: `radio`, `mains_powered`, `battery`, `connected`, `body_worn` | `radio, battery, connected` |
+| Product category | A label recorded with the checklist; applicability comes from the features | `consumer_electronics` |
 | Project | Optional for a computed checklist, needed to look for evidence | `Drone FC` |
 
 Map the user's words to regimes: "UK" is `UKCA` (and `PSTI` if the product
@@ -133,6 +134,21 @@ another regime.
 | PSTI-SBT-001 | secure_boot | Secure boot chain verification | ETSI EN 303 645 5.7-1 | TR |
 | PSTI-SBT-002 | secure_boot | Software integrity validation at boot | ETSI EN 303 645 5.7-2 | TF |
 
+## Conditional items
+
+Some items apply only to products with certain features. An item applies
+when the product has **every** feature listed for it:
+
+| Items | Needs |
+|---|---|
+| UKCA-SAF-001, UKCA-SAF-002, CE-LVD-001 to 003 | `mains_powered` |
+| UKCA-SAF-003 | `battery` |
+| UKCA-RAD-001 to 003, CE-RED-001 to 004, FCC-15C-001 to 003, FCC-LBL-001 | `radio` |
+| FCC-SAR-001 | `radio` and `body_worn` |
+| All PSTI items | `connected` |
+
+Every other item applies to every product.
+
 ## Procedure
 
 1. If a project is named, call `project.open` with the user's words as
@@ -140,27 +156,29 @@ another regime.
    product contains (radio, battery, mains power, network connection).
 2. Confirm the target markets with the user, in the order they care about
    most. Only `UKCA`, `CE`, `FCC` and `PSTI` exist.
-3. Build the checklist exactly as the handler does:
-   - Walk the markets in the order given. Within a market, take its rows
-     top to bottom.
-   - Keep a row unless its **exact** standard string was already taken by
-     an earlier row. Only the four rows marked * can collide, so UKCA then
-     CE gives 15 + 18 - 4 = 29 items, and CE then UKCA keeps the CE ids
-     instead of the UKCA ones.
-   - Set every item's evidence status to `MISSING`.
-4. Compute `total_items` and `coverage_percent`. The handler counts items
-   whose status is not `MISSING`. Because it starts every item as
-   `MISSING`, its coverage is always `0.0` at generation. Report it as
-   `0.0`; do not raise it on the strength of a document you merely found.
-5. Optionally, for each item, call `knowledge.search` (with `project_id`)
+3. Ask which features the product has (or read them from the brief and
+   confirm): `radio`, `mains_powered`, `battery`, `connected`, `body_worn`.
+4. Build the checklist exactly as the handler does:
+   - Walk the markets in alphabetical order (`CE`, `FCC`, `PSTI`, `UKCA`),
+     whatever order the user gave. Within a market, take its rows top to
+     bottom.
+   - With features stated, leave out every item needing a feature the
+     product lacks, and list it as excluded with the missing feature.
+     Without features, keep every item and list the conditional ones as
+     "applies only if the product has ...".
+   - If a row's **exact** standard string was already taken by an earlier
+     row, fold it into that row ("also satisfies UKCA-EMC-001") instead of
+     listing it again. Only the four rows marked * can collide, so UKCA and
+     CE together give 15 + 18 - 4 = 29 items before exclusions, with the CE
+     ids kept.
+   - Set each item's evidence status to `MISSING`, unless the user has
+     confirmed evidence for it (then `UPLOADED`, `REVIEWED` or `APPROVED`).
+5. `coverage_percent` is the share of items whose status is not `MISSING`.
+   Do not raise it on the strength of a document you merely found.
+6. Optionally, for each item, call `knowledge.search` (with `project_id`)
    for an existing test report, declaration or certificate. Report a match
    as "possible evidence found: <source_path>" next to the item, for the
-   user to confirm. It does not change the status.
-6. Flag, without removing, items that look inapplicable given what the
-   product contains (no radio: the RED, radio and Part 15 Subpart C rows;
-   no battery: UKCA-SAF-003; not portable: FCC-SAR-001). Ask the user to
-   confirm. The catalogue ignores `product_category`, so this judgement is
-   the user's, not the catalogue's.
+   user to confirm. It does not change the status until they do.
 7. If the user decides a regime or an item is out of scope, offer to record
    that with `twin.record_decision` (`title`, `rationale`, `alternatives`).
 
@@ -169,17 +187,18 @@ another regime.
 - Markets included, in order, and `total_items`.
 - The checklist grouped by regime and category: id, requirement, standard,
   evidence type, status.
-- Which shared standards were collapsed and which regime kept them.
-- `coverage_percent` (0.0 at generation) and any possible evidence found.
-- Items you flagged as possibly inapplicable, as questions.
+- Which shared standards were folded and which item kept them.
+- The features used, and the excluded items with the missing feature; or,
+  if features were not stated, the conditional items as questions.
+- `coverage_percent` and any possible evidence found.
 - That nothing was saved, and that `record_compliance_checklist` saves it.
 
 ## Checks before you report
 
 - [ ] Every market is one of the four regimes; any other was named as unsupported
-- [ ] Deduplication used the exact standard string and the user's market order
+- [ ] Deduplication used the exact standard string and alphabetical market order
 - [ ] Every item's status is `MISSING` unless the user confirmed evidence
-- [ ] No item was dropped because you judged it inapplicable
+- [ ] Items were excluded only by the stated features, never by your own judgement
 - [ ] You said the list comes from MetaForge's built-in catalogue
 
 ## Failure handling
@@ -195,7 +214,7 @@ another regime.
 ## Limits
 
 - Coverage is bounded by the built-in catalogue: four regimes, a fixed item
-  list, no product-category filtering, no version tracking of standards.
+  list, five product features, no version tracking of standards.
 - Deduplication is by exact string. `2014/35/EU` and `2014/35/EU Annex IV`
   stay separate; one test report may in practice serve both regimes even
   where the strings differ.

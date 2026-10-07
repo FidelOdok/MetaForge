@@ -94,7 +94,7 @@ class TestMeshModels:
         assert inp.element_size == 1.0
         assert inp.algorithm == "netgen"
         assert inp.output_format == "inp"
-        assert inp.min_angle_threshold == 15.0
+        assert inp.min_angle_threshold == 10.0
         assert inp.max_aspect_ratio_threshold == 10.0
         assert inp.refinement_regions == []
 
@@ -201,7 +201,7 @@ class TestGenerateMeshHandler:
 
         assert output.quality_acceptable is False
         assert len(output.quality_issues) == 2
-        # min_angle 8.0 < threshold 15.0
+        # min_angle 8.0 < threshold 10.0
         assert any("angle" in issue.lower() for issue in output.quality_issues)
         # max_aspect_ratio 15.0 > threshold 10.0
         assert any("aspect ratio" in issue.lower() for issue in output.quality_issues)
@@ -439,3 +439,51 @@ class TestGenerateMeshWithAgent:
 
         assert result.success is False
         assert any("cad_file" in e for e in result.errors)
+
+
+class TestUnmeasuredQualityForge548:
+    """An unmeasured mesh is not an acceptable one (FORGE-548)."""
+
+    async def _run(self, mock_context: SkillContext, response: dict, **overrides):
+        mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
+        mock_context.mcp.register_tool_response("freecad.generate_mesh", response)
+        inp = GenerateMeshInput(
+            work_product_id=uuid4(), cad_file="/project/cad/bracket.step", **overrides
+        )
+        return await GenerateMeshHandler(mock_context).execute(inp)
+
+    async def test_missing_metrics_fail_instead_of_passing(
+        self, mock_context: SkillContext
+    ) -> None:
+        response = {**GOOD_MESH_RESPONSE, "quality_metrics": {}}
+        output = await self._run(mock_context, response)
+        assert output.quality_acceptable is False
+        assert any("not measured" in issue for issue in output.quality_issues)
+
+    async def test_degenerate_elements_fail(self, mock_context: SkillContext) -> None:
+        metrics = {**GOOD_MESH_RESPONSE["quality_metrics"], "degenerate_elements": 3}
+        output = await self._run(mock_context, {**GOOD_MESH_RESPONSE, "quality_metrics": metrics})
+        assert output.quality_acceptable is False
+        assert any("degenerate" in issue for issue in output.quality_issues)
+
+    async def test_measured_zero_angle_is_a_failure(self, mock_context: SkillContext) -> None:
+        metrics = {**GOOD_MESH_RESPONSE["quality_metrics"], "min_angle": 0.0}
+        output = await self._run(mock_context, {**GOOD_MESH_RESPONSE, "quality_metrics": metrics})
+        assert output.quality_acceptable is False
+
+    @pytest.mark.parametrize("cad_file", ["/m/part.stl", "/m/part.brep"])
+    async def test_non_step_input_is_refused(
+        self, mock_context: SkillContext, cad_file: str
+    ) -> None:
+        mock_context.mcp.register_tool("freecad.generate_mesh", "mesh_generation")
+        inp = GenerateMeshInput(work_product_id=uuid4(), cad_file=cad_file)
+        with pytest.raises(ValueError, match="Unsupported CAD file extension"):
+            await GenerateMeshHandler(mock_context).execute(inp)
+
+    async def test_refinement_regions_are_refused(self, mock_context: SkillContext) -> None:
+        with pytest.raises(ValueError, match="refinement_regions"):
+            await self._run(
+                mock_context,
+                GOOD_MESH_RESPONSE,
+                refinement_regions=[{"name": "fillet", "element_size": 0.2}],
+            )

@@ -328,24 +328,63 @@ class TestElectronicsAgentE2E:
         assert result.success is False
         assert result.skill_results[0]["total_errors"] == 2
 
-    async def test_check_power_budget_not_implemented(self, stack):
-        """Power budget check returns not-implemented error."""
-        s = stack
-        result = await s["agent"].run_task(
+    async def test_check_power_budget_through_the_real_tool(self, stack):
+        """FORGE-544: agent -> skill -> MCP loopback -> PowerServer, real arithmetic."""
+        from tool_registry.tools.power.adapter import PowerServer
+
+        server = PowerServer()
+        client = McpClient()
+        await client.connect("power", LoopbackTransport(server))
+        m = server._tools["power.check_budget"].manifest
+        client.register_manifest(
+            ClientToolManifest(
+                tool_id=m.tool_id,
+                adapter_id=m.adapter_id,
+                name=m.name,
+                description=m.description,
+                capability=m.capability,
+                input_schema=m.input_schema,
+                output_schema=m.output_schema,
+                phase=m.phase,
+            )
+        )
+        agent = ElectronicsAgent(twin=stack["twin"], mcp=McpClientBridge(client))
+        result = await agent.run_task(
             TaskRequest(
                 task_type="check_power_budget",
-                work_product_id=s["work_product"].id,
+                work_product_id=stack["work_product"].id,
                 parameters={
-                    "components": [
-                        {"ref": "U1", "power_mw": 120},
-                        {"ref": "U2", "power_mw": 350},
+                    "derating": 0.8,
+                    "rails": [
+                        {
+                            "name": "5V0",
+                            "voltage_v": 5.0,
+                            "source_kind": "supply",
+                            "rated_current_ma": 2000,
+                        },
+                        {
+                            "name": "3V3",
+                            "voltage_v": 3.3,
+                            "source_kind": "ldo",
+                            "rated_current_ma": 500,
+                            "input_rail": "5V0",
+                            "quiescent_ma": 0.1,
+                        },
+                    ],
+                    "loads": [
+                        {"name": "U1 MCU", "rail": "3V3", "power_mw": 120},
+                        {"name": "U2 radio", "rail": "3V3", "power_mw": 350},
                     ],
                 },
             )
         )
 
-        assert result.success is False
-        assert any("not yet implemented" in e for e in result.errors)
+        assert result.success is True
+        out = result.skill_results[0]
+        rails = {r["name"]: r for r in out["rails"]}
+        assert rails["3V3"]["load_ma"] == pytest.approx(470 / 3.3, abs=1e-3)
+        assert rails["5V0"]["load_ma"] == pytest.approx(470 / 3.3 + 0.1, abs=1e-3)
+        assert out["verdict"] == "pass"
 
     async def test_full_validation_erc_and_drc(self, stack):
         """Full validation runs ERC + DRC sequentially."""

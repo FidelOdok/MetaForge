@@ -51,23 +51,25 @@ class RunErcHandler(SkillBase[RunErcInput, RunErcOutput]):
             "kicad.run_erc",
             {
                 "schematic_file": input_data.schematic_file,
-                "severity_filter": input_data.severity_filter,
+                # Every severity, so the verdict counts all errors; the
+                # skill filters the listed violations itself (FORGE-551).
+                "severity_filter": "all",
             },
             timeout=120,
         )
 
         # Parse violations from the tool result
-        violations = self._parse_violations(
-            erc_result.get("violations", []),
-            input_data.severity_filter,
-        )
+        raw_violations = erc_result.get("violations", [])
+        violations = self._parse_violations(raw_violations, input_data.severity_filter)
 
         total_errors = sum(1 for v in violations if v.severity == "error")
         total_warnings = sum(1 for v in violations if v.severity == "warning")
         total_violations = len(violations)
 
         # Passed = no errors (warnings are acceptable)
-        passed = total_errors == 0
+        # FORGE-551: counted before the severity filter, so filtering to
+        # warnings cannot pass a sheet with errors. Warnings are allowed.
+        passed = not any(raw.get("severity", "error") == "error" for raw in raw_violations)
 
         summary = self._build_summary(
             input_data.schematic_file,

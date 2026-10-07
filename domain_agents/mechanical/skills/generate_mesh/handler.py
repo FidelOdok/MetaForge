@@ -8,7 +8,9 @@ from skill_registry.skill_base import SkillBase
 
 from .schema import GenerateMeshInput, GenerateMeshOutput, MeshQualityMetrics
 
-SUPPORTED_EXTENSIONS = {".step", ".stp", ".stl", ".brep"}
+# freecad.generate_mesh meshes a STEP file (it re-exports it in the twin frame
+# first); STL and BREP were listed here but never reached a mesher (FORGE-548).
+SUPPORTED_EXTENSIONS = {".step", ".stp"}
 SUPPORTED_ALGORITHMS = {"netgen", "gmsh", "mefisto"}
 SUPPORTED_OUTPUT_FORMATS = {"inp", "unv", "stl"}
 
@@ -73,6 +75,14 @@ class GenerateMeshHandler(SkillBase[GenerateMeshInput, GenerateMeshOutput]):
                 f"Supported: {', '.join(sorted(SUPPORTED_OUTPUT_FORMATS))}"
             )
 
+        # Refinement regions were accepted and silently dropped (FORGE-548): the
+        # tool has no per-region sizing, so refuse rather than pretend.
+        if input_data.refinement_regions:
+            raise ValueError(
+                "refinement_regions are not supported by freecad.generate_mesh; "
+                "mesh with a smaller element_size instead"
+            )
+
         # 4. Invoke freecad.generate_mesh via MCP bridge
         result = await self.context.mcp.invoke(
             "freecad.generate_mesh",
@@ -99,24 +109,31 @@ class GenerateMeshHandler(SkillBase[GenerateMeshInput, GenerateMeshOutput]):
             jacobian_ratio=float(raw_quality.get("jacobian_ratio", 0.0)),
         )
 
-        # 6. Assess quality against thresholds
+        # 6. Assess quality against thresholds.
+        # FORGE-548: these checks were skipped whenever a metric was 0, and the
+        # tool returned no metrics at all, so every mesh passed. A metric the
+        # tool did not measure is now an issue in its own right ("not measured"
+        # is not "acceptable"), and a measured 0 is a real, failing value.
         quality_issues: list[str] = []
-
-        if quality_metrics.min_angle > 0 and (
-            quality_metrics.min_angle < input_data.min_angle_threshold
-        ):
+        if "min_angle" not in raw_quality:
             quality_issues.append(
-                f"Minimum element angle {quality_metrics.min_angle:.1f} deg "
-                f"is below threshold {input_data.min_angle_threshold:.1f} deg"
+                "element quality was not measured (only .inp output is measured); "
+                "check the mesh with calculix.validate_mesh before trusting it"
             )
-
-        if quality_metrics.max_aspect_ratio > 0 and (
-            quality_metrics.max_aspect_ratio > input_data.max_aspect_ratio_threshold
-        ):
-            quality_issues.append(
-                f"Maximum aspect ratio {quality_metrics.max_aspect_ratio:.1f} "
-                f"exceeds threshold {input_data.max_aspect_ratio_threshold:.1f}"
-            )
+        else:
+            if quality_metrics.min_angle < input_data.min_angle_threshold:
+                quality_issues.append(
+                    f"Minimum element angle {quality_metrics.min_angle:.1f} deg "
+                    f"is below threshold {input_data.min_angle_threshold:.1f} deg"
+                )
+            if quality_metrics.max_aspect_ratio > input_data.max_aspect_ratio_threshold:
+                quality_issues.append(
+                    f"Maximum aspect ratio {quality_metrics.max_aspect_ratio:.1f} "
+                    f"exceeds threshold {input_data.max_aspect_ratio_threshold:.1f}"
+                )
+            degenerate = int(raw_quality.get("degenerate_elements", 0) or 0)
+            if degenerate:
+                quality_issues.append(f"{degenerate} degenerate (zero-volume) element(s)")
 
         quality_acceptable = len(quality_issues) == 0
 

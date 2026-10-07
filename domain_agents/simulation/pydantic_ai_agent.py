@@ -105,8 +105,10 @@ You have access to the following tools:
 load_cases, analysis_type (static/modal/thermal), and material.
 - **run_spice**: Run SPICE circuit simulation. Provide netlist_path, \
 analysis_type (dc/ac/transient), and optional params.
-- **run_cfd**: Run CFD thermal/flow analysis. Provide geometry_file, \
-fluid_properties, boundary_conditions, and mesh_resolution.
+- **run_cfd**: Steady conduction to a fixed-temperature sink (CalculiX). \
+Provide conduction (mesh_file, material, heat_source_node_set, \
+power_dissipation_w, sink_node_set, sink_temp_c). There is no flow solver: \
+velocity, pressure drop and convection cannot be computed.
 
 Given a user request, determine which simulation tools to run. \
 Analyze convergence, safety factors, and key results. Provide clear \
@@ -250,22 +252,23 @@ def create_simulation_agent(
     @agent.tool
     async def run_cfd(
         ctx: RunContext[SimulationAgentDeps],
-        geometry_file: str,
+        conduction: dict[str, Any] | None = None,
+        geometry_file: str | None = None,
         fluid_properties: dict[str, Any] | None = None,
         boundary_conditions: dict[str, Any] | None = None,
-        mesh_resolution: str = "medium",
     ) -> dict[str, Any]:
-        """Run CFD thermal/flow analysis.
+        """Steady conduction to a fixed-temperature sink; flow is refused (FORGE-543).
 
         Args:
-            geometry_file: Path to the geometry file (.step, .stl).
-            fluid_properties: Fluid properties (density, viscosity).
-            boundary_conditions: Boundary conditions (inlet velocity, etc.).
-            mesh_resolution: Mesh resolution ('coarse', 'medium', 'fine').
+            conduction: calculix.run_thermal's case: mesh_file, material,
+                heat_source_node_set, power_dissipation_w, sink_node_set, sink_temp_c.
+            geometry_file: Geometry the case came from, for the record.
+            fluid_properties: Flow input; refused, there is no flow solver.
+            boundary_conditions: Flow input; refused, there is no flow solver.
         """
         with tracer.start_as_current_span("tool.run_cfd") as span:
-            span.set_attribute("geometry_file", geometry_file)
-            logger.info("Running CFD", geometry_file=geometry_file)
+            span.set_attribute("geometry_file", geometry_file or "")
+            logger.info("Running thermal (conduction only)", geometry_file=geometry_file)
 
             skill_ctx = SkillContext(
                 twin=ctx.deps.twin,
@@ -280,7 +283,7 @@ def create_simulation_agent(
                 geometry_file=geometry_file,
                 fluid_properties=fluid_properties or {},
                 boundary_conditions=boundary_conditions or {},
-                mesh_resolution=mesh_resolution,
+                conduction=conduction,
             )
 
             handler = RunCfdHandler(skill_ctx)
@@ -293,10 +296,10 @@ def create_simulation_agent(
             return {
                 "skill": "run_cfd",
                 "success": True,
-                "max_velocity_ms": output.max_velocity_ms,
-                "pressure_drop_pa": output.pressure_drop_pa,
+                "analysis": output.analysis,
                 "max_temperature_c": output.max_temperature_c,
-                "convergence_residual": output.convergence_residual,
+                "min_temperature_c": output.min_temperature_c,
+                "warnings": output.warnings,
             }
 
     logger.debug("simulation_pydantic_ai_agent_created")

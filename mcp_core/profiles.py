@@ -190,6 +190,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "gazebo.extract_results",
         "gazebo.run_simulation",
         "gazebo.validate_world",
+        # FORGE-542: circuit simulation is prediction too.
+        "spice.run_simulation",
         "twin.evaluate_metric",
         "twin.execute_revalidation_plan",
         "twin.rank_sensitivity",
@@ -216,6 +218,10 @@ PROFILES: dict[str, frozenset[str]] = {
         "kicad.run_drc",
         "kicad.run_erc",
         "knowledge.populate_bom",
+        # FORGE-544: the per-rail budget, computed rather than hand-summed.
+        "power.check_budget",
+        # FORGE-542: simulate the netlist kicad.export_netlist writes.
+        "spice.run_simulation",
         "twin.commit_procurement_record",
         "twin.record_component_selection",
     },

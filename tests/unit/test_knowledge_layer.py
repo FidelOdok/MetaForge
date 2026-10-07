@@ -465,7 +465,7 @@ class TestIngestKnowledgeHandler:
         handler = IngestKnowledgeHandler(mock_context, store)
         inp = IngestKnowledgeInput(
             content="content",
-            knowledge_type="session_summary",
+            knowledge_type="session",
             source="test",
         )
         output = await handler.execute(inp)

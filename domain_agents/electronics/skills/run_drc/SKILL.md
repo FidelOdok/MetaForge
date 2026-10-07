@@ -17,11 +17,14 @@ Runs Design Rules Check (DRC) on a KiCad PCB layout and returns categorised viol
 
 - `work_product_id` -- ID of the PCB work_product in the Digital Twin
 - `pcb_file` -- Path to the KiCad PCB file (.kicad_pcb)
-- `severity_filter` -- Filter violations by severity: "all", "error", or "warning" (default: "all")
+- `severity_filter` -- Filter the listed violations: "all", "error", or "warning" (default: "all"). It does not change `passed`
+- `rule_set` -- Optional custom design rules (a `.kicad_dru` path or its text); DRC runs with them beside a copy of the board
 
 ## Output
 
-- `passed` -- Whether the PCB passed DRC (no errors; warnings are acceptable)
+- `passed` -- No error-severity violation (before the filter) and nothing unconnected; warnings are acceptable
+- `unconnected_items` -- Connections KiCad reports as missing (unrouted nets)
+- `rule_set_applied` -- Whether KiCad ran with the custom `rule_set`
 - `total_violations` -- Total number of violations found
 - `total_errors` -- Number of error-severity violations
 - `total_warnings` -- Number of warning-severity violations

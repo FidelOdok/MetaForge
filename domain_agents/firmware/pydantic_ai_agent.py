@@ -101,13 +101,18 @@ systems (FreeRTOS, Zephyr), peripheral drivers, and hardware abstraction layers.
 
 You have access to the following tools:
 
-- **generate_hal**: Generate a Hardware Abstraction Layer for a target MCU. \
-Provide mcu_family and list of peripherals (GPIO, SPI, I2C, UART, etc.).
-- **scaffold_driver**: Scaffold a peripheral driver with register map and \
-interface code. Provide peripheral_type, interface (spi/i2c/uart), and driver_name.
-- **configure_rtos**: Configure an RTOS for the target firmware. Provide \
-rtos_name, task_definitions (name, priority, stack_size), heap_size_kb, \
+- **generate_hal**: Generate the board's pin definitions for a target MCU. \
+Provide mcu_family and the board's real pin_map (signal, pin, peripheral), \
+e.g. from kicad.get_pin_mapping. Never invent pins.
+- **scaffold_driver**: Generate a register-level driver. Provide \
+peripheral_type, interface (spi/i2c/uart), driver_name and the part's \
+registers from its datasheet (name, address, access, reset, expected).
+- **configure_rtos**: Configure FreeRTOS or Zephyr. Provide rtos_name, \
+task_definitions (name, priority, stack_size in bytes), heap_size_kb, \
 and tick_rate_hz.
+
+Each tool returns the generated files' full content; record or stage them \
+yourself.
 
 Given a user request, determine which tools to call and in what order. \
 For a full firmware build, generate HAL first, then scaffold drivers, \
@@ -145,14 +150,16 @@ def create_firmware_agent(
     async def generate_hal(
         ctx: RunContext[FirmwareAgentDeps],
         mcu_family: str,
-        peripherals: list[str],
+        pin_map: list[dict[str, Any]],
+        peripherals: list[str] | None = None,
         output_dir: str = "firmware/hal",
     ) -> dict[str, Any]:
-        """Generate a Hardware Abstraction Layer for a target MCU.
+        """Generate the board's pin definitions for a target MCU.
 
         Args:
             mcu_family: MCU family identifier (e.g. 'STM32F4', 'ESP32').
-            peripherals: List of peripherals to generate HAL for.
+            pin_map: The board's real pin assignments [{'signal', 'pin', 'peripheral'}].
+            peripherals: Optional peripherals that must appear in pin_map.
             output_dir: Output directory for generated files.
         """
         with tracer.start_as_current_span("tool.generate_hal") as span:
@@ -170,7 +177,8 @@ def create_firmware_agent(
             skill_input = GenerateHalInput(
                 work_product_id=str(UUID(int=0)),
                 mcu_family=mcu_family,
-                peripherals=peripherals,
+                pin_map=pin_map,
+                peripherals=peripherals or [],
                 output_dir=output_dir,
             )
 
@@ -184,6 +192,7 @@ def create_firmware_agent(
             return {
                 "skill": "generate_hal",
                 "success": True,
+                "files": [f.model_dump() for f in output.files],
                 "generated_files": output.generated_files,
                 "pin_mappings": output.pin_mappings,
                 "hal_version": output.hal_version,
@@ -196,13 +205,16 @@ def create_firmware_agent(
         ctx: RunContext[FirmwareAgentDeps],
         peripheral_type: str,
         driver_name: str,
+        registers: list[dict[str, Any]],
         interface: str = "spi",
     ) -> dict[str, Any]:
-        """Scaffold a peripheral driver with register map and interface code.
+        """Generate a register-level driver from the part's datasheet registers.
 
         Args:
             peripheral_type: Type of peripheral (e.g. 'accelerometer', 'gyroscope').
             driver_name: Name for the driver (e.g. 'bmi088').
+            registers: From the datasheet: [{'name', 'address', 'access', 'reset',
+                'expected'}]. Never invent them.
             interface: Communication interface ('spi', 'i2c', 'uart').
         """
         with tracer.start_as_current_span("tool.scaffold_driver") as span:
@@ -222,6 +234,7 @@ def create_firmware_agent(
                 peripheral_type=peripheral_type,
                 interface=interface,
                 driver_name=driver_name,
+                registers=registers,
             )
 
             handler = ScaffoldDriverHandler(skill_ctx)
@@ -234,6 +247,7 @@ def create_firmware_agent(
             return {
                 "skill": "scaffold_driver",
                 "success": True,
+                "files": [f.model_dump() for f in output.files],
                 "driver_files": output.driver_files,
                 "interface_type": output.interface_type,
                 "register_map": output.register_map,
@@ -287,6 +301,7 @@ def create_firmware_agent(
             return {
                 "skill": "configure_rtos",
                 "success": True,
+                "files": [f.model_dump() for f in output.files],
                 "config_file": output.config_file,
                 "tasks_configured": output.tasks_configured,
                 "memory_estimate_kb": output.memory_estimate_kb,

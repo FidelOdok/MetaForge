@@ -88,8 +88,7 @@ Call `kicad.run_erc` with:
 
 - `schematic_file`: the path from step 2
 - `severity_filter`: `"all"`. Always start with `all`. Filtering to `error`
-  hides the warnings, and the tool's `passed` flag is computed after the
-  filter.
+  hides the warnings from the list; `passed` still counts every error.
 
 Read from the result: `total_violations`, `errors`, `warnings`, `passed`, and
 `violations`. Each violation has `rule_id` (KiCad's type, for example
@@ -99,11 +98,10 @@ effort basis and can be empty; quote `message` when they are.
 
 ### 4. Judge the result
 
-- **The tool's `passed` is stricter than this skill's rule.** The tool sets
-  `passed: true` only when there are no violations of any severity. This
-  skill passes on **zero errors**, with warnings reported. Compute the
-  verdict from `errors` yourself and state which rule you applied. If the
-  user gave a stricter rule (zero warnings), use theirs.
+- `passed` is true when there are **zero errors**, counted before any
+  severity filter; warnings do not fail it, and you report them. If the
+  user gave a stricter rule (zero warnings), apply theirs and say which
+  rule you applied.
 - If `total_violations` is not `errors + warnings`, KiCad reported a
   violation with another severity. List those separately; do not drop them.
 - Group violations by `rule_id`. Thirty `pin_not_connected` on one connector

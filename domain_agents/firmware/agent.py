@@ -102,13 +102,18 @@ systems (FreeRTOS, Zephyr), peripheral drivers, and hardware abstraction layers.
 
 You have access to the following tools:
 
-- **generate_hal**: Generate a Hardware Abstraction Layer for a target MCU. \
-Provide mcu_family and list of peripherals (GPIO, SPI, I2C, UART, etc.).
-- **scaffold_driver**: Scaffold a peripheral driver with register map and \
-interface code. Provide peripheral_type, interface (spi/i2c/uart), and driver_name.
-- **configure_rtos**: Configure an RTOS for the target firmware. Provide \
-rtos_name, task_definitions (name, priority, stack_size), heap_size_kb, \
+- **generate_hal**: Generate the board's pin definitions for a target MCU. \
+Provide mcu_family and the board's real pin_map (signal, pin, peripheral), \
+e.g. from kicad.get_pin_mapping. Never invent pins.
+- **scaffold_driver**: Generate a register-level driver. Provide \
+peripheral_type, interface (spi/i2c/uart), driver_name and the part's \
+registers from its datasheet (name, address, access, reset, expected).
+- **configure_rtos**: Configure FreeRTOS or Zephyr. Provide rtos_name, \
+task_definitions (name, priority, stack_size in bytes), heap_size_kb, \
 and tick_rate_hz.
+
+Each tool returns the generated files' full content; record or stage them \
+yourself.
 
 Given a user request, determine which tools to call and in what order. \
 For a full firmware build, generate HAL first, then scaffold drivers, \
@@ -145,14 +150,17 @@ def _get_or_create_pydantic_agent() -> Any:
     async def generate_hal(
         ctx: RunContext[AgentDependencies],
         mcu_family: str,
-        peripherals: list[str],
+        pin_map: list[dict[str, Any]],
+        peripherals: list[str] | None = None,
         output_dir: str = "firmware/hal",
     ) -> dict[str, Any]:
-        """Generate a Hardware Abstraction Layer for a target MCU.
+        """Generate the board's pin definitions for a target MCU.
 
         Args:
             mcu_family: MCU family identifier (e.g. 'STM32F4', 'ESP32').
-            peripherals: List of peripherals to generate HAL for.
+            pin_map: The board's real pin assignments, e.g. from
+                kicad.get_pin_mapping: [{'signal', 'pin', 'peripheral'}].
+            peripherals: Optional peripherals that must appear in pin_map.
             output_dir: Output directory for generated files.
         """
         skill_ctx = SkillContext(
@@ -166,7 +174,8 @@ def _get_or_create_pydantic_agent() -> Any:
         skill_input = GenerateHalInput(
             work_product_id=str(UUID("00000000-0000-0000-0000-000000000000")),
             mcu_family=mcu_family,
-            peripherals=peripherals,
+            pin_map=pin_map,
+            peripherals=peripherals or [],
             output_dir=output_dir,
         )
 
@@ -180,6 +189,7 @@ def _get_or_create_pydantic_agent() -> Any:
         return {
             "skill": "generate_hal",
             "success": True,
+            "files": [f.model_dump() for f in output.files],
             "generated_files": output.generated_files,
             "pin_mappings": output.pin_mappings,
             "hal_version": output.hal_version,
@@ -192,13 +202,16 @@ def _get_or_create_pydantic_agent() -> Any:
         ctx: RunContext[AgentDependencies],
         peripheral_type: str,
         driver_name: str,
+        registers: list[dict[str, Any]],
         interface: str = "spi",
     ) -> dict[str, Any]:
-        """Scaffold a peripheral driver with register map and interface code.
+        """Generate a register-level driver from the part's datasheet registers.
 
         Args:
             peripheral_type: Type of peripheral (e.g. 'accelerometer', 'gyroscope').
             driver_name: Name for the driver (e.g. 'bmi088').
+            registers: From the datasheet: [{'name', 'address', 'access' r/w/rw,
+                'reset', 'expected', 'description'}]. Never invent them.
             interface: Communication interface ('spi', 'i2c', 'uart').
         """
         skill_ctx = SkillContext(
@@ -214,6 +227,7 @@ def _get_or_create_pydantic_agent() -> Any:
             peripheral_type=peripheral_type,
             interface=interface,
             driver_name=driver_name,
+            registers=registers,
         )
 
         handler = ScaffoldDriverHandler(skill_ctx)
@@ -226,6 +240,7 @@ def _get_or_create_pydantic_agent() -> Any:
         return {
             "skill": "scaffold_driver",
             "success": True,
+            "files": [f.model_dump() for f in output.files],
             "driver_files": output.driver_files,
             "interface_type": output.interface_type,
             "register_map": output.register_map,
@@ -275,6 +290,7 @@ def _get_or_create_pydantic_agent() -> Any:
         return {
             "skill": "configure_rtos",
             "success": True,
+            "files": [f.model_dump() for f in output.files],
             "config_file": output.config_file,
             "tasks_configured": output.tasks_configured,
             "memory_estimate_kb": output.memory_estimate_kb,
@@ -308,7 +324,10 @@ class FirmwareAgent:
         result = await agent.run_task(TaskRequest(
             task_type="generate_hal",
             work_product_id=work_product.id,
-            parameters={"mcu_family": "STM32F4", "peripherals": ["GPIO", "SPI"]},
+            parameters={
+                "mcu_family": "STM32F4",
+                "pin_map": [{"signal": "IMU_CS", "pin": "PA4", "peripheral": "SPI1"}],
+            },
         ))
     """
 
@@ -475,26 +494,30 @@ class FirmwareAgent:
                 errors=["Missing required parameter: mcu_family"],
             )
 
-        peripherals: list[str] = request.parameters.get("peripherals", [])
-        if not peripherals:
+        pin_map: list[dict[str, Any]] = request.parameters.get("pin_map", [])
+        if not pin_map:
+            # FORGE-545: without the board's pin map the HAL was invented.
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
                 success=False,
-                errors=["Missing required parameter: peripherals"],
+                errors=["Missing required parameter: pin_map"],
             )
+        peripherals: list[str] = request.parameters.get("peripherals", [])
 
         self.logger.info(
             "HAL generation requested",
             mcu_family=mcu_family,
-            peripherals=peripherals,
+            pins=len(pin_map),
         )
 
         ctx = self._create_skill_context(request.branch)
         skill_input = GenerateHalInput(
             work_product_id=str(request.work_product_id),
             mcu_family=mcu_family,
+            pin_map=pin_map,
             peripherals=peripherals,
+            source=request.parameters.get("pin_map_source", ""),
             output_dir=request.parameters.get("output_dir", "firmware/hal"),
         )
 
@@ -517,6 +540,7 @@ class FirmwareAgent:
             skill_results=[
                 {
                     "skill": "generate_hal",
+                    "files": [f.model_dump() for f in output.files],
                     "generated_files": output.generated_files,
                     "pin_mappings": output.pin_mappings,
                     "hal_version": output.hal_version,
@@ -544,6 +568,16 @@ class FirmwareAgent:
                 errors=["Missing required parameter: driver_name"],
             )
 
+        registers: list[dict[str, Any]] = request.parameters.get("registers", [])
+        if not registers:
+            # FORGE-545: one hard-coded register map used to stand in for every part.
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=["Missing required parameter: registers"],
+            )
+
         self.logger.info(
             "Driver scaffolding requested",
             peripheral_type=peripheral_type,
@@ -556,6 +590,9 @@ class FirmwareAgent:
             peripheral_type=peripheral_type,
             interface=request.parameters.get("interface", "spi"),
             driver_name=driver_name,
+            registers=registers,
+            address_bits=request.parameters.get("address_bits", 8),
+            source=request.parameters.get("registers_source", ""),
         )
 
         handler = ScaffoldDriverHandler(ctx)
@@ -577,6 +614,7 @@ class FirmwareAgent:
             skill_results=[
                 {
                     "skill": "scaffold_driver",
+                    "files": [f.model_dump() for f in output.files],
                     "driver_files": output.driver_files,
                     "interface_type": output.interface_type,
                     "register_map": output.register_map,
@@ -638,6 +676,7 @@ class FirmwareAgent:
             skill_results=[
                 {
                     "skill": "configure_rtos",
+                    "files": [f.model_dump() for f in output.files],
                     "config_file": output.config_file,
                     "tasks_configured": output.tasks_configured,
                     "memory_estimate_kb": output.memory_estimate_kb,
@@ -653,8 +692,8 @@ class FirmwareAgent:
         overall_success = True
         steps_run = 0
 
-        # Step 1: Generate HAL if mcu_family and peripherals are provided
-        if request.parameters.get("mcu_family") and request.parameters.get("peripherals"):
+        # Step 1: Generate HAL if mcu_family and pin_map are provided
+        if request.parameters.get("mcu_family") and request.parameters.get("pin_map"):
             hal_result = await self._run_generate_hal(request)
             all_results.extend(hal_result.skill_results)
             all_errors.extend(hal_result.errors)
@@ -663,8 +702,8 @@ class FirmwareAgent:
                 overall_success = False
             steps_run += 1
 
-        # Step 2: Scaffold driver if peripheral_type and driver_name are provided
-        if request.parameters.get("peripheral_type") and request.parameters.get("driver_name"):
+        # Step 2: Scaffold driver if peripheral_type and registers are provided
+        if request.parameters.get("peripheral_type") and request.parameters.get("registers"):
             driver_result = await self._run_scaffold_driver(request)
             all_results.extend(driver_result.skill_results)
             all_errors.extend(driver_result.errors)
@@ -691,8 +730,8 @@ class FirmwareAgent:
                 errors=[
                     "No build steps could be run. "
                     "Provide parameters for at least one of: "
-                    "generate_hal (mcu_family + peripherals), "
-                    "scaffold_driver (peripheral_type + driver_name), "
+                    "generate_hal (mcu_family + pin_map), "
+                    "scaffold_driver (peripheral_type + driver_name + registers), "
                     "configure_rtos (rtos_name + task_definitions)"
                 ],
             )

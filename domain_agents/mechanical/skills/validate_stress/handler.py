@@ -65,13 +65,12 @@ class ValidateStressHandler(SkillBase[ValidateStressInput, ValidateStressOutput]
         stress_data: dict[str, Any] = fea_result.get("max_von_mises", {})
 
         for constraint in input_data.constraints:
-            allowable = constraint.max_von_mises_mpa / constraint.safety_factor
+            # FORGE-554: the schema decides what the number means, once.
+            allowable = constraint.allowable
 
             for region, stress_val_raw in stress_data.items():
                 stress_val = float(stress_val_raw)
-                sf_achieved = (
-                    constraint.max_von_mises_mpa / stress_val if stress_val > 0 else float("inf")
-                )
+                sf_achieved = constraint.limit / stress_val if stress_val > 0 else float("inf")
                 passed = stress_val <= allowable
 
                 results.append(

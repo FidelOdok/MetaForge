@@ -53,18 +53,21 @@ FEA_UNSAFE_RESULT: dict[str, Any] = {
     "solver_time_s": 15.0,
 }
 
+# FORGE-543: calculix.run_thermal's real result shape (conduction only).
 CFD_CONVERGED_RESULT: dict[str, Any] = {
-    "max_velocity_ms": 4.2,
-    "pressure_drop_pa": 1250.0,
-    "max_temperature_c": 72.3,
-    "convergence_residual": 1e-5,
+    "max_temperature_c": 61.4,
+    "min_temperature_c": 25.0,
+    "solver_time": 0.8,
+    "result_files": ["/workspace/bracket_thermal.frd"],
 }
-
-CFD_NOT_CONVERGED: dict[str, Any] = {
-    "max_velocity_ms": 12.0,
-    "pressure_drop_pa": 5000.0,
-    "max_temperature_c": 150.0,
-    "convergence_residual": 0.1,
+CFD_NOT_CONVERGED: dict[str, Any] = {"result_files": []}
+CONDUCTION = {
+    "mesh_file": "models/motor_mount_bracket.inp",
+    "material": {"name": "aluminium_6061"},
+    "heat_source_node_set": "Surface3",
+    "power_dissipation_w": 2.5,
+    "sink_node_set": "Surface1",
+    "sink_temp_c": 25.0,
 }
 
 
@@ -286,8 +289,28 @@ class TestCfdSimulationE2E:
         agent = SimulationAgent(twin=twin, mcp=mcp)
         return {"twin": twin, "mcp": mcp, "agent": agent, "work_product": work_product}
 
-    async def test_cfd_converges(self, stack):
-        """CFD simulation converges with residual below threshold."""
+    async def test_conduction_case_runs(self, stack):
+        """FORGE-543: the conduction case reaches run_thermal with its real arguments."""
+        s = stack
+        result = await s["agent"].run_task(
+            TaskRequest(
+                task_type="run_cfd",
+                work_product_id=s["work_product"].id,
+                parameters={
+                    "geometry_file": "models/motor_mount_bracket.step",
+                    "conduction": CONDUCTION,
+                },
+            )
+        )
+
+        assert result.success is True
+        out = result.skill_results[0]
+        assert out["analysis"] == "conduction_only"
+        assert out["max_temperature_c"] == 61.4
+        assert any("conduction only" in w for w in result.warnings)
+
+    async def test_flow_request_is_refused(self, stack):
+        """Velocity and pressure need a flow solver MetaForge does not have."""
         s = stack
         result = await s["agent"].run_task(
             TaskRequest(
@@ -296,18 +319,15 @@ class TestCfdSimulationE2E:
                 parameters={
                     "geometry_file": "models/motor_mount_bracket.step",
                     "fluid_properties": {"density_kg_m3": 1.225, "viscosity_pa_s": 1.8e-5},
-                    "boundary_conditions": {"inlet_velocity_ms": 5.0, "outlet_pressure_pa": 101325},
-                    "mesh_resolution": "medium",
+                    "boundary_conditions": {"inlet_velocity_ms": 5.0},
                 },
             )
         )
 
-        assert result.success is True
-        assert result.skill_results[0]["max_velocity_ms"] == 4.2
-        assert result.skill_results[0]["convergence_residual"] == 1e-5
+        assert result.success is False
+        assert any("no flow solver" in e for e in result.errors)
 
-    async def test_cfd_not_converged(self):
-        """CFD fails when convergence residual exceeds threshold."""
+    async def test_result_without_a_temperature_fails(self):
         twin = InMemoryTwinAPI.create()
         mcp = _make_mcp_bridge(cfd_result=CFD_NOT_CONVERGED)
         work_product = await twin.create_work_product(_make_mech_work_product())
@@ -317,14 +337,12 @@ class TestCfdSimulationE2E:
             TaskRequest(
                 task_type="run_cfd",
                 work_product_id=work_product.id,
-                parameters={
-                    "geometry_file": "models/motor_mount_bracket.step",
-                },
+                parameters={"conduction": CONDUCTION},
             )
         )
 
         assert result.success is False
-        assert any("residual" in w.lower() for w in result.warnings)
+        assert any("max_temperature_c" in e for e in result.errors)
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +367,7 @@ class TestFullSimulationE2E:
                 parameters={
                     "netlist_path": "sim/power_supply.cir",
                     "mesh_file": "models/motor_mount_bracket.inp",
-                    "geometry_file": "models/motor_mount_bracket.step",
+                    "conduction": CONDUCTION,
                 },
             )
         )

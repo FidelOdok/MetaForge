@@ -538,6 +538,121 @@ def _inp_node_bbox(inp_path: str) -> dict[str, list[float]]:
     return {"min": [round(v, 6) for v in lo], "max": [round(v, 6) for v in hi]}
 
 
+#: Above this many tetrahedra the quality metrics are computed on an evenly
+#: spaced sample, so a fine mesh does not stall the tool; the result says so.
+_QUALITY_SAMPLE_LIMIT = 200_000
+
+
+def _tet_metrics(p: list[tuple[float, float, float]]) -> tuple[float, float, float] | None:
+    """(min dihedral angle in degrees, edge aspect ratio, radius-ratio quality).
+
+    Radius ratio is ``3 * r_in / r_circ``: 1 for a regular tetrahedron, 0 for
+    a flat one. ``None`` for a degenerate (zero-volume) element.
+    """
+
+    def sub(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, ...]:
+        return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+    def cross(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, ...]:
+        return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+    def dot(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+    def norm(a: tuple[float, ...]) -> float:
+        return math.sqrt(dot(a, a))
+
+    a, b, c, d = p
+    volume = abs(dot(sub(b, a), cross(sub(c, a), sub(d, a)))) / 6.0
+    if volume <= 1e-18:
+        return None
+    edges = [norm(sub(x, y)) for x, y in ((a, b), (a, c), (a, d), (b, c), (b, d), (c, d))]
+    faces = ((a, b, c), (a, b, d), (a, c, d), (b, c, d))
+    areas = [norm(cross(sub(y, x), sub(z, x))) / 2.0 for x, y, z in faces]
+    r_in = 3.0 * volume / sum(areas)
+    # Circumradius from the edge lengths (Cayley-Menger simplification).
+    ab, ac, ad, bc, bd, cd = edges
+    prod = (ab * cd + ac * bd + ad * bc) * (ab * cd + ac * bd - ad * bc)
+    prod *= (ab * cd - ac * bd + ad * bc) * (-ab * cd + ac * bd + ad * bc)
+    r_circ = math.sqrt(max(prod, 0.0)) / (24.0 * volume)
+    quality = 3.0 * r_in / r_circ if r_circ > 0 else 0.0
+    # Dihedral angle along each edge, from the two face normals meeting there.
+    normals = [cross(sub(y, x), sub(z, x)) for x, y, z in faces]
+    min_dihedral = 180.0
+    for i in range(4):
+        for j in range(i + 1, 4):
+            ni, nj = normals[i], normals[j]
+            denom = norm(ni) * norm(nj)
+            if denom <= 0:
+                continue
+            cos = max(-1.0, min(1.0, dot(ni, nj) / denom))
+            min_dihedral = min(min_dihedral, 180.0 - math.degrees(math.acos(cos)))
+    return min_dihedral, max(edges) / min(edges), quality
+
+
+def _inp_tet_quality(inp_path: str) -> dict[str, Any]:
+    """Element-quality metrics of the tetrahedra in a ``.inp`` mesh (FORGE-548).
+
+    ``freecad.generate_mesh`` returned no quality metrics at all, so a mesh
+    skill comparing them with thresholds compared nothing and always passed.
+    These are computed from the element geometry itself: the minimum
+    dihedral angle, the worst edge aspect ratio, and the mean radius-ratio
+    quality. Second-order elements are measured on their corner nodes.
+    """
+    nodes: dict[int, tuple[float, float, float]] = {}
+    tets: list[tuple[int, int, int, int]] = []
+    section = ""
+    with open(inp_path, encoding="utf-8", errors="replace") as f:  # noqa: PTH123
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("*"):
+                upper = stripped.upper().replace(" ", "")
+                if upper.startswith("*NODE"):
+                    section = "node"
+                elif upper.startswith("*ELEMENT") and (
+                    "TYPE=C3D4" in upper or "TYPE=C3D10" in upper
+                ):
+                    section = "tet"
+                else:
+                    section = ""
+                continue
+            parts = [x for x in stripped.split(",") if x.strip()]
+            if section == "node" and len(parts) >= 4:
+                nodes[int(parts[0])] = (float(parts[1]), float(parts[2]), float(parts[3]))
+            elif section == "tet" and len(parts) >= 5:
+                tets.append((int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])))
+    if not tets:
+        return {}
+    step = max(1, len(tets) // _QUALITY_SAMPLE_LIMIT)
+    min_angle, max_aspect, total_quality, measured, degenerate = 180.0, 0.0, 0.0, 0, 0
+    for tet in tets[::step]:
+        if any(n not in nodes for n in tet):
+            continue  # an element referencing an undefined node is not measurable
+        metrics = _tet_metrics([nodes[n] for n in tet])
+        if metrics is None:
+            degenerate += 1
+            continue
+        angle, aspect, quality = metrics
+        min_angle = min(min_angle, angle)
+        max_aspect = max(max_aspect, aspect)
+        total_quality += quality
+        measured += 1
+    if not measured and not degenerate:
+        return {}
+    out: dict[str, Any] = {
+        "min_angle": round(min_angle, 3) if measured else 0.0,
+        "max_aspect_ratio": round(max_aspect, 3),
+        "avg_quality": round(total_quality / measured, 4) if measured else 0.0,
+        "degenerate_elements": degenerate,
+        "elements_measured": measured,
+    }
+    if step > 1:
+        out["sampled_every"] = step
+    return out
+
+
 def _bboxes_match(a: dict[str, Any], b: dict[str, Any], tol_mm: float) -> bool:
     """True when two ``{"min": [x,y,z], "max": [x,y,z]}`` boxes agree per axis."""
     return all(abs(a[k][i] - b[k][i]) <= tol_mm for k in ("min", "max") for i in range(3))
@@ -1150,10 +1265,12 @@ class FreecadOperations:
             # (calculix.validate_mesh / calculix.run_fea both require .inp) --
             # .unv/.stl use different, unparsed formats here.
             mesh_bbox: dict[str, list[float]] | None = None
+            quality: dict[str, Any] = {}
             if output_format == "inp":
                 num_nodes, counts_by_type = _parse_inp_mesh_counts(output_path)
                 faces = _parse_inp_face_table(output_path)
                 mesh_bbox = _inp_node_bbox(output_path)
+                quality = _inp_tet_quality(output_path)
             else:
                 num_nodes, counts_by_type = 0, {}
                 faces = []
@@ -1202,6 +1319,9 @@ class FreecadOperations:
                     "element_order": element_order,
                     "num_volume_elements": num_volume_elements,
                     "element_counts_by_type": counts_by_type,
+                    # FORGE-548: measured, not assumed. Absent for non-.inp
+                    # output, which this tool does not parse.
+                    **quality,
                 },
                 # FORGE-239: per-STEP-face geometry (name, bbox, centroid,
                 # area, normal) so a caller can identify "the face at x=0"

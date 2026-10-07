@@ -47,8 +47,8 @@ The scorer runs in MetaForge, not in any MCP tool. Two honest routes:
 | Record a decision on a flagged part | `twin.record_decision` | every profile |
 | Save the report as a document | `twin.record_document` | `core` |
 
-The skill's definition names a tool `distributor_search`; no tool has that
-id. `distributors.resolve_offers` is the real source.
+The skill's definition lists `distributors.resolve_offers` (optional): the
+scorer itself calls no tool, and scores the data you pass it.
 
 ## Inputs you need before you start
 
@@ -102,8 +102,8 @@ Each factor scores 0, 50 or 100:
 |---|---|---|---|
 | Single source (0.25) | 3+ sources | 2 sources | 0 or 1 source |
 | Lead time (0.20) | under 2 weeks | 2 to 8 weeks | over 8 weeks |
-| Lifecycle (0.20) | active | NRND or unknown | EOL or obsolete |
-| Price volatility (0.15) | CV under 0.1, or fewer than 2 prices | CV 0.1 to 0.3 | CV 0.3 or more |
+| Lifecycle (0.20) | active | NRND | EOL or obsolete |
+| Price volatility (0.15) | CV under 0.1 | CV 0.1 to 0.3 | CV 0.3 or more |
 | Stock level (0.10) | 10x MOQ or more | MOQ to 10x MOQ | below MOQ |
 | Compliance (0.10) | RoHS and REACH | one of them | neither |
 
@@ -112,15 +112,16 @@ Part score = the weighted sum (weights total 1.0), rounded. Levels: 0 to 25
 `low`, 26 to 50 `medium`, 51 to 75 `high`, 76 to 100 `critical`. High and
 critical are flagged.
 
-**Missing data.** The scorer turns missing inputs into numbers, and not
-consistently: a missing source count scores as single source (100),
-missing stock as 0 in stock (100), missing compliance as neither (100),
-missing lifecycle as unknown (50), but a missing lead time as 0 weeks (0)
-and missing prices as stable (0). Do not hide this. For every factor you
-had no data for, mark it "no data" in the table, compute the score as the
-rules do, and say which factors were defaulted and in which direction. In
-particular, compliance will be 100 for every part unless the user gives you
-RoHS/REACH status; say that this alone adds 10 points to every part.
+**Missing data.** A factor whose input was not supplied scores 50 and is
+marked unknown: the factor has `known: false`, and the part lists it in
+`unknown_factors`. This is the same for every factor (a missing lead time
+is not "short", missing stock is not "out of stock"), so an unknown never
+pushes a part up or down for a reason that has nothing to do with the part.
+Fewer than two prices is an unknown volatility. A source count of `0` is
+known and scores 100. Mark every unknown factor "no data" in the table and
+list `unknown_factors` per part. Compliance is unknown for every part unless
+the user gives you RoHS/REACH status, because no MetaForge tool reports it;
+say so.
 
 ### 4. Roll up
 

@@ -4,14 +4,17 @@ categories:
   - name: safety
     items:
       - id: "UKCA-SAF-001"
+        requires: [mains_powered]
         requirement: "Product safety per EN 62368-1"
         standard: "EN 62368-1:2020"
         evidence_type: test_report
       - id: "UKCA-SAF-002"
-        requirement: "Electrical safety — insulation and grounding"
+        requires: [mains_powered]
+        requirement: "Electrical safety: insulation and grounding"
         standard: "BS 7671:2018"
         evidence_type: test_report
       - id: "UKCA-SAF-003"
+        requires: [battery]
         requirement: "Battery safety per IEC 62133"
         standard: "IEC 62133-2:2017"
         evidence_type: test_report
@@ -30,6 +33,7 @@ categories:
         standard: "SI 2016/1091"
         evidence_type: technical_file
   - name: radio
+    requires: [radio]
     items:
       - id: "UKCA-RAD-001"
         requirement: "Radio equipment conformity"

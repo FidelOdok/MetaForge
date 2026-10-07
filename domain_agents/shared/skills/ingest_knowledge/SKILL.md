@@ -16,14 +16,14 @@ None -- this skill operates directly on the KnowledgeStore (in-process).
 ## Input
 
 - `content` -- The text content to ingest (required)
-- `knowledge_type` -- Category of this knowledge (required, e.g. "design_rule", "material_property")
-- `source` -- Origin of this knowledge (required, e.g. "datasheet:LM7805", "standard:IPC-2221")
+- `knowledge_type` -- Category (required): one of `design_decision`, `component`, `failure`, `constraint`, `session`, the same values `knowledge.ingest` takes. Anything else is rejected
+- `source_path` -- Stable id of the source, a URL or path (required, e.g. "https://.../lm7805.pdf", "docs/design_rules/ipc2221.md"). `source` is still accepted
 - `metadata` -- Optional additional key-value metadata
 
 ## Output
 
 - `entry_id` -- UUID of the primary knowledge entry created
-- `embedded` -- Whether the content was successfully embedded
+- `embedded` -- Whether the content was embedded. Without an embedding service it is false, and the entries are stored but never returned by a search
 - `chunk_count` -- Number of chunks created (1 for short content)
 - `content_length` -- Total length of ingested content
 

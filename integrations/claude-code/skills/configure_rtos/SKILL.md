@@ -10,9 +10,9 @@ Produce the RTOS configuration file for a firmware project from the user's
 task definitions and the target's memory, with a RAM check a reviewer can
 follow, and record what was configured and why.
 
-**No MetaForge tool generates RTOS configuration.** The server-side skill
-only computes a file path and a rough memory sum; it writes no file and
-records nothing, and no MCP tool exposes it. You write the configuration
+**No MCP tool generates RTOS configuration.** The server-side skill (used by
+the in-process firmware agent, not exposed over MCP) generates FreeRTOS or
+Zephyr configuration from task definitions it is given, and records nothing. You write the configuration
 yourself, in the user's repository, and record the result in the twin with
 real twin tools. Tell the user this plainly.
 

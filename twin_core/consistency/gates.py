@@ -300,56 +300,94 @@ async def _evaluate_invariant_check(
     )
 
 
+def _risk_score(severity: Any, likelihood: Any) -> int | None:
+    """``severity * likelihood``, or ``None`` when either is missing or not a number."""
+    if severity is None or likelihood is None:
+        return None
+    try:
+        return int(severity) * int(likelihood)
+    except (TypeError, ValueError):
+        return None
+
+
+def _risk_check(
+    check_id: str, label: str, severity: Any, likelihood: Any, mitigation: Any
+) -> GateCheck:
+    score = _risk_score(severity, likelihood)
+    if score is None:
+        return GateCheck(
+            id=check_id,
+            label=f"Risk assessed: {label}",
+            status=GateCheckStatus.NOT_EVALUATED,
+            detail="no numeric severity/likelihood recorded yet",
+        )
+    level = _risk_level(score)
+    mitigated = bool(str(mitigation or "").strip())
+    return GateCheck(
+        id=check_id,
+        label=f"Risk mitigated: {label}",
+        status=(
+            GateCheckStatus.FAIL if level == "critical" and not mitigated else GateCheckStatus.PASS
+        ),
+        detail=(
+            f"severity={severity}, likelihood={likelihood}, level={level}, mitigated={mitigated}"
+        ),
+    )
+
+
 async def _evaluate_risk_checks(twin: TwinAPI, project_id: UUID) -> list[GateCheck]:
-    """One check per recorded 'risk' EngineeringEntity: FAIL if it scores
-    critical (severity*likelihood) with no mitigation recorded;
-    NOT_EVALUATED if the risk hasn't been scored yet (metadata missing
-    severity/likelihood) -- never a silent PASS for an un-assessed risk. No
-    risks recorded at all also surfaces as one NOT_EVALUATED check, not an
-    empty, invisible pass.
+    """One check per recorded risk: FAIL if it scores critical
+    (severity*likelihood) with no mitigation; NOT_EVALUATED if it has not been
+    scored -- never a silent PASS for an un-assessed risk.
+
+    Risks come from two places (FORGE-549): 'risk' EngineeringEntities, and
+    the hazard rows of the project's HAZARD_ANALYSIS work products (what
+    analyze_hazards and twin.commit_hazard_analysis record), which the gate
+    used to ignore. An entity's score may be recorded as ``likelihood`` or
+    ``probability`` (the tool description used to say the latter). No risks
+    recorded at all is one NOT_EVALUATED check, not an empty, invisible pass.
     """
     entities = await twin.list_engineering_entities(project_id=project_id)
     risks = [e for e in entities if e.entity_type == "risk"]
-    if not risks:
+    analyses = await twin.list_work_products(
+        work_product_type=WorkProductType.HAZARD_ANALYSIS, project_id=project_id
+    )
+    if not risks and not any((a.metadata or {}).get("hazards") for a in analyses):
         return [
             GateCheck(
                 id="risks:none-recorded",
                 label="Major risks identified",
                 status=GateCheckStatus.NOT_EVALUATED,
-                detail="no 'risk' entities recorded for this project yet",
+                detail="no 'risk' entities or hazard analyses recorded for this project yet",
             )
         ]
 
     checks: list[GateCheck] = []
     for risk in risks:
-        severity = risk.metadata.get("severity")
-        likelihood = risk.metadata.get("likelihood")
-        label = risk.title or risk.statement or str(risk.id)
-        if severity is None or likelihood is None:
-            checks.append(
-                GateCheck(
-                    id=f"risk:{risk.id}",
-                    label=f"Risk assessed: {label}",
-                    status=GateCheckStatus.NOT_EVALUATED,
-                    detail="no severity/likelihood recorded in metadata yet",
-                )
-            )
-            continue
-        score = int(severity) * int(likelihood)
-        level = _risk_level(score)
-        mitigated = bool(str(risk.metadata.get("mitigation", "")).strip())
-        is_critical_unmitigated = level == "critical" and not mitigated
+        meta = risk.metadata
+        likelihood = meta.get("likelihood", meta.get("probability"))
         checks.append(
-            GateCheck(
-                id=f"risk:{risk.id}",
-                label=f"Risk mitigated: {label}",
-                status=GateCheckStatus.FAIL if is_critical_unmitigated else GateCheckStatus.PASS,
-                detail=(
-                    f"severity={severity}, likelihood={likelihood}, "
-                    f"level={level}, mitigated={mitigated}"
-                ),
+            _risk_check(
+                f"risk:{risk.id}",
+                risk.title or risk.statement or str(risk.id),
+                meta.get("severity"),
+                likelihood,
+                meta.get("mitigation"),
             )
         )
+    for analysis in analyses:
+        for index, hazard in enumerate((analysis.metadata or {}).get("hazards") or []):
+            if not isinstance(hazard, dict):
+                continue
+            checks.append(
+                _risk_check(
+                    f"hazard:{analysis.id}:{index}",
+                    str(hazard.get("hazard") or hazard.get("name") or f"hazard {index + 1}"),
+                    hazard.get("severity"),
+                    hazard.get("likelihood", hazard.get("probability")),
+                    hazard.get("mitigation"),
+                )
+            )
     return checks
 
 

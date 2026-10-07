@@ -47,12 +47,18 @@ class RecordComplianceChecklistHandler(
             project_id=input_data.project_id,
             product_category=input_data.product_category,
             markets=input_data.target_markets,
+            product_features=input_data.product_features,
+            evidence=input_data.evidence,
         )
 
         result = await self.context.mcp.invoke(
             "twin.commit_compliance_checklist",
             {
-                "name": f"{input_data.project_id} Compliance Checklist",
+                # Named for its markets: the project id prefix read as a stray
+                # uuid, or as " Compliance Checklist" when it was blank (FORGE-553).
+                "name": "Compliance Checklist ("
+                + ", ".join(m.value for m in checklist.target_markets)
+                + ")",
                 "target_markets": [m.value for m in checklist.target_markets],
                 "items": [i.model_dump(mode="json") for i in checklist.items],
                 "coverage_percent": checklist.coverage_percent,
@@ -65,5 +71,7 @@ class RecordComplianceChecklistHandler(
             items=checklist.items,
             total_items=checklist.total_items,
             coverage_percent=checklist.coverage_percent,
+            excluded_items=checklist.excluded_items,
+            conditional_items=checklist.conditional_items,
             generated_at=checklist.generated_at,
         )

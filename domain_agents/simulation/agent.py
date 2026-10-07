@@ -106,8 +106,10 @@ You have access to the following tools:
 load_cases, analysis_type (static/modal/thermal), and material.
 - **run_spice**: Run SPICE circuit simulation. Provide netlist_path, \
 analysis_type (dc/ac/transient), and optional params.
-- **run_cfd**: Run CFD thermal/flow analysis. Provide geometry_file, \
-fluid_properties, boundary_conditions, and mesh_resolution.
+- **run_cfd**: Steady conduction to a fixed-temperature sink (CalculiX). \
+Provide conduction (mesh_file, material, heat_source_node_set, \
+power_dissipation_w, sink_node_set, sink_temp_c). There is no flow solver: \
+velocity, pressure drop and convection cannot be computed.
 
 Given a user request, determine which simulation tools to run. \
 Analyze convergence, safety factors, and key results. Provide clear \
@@ -240,18 +242,19 @@ def _get_or_create_pydantic_agent() -> Any:
     @agent.tool
     async def run_cfd(
         ctx: RunContext[AgentDependencies],
-        geometry_file: str,
+        conduction: dict[str, Any] | None = None,
+        geometry_file: str | None = None,
         fluid_properties: dict[str, Any] | None = None,
         boundary_conditions: dict[str, Any] | None = None,
-        mesh_resolution: str = "medium",
     ) -> dict[str, Any]:
-        """Run CFD thermal/flow analysis.
+        """Steady conduction to a fixed-temperature sink; flow is refused (FORGE-543).
 
         Args:
-            geometry_file: Path to the geometry file (.step, .stl).
-            fluid_properties: Fluid properties (density, viscosity).
-            boundary_conditions: Boundary conditions (inlet velocity, etc.).
-            mesh_resolution: Mesh resolution ('coarse', 'medium', 'fine').
+            conduction: calculix.run_thermal's case: mesh_file, material,
+                heat_source_node_set, power_dissipation_w, sink_node_set, sink_temp_c.
+            geometry_file: Geometry the case came from, for the record.
+            fluid_properties: Flow input; refused, there is no flow solver.
+            boundary_conditions: Flow input; refused, there is no flow solver.
         """
         skill_ctx = SkillContext(
             twin=ctx.deps.twin,
@@ -266,7 +269,7 @@ def _get_or_create_pydantic_agent() -> Any:
             geometry_file=geometry_file,
             fluid_properties=fluid_properties or {},
             boundary_conditions=boundary_conditions or {},
-            mesh_resolution=mesh_resolution,
+            conduction=conduction,
         )
 
         handler = RunCfdHandler(skill_ctx)
@@ -279,10 +282,10 @@ def _get_or_create_pydantic_agent() -> Any:
         return {
             "skill": "run_cfd",
             "success": True,
-            "max_velocity_ms": output.max_velocity_ms,
-            "pressure_drop_pa": output.pressure_drop_pa,
+            "analysis": output.analysis,
             "max_temperature_c": output.max_temperature_c,
-            "convergence_residual": output.convergence_residual,
+            "min_temperature_c": output.min_temperature_c,
+            "warnings": output.warnings,
         }
 
     _pydantic_agent = agent
@@ -475,12 +478,13 @@ class SimulationAgent:
     async def _run_spice(self, request: TaskRequest) -> TaskResult:
         """Run SPICE circuit simulation."""
         netlist_path: str = request.parameters.get("netlist_path", "")
-        if not netlist_path:
+        netlist: str = request.parameters.get("netlist", "")
+        if not netlist_path and not netlist:
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
                 success=False,
-                errors=["Missing required parameter: netlist_path"],
+                errors=["Missing required parameter: netlist_path (or netlist)"],
             )
 
         self.logger.info("SPICE simulation requested", netlist_path=netlist_path)
@@ -488,9 +492,11 @@ class SimulationAgent:
         ctx = self._create_skill_context(request.branch)
         skill_input = RunSpiceInput(
             work_product_id=str(request.work_product_id),
-            netlist_path=netlist_path,
+            netlist_path=netlist_path or None,
+            netlist=netlist or None,
             analysis_type=request.parameters.get("analysis_type", "dc"),
             params=request.parameters.get("params", {}),
+            probes=request.parameters.get("probes", []),
         )
 
         handler = RunSpiceHandler(ctx)
@@ -513,12 +519,16 @@ class SimulationAgent:
                 {
                     "skill": "run_spice",
                     "results": output.results,
+                    "waveform_data": output.waveform_data,
+                    "scale": output.scale,
                     "waveforms": output.waveforms,
                     "convergence": output.convergence,
                     "sim_time_s": output.sim_time_s,
                 }
             ],
-            warnings=[] if output.convergence else ["SPICE simulation did not converge"],
+            warnings=[]
+            if output.convergence
+            else [f"SPICE simulation did not converge: {output.log}".rstrip(": ")],
         )
 
     async def _run_fea(self, request: TaskRequest) -> TaskResult:
@@ -575,26 +585,30 @@ class SimulationAgent:
         )
 
     async def _run_cfd(self, request: TaskRequest) -> TaskResult:
-        """Run CFD thermal/flow analysis."""
-        geometry_file: str = request.parameters.get("geometry_file", "")
-        if not geometry_file:
+        """Steady conduction to a fixed-temperature sink; flow is refused (FORGE-543)."""
+        conduction = request.parameters.get("conduction")
+        self.logger.info(
+            "Thermal (conduction only) requested",
+            geometry_file=request.parameters.get("geometry_file"),
+            conduction=conduction is not None,
+        )
+
+        ctx = self._create_skill_context(request.branch)
+        try:
+            skill_input = RunCfdInput(
+                work_product_id=str(request.work_product_id),
+                geometry_file=request.parameters.get("geometry_file"),
+                fluid_properties=request.parameters.get("fluid_properties", {}),
+                boundary_conditions=request.parameters.get("boundary_conditions", {}),
+                conduction=conduction,
+            )
+        except ValueError as exc:
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
                 success=False,
-                errors=["Missing required parameter: geometry_file"],
+                errors=[str(exc)],
             )
-
-        self.logger.info("CFD simulation requested", geometry_file=geometry_file)
-
-        ctx = self._create_skill_context(request.branch)
-        skill_input = RunCfdInput(
-            work_product_id=str(request.work_product_id),
-            geometry_file=geometry_file,
-            fluid_properties=request.parameters.get("fluid_properties", {}),
-            boundary_conditions=request.parameters.get("boundary_conditions", {}),
-            mesh_resolution=request.parameters.get("mesh_resolution", "medium"),
-        )
 
         handler = RunCfdHandler(ctx)
         result = await handler.run(skill_input)
@@ -608,25 +622,20 @@ class SimulationAgent:
             )
 
         output = result.data
-        converged = output.convergence_residual < 1e-3
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
-            success=converged,
+            success=True,
             skill_results=[
                 {
                     "skill": "run_cfd",
-                    "max_velocity_ms": output.max_velocity_ms,
-                    "pressure_drop_pa": output.pressure_drop_pa,
+                    "analysis": output.analysis,
                     "max_temperature_c": output.max_temperature_c,
-                    "convergence_residual": output.convergence_residual,
+                    "min_temperature_c": output.min_temperature_c,
+                    "solver": output.solver,
                 }
             ],
-            warnings=(
-                [f"CFD residual {output.convergence_residual:.2e} exceeds threshold"]
-                if not converged
-                else []
-            ),
+            warnings=output.warnings,
         )
 
     async def _run_full_simulation(self, request: TaskRequest) -> TaskResult:
@@ -657,8 +666,8 @@ class SimulationAgent:
                 overall_success = False
             sims_run += 1
 
-        # Run CFD if geometry_file is provided
-        if request.parameters.get("geometry_file"):
+        # Run the thermal case if one is given (flow requests are refused inside)
+        if request.parameters.get("conduction") or request.parameters.get("geometry_file"):
             cfd_result = await self._run_cfd(request)
             all_results.extend(cfd_result.skill_results)
             all_errors.extend(cfd_result.errors)
@@ -674,7 +683,7 @@ class SimulationAgent:
                 success=False,
                 errors=[
                     "No simulations could be run. "
-                    "Provide at least one of: netlist_path, mesh_file, geometry_file"
+                    "Provide at least one of: netlist_path, mesh_file, conduction"
                 ],
             )
 

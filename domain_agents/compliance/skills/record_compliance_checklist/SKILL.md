@@ -15,13 +15,15 @@ backed counterpart to what `generate_checklist` only computes in-session.
 
 ## Input
 
-`project_id`, `product_category` (default `consumer_electronics`),
-`target_markets` (UKCA, CE, FCC, PSTI).
+`project_id`, `product_category` (a label, default `consumer_electronics`),
+`target_markets` (UKCA, CE, FCC, PSTI), optional `product_features` (radio,
+mains_powered, battery, connected, body_worn) and `evidence` (by item id).
+The node is named `Compliance Checklist (<markets>)`.
 
 ## Output
 
 `node_id`, `target_markets`, `items`, `total_items`, `coverage_percent`,
-`generated_at`.
+`excluded_items`, `conditional_items`, `generated_at`.
 
 ## Limitations
 
