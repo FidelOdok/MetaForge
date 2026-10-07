@@ -101,8 +101,9 @@ multi-physics simulation.
 
 You have access to the following tools:
 
-- **run_fea**: Run FEA structural analysis using CalculiX. Provide mesh_file, \
-load_cases, analysis_type (static/modal/thermal), and material.
+- **run_fea**: Run FEA with CalculiX. Provide mesh_file, load_case, material, \
+fixed_node_set, and for static_stress load_node_set and load_force_n [Fx, Fy, Fz] \
+(N); modal takes num_modes. Give a cited yield_strength_mpa for a safety factor.
 - **run_spice**: Run SPICE circuit simulation. Provide netlist_path, \
 analysis_type (dc/ac/transient), and optional params.
 - **run_cfd**: Steady conduction to a fixed-temperature sink (CalculiX). \
@@ -146,17 +147,27 @@ def create_simulation_agent(
     async def run_fea(
         ctx: RunContext[SimulationAgentDeps],
         mesh_file: str,
-        load_cases: list[dict[str, Any]] | None = None,
-        analysis_type: str = "static",
-        material: str = "steel_1018",
+        load_case: str,
+        material: dict[str, Any],
+        fixed_node_set: str,
+        analysis_type: str = "static_stress",
+        load_node_set: str | None = None,
+        load_force_n: list[float] | None = None,
+        num_modes: int = 3,
+        yield_strength_mpa: float | None = None,
     ) -> dict[str, Any]:
-        """Run FEA structural analysis using CalculiX.
+        """Run FEA with CalculiX: calculix.run_fea's own arguments (FORGE-561).
 
         Args:
-            mesh_file: Path to the mesh file (.inp format).
-            load_cases: List of load case definitions.
-            analysis_type: Type of analysis ('static', 'modal', 'thermal').
-            material: Material identifier.
+            mesh_file: Volume mesh (.inp), e.g. from generate_mesh.
+            load_case: Name of the load case.
+            material: {'name': ...} or explicit youngs_modulus_mpa/poissons_ratio.
+            fixed_node_set: Face held fixed (a surface set from generate_mesh).
+            analysis_type: 'static_stress' or 'modal'.
+            load_node_set: Loaded face (static_stress).
+            load_force_n: [Fx, Fy, Fz] in N (static_stress).
+            num_modes: Modes to extract (modal).
+            yield_strength_mpa: Cited yield strength; gives a safety factor.
         """
         with tracer.start_as_current_span("tool.run_fea") as span:
             span.set_attribute("mesh_file", mesh_file)
@@ -174,9 +185,14 @@ def create_simulation_agent(
             skill_input = RunFeaInput(
                 work_product_id=str(UUID(int=0)),
                 mesh_file=mesh_file,
-                load_cases=load_cases or [],
+                load_case=load_case,
                 analysis_type=analysis_type,
                 material=material,
+                fixed_node_set=fixed_node_set,
+                load_node_set=load_node_set,
+                load_force_n=load_force_n,
+                num_modes=num_modes,
+                yield_strength_mpa=yield_strength_mpa,
             )
 
             handler = RunFeaHandler(skill_ctx)
@@ -189,9 +205,12 @@ def create_simulation_agent(
             return {
                 "skill": "run_fea",
                 "success": True,
+                "analysis_type": output.analysis_type,
                 "max_stress_mpa": output.max_stress_mpa,
                 "max_displacement_mm": output.max_displacement_mm,
                 "safety_factor": output.safety_factor,
+                "frequencies_hz": output.frequencies_hz,
+                "frd_path": output.frd_path,
                 "solver_time_s": output.solver_time_s,
             }
 
