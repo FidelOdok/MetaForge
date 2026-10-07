@@ -153,7 +153,7 @@ services:
       # the blob client hangs on a misconfigured endpoint).
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
       - MINIO_SECURE=${MINIO_SECURE:-false}
       - WATCHFILES_FORCE_POLLING=true

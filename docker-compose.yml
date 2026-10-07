@@ -31,7 +31,7 @@ services:
       - METAFORGE_ENV=docker
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - TEMPORAL_HOST=temporal:7233
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
@@ -50,7 +50,7 @@ services:
       # FORGE-542: ngspice is only in spice-adapter's image.
       - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
       - ADAPTER_WORKSPACE_DIR=/workspace
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:-metaforge}@postgres:5432/${POSTGRES_DB:-metaforge}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
       - METAFORGE_LLM_MODEL=${METAFORGE_LLM_MODEL:-}
       - METAFORGE_LLM_BASE_URL=${METAFORGE_LLM_BASE_URL:-}
@@ -109,7 +109,7 @@ services:
       - PROPERTY_EXTRACTION_MODEL=${PROPERTY_EXTRACTION_MODEL:-}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
       - MINIO_SECURE=${MINIO_SECURE:-false}
       # Distributor APIs (MET-434). Loader skips registration when the
@@ -209,7 +209,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-metaforge}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metaforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       POSTGRES_DB: ${POSTGRES_DB:-metaforge}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -230,7 +230,7 @@ services:
       - "${NEO4J_HTTP_PORT:-7474}:7474"
       - "${NEO4J_BOLT_PORT:-7687}:7687"
     environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-metaforge}
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - NEO4J_PLUGINS=["apoc"]
       - NEO4J_server_memory_heap_initial__size=256m
       - NEO4J_server_memory_heap_max__size=512m
@@ -251,7 +251,8 @@ services:
   # Authoritative store for L1-L3 knowledge data (datasheets, extracted
   # properties, design decisions, BOM specs). Neo4j + pgvector are
   # regenerable caches built from these objects. Dev creds default to
-  # minioadmin/minioadmin; override via MINIO_ACCESS_KEY/MINIO_SECRET_KEY
+  # MINIO_ACCESS_KEY identifies the account and keeps a default;
+  # MINIO_SECRET_KEY is the credential and has none (FORGE-558).
   # in real environments.
   minio:
     image: minio/minio:latest
@@ -261,7 +262,7 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
     volumes:
       - minio-data:/data
     healthcheck:
@@ -318,7 +319,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:?TEMPORAL_POSTGRES_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- Temporal's database password used to be hardcoded as 'temporal'}
       POSTGRES_DB: temporal
     volumes:
       - temporal-db-data:/var/lib/postgresql/data
@@ -341,7 +342,7 @@ services:
       - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
+      - POSTGRES_PWD=${TEMPORAL_POSTGRES_PASSWORD:?TEMPORAL_POSTGRES_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- Temporal's database password used to be hardcoded as 'temporal'}
       - POSTGRES_SEEDS=temporal-db
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml
     volumes:
@@ -391,8 +392,8 @@ services:
       - TEMPORAL_HOST=temporal:7233
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://metaforge:metaforge@postgres:5432/metaforge}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       # MET-724: the worker synthesizes insights in its own process, so it
       # needs the same LLM credentials the gateway has. Without the key the
@@ -447,8 +448,8 @@ services:
       - TEMPORAL_HOST=temporal:7233
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-metaforge}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://metaforge:metaforge@postgres:5432/metaforge}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}}
       - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
       # FORGE-475: a phase runs the same chat harness the gateway does, so it
       # needs the same model config. This service had none, and every phase
@@ -480,7 +481,7 @@ services:
       # created with no stored geometry. Same names and defaults as `gateway`.
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
       - MINIO_SECURE=${MINIO_SECURE:-false}
       # FORGE-487: the service credential that lets the sidecar tell this
@@ -732,7 +733,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-metaforge}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-metaforge}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - POSTGRES_DATABASE=${POSTGRES_DB:-metaforge}
       - POSTGRES_WORKSPACE=lightrag_ui
       # Embeddings — ollama default. The bootstrap helper below

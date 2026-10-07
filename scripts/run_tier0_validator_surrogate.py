@@ -13,12 +13,39 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 REPO_ROOT = Path("/mnt/c/Users/odokf/Documents/MetaForge")
 sys.path.insert(0, str(REPO_ROOT))
+
+
+def _postgres_dsn() -> str:
+    """Where this surrogate finds Postgres.
+
+    Read from the environment rather than hardcoded (FORGE-558). The old
+    literal embedded `metaforge:metaforge`, which stopped being the password
+    the moment compose stopped defaulting to it -- so a hardcoded DSN here
+    would fail against any correctly-configured install.
+    """
+    dsn = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_DSN")
+    if dsn:
+        # The app speaks SQLAlchemy's asyncpg dialect; LightRAG wants plain
+        # libpq, so strip the driver suffix if one is present.
+        return dsn.replace("postgresql+asyncpg://", "postgresql://")
+    user = os.environ.get("POSTGRES_USER", "metaforge")
+    db = os.environ.get("POSTGRES_DB", "metaforge")
+    password = os.environ.get("POSTGRES_PASSWORD")
+    if not password:
+        raise SystemExit(
+            "POSTGRES_PASSWORD is unset, and there is no default any more. "
+            "Source your .env (or run scripts/onboarding.sh) before this script."
+        )
+    host = os.environ.get("POSTGRES_HOST", "localhost")
+    port = os.environ.get("POSTGRES_PORT", "5432")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
 async def main() -> int:
@@ -62,7 +89,7 @@ async def main() -> int:
     svc = create_knowledge_service(
         "lightrag",
         working_dir=f"/tmp/lightrag-tier0-validator-{svc_suffix}",
-        postgres_dsn="postgresql://metaforge:metaforge@localhost:5432/metaforge",
+        postgres_dsn=_postgres_dsn(),
         namespace_prefix=f"lightrag_tier0_{svc_suffix}",
     )
     await svc.initialize()

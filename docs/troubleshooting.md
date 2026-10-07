@@ -373,42 +373,66 @@ Prometheus carries the same thing as
 the `McpRunningStaleCode` alert fires on — the point being to be told
 without looking.
 
-## `docker compose` fails: `required variable GRAFANA_PASSWORD is missing a value`
+## `docker compose` fails: `required variable <NAME> is missing a value`
 
 Every `docker compose` command fails, including ones that have nothing to do
-with Grafana:
+with the named service:
 
 ```
-error while interpolating services.grafana.environment.[]:
-required variable GRAFANA_PASSWORD is missing a value
+error while interpolating services.postgres.environment.POSTGRES_PASSWORD:
+required variable POSTGRES_PASSWORD is missing a value
 ```
 
-**This is deliberate (FORGE-556).** Grafana's admin password used to default to
-`metaforge` — a value committed to this public repository since the first
-compose commit, so every MetaForge install shared an admin password that any
-reader already knew. The default is gone, and compose refuses rather than
-picking one for you.
+**This is deliberate (FORGE-556, FORGE-558).** These credentials used to have
+working defaults — `metaforge`, `minioadmin`, `temporal` — committed to this
+public repository since the first compose commit. Every MetaForge install
+therefore shared passwords that any reader of the repository already knew, on
+services that publish host ports by default:
+
+| Variable | Old default | Service | Published on |
+|---|---|---|---|
+| `POSTGRES_PASSWORD` | `metaforge` | Postgres | `5432` |
+| `NEO4J_PASSWORD` | `metaforge` | Neo4j | `7474`, `7687` |
+| `MINIO_SECRET_KEY` | `minioadmin` | MinIO | `9000`, `9001` |
+| `TEMPORAL_POSTGRES_PASSWORD` | `temporal` | Temporal's database | not published |
+| `GRAFANA_PASSWORD` | `metaforge` | Grafana | `3001`, `--profile observability` |
+
+The defaults are gone, and compose refuses rather than picking one for you.
+Identifiers that are *not* secrets — `POSTGRES_USER`, `POSTGRES_DB`,
+`NEO4J_USER`, `MINIO_ACCESS_KEY` — keep their defaults.
 
 Compose interpolates the whole file before it decides which services to start,
-so the error appears even for `docker compose up gateway`, where Grafana is not
-involved. That is a property of compose, not a bug here.
+so the error appears even for `docker compose up gateway`, where the named
+service is not involved. That is a property of compose, not a bug here.
 
 Fix it in either direction:
 
 ```bash
-scripts/onboarding.sh            # generates one, in both --usage and --develop
-# or, by hand:
-echo "GRAFANA_PASSWORD=$(openssl rand -base64 24)" >> .env
+scripts/onboarding.sh            # fills every blank, in both --usage and --develop
+# or, by hand, for each one the error names:
+for v in POSTGRES_PASSWORD NEO4J_PASSWORD MINIO_SECRET_KEY \
+         TEMPORAL_POSTGRES_PASSWORD GRAFANA_PASSWORD; do
+  echo "$v=$(openssl rand -base64 24)" >> .env
+done
 ```
 
-If you copied `.env.example` and skipped onboarding, you will hit this: the file
-ships `GRAFANA_PASSWORD=` blank **on purpose**. `onboarding.sh` generates
-secrets with `set_if_blank`, which returns early for any key that already has a
-value — so the old shipped default silently guaranteed the generator never
-fired, and every install kept the published password.
+Fix them one at a time and compose will name the next one, since interpolation
+stops at the first failure.
 
-**Already running a Grafana that used the old default?** Setting the variable is
-not enough. `GF_SECURITY_ADMIN_PASSWORD` seeds the admin user when Grafana first
+If you copied `.env.example` and skipped onboarding, you will hit this: the file
+ships these keys blank **on purpose**. `onboarding.sh` generates secrets with
+`set_if_blank`, which returns early for any key that already has a value — so
+the old shipped defaults silently guaranteed the generator never fired, and
+every install kept the published passwords.
+
+**Already running services that used the old defaults?** Setting the variables is
+not enough. Postgres, Neo4j, MinIO and Grafana all seed their credentials when
+they first provision their data directory, and those live in named volumes that
+survive `docker compose down`. An existing stack keeps the published passwords
+until each service is rotated in place, or its volume is deleted and the stack
+recreated from scratch (which destroys the data in it).
+
+For Grafana specifically: `GF_SECURITY_ADMIN_PASSWORD` seeds the admin user when Grafana first
 provisions its database; on later starts an existing admin keeps the password it
 already has. Since `grafana-data` is a named volume that survives
 `docker compose down`, an instance created before this change is still on the
