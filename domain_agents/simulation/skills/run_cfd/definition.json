@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "domain": "simulation",
   "agent": "simulation",
-  "description": "Run computational fluid dynamics analysis using CalculiX thermal solver",
+  "description": "Thermal analysis a CFD request can be answered with today: steady conduction to a fixed-temperature sink via the CalculiX thermal solver. Flow (velocity, pressure, convection) is refused; MetaForge has no flow solver.",
   "phase": 1,
   "tools_required": [
     {
       "tool_id": "calculix.run_thermal",
-      "capability": "cfd_analysis",
+      "capability": "thermal_analysis",
       "required": true
     }
   ],
@@ -17,5 +17,10 @@
   "timeout_seconds": 600,
   "retries": 1,
   "idempotent": true,
-  "tags": ["cfd", "thermal", "flow", "calculix"]
+  "tags": [
+    "cfd",
+    "thermal",
+    "conduction",
+    "calculix"
+  ]
 }

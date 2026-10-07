@@ -1562,6 +1562,7 @@ What's deliberately not in scope this phase — see
 | **6–7 specialist agents**, not all 25 disciplines | 1:1 agent-to-discipline; covers electronics-heavy products (IoT, drones, embedded) | Phase 2 → 19 agents; Phase 3 → 25 |
 | **No production PDF ingest path** — text fixtures only for now | Server-side parser (MET-399) is in flight | Tracked under MET-399 |
 | **No streaming progress for long-running tools** in the CLI yet | Streaming notifications work over MCP; CLI wrapper is a follow-up | Tracked separately |
+| **No flow solver**: `run_cfd` answers steady conduction to a fixed-temperature sink (`calculix.run_thermal`) and refuses velocity, pressure drop and convection rather than returning zeros | Chosen solver is OpenFOAM in its own adapter container (`foamRun`, `snappyHexMesh`); its image is large and is built on CI runners, not the shared dev box (FORGE-543) | Follow-up ticket under FORGE-541 |
 
 ## Where each capability is proven
 
