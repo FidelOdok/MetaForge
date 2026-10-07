@@ -1713,9 +1713,15 @@ async def _bootstrap(
     # FORGE-462: flow.* and run.* registered in the gateway and never here, so
     # no harness plugin could list, propose or start a design flow.
     flow_bindings = _build_flow_bindings()
+    # FORGE-546: evidence, claims, promotion, the evaluators and the
+    # commit_* recorders registered in the gateway and never here, so every
+    # plugin client lacked them while every profile advertised
+    # twin.record_evidence.
+    evidence_bindings, lazy_bridges = _build_evidence_bindings(twin, project_backend)
 
     server = await build_unified_server(
         **flow_bindings,
+        **evidence_bindings,
         engineering_entity_recorder=entity_recorder,
         engineering_entity_approver=make_engineering_entity_approver(twin),
         document_recorder=make_document_recorder(twin, project_backend),
@@ -1747,7 +1753,122 @@ async def _bootstrap(
         # FORGE-523: twin.item_history, so a plugin can read revisions too.
         item_history_reader=make_item_history_reader(twin),
     )
+    # The evaluators' tier-2 calls (calculix.run_fea, run_thermal,
+    # freecad.list_named_faces) go through this server's own registry, which
+    # only exists now -- the same late binding the gateway does.
+    if lazy_bridges and server.tool_registry is not None:
+        from skill_registry.registry_bridge import RegistryMcpBridge
+
+        registry_bridge = RegistryMcpBridge(server.tool_registry)
+        for lazy in lazy_bridges:
+            lazy.bridge = registry_bridge
     return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
+
+
+class _LateBridge:
+    """An MCP bridge whose backing registry is bound after the server exists."""
+
+    def __init__(self) -> None:
+        self.bridge: Any = None
+
+    async def invoke(
+        self, tool_id: str, params: dict[str, Any], timeout: int | None = None
+    ) -> dict[str, Any]:
+        if self.bridge is None:
+            raise RuntimeError(f"no MCP bridge bound yet for {tool_id!r}")
+        result: dict[str, Any] = await self.bridge.invoke(tool_id, params, timeout=timeout)
+        return result
+
+
+def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str, Any], list[Any]]:
+    """The gateway's evidence and recorder collaborators, for the sidecar (FORGE-546).
+
+    Each needs only the twin and the project backend, plus (for the three
+    evaluators) a bridge to this server's own registry, bound once it exists.
+    A collaborator that cannot be built is logged and left out, so its tool is
+    simply absent rather than registered and broken.
+    """
+    bindings: dict[str, Any] = {}
+    bridges: list[Any] = []
+
+    def _try(name: str, build: Any) -> None:
+        try:
+            bindings[name] = build()
+        except Exception as exc:  # noqa: BLE001 - one missing tool, not a dead sidecar
+            logger.warning("mcp_collaborator_init_failed", collaborator=name, error=str(exc))
+
+    from api_gateway.twin import (
+        claim_recorder,
+        design_sketch_recorder,
+        evidence_recorder,
+        structured_document_recorder,
+    )
+
+    _try(
+        "evidence_recorder", lambda: evidence_recorder.make_evidence_recorder(twin, project_backend)
+    )
+    _try("claim_recorder", lambda: claim_recorder.make_claim_recorder(twin))
+    _try(
+        "design_sketch_recorder",
+        lambda: design_sketch_recorder.make_design_sketch_recorder(twin, project_backend),
+    )
+    for name in (
+        "hazard_analysis_recorder",
+        "system_architecture_recorder",
+        "technical_drawing_recorder",
+        "compliance_checklist_recorder",
+        "procurement_record_recorder",
+    ):
+        factory = getattr(structured_document_recorder, f"make_{name}")
+        _try(name, lambda f=factory: f(twin, project_backend))
+
+    try:
+        from api_gateway.requirement_intelligence.promotion import attempt_promotion
+
+        async def promotion_attempter(**kwargs: Any) -> dict[str, Any]:
+            result: dict[str, Any] = await attempt_promotion(twin, **kwargs)
+            return result
+
+        bindings["promotion_attempter"] = promotion_attempter
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="promotion", error=str(exc))
+
+    evidence = bindings.get("evidence_recorder")
+    if evidence is not None:
+        try:
+            from api_gateway.twin.calibration import make_calibrated_band_lookup
+            from api_gateway.twin.dfm_evidence import make_overhang_evidence_recorder
+            from api_gateway.twin.metric_evaluator import make_metric_evaluator
+            from api_gateway.twin.sensitivity import make_sensitivity_ranker
+            from api_gateway.twin.thermal_evidence import make_thermal_evidence_recorder
+
+            metric_bridge, thermal_bridge, overhang_bridge = (
+                _LateBridge(),
+                _LateBridge(),
+                _LateBridge(),
+            )
+            bridges.extend([metric_bridge, thermal_bridge, overhang_bridge])
+            bindings["metric_evaluator"] = make_metric_evaluator(
+                twin,
+                evidence_recorder=evidence,
+                mcp_bridge=metric_bridge,
+                calibrated_band_lookup=make_calibrated_band_lookup(twin),
+            )
+            bindings["thermal_evaluator"] = make_thermal_evidence_recorder(
+                twin, evidence_recorder=evidence, mcp_bridge=thermal_bridge
+            )
+            bindings["overhang_evaluator"] = make_overhang_evidence_recorder(
+                twin, evidence_recorder=evidence, mcp_bridge=overhang_bridge
+            )
+            bindings["sensitivity_ranker"] = make_sensitivity_ranker(
+                twin, evidence_recorder=evidence
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "mcp_collaborator_init_failed", collaborator="evaluators", error=str(exc)
+            )
+    logger.info("mcp_evidence_bindings", wired=sorted(bindings))
+    return bindings, bridges
 
 
 def _build_flow_bindings() -> dict[str, Any]:
