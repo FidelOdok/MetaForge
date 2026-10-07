@@ -453,3 +453,54 @@ class TestGateStatus:
     async def test_gate_id_is_g3(self, twin, project_id):
         result = await evaluate_g3_feasibility(twin, project_id)
         assert result.gate_id == "G3"
+
+
+class TestRiskSourcesForge549:
+    """FORGE-549: risks recorded as the tool described, and hazard analyses."""
+
+    async def test_probability_counts_as_likelihood(self, twin, project_id):
+        await twin.create_engineering_entity(
+            _risk(project_id, {"severity": 5, "probability": 5}, title="pinch point")
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id.startswith("risk:"))
+        assert check.status is GateCheckStatus.FAIL  # critical, no mitigation
+
+    async def test_a_non_numeric_score_is_not_evaluated_not_a_crash(self, twin, project_id):
+        await twin.create_engineering_entity(
+            _risk(project_id, {"severity": "high", "likelihood": "low"})
+        )
+        result = await evaluate_g3_feasibility(twin, project_id)
+        check = next(c for c in result.checks if c.id.startswith("risk:"))
+        assert check.status is GateCheckStatus.NOT_EVALUATED
+
+    async def test_hazard_analysis_rows_reach_the_gate(self, twin, project_id):
+        analysis = WorkProduct(
+            name="hazards",
+            type=WorkProductType.HAZARD_ANALYSIS,
+            domain="compliance",
+            file_path="hazards.md",
+            content_hash="h",
+            format="markdown",
+            created_by="user",
+            project_id=project_id,
+            metadata={
+                "hazards": [
+                    {"hazard": "arm crush", "severity": 5, "likelihood": 4, "mitigation": ""},
+                    {
+                        "hazard": "sharp edge",
+                        "severity": 2,
+                        "likelihood": 2,
+                        "mitigation": "deburr",
+                    },
+                ]
+            },
+        )
+        await twin.create_work_product(analysis)
+        result = await evaluate_g3_feasibility(twin, project_id)
+        hazards = {c.label: c.status for c in result.checks if c.id.startswith("hazard:")}
+        assert hazards == {
+            "Risk mitigated: arm crush": GateCheckStatus.FAIL,
+            "Risk mitigated: sharp edge": GateCheckStatus.PASS,
+        }
+        assert not any(c.id == "risks:none-recorded" for c in result.checks)

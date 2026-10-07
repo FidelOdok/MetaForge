@@ -1825,7 +1825,8 @@ class TwinServer(McpToolServer):
                             "type": "object",
                             "description": (
                                 "Type-specific fields (e.g. objective's metric/direction/"
-                                "target, risk's probability/severity/mitigation, "
+                                "target, risk's severity (1-5), likelihood (1-5) and "
+                                "mitigation -- the names the G3 gate reads, "
                                 "evidence's evidence_type/result) -- stored in metadata."
                             ),
                         },
