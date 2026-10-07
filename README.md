@@ -158,6 +158,28 @@ npm start                 # http://localhost:3000/MetaForge/
 multi-user collaboration ship in later phases. See
 [`docs/roadmap.md`](docs/roadmap.md) for the full plan.
 
+## Open core
+
+Everything that turns intent into reviewable, manufacturable hardware is
+here: the gateway, the orchestrator, the digital twin, the agents, the
+tool adapters, the dashboard and the CLI. A local, single-user MetaForge
+is the whole product, needs no account, and talks to no service of ours.
+
+What is *not* here is the hosted service — accounts, the Supabase-backed
+identity layer and the control plane behind them. That lives in a
+separate repository and plugs in through two documented seams:
+
+- **Gateway**: an auth provider registered on the `metaforge.auth`
+  entry-point group. See
+  [Gateway authentication](docs/deployment/authentication.md) for the
+  three-member protocol and how to write your own.
+- **Dashboard**: the `metaforge:auth` module alias, which resolves to
+  `dashboard/src/auth/none.ts` by default.
+
+Both seams are provider-agnostic. Running MetaForge against your own
+identity provider is a supported path, not a workaround, and nothing in
+this repository is shaped to make the hosted option the easy one.
+
 ## Contributing
 
 This README is for engineers **using** MetaForge. If you want to

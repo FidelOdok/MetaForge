@@ -12,6 +12,10 @@ its author did nothing.
 
 When ``auth_mode`` is ``off`` this middleware is never installed at all, so the
 local single-user gateway carries no added work and no behavioural difference.
+
+What it does *not* know is how a token is checked. That belongs to whichever
+:class:`~api_gateway.auth.provider.AuthProvider` is installed — this class only
+decides what each of the provider's two failure classes means over HTTP.
 """
 
 from __future__ import annotations
@@ -23,8 +27,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from api_gateway.auth.jwks import JwksError
-from api_gateway.auth.verifier import InvalidToken, TokenVerifier
+from api_gateway.auth.provider import AuthProvider, AuthUnavailable, InvalidToken
 
 logger = structlog.get_logger(__name__)
 
@@ -49,9 +52,9 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
 class AuthMiddleware(BaseHTTPMiddleware):
     """Requires a verified bearer token on every non-public request."""
 
-    def __init__(self, app: Callable[..., Awaitable[None]], *, verifier: TokenVerifier) -> None:
+    def __init__(self, app: Callable[..., Awaitable[None]], *, provider: AuthProvider) -> None:
         super().__init__(app)  # type: ignore[arg-type]
-        self._verifier = verifier
+        self._provider = provider
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -64,11 +67,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return self._challenge("Missing bearer token")
 
         try:
-            principal = await self._verifier.verify(token)
+            principal = await self._provider.verify(token)
         except InvalidToken as exc:
             logger.info("gateway_auth_rejected", path=request.url.path, reason=str(exc))
             return self._challenge(str(exc))
-        except JwksError as exc:
+        except AuthUnavailable as exc:
             # We could not reach a verdict. Saying 401 here would blame the
             # user's credentials for our own outage.
             logger.error("gateway_auth_unavailable", path=request.url.path, error=str(exc))

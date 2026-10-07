@@ -20,8 +20,10 @@ from api_gateway.approvals.routes import router as approvals_router
 from api_gateway.assistant.routes import router as assistant_router
 from api_gateway.auth import (
     AuthConfigurationError,
+    AuthMiddleware,
     AuthSettings,
     load_auth_settings,
+    load_provider,
 )
 from api_gateway.bom.risk_routes import router as bom_risk_router
 from api_gateway.bom.routes import router as bom_router
@@ -1915,6 +1917,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # MET-672: stop the abandoned-run reaper.
     if getattr(app.state, "run_reaper", None) is not None:
         await app.state.run_reaper.stop()
+    # FORGE-540: an auth provider typically holds an HTTP client for fetching
+    # signing keys. Best-effort, and never allowed to stop the rest of shutdown.
+    if getattr(app.state, "auth_provider", None) is not None:
+        try:
+            await app.state.auth_provider.aclose()
+        except Exception as exc:
+            logger.warning("gateway_auth_provider_close_failed", error=str(exc))
     # Flush and close the Kafka producer so buffered events are not dropped.
     if getattr(app.state, "kafka_publisher", None) is not None:
         try:
@@ -2036,14 +2045,14 @@ def create_app(
     if scheduler is not None:
         app.state.scheduler = scheduler
 
-    # -- Authentication (MetaForge Cloud) ----------------------------------
+    # -- Authentication ----------------------------------------------------
     #
     # ``load_auth_settings`` raises rather than returning a downgraded result,
-    # so a gateway configured for cloud auth that cannot verify tokens fails to
-    # start here instead of coming up silently open.
+    # so a gateway asked for authentication it cannot deliver fails to start
+    # here instead of coming up silently open.
     auth_settings = load_auth_settings()
     app.state.auth_settings = auth_settings
-    set_reported_auth_mode(auth_settings.mode.value)
+    set_reported_auth_mode(auth_settings.mode)
 
     origins = _resolve_cors_origins(cors_origins, auth_settings)
 
@@ -2052,12 +2061,11 @@ def create_app(
     # layer and arrives at the browser with its headers, as a readable error
     # rather than an opaque network failure.
     if auth_settings.enabled:
-        # Imported here, not at module scope: these pull in PyJWT, which is a
-        # cloud-only dependency. A local gateway must import nothing extra.
-        from api_gateway.auth import AuthMiddleware, TokenVerifier
-
-        app.state.token_verifier = TokenVerifier(auth_settings)
-        app.add_middleware(AuthMiddleware, verifier=app.state.token_verifier)
+        # The provider is a separately-installed plug-in (FORGE-540), so it is
+        # resolved here rather than imported: a local gateway loads none of its
+        # crypto stack, and a gateway whose image lacks it fails loudly.
+        app.state.auth_provider = load_provider(auth_settings.mode)
+        app.add_middleware(AuthMiddleware, provider=app.state.auth_provider)
 
     # -- CORS --------------------------------------------------------------
     app.add_middleware(

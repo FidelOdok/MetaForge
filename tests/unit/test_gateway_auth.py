@@ -1,4 +1,4 @@
-"""Gateway authentication (MetaForge Cloud, Phase 1).
+"""Gateway authentication: the seam, not any particular provider (FORGE-540).
 
 The load-bearing assertions here are the *refusals*. MetaForge already carries
 several fail-open auth paths — a guard that returns silently when its token is
@@ -9,54 +9,99 @@ became a permanent state because nothing failed when it engaged.
 So the tests that matter most are the ones proving this gateway refuses to
 start rather than coming up silently open, and that a route nobody remembered
 to annotate is protected anyway.
+
+Since the hosted provider moved to its own repository, one refusal carries more
+weight than it used to: naming a provider that is not installed. That is no
+longer a typo-only scenario — it is what a gateway image built without the
+cloud package looks like, and it must stop the process rather than quietly
+serve every route to anyone.
 """
 
 from __future__ import annotations
 
 import sys
-import time
 
-import jwt
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from api_gateway.auth import (
     AuthConfigurationError,
     AuthMiddleware,
-    AuthMode,
+    AuthUnavailable,
     InvalidToken,
-    JwksError,
     Principal,
-    TokenVerifier,
     load_auth_settings,
+    load_provider,
 )
-from api_gateway.auth.config import DEFAULT_AUDIENCE
 
-# At least 32 bytes: PyJWT warns below the RFC 7518 §3.2 minimum for HS256.
-SECRET = "test-signing-secret-at-least-32-bytes-long"
-ISSUER = "https://proj.supabase.co/auth/v1"
+SUBJECT = "3f9a2c14-0000-4000-8000-000000000001"
 
 
-def _settings(**overrides):
-    env = {
-        "METAFORGE_AUTH_MODE": "supabase",
-        "METAFORGE_SUPABASE_JWT_SECRET": SECRET,
-        **overrides,
+# ---------------------------------------------------------------------------
+# A stand-in provider, so these tests exercise the seam and nothing behind it
+# ---------------------------------------------------------------------------
+
+
+class FakeProvider:
+    """Accepts one token and rejects everything else."""
+
+    name = "fake"
+
+    def __init__(self, *, good_token: str = "good") -> None:
+        self._good = good_token
+        self.closed = False
+
+    async def verify(self, token: str) -> Principal:
+        if token != self._good:
+            raise InvalidToken("Token rejected")
+        return Principal(subject=SUBJECT, email="engineer@example.com", role="authenticated")
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class UnreachableProvider(FakeProvider):
+    """The identity provider cannot be reached, so there is no verdict."""
+
+    async def verify(self, token: str) -> Principal:
+        raise AuthUnavailable("connection refused")
+
+
+class _StubEntryPoint:
+    """The two attributes :func:`load_provider` actually uses.
+
+    ``load()`` returns the object the entry point names — a class or factory —
+    which ``load_provider`` then calls, exactly as ``importlib.metadata`` does.
+    """
+
+    def __init__(self, name: str, target, value: str = "tests:FakeProvider") -> None:
+        self.name = name
+        self.value = value
+        self._target = target
+
+    def load(self):
+        return self._target
+
+
+class _UnimportableEntryPoint(_StubEntryPoint):
+    """An entry point whose module is not in this environment."""
+
+    def load(self):
+        raise ModuleNotFoundError("No module named 'metaforge_cloud'")
+
+
+def _register(monkeypatch, **providers) -> None:
+    """Make ``providers`` look installed on the ``metaforge.auth`` group.
+
+    Each value is the object the entry point resolves to, so a test registers
+    ``fake=FakeProvider`` — the class — not an instance of it.
+    """
+    entries = {
+        name: target if isinstance(target, _StubEntryPoint) else _StubEntryPoint(name, target)
+        for name, target in providers.items()
     }
-    return load_auth_settings(env=env)
-
-
-def _token(**claims) -> str:
-    payload = {
-        "sub": "3f9a2c14-0000-4000-8000-000000000001",
-        "aud": DEFAULT_AUDIENCE,
-        "email": "engineer@example.com",
-        "role": "authenticated",
-        "exp": int(time.time()) + 3600,
-        **claims,
-    }
-    return jwt.encode(payload, SECRET, algorithm="HS256")
+    monkeypatch.setattr("api_gateway.auth.provider.available_providers", lambda: entries)
 
 
 # ---------------------------------------------------------------------------
@@ -65,104 +110,62 @@ def _token(**claims) -> str:
 
 
 class TestAuthConfigRefuses:
-    def test_cloud_mode_without_any_verification_method_refuses_to_start(self):
+    def test_naming_an_uninstalled_provider_refuses_to_start(self, monkeypatch):
         """The whole point: no silent downgrade to an open gateway."""
+        _register(monkeypatch)
         with pytest.raises(AuthConfigurationError) as exc:
             load_auth_settings(env={"METAFORGE_AUTH_MODE": "supabase"})
         assert "Refusing to start" in str(exc.value)
+        assert "silently open" in str(exc.value)
 
-    def test_unrecognised_mode_refuses_rather_than_meaning_off(self):
+    def test_refusal_names_what_is_installed(self, monkeypatch):
+        """An operator needs to know what they can actually choose."""
+        _register(monkeypatch, fake=FakeProvider)
         with pytest.raises(AuthConfigurationError) as exc:
             load_auth_settings(env={"METAFORGE_AUTH_MODE": "supbase"})
-        assert "not a valid mode" in str(exc.value)
+        assert "Installed providers: fake" in str(exc.value)
 
-    def test_contradictory_signing_schemes_refuse(self):
-        with pytest.raises(AuthConfigurationError):
-            load_auth_settings(
-                env={
-                    "METAFORGE_AUTH_MODE": "supabase",
-                    "METAFORGE_SUPABASE_JWKS_URL": "https://x/jwks",
-                    "METAFORGE_SUPABASE_JWT_SECRET": "s",
-                }
-            )
-
-    def test_plaintext_supabase_url_refuses(self):
+    def test_refusal_with_nothing_installed_says_where_to_get_one(self, monkeypatch):
+        _register(monkeypatch)
         with pytest.raises(AuthConfigurationError) as exc:
-            load_auth_settings(
-                env={
-                    "METAFORGE_AUTH_MODE": "supabase",
-                    "METAFORGE_SUPABASE_URL": "http://proj.supabase.co",
-                }
-            )
-        assert "https" in str(exc.value)
+            load_auth_settings(env={"METAFORGE_AUTH_MODE": "supabase"})
+        assert "MetaForge Cloud" in str(exc.value)
+
+    def test_a_provider_that_fails_to_import_is_fatal(self, monkeypatch):
+        _register(monkeypatch, broken=_UnimportableEntryPoint("broken", None))
+        with pytest.raises(AuthConfigurationError, match="failed to import"):
+            load_provider("broken")
+
+    def test_a_provider_that_cannot_verify_is_fatal(self, monkeypatch):
+        """A plug-in resolving to the wrong object must not pass for one."""
+
+        class NotAProvider:
+            name = "wrong"
+
+        _register(monkeypatch, wrong=lambda: NotAProvider())
+        with pytest.raises(AuthConfigurationError, match="no verify"):
+            load_provider("wrong")
 
 
 class TestAuthConfigResolution:
     def test_default_is_off_and_needs_nothing(self):
         settings = load_auth_settings(env={})
-        assert settings.mode is AuthMode.OFF
+        assert settings.mode == "off"
         assert settings.enabled is False
 
-    def test_project_url_derives_jwks_and_issuer(self):
-        settings = load_auth_settings(
-            env={
-                "METAFORGE_AUTH_MODE": "supabase",
-                "METAFORGE_SUPABASE_URL": "https://proj.supabase.co/",
-            }
-        )
-        assert settings.jwks_url == "https://proj.supabase.co/auth/v1/.well-known/jwks.json"
-        assert settings.issuer == ISSUER
-        assert settings.algorithms == ["RS256", "ES256"]
+    def test_an_installed_provider_resolves(self, monkeypatch):
+        _register(monkeypatch, fake=FakeProvider)
+        settings = load_auth_settings(env={"METAFORGE_AUTH_MODE": "fake"})
+        assert settings.mode == "fake"
+        assert settings.enabled is True
 
-    def test_algorithms_are_pinned_to_the_configured_scheme(self):
-        """A symmetric-secret gateway must not also accept asymmetric tokens."""
-        assert _settings().algorithms == ["HS256"]
+    def test_mode_is_case_insensitive(self, monkeypatch):
+        _register(monkeypatch, fake=FakeProvider)
+        assert load_auth_settings(env={"METAFORGE_AUTH_MODE": "FAKE"}).mode == "fake"
 
-
-# ---------------------------------------------------------------------------
-# Token verification
-# ---------------------------------------------------------------------------
-
-
-class TestTokenVerifier:
-    async def test_valid_token_yields_a_principal(self):
-        principal = await TokenVerifier(_settings()).verify(_token())
-        assert isinstance(principal, Principal)
-        assert principal.subject == "3f9a2c14-0000-4000-8000-000000000001"
-        assert principal.email == "engineer@example.com"
-        assert principal.actor_id == "user:3f9a2c14-0000-4000-8000-000000000001"
-
-    async def test_expired_token_is_rejected(self):
-        with pytest.raises(InvalidToken, match="expired"):
-            await TokenVerifier(_settings()).verify(_token(exp=int(time.time()) - 10))
-
-    async def test_wrong_audience_is_rejected(self):
-        with pytest.raises(InvalidToken, match="audience"):
-            await TokenVerifier(_settings()).verify(_token(aud="some-other-service"))
-
-    async def test_token_signed_with_another_key_is_rejected(self):
-        forged = jwt.encode(
-            {"sub": "x", "aud": DEFAULT_AUDIENCE, "exp": int(time.time()) + 60},
-            "a-different-secret-also-at-least-32-bytes",
-            algorithm="HS256",
-        )
-        with pytest.raises(InvalidToken):
-            await TokenVerifier(_settings()).verify(forged)
-
-    async def test_alg_none_token_is_rejected(self):
-        """The classic JWT downgrade attack."""
-        unsigned = jwt.encode(
-            {"sub": "x", "aud": DEFAULT_AUDIENCE, "exp": int(time.time()) + 60},
-            key="",
-            algorithm="none",
-        )
-        with pytest.raises(InvalidToken):
-            await TokenVerifier(_settings()).verify(unsigned)
-
-    async def test_token_without_subject_is_rejected(self):
-        payload = {"aud": DEFAULT_AUDIENCE, "exp": int(time.time()) + 60}
-        with pytest.raises(InvalidToken):
-            await TokenVerifier(_settings()).verify(jwt.encode(payload, SECRET, algorithm="HS256"))
+    def test_load_provider_returns_the_registered_implementation(self, monkeypatch):
+        _register(monkeypatch, fake=FakeProvider)
+        assert isinstance(load_provider("fake"), FakeProvider)
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +173,7 @@ class TestTokenVerifier:
 # ---------------------------------------------------------------------------
 
 
-def _app(verifier: TokenVerifier) -> FastAPI:
+def _app(provider) -> FastAPI:
     app = FastAPI()
 
     @app.get("/health")
@@ -188,13 +191,13 @@ def _app(verifier: TokenVerifier) -> FastAPI:
     async def forgotten() -> dict[str, bool]:
         return {"reached": True}
 
-    app.add_middleware(AuthMiddleware, verifier=verifier)
+    app.add_middleware(AuthMiddleware, provider=provider)
     return app
 
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(_app(TokenVerifier(_settings())))
+    return TestClient(_app(FakeProvider()))
 
 
 class TestAuthMiddleware:
@@ -204,8 +207,12 @@ class TestAuthMiddleware:
         assert response.headers["WWW-Authenticate"].startswith("Bearer")
 
     def test_valid_token_passes(self, client: TestClient):
-        response = client.get("/v1/projects", headers={"Authorization": f"Bearer {_token()}"})
+        response = client.get("/v1/projects", headers={"Authorization": "Bearer good"})
         assert response.status_code == 200
+
+    def test_rejected_token_is_401(self, client: TestClient):
+        response = client.get("/v1/projects", headers={"Authorization": "Bearer nope"})
+        assert response.status_code == 401
 
     def test_a_route_nobody_annotated_is_still_protected(self, client: TestClient):
         assert client.get("/v1/some/route/nobody/remembered").status_code == 401
@@ -232,15 +239,21 @@ class TestAuthMiddleware:
         response = client.get("/v1/projects", headers={"Authorization": header})
         assert response.status_code == 401
 
+    def test_the_verified_principal_reaches_the_route(self):
+        app = FastAPI()
+
+        @app.get("/v1/whoami")
+        async def whoami(request: Request) -> dict[str, str]:
+            return {"actor": request.state.principal.actor_id}
+
+        app.add_middleware(AuthMiddleware, provider=FakeProvider())
+        response = TestClient(app).get("/v1/whoami", headers={"Authorization": "Bearer good"})
+        assert response.json() == {"actor": f"user:{SUBJECT}"}
+
     def test_unreachable_identity_provider_is_503_not_401(self):
         """ "Cannot verify" must not be reported as "your credentials are bad"."""
-
-        class Unreachable(TokenVerifier):
-            async def verify(self, token: str) -> Principal:
-                raise JwksError("connection refused")
-
-        client = TestClient(_app(Unreachable(_settings())))
-        response = client.get("/v1/projects", headers={"Authorization": f"Bearer {_token()}"})
+        client = TestClient(_app(UnreachableProvider()))
+        response = client.get("/v1/projects", headers={"Authorization": "Bearer good"})
         assert response.status_code == 503
 
 
@@ -257,7 +270,7 @@ class TestCreateApp:
         from api_gateway.server import create_app
 
         app = create_app()
-        assert app.state.auth_settings.mode is AuthMode.OFF
+        assert app.state.auth_settings.mode == "off"
         # No auth middleware installed at all, so local pays nothing for this.
         assert not any(m.cls is AuthMiddleware for m in app.user_middleware)
 
@@ -269,37 +282,52 @@ class TestCreateApp:
         create_app()
         assert get_reported_auth_mode() == "off"
 
-    def test_cloud_mode_with_wildcard_cors_refuses_to_start(self, monkeypatch):
+    def test_wildcard_cors_with_auth_on_refuses_to_start(self, monkeypatch):
         """Wildcard origin + credentials is the one combination that must be
         impossible to deploy once tokens exist."""
-        monkeypatch.setenv("METAFORGE_AUTH_MODE", "supabase")
-        monkeypatch.setenv("METAFORGE_SUPABASE_URL", "https://proj.supabase.co")
+        _register(monkeypatch, fake=FakeProvider)
+        monkeypatch.setenv("METAFORGE_AUTH_MODE", "fake")
         monkeypatch.setenv("METAFORGE_CORS_ORIGINS", "*")
         from api_gateway.server import create_app
 
         with pytest.raises(AuthConfigurationError, match="wildcard"):
             create_app()
 
-    def test_cloud_mode_installs_the_middleware(self, monkeypatch):
-        monkeypatch.setenv("METAFORGE_AUTH_MODE", "supabase")
-        monkeypatch.setenv("METAFORGE_SUPABASE_URL", "https://proj.supabase.co")
+    def test_an_installed_provider_gets_the_middleware(self, monkeypatch):
+        _register(monkeypatch, fake=FakeProvider)
+        monkeypatch.setenv("METAFORGE_AUTH_MODE", "fake")
         monkeypatch.setenv("METAFORGE_CORS_ORIGINS", "https://app.metaforge.uk")
         from api_gateway.server import create_app
 
         app = create_app()
         assert app.state.auth_settings.enabled is True
+        assert isinstance(app.state.auth_provider, FakeProvider)
         assert any(m.cls is AuthMiddleware for m in app.user_middleware)
+
+    def test_a_gateway_image_missing_the_provider_will_not_start(self, monkeypatch):
+        """The deployment mistake the entry-point indirection exists to catch."""
+        _register(monkeypatch)
+        monkeypatch.setenv("METAFORGE_AUTH_MODE", "supabase")
+        monkeypatch.setenv("METAFORGE_CORS_ORIGINS", "https://app.metaforge.uk")
+        from api_gateway.server import create_app
+
+        with pytest.raises(AuthConfigurationError, match="not installed"):
+            create_app()
 
 
 class TestMinimalInstall:
-    """PyJWT is a cloud-only dependency and must stay one.
+    """A crypto stack stays the provider's dependency, never the gateway's.
 
     ``api_gateway/__init__.py`` imports ``server``, which imports the auth
     package, so anything touching ``api_gateway`` loads it — including a local
     gateway that will never verify a token. An eager ``import jwt`` therefore
-    makes PyJWT a hard dependency of the entire package. That regression
-    shipped once and was caught by CI rather than locally, because the library
-    happened to be present transitively in the dev environment.
+    made PyJWT a hard dependency of the entire package. That regression shipped
+    once and was caught by CI rather than locally, because the library happened
+    to be present transitively in the dev environment.
+
+    Moving verification behind an entry point is what makes this structural:
+    there is no longer any import path from the gateway to a JWT library at
+    all. These tests keep it that way.
     """
 
     @staticmethod
@@ -308,8 +336,7 @@ class TestMinimalInstall:
 
         Blocking ``meta_path`` alone is not enough: ``find_spec`` consults
         ``sys.modules`` first and returns a cached module's spec without ever
-        reaching a finder. This module imports ``jwt`` at the top, so it is
-        always cached — the eviction below is what makes the check honest.
+        reaching a finder, so cached entries are evicted too.
         """
 
         class Blocker:
@@ -330,18 +357,14 @@ class TestMinimalInstall:
 
         from api_gateway.server import create_app
 
-        # Compared by value, not identity: purging the modules above means the
-        # freshly imported AuthMode is a different class object from the one
-        # this test module imported.
-        assert create_app().state.auth_settings.mode.value == "off"
+        assert create_app().state.auth_settings.mode == "off"
 
-    def test_cloud_mode_without_pyjwt_refuses_by_name(self, monkeypatch):
-        """Named at startup, not discovered as a 500 on the first request."""
+    def test_the_auth_package_imports_no_jwt_library(self, monkeypatch):
+        """Not merely lazy — absent. The seam has no crypto behind it."""
         self._hide_pyjwt(monkeypatch)
-        with pytest.raises(AuthConfigurationError, match="PyJWT"):
-            load_auth_settings(
-                env={
-                    "METAFORGE_AUTH_MODE": "supabase",
-                    "METAFORGE_SUPABASE_URL": "https://proj.supabase.co",
-                }
-            )
+        for module in [m for m in sys.modules if m.startswith("api_gateway")]:
+            monkeypatch.delitem(sys.modules, module, raising=False)
+
+        import api_gateway.auth as auth_pkg
+
+        assert auth_pkg.MODE_OFF == "off"

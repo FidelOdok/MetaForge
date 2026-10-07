@@ -5,7 +5,15 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      // Mirrors vite.config.ts. Tests run against the open-core default —
+      // no auth client — and register a fake one where they need it.
+      'metaforge:auth': path.resolve(
+        __dirname,
+        process.env.METAFORGE_AUTH_MODULE || './src/auth/none.ts',
+      ),
+    },
   },
   test: {
     environment: 'jsdom',

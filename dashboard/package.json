@@ -29,7 +29,6 @@
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
-    "@supabase/supabase-js": "^2.117.2",
     "@tanstack/react-query": "^5.62.0",
     "@tracespace/parser": "5.0.0-alpha.0",
     "@tracespace/plotter": "5.0.0-alpha.0",

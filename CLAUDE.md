@@ -86,6 +86,35 @@ No fixed epic enumeration — epics are created as real initiatives start (unlik
 | Event Bus | Apache Kafka |
 | Observability | OpenTelemetry + structlog + Prometheus + Grafana |
 
+## Open Core — What Does Not Live Here
+
+MetaForge is open core. This repository is the whole system **minus the
+hosted service**. The commercial half lives in the private
+**`FidelOdok/MetaForge-Cloud`** repo: Supabase-backed gateway authentication,
+the accounts control plane (`accounts`, `account_members`, `cloud_projects`,
+`gateway_connections` + RLS), the dashboard's sign-in surface, and the
+marketing site.
+
+Two seams connect them, both defined here and both usable by any provider:
+
+- **Gateway** — `api_gateway/auth/provider.py`. An implementation registers on
+  the `metaforge.auth` entry-point group; `METAFORGE_AUTH_MODE` names it.
+- **Dashboard** — the `metaforge:auth` Vite alias, resolving to
+  `dashboard/src/auth/none.ts` unless `METAFORGE_AUTH_MODULE` overrides it.
+
+**Rules when touching authentication:**
+
+1. Never add a provider-specific name (`supabase`, a vendor SDK, a
+   `VITE_SUPABASE_*` variable) to this repository. If something can only work
+   by making open core know about one provider, widen the seam instead.
+2. `api_gateway/auth/` carries no crypto stack. A JWT library is a provider's
+   dependency, and `tests/unit/test_gateway_auth.py` asserts that it stays one.
+3. Changing `AuthProvider`, `AuthClient`, `Principal` or the `InvalidToken` /
+   `AuthUnavailable` split is a cross-repo change — land the Cloud side too.
+4. The load-bearing property is that a gateway asked for authentication it
+   cannot deliver **refuses to start**. A provider missing from an image is a
+   real deployment mistake, not just a typo; it must never degrade to `off`.
+
 ## Dual-Mode Operation
 
 MetaForge supports two operational modes:

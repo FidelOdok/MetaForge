@@ -117,10 +117,6 @@ dev = [
     # "Library stubs not installed for yaml". The stubs are a type-check
     # dependency, so they belong in the extra that installs the type checker.
     "types-PyYAML>=6.0",
-    # MetaForge Cloud auth is a runtime [gateway] dependency, but the tests for
-    # it live in tests/unit and CI installs only .[dev] -- so without this the
-    # auth suite cannot run at all.
-    "pyjwt[crypto]>=2.8",
     # MET-735: the Makefile's integration/e2e targets pass --timeout, which
     # needs this plugin -- without it pytest rejects the flag outright and the
     # target fails on a usage error. Worth having rather than dropping: with
@@ -203,13 +199,11 @@ gateway = [
     # only in [knowledge], leaving the built gateway image unable to
     # import ``minio`` — MinIOKBStorage silently fell back / errored.
     "minio>=7.2",
-    # MetaForge Cloud: verifying Supabase access tokens in
-    # ``api_gateway.auth``. The [crypto] extra pulls ``cryptography``, which
-    # RS256/ES256 need — without it PyJWT silently supports only HMAC, and a
-    # gateway configured for asymmetric keys would fail at the first request
-    # rather than at import. Present transitively today; pinned explicitly
-    # because the gateway now depends on it directly.
-    "pyjwt[crypto]>=2.8",
+    # FORGE-540: no JWT library here on purpose. ``api_gateway.auth`` knows
+    # that callers may have to prove who they are, not how a credential is
+    # checked -- that belongs to whichever provider is registered on the
+    # ``metaforge.auth`` entry-point group, and travels as that provider's own
+    # dependency. A local gateway therefore installs no crypto stack at all.
 ]
 
 [tool.pytest.ini_options]

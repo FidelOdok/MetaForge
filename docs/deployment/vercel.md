@@ -1,20 +1,11 @@
-# Hosting the dashboard and marketing site on Vercel
+# Hosting the dashboard on Vercel
 
 MetaForge is local-first: the gateway, the agents and the tool containers run on
 your own machine. The dashboard is only a client, so it can be hosted anywhere —
 including Vercel — and pointed back at whatever gateway you are running.
 
-This page covers two separate Vercel projects from this one repository:
-
-| App | Directory | Suggested domain |
-|-----|-----------|------------------|
-| Marketing site | `marketing/` | `metaforge.dev` |
-| Dashboard | `dashboard/` | `app.metaforge.dev` |
-
-They are deliberately separate projects. The dashboard bundles Three.js and a
-physics engine — around 770 kB gzipped for the URDF viewer alone — and a landing
-page should not pay for that. Separate projects also mean marketing copy can ship
-without rebuilding the dashboard.
+This page covers one Vercel project, built from `dashboard/` and suited to a
+domain such as `app.example.com`.
 
 ## Why the dashboard needs configuring at all
 
@@ -48,22 +39,20 @@ you are testing routes by hand with `curl`.
 
 ## Deploying
 
-### 1. Create the projects
+### 1. Create the project
 
-For each app, create a Vercel project from this repository and set **Root
-Directory** to `marketing` or `dashboard`. The `vercel.json` in each directory
-supplies the build command, output directory and headers; the dashboard's also
-carries the SPA rewrite that keeps deep links such as `/twin` and `/settings`
-working on reload.
+Create a Vercel project from this repository and set **Root Directory** to
+`dashboard`. Its `vercel.json` supplies the build command, output directory and
+headers, and carries the SPA rewrite that keeps deep links such as `/twin` and
+`/settings` working on reload.
 
 ### 2. Set environment variables
 
-| Project | Variable | Value |
-|---------|----------|-------|
-| Marketing | `VITE_DASHBOARD_URL` | Where "Open the dashboard" should point, e.g. `https://app.metaforge.dev` |
-| Dashboard | `VITE_GATEWAY_URL` | *Optional.* A default gateway for first-time visitors. Leave unset to have them configure their own. |
+| Variable | Value |
+|----------|-------|
+| `VITE_GATEWAY_URL` | *Optional.* A default gateway for first-time visitors. Leave unset to have them configure their own. |
 
-Both are build-time variables — Vite inlines them — so changing one needs a
+This is a build-time variable — Vite inlines it — so changing it needs a
 redeploy.
 
 ### 3. Point the dashboard at your gateway
@@ -97,18 +86,20 @@ Chrome-against-localhost. Two practical options:
 The Settings page detects the mixed-content case and says so, rather than leaving
 you with an unexplained network error.
 
-CORS is not an obstacle: the gateway's `create_app` defaults `allow_origins` to
-`["*"]`, so a browser on any origin may call it.
+CORS is not an obstacle for a default local gateway: `create_app` leaves
+`allow_origins` at `["*"]`, so a browser on any origin may call it. A gateway
+with authentication switched on refuses that wildcard — see
+[Gateway authentication](authentication.md).
 
 ## Security: read this before exposing a gateway
 
-:::danger[The gateway has no authentication on its data routes]
+:::danger[A default gateway has no authentication on its data routes]
 
-Only the harness credential routes are guarded, by
-`METAFORGE_HARNESS_ADMIN_TOKEN`. Everything else — the digital twin, projects,
-chat, file download — is open to anything that can reach the port. Combined
-with `allow_origins=["*"]`, a gateway on a public address is readable and
-writable by anyone who finds it.
+With `METAFORGE_AUTH_MODE=off`, which is the default, only the harness
+credential routes are guarded — by `METAFORGE_HARNESS_ADMIN_TOKEN`. Everything
+else (the digital twin, projects, chat, file download) is open to anything that
+can reach the port. Combined with `allow_origins=["*"]`, a gateway on a public
+address is readable and writable by anyone who finds it.
 
 Do not put one on the open internet. Use a private network (Tailscale) or an
 authenticating proxy (Cloudflare Access, an OAuth2 proxy) in front of it. Both
@@ -116,7 +107,10 @@ also give you the HTTPS endpoint the section above requires.
 
 :::
 
-Gateway authentication is not yet implemented and is tracked as follow-up work.
+The gateway *can* authenticate callers itself, by installing an auth provider
+and naming it in `METAFORGE_AUTH_MODE`. That is a plug-in seam rather than a
+built-in: see [Gateway authentication](authentication.md) for the contract, and for the
+dashboard side of it.
 
 ## What is *not* deployed to Vercel
 
@@ -131,14 +125,11 @@ Gateway authentication is not yet implemented and is tracked as follow-up work.
 ## Local preview
 
 ```bash
-cd marketing && npm install && npm run dev    # http://localhost:5174
 cd dashboard && npm install && npm run dev    # http://localhost:5173
 ```
-
-The marketing site runs on 5174 so both can run at once.
 
 To check a production build the way Vercel serves it:
 
 ```bash
-cd marketing && npm run build && npm run preview
+cd dashboard && npm run build && npm run preview
 ```

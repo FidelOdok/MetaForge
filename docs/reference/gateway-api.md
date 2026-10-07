@@ -36,16 +36,20 @@ curl "$METAFORGE_GATEWAY/v1/projects"
 ```
 
 See [Vercel deployment](../deployment/vercel.md) for the proxy rules and
-[Gateway authentication](../deployment/cloud.md) for what `auth_mode` in the
-health response means.
+[Gateway authentication](../deployment/authentication.md) for what `auth_mode`
+in the health response means.
 
 ## Authentication
 
 With `METAFORGE_AUTH_MODE=off` — the default, and the only mode a local
-install needs — the data routes take no credential. With
-`METAFORGE_AUTH_MODE=supabase` every route outside the public set requires a
-bearer token and returns `401` without one. `GET /health` reports which mode is
-active, so it is checkable at runtime rather than by reading config.
+install needs — the data routes take no credential. Set it to the name of an
+installed authentication provider and every route outside the public set
+requires a bearer token, returning `401` without one. `GET /health` reports
+which mode is active, so it is checkable at runtime rather than by reading
+config.
+
+Providers are plug-ins, so `auth_mode` is not a closed set of values: it is
+`off`, or whatever that gateway has installed.
 
 The harness credential routes are separate, and are guarded by
 `METAFORGE_HARNESS_ADMIN_TOKEN` in both modes.
