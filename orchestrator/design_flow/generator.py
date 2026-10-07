@@ -684,6 +684,57 @@ def _require_analysis_evidence(
     ]
 
 
+def _reused_type(phase: Phase) -> str | None:
+    """The reusable item a phase exists to produce, if that is all it produces.
+
+    A phase whose only required deliverable is an intent or a set of
+    stakeholder needs produces that item. The requirements phase records its
+    requirement set as a constraint_set whatever its template lists (mech_v1
+    lists a design_decision), the same reading the invariants give it.
+    """
+    from orchestrator.design_flow.context import REUSABLE_ITEM_TYPES
+
+    if phase.id == "requirements":
+        return "constraint_set"
+    required = tuple(phase.required_deliverables)
+    if len(required) == 1 and required[0] in REUSABLE_ITEM_TYPES:
+        return required[0]
+    return None
+
+
+def _reuse_current_items(
+    base: FlowDefinition, ops: list[Operation], current: tuple[str, ...]
+) -> list[Operation]:
+    """Skip phases whose output is already current in the project (FORGE-571).
+
+    Generation planned an intent, needs and requirements phase for every
+    proposal, so a project that had settled them did them again. A phase
+    whose item has a current revision now runs only while it does not: a
+    condition on the ``<type>_current`` fact frozen with the version. A phase
+    the caller dropped or gave its own condition is left alone.
+    """
+    touched = {
+        op.phase_id
+        for op in ops
+        if op.kind in (OperationKind.DROP_PHASE, OperationKind.SET_CONDITION)
+    }
+    out: list[Operation] = []
+    for phase in base.phases:
+        item_type = _reused_type(phase)
+        if item_type is None or item_type not in current or phase.condition or phase.id in touched:
+            continue
+        out.append(
+            Operation(
+                OperationKind.SET_CONDITION,
+                phase.id,
+                f"the project already has a current {item_type}; reuse it rather than "
+                "produce it again (the phase runs if it is superseded or withdrawn first)",
+                value=f"{item_type}_current == false",
+            )
+        )
+    return out
+
+
 def build_proposal(
     base: FlowDefinition,
     *,
@@ -708,6 +759,8 @@ def build_proposal(
         ops = [replace(op, basis=op.basis or basis) for op in ops]
         if context.loads_known:
             ops.extend(_require_analysis_evidence(base, ops, basis))
+        if context.current_items is not None:
+            ops.extend(_reuse_current_items(base, ops, context.current_items))
         if context.route is ManufacturingRoute.UNDECIDED:
             ops.append(
                 Operation(

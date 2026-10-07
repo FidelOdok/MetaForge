@@ -12,8 +12,6 @@ visible, and the marker has to come off the day the gap closes.
 
 from __future__ import annotations
 
-import pytest
-
 from mcp_core.profiles import DELIVERABLE_TOOLS
 from orchestrator.design_flow.capabilities import Coverage, assess_capabilities
 from orchestrator.design_flow.graph import build_graph
@@ -115,15 +113,35 @@ def test_generation_alone_requires_analysis_evidence_for_analysed_requirements()
     assert "simulation_result" in sim.required_deliverables
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FORGE-571: generation does not inspect existing work, so recorded requirements "
-    "are planned again instead of reused",
-)
+def _reuse_ctx(current: tuple[str, ...] | None):  # type: ignore[no-untyped-def]
+    from dataclasses import replace
+
+    return replace(bracket.context(), current_items=current)
+
+
 def test_valid_existing_work_is_reused() -> None:
-    proposal = bracket.generate(operations=[])
-    req = next(p for p in proposal.definition.phases if p.id == "requirements")
-    assert req.condition, "a phase whose output already exists should be conditional"
+    proposal = bracket.generate(ctx=_reuse_ctx(("intent", "stakeholder_need", "constraint_set")))
+    assert proposal.valid
+    conditions = {p.id: p.condition for p in proposal.definition.phases}
+    assert conditions["intent"] == "intent_current == false"
+    assert conditions["needs"] == "stakeholder_need_current == false"
+    assert conditions["requirements"] == "constraint_set_current == false"
+    # The engineering work itself is never skipped on the strength of old work.
+    assert not any(conditions[p] for p in ("feasibility", "design", "simulation"))
+
+
+def test_only_what_exists_is_reused() -> None:
+    proposal = bracket.generate(ctx=_reuse_ctx(("intent",)))
+    conditions = {p.id: p.condition for p in proposal.definition.phases}
+    assert conditions["intent"] and not conditions["needs"] and not conditions["requirements"]
+
+
+def test_nothing_is_reused_when_the_project_was_not_checked() -> None:
+    # None is "not checked" (no project, unreadable twin): a reuse condition then
+    # would read a missing fact as false and skip the phase on a guess.
+    proposal = bracket.generate(ctx=_reuse_ctx(None))
+    assert not any(p.condition for p in proposal.definition.phases)
+    assert not any(k.endswith("_current") for k in _reuse_ctx(None).facts())
 
 
 # --- Capabilities and readiness -------------------------------------------------

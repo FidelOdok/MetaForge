@@ -81,6 +81,11 @@ class ManufacturingContext:
         return bool(self.processes or self.machines or self.stock_materials)
 
 
+#: Definition items whose current revision a new flow can reuse instead of
+#: producing again (FORGE-571): the front of the lifecycle, settled once.
+REUSABLE_ITEM_TYPES: tuple[str, ...] = ("intent", "stakeholder_need", "constraint_set")
+
+
 @dataclass(frozen=True)
 class FlowContext:
     """Everything the generator is told about a project besides its intent."""
@@ -90,6 +95,11 @@ class FlowContext:
     loads_and_use: str | None = None
     budget: str | None = None
     requirements: tuple[str, ...] = ()
+    #: FORGE-571: which :data:`REUSABLE_ITEM_TYPES` already have a current
+    #: revision in the project's twin. ``None`` means nobody checked (no
+    #: project, or the twin could not be read): then nothing is reused,
+    #: because a missing fact would make a reuse condition skip the phase.
+    current_items: tuple[str, ...] | None = None
 
     @property
     def loads_known(self) -> bool:
@@ -129,6 +139,9 @@ class FlowContext:
             out["production_quantity"] = str(m.production_quantity)
         out["budget_stated"] = "true" if (self.budget or "").strip() else "false"
         out["requirements_recorded"] = "false" if self.requirements_pending else "true"
+        if self.current_items is not None:
+            for item_type in REUSABLE_ITEM_TYPES:
+                out[f"{item_type}_current"] = "true" if item_type in self.current_items else "false"
         return out
 
     def capability_basis(self) -> str:

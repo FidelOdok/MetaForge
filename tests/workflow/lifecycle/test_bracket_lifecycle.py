@@ -249,3 +249,52 @@ def test_no_evidence_is_not_a_pass(accepted_bracket: bracket.Accepted) -> None:
 def test_repair_iterations_are_bounded() -> None:
     assert 0 < max_rework_cycles() <= 5
     assert 0 < max_phase_retries() <= 5
+
+
+# --- Reuse at run time (FORGE-571) ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reused_phases_are_skipped_by_the_real_engine() -> None:
+    import asyncio
+    from dataclasses import replace
+
+    from api_gateway.runs.routes import _in_process_state
+    from orchestrator.design_flow.executor import (
+        DesignFlowExecutor,
+        FlowContext,
+        GateCoordinator,
+        PhaseOutcome,
+    )
+    from orchestrator.design_flow.lifecycle import lifecycle_view
+    from orchestrator.design_flow.spec import Phase
+    from orchestrator.harness.runs import ApprovalDecision, InMemoryRunStore, RunStatus
+
+    ctx = replace(bracket.context(), current_items=("intent", "stakeholder_need", "constraint_set"))
+    accepted = bracket.accept(bracket.generate(ctx=ctx))
+    ran: list[str] = []
+
+    class Brain:
+        async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
+            ran.append(phase.id)
+            return PhaseOutcome(summary=f"{phase.id} done", status="completed")
+
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    run = store.create({"goal": bracket.INTENT, "flow": accepted.definition.id})
+    executor = DesignFlowExecutor(store=store, brain=Brain(), coordinator=coord)
+    task = asyncio.create_task(
+        executor.run(run.id, accepted.definition, facts=accepted.frozen.facts)
+    )
+    for _ in range(2000):
+        if task.done():
+            break
+        if store.get(run.id).status is RunStatus.AWAITING_APPROVAL:
+            store.submit_approval(run.id, ApprovalDecision.APPROVE)
+        await asyncio.sleep(0.005)
+    await asyncio.wait_for(task, timeout=5.0)
+
+    assert ran == ["feasibility", "design", "simulation"]
+    view = lifecycle_view(accepted.definition.phases, _in_process_state(store.get(run.id)))
+    for reused in ("intent", "needs", "requirements"):
+        assert view.node(reused).execution_status is ExecutionStatus.SKIPPED
