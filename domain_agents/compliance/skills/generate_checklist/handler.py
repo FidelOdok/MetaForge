@@ -37,6 +37,8 @@ class GenerateChecklistHandler(SkillBase[GenerateChecklistInput, GenerateCheckli
             project_id=input_data.project_id,
             product_category=input_data.product_category,
             markets=input_data.target_markets,
+            product_features=input_data.product_features,
+            evidence=input_data.evidence,
         )
 
         return GenerateChecklistOutput(
@@ -45,5 +47,7 @@ class GenerateChecklistHandler(SkillBase[GenerateChecklistInput, GenerateCheckli
             items=checklist.items,
             total_items=checklist.total_items,
             coverage_percent=checklist.coverage_percent,
+            excluded_items=checklist.excluded_items,
+            conditional_items=checklist.conditional_items,
             generated_at=checklist.generated_at,
         )

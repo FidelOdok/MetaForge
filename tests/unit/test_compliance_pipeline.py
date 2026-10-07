@@ -836,3 +836,73 @@ class TestGenerateChecklistSkill:
         )
 
         assert GenerateChecklistHandler is not None
+
+
+class TestChecklistApplicabilityForge553:
+    """The checklist follows the product and its evidence (FORGE-553)."""
+
+    @pytest.fixture()
+    def gen(self) -> ChecklistGenerator:
+        g = ChecklistGenerator()
+        g.load_regimes(REGIMES_DIR)
+        return g
+
+    def _ids(self, checklist: ComplianceChecklist) -> set[str]:
+        return {i.id for i in checklist.items}
+
+    def test_radio_less_product_gets_no_radio_rows(self, gen: ChecklistGenerator) -> None:
+        c = gen.generate_checklist(
+            "p",
+            markets=[ComplianceRegime.CE, ComplianceRegime.FCC, ComplianceRegime.UKCA],
+            product_features=["mains_powered"],
+        )
+        ids = self._ids(c)
+        assert not ids & {"CE-RED-001", "FCC-15C-001", "FCC-SAR-001", "UKCA-RAD-001"}
+        assert "FCC-15B-001" in ids
+        excluded = {e.id: e.reason for e in c.excluded_items}
+        assert "radio" in excluded["CE-RED-001"]
+        assert c.conditional_items == []
+
+    def test_psti_needs_a_connected_product(self, gen: ChecklistGenerator) -> None:
+        offline = gen.generate_checklist("p", markets=[ComplianceRegime.PSTI], product_features=[])
+        assert offline.items == []
+        online = gen.generate_checklist(
+            "p", markets=[ComplianceRegime.PSTI], product_features=["connected"]
+        )
+        assert online.total_items > 0
+
+    def test_unstated_features_keep_everything_but_say_so(self, gen: ChecklistGenerator) -> None:
+        c = gen.generate_checklist("p", markets=[ComplianceRegime.CE])
+        assert "CE-RED-001" in self._ids(c)
+        assert "CE-RED-001" in c.conditional_items
+        assert c.product_features is None
+
+    def test_unknown_feature_is_rejected(self, gen: ChecklistGenerator) -> None:
+        with pytest.raises(ValueError, match="unknown product feature"):
+            gen.generate_checklist("p", markets=[ComplianceRegime.CE], product_features=["wifi"])
+
+    def test_dedupe_does_not_depend_on_market_order(self, gen: ChecklistGenerator) -> None:
+        a = gen.generate_checklist("p", markets=[ComplianceRegime.UKCA, ComplianceRegime.CE])
+        b = gen.generate_checklist("p", markets=[ComplianceRegime.CE, ComplianceRegime.UKCA])
+        assert [i.id for i in a.items] == [i.id for i in b.items]
+        shared = next(i for i in a.items if i.standard == "EN 55032:2015+A1:2020")
+        assert shared.also_satisfies
+
+    def test_coverage_comes_from_evidence(self, gen: ChecklistGenerator) -> None:
+        from domain_agents.compliance.models import EvidenceStatus, ItemEvidence
+
+        base = gen.generate_checklist("p", markets=[ComplianceRegime.CE], product_features=[])
+        first = base.items[0].id
+        c = gen.generate_checklist(
+            "p",
+            markets=[ComplianceRegime.CE],
+            product_features=[],
+            evidence={first: ItemEvidence(status=EvidenceStatus.APPROVED)},
+        )
+        assert c.evidenced_items == 1
+        assert c.coverage_percent == round(100.0 / c.total_items, 2)
+        assert c.items[0].evidence_status is EvidenceStatus.APPROVED
+
+    def test_no_em_dash_in_regime_text(self) -> None:
+        for path in REGIMES_DIR.glob("*.yaml"):
+            assert "—" not in path.read_text(), path.name

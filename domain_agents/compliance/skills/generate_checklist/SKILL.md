@@ -16,7 +16,9 @@ Generate a compliance checklist for target markets, deduplicating standards shar
 ## Input
 
 - `project_id` -- project identifier
-- `product_category` -- product category (default `consumer_electronics`)
+- `product_category` -- a label recorded with the checklist (default `consumer_electronics`)
+- `product_features` -- optional: `radio`, `mains_powered`, `battery`, `connected`, `body_worn`. Items needing a feature the product lacks are excluded; left out, every item is kept and the conditional ones are listed
+- `evidence` -- optional: evidence already held, by item id (`status`, `work_product_id`)
 - `target_markets` -- list of `ComplianceRegime` values to cover
 
 ## Output
@@ -25,7 +27,9 @@ Generate a compliance checklist for target markets, deduplicating standards shar
 - `target_markets` -- markets included
 - `items` -- generated checklist items (standard, requirement, evidence status)
 - `total_items` -- total item count after deduplication
-- `coverage_percent` -- percentage of items with evidence on file
+- `coverage_percent` -- percentage of items whose evidence status is not `MISSING`
+- `excluded_items` -- items left out, with the missing feature
+- `conditional_items` -- items kept only because `product_features` was not stated
 
 ## Limitations
 

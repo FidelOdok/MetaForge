@@ -2,6 +2,7 @@ regime: CE
 name: "Conformite Europeenne"
 categories:
   - name: lvd
+    requires: [mains_powered]
     items:
       - id: "CE-LVD-001"
         requirement: "Low Voltage Directive safety assessment"
@@ -30,6 +31,7 @@ categories:
         standard: "2014/30/EU"
         evidence_type: declaration
   - name: red
+    requires: [radio]
     items:
       - id: "CE-RED-001"
         requirement: "Radio Equipment Directive conformity"

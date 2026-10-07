@@ -75,17 +75,21 @@ applies to connectable products.
 
 Follow the `generate_checklist` procedure exactly:
 
-- Walk the markets in the user's order, each market's rows top to bottom.
-- Drop a row only if its exact standard string was already taken.
-- Every item's `evidence_status` is `MISSING`.
-- `total_items` is the count; `coverage_percent` is `0.0` (the handler
-  counts non-`MISSING` items, and it starts all of them as `MISSING`).
+- Ask which product features apply (`radio`, `mains_powered`, `battery`,
+  `connected`, `body_worn`) and exclude the conditional items the product
+  does not need, listing each with its missing feature. If the user will
+  not say, keep every item and list the conditional ones as questions.
+- Walk the markets in alphabetical order, each market's rows top to bottom;
+  fold a row whose exact standard string was already taken into that row.
+- Every item's `evidence_status` is `MISSING` unless the user confirmed
+  evidence for it.
+- `total_items` is the count; `coverage_percent` is the share of items not
+  `MISSING`.
 
-Show the checklist to the user and flag rows that look inapplicable (no
-radio, no battery, not portable) as questions. Do not drop rows on your own
-judgement; the handler does not, and a reviewer needs to see the scope
-decision. If the user rules items or a regime out, record that with
-`twin.record_decision` (`title`, `rationale`, `alternatives`).
+Show the checklist and the excluded items to the user. Do not drop rows on
+your own judgement beyond the stated features. If the user rules items or a
+regime out, record that with `twin.record_decision` (`title`, `rationale`,
+`alternatives`).
 
 ### 3. Record it
 
@@ -99,8 +103,8 @@ with:
 - `items`: one object per row with `id`, `regime`, `category`,
   `requirement`, `standard`, `evidence_type` (`TEST_REPORT`, `DECLARATION`,
   `CERTIFICATE`, `TECHNICAL_FILE`, `RISK_ASSESSMENT`) and `evidence_status`
-  (`MISSING`)
-- `coverage_percent`: `0.0`
+  (`MISSING` unless evidence was confirmed)
+- `coverage_percent`: as computed
 - `project_id`
 
 It returns `node_id`, `total_items`, `coverage_percent` and
@@ -112,7 +116,7 @@ true.
 - `document_type: "documentation"`
 - `name`: the agreed name
 - `content`: markdown, a heading `# Compliance Checklist: <markets>`, a line
-  `Coverage: 0.0%`, then a table with columns Regime, Category, ID,
+  `Coverage: <coverage_percent>%`, then a table with columns Regime, Category, ID,
   Requirement, Standard, Evidence, Status
 - `metadata`: `target_markets`, `product_category`, `total_items`,
   `coverage_percent`, and `items` (the rows)
@@ -128,9 +132,10 @@ was recorded, and name the profile that would allow it (`core`).
 ### 4. Report
 
 - What was recorded: `node_id`, name, which path (typed or documentation).
-- Markets, `total_items`, `coverage_percent` (0.0).
-- Shared standards that were collapsed and which regime kept them.
-- Rows flagged as possibly inapplicable, as open questions.
+- Markets, features, `total_items`, `coverage_percent`.
+- Shared standards that were folded and which item kept them.
+- Excluded items with the missing feature, or the conditional items as
+  open questions if features were not stated.
 - That evidence status stays `MISSING` until a person attaches evidence,
   and that no MCP tool on this connection updates it.
 
@@ -138,9 +143,9 @@ was recorded, and name the profile that would allow it (`core`).
 
 - [ ] The project was resolved, not guessed
 - [ ] You checked for an existing checklist before writing a new one
-- [ ] Markets are only the four supported regimes, in the user's order
-- [ ] Deduplication used exact standard strings
-- [ ] Every row is `MISSING`; coverage is 0.0
+- [ ] Markets are only the four supported regimes
+- [ ] Deduplication used exact standard strings, markets in alphabetical order
+- [ ] Rows are `MISSING` unless evidence was confirmed; coverage matches
 - [ ] You said which recording path was used, with the returned node id
 
 ## Failure handling
@@ -159,9 +164,9 @@ was recorded, and name the profile that would allow it (`core`).
 ## Limits
 
 - Same catalogue limits as `generate_checklist`: four regimes, fixed items,
-  no product-category filtering, exact-string deduplication.
+  five product features, exact-string deduplication.
 - Not idempotent: every recording is a new node.
 - The checklist is a snapshot. No MCP tool links a test report or
-  declaration to a checklist item or advances its evidence status, so
-  coverage stays 0.0 on the recorded node until that exists.
+  declaration to a checklist item or advances its evidence status, so the
+  recorded coverage only reflects evidence known when it was recorded.
 - A checklist is a completeness aid, not a conformity verdict.
