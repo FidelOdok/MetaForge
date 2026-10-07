@@ -298,3 +298,15 @@ async def test_reused_phases_are_skipped_by_the_real_engine() -> None:
     view = lifecycle_view(accepted.definition.phases, _in_process_state(store.get(run.id)))
     for reused in ("intent", "needs", "requirements"):
         assert view.node(reused).execution_status is ExecutionStatus.SKIPPED
+
+
+def test_a_repair_that_stops_improving_is_flagged_then_stopped() -> None:
+    """FORGE-573: the FoS stays at 1.6 however the design is reworked."""
+    from orchestrator.design_flow.rework import findings_streak, stall_note, stall_stop
+
+    same = ("REQ-FOS: safety factor 1.6 < 2.0",)
+    better = ("REQ-FOS: safety factor 1.8 < 2.0",)
+    assert findings_streak([same, better]) == 1  # it changed: still converging
+    assert findings_streak([same, same]) == 2  # flagged
+    assert stall_note("simulation", 2, stall_stop()).startswith("NO IMPROVEMENT")
+    assert findings_streak([same, same, same]) >= stall_stop()  # the run stops

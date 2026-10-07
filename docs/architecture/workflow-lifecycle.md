@@ -37,6 +37,28 @@ person did not state.
 - `POST /v1/design-flows/intent`, MCP `flow.compile_intent`
 - Every proposal carries it as `intentModel`.
 
+The compiler also reads (FORGE-569):
+
+- **Named dimensionless quantities**, such as "a factor of safety of at
+  least 2" or "safety factor >= 1.5". They become criteria in their own unit
+  (`FoS`, `MoS`). A factor of safety is a minimum unless the person says
+  otherwise.
+- **Envelopes.** "80 x 60 x 40 mm" becomes one constraint per axis (`length`,
+  `width`, `height`, recorded as `dimension`), plus a criterion for each when
+  a direction such as "within" is stated.
+- **Keywords as words, not substrings.** "evidence" no longer reads as the
+  regulatory "CE".
+- **Delivery requests.** "Deliver CAD, a drawing and validation evidence"
+  fills `requested_deliverables` rather than becoming a constraint.
+
+**Reuse (FORGE-571).** When a proposal names a project, the gateway reads
+which reusable items (`intent`, `stakeholder_need`, `constraint_set`)
+already have a current revision. The phase that produces each such item
+becomes conditional on `<type>_current == false`, so a run skips it and the
+lifecycle shows it as `SKIPPED`. If the project could not be read, nothing is
+reused: a missing fact would make the condition skip the phase on a guess.
+The engineering phases are never skipped on the strength of old work.
+
 When a proposal is told the loads and the flow designs a physical part, the
 generator makes the analysis result (`simulation_result`) *required* at the
 gate whose phase only expected it, as a server change in the diff with its
@@ -102,6 +124,19 @@ A phase that cannot run is classified (`transient`, `tool`, `data`,
 retried as-is; a design failure calls for replanning, a missing key for
 fixing configuration. Temporal records the class on the failed result
 (`forge-539-failure-class` patch); the in-process engine adds it to the error.
+
+## A repair that stops improving (FORGE-573)
+
+Retries and reworks are capped (3 each), but a repair that changes nothing
+would use every one of them first. Each phase keeps its not-ready gate
+findings across retries and reworks, cleared when its gate passes. The same
+findings twice in a row mark the gate **stalled**: the reviewer reads "NO
+IMPROVEMENT ... change the approach, rework an earlier phase, or reject", and
+the gate state carries `stalled: true`. The same findings three times in a
+row (`METAFORGE_DESIGN_FLOW_STALL_STOP`, at least 2) end the run as a design
+failure, before the caps. Both engines share the helper in `rework.py`; on
+Temporal it is behind the `forge-573-stall` patch, so older histories replay
+unchanged.
 
 ## Selective repair and patches (`patch.py`)
 

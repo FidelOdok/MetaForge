@@ -150,6 +150,11 @@ async def test_retry_reruns_only_that_phase_with_findings_and_keeps_earlier_appr
 @pytest.mark.asyncio
 async def test_retry_cap_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(MAX_PHASE_RETRIES_ENV, "2")
+    # The findings never change here, so FORGE-573's stall stop would end the run
+    # first; lift it so this test checks the retry cap on its own.
+    from orchestrator.design_flow.rework import STALL_STOP_ENV
+
+    monkeypatch.setenv(STALL_STOP_ENV, "10")
     evaluator = ScriptedEvaluator([set()])  # never satisfies the gate
     coord, store, brain, run, executor = _setup(_flow("retry_cap"), evaluator)
     task = asyncio.create_task(executor.run(run.id))

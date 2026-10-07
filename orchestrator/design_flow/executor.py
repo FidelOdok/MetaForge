@@ -38,8 +38,11 @@ from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
 from orchestrator.design_flow.retry import build_retry_feedback, max_phase_retries
 from orchestrator.design_flow.rework import (
     build_rework_feedback,
+    findings_streak,
     max_rework_cycles,
     rework_target_error,
+    stall_note,
+    stall_stop,
 )
 from orchestrator.design_flow.rework_context import RevisionNote, RevisionNotesProvider
 from orchestrator.design_flow.spec import DEFAULT_FLOW_ID, FlowDefinition, Phase, get_flow
@@ -101,6 +104,9 @@ class FlowContext:
     #: phases skipped because their condition did not hold.
     facts: dict[str, str] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
+    #: FORGE-573: each phase's not-ready findings, one entry per verdict,
+    #: kept across retries and reworks, cleared when its gate passes.
+    gate_history: dict[str, list[tuple[str, ...]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -248,12 +254,14 @@ class GateCoordinator:
         retries_left: int,
         phase: str | None = None,
         reworks_left: int | None = None,
+        stalled: bool = False,
     ) -> None:
         self._gate_state[run_id] = {
             "ready": ready,
             "retries_left": retries_left,
             "phase": phase,
             "reworks_left": reworks_left,
+            "stalled": stalled,
         }
 
     def gate_state(self, run_id: str) -> dict[str, object] | None:
@@ -677,6 +685,23 @@ class DesignFlowExecutor:
         consistency = await self._consistency(gate.gate_id, ctx)
 
         reason = _gate_reason(phase, outcome, readiness, constraints, consistency)
+        # FORGE-573: is the repair converging? Same findings as last time is not.
+        stalled = False
+        if blocking:
+            history = ctx.gate_history.setdefault(phase.id, [])
+            history.append(tuple(findings))
+            streak = findings_streak(history)
+            stop_at = stall_stop()
+            if streak >= stop_at:
+                msg = stall_note(phase.id, streak, stop_at)
+                logger.warning(
+                    "design_flow_repair_stalled_stop", run_id=run_id, phase=phase.id, streak=streak
+                )
+                self._store.fail(run_id, f"{msg} [failure class: design]")
+                return True
+            stalled = streak >= 2
+        else:
+            ctx.gate_history.pop(phase.id, None)
         if blocking:
             # FORGE-495: park with the findings instead of failing the run, so
             # the reviewer can retry the phase (or reject). Approve is refused.
@@ -684,6 +709,12 @@ class DesignFlowExecutor:
             reason = f"[{gate.name}] NOT READY (retry the phase or reject): " + "; ".join(findings)
             if constraints.checked:
                 reason += _constraint_details(constraints)
+            if stalled:
+                streak = findings_streak(ctx.gate_history[phase.id])
+                reason = f"[{gate.name}] {stall_note(phase.id, streak, stall_stop())} | " + reason
+                logger.warning(
+                    "design_flow_repair_stalled", run_id=run_id, phase=phase.id, streak=streak
+                )
         retries_left = max(max_retries - (attempt - 1), 0)
         reworks_left = max(max_rework - rework_cycles, 0)
         self._coordinator.set_gate_state(
@@ -692,6 +723,7 @@ class DesignFlowExecutor:
             retries_left=retries_left,
             phase=phase.id,
             reworks_left=reworks_left,
+            stalled=stalled,
         )
 
         # Register the waiter BEFORE moving to awaiting_approval so a fast
