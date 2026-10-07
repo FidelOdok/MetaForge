@@ -42,7 +42,8 @@ services:
     ports:
       - "3001:3000"  # Use 3001 to avoid conflict with dashboard dev server
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=metaforge
+      # FORGE-556: was hardcoded here, with no way to override it at all.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer

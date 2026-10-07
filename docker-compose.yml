@@ -842,7 +842,11 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-metaforge}
+      # FORGE-556: no default. The old one (`metaforge`) was in the public
+      # repo from the first compose commit, so every install shared an admin
+      # password any reader already knew. `:?` refuses rather than falling
+      # back -- the same rule the gateway's auth applies to itself.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer

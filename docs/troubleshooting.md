@@ -373,6 +373,55 @@ Prometheus carries the same thing as
 the `McpRunningStaleCode` alert fires on — the point being to be told
 without looking.
 
+## `docker compose` fails: `required variable GRAFANA_PASSWORD is missing a value`
+
+Every `docker compose` command fails, including ones that have nothing to do
+with Grafana:
+
+```
+error while interpolating services.grafana.environment.[]:
+required variable GRAFANA_PASSWORD is missing a value
+```
+
+**This is deliberate (FORGE-556).** Grafana's admin password used to default to
+`metaforge` — a value committed to this public repository since the first
+compose commit, so every MetaForge install shared an admin password that any
+reader already knew. The default is gone, and compose refuses rather than
+picking one for you.
+
+Compose interpolates the whole file before it decides which services to start,
+so the error appears even for `docker compose up gateway`, where Grafana is not
+involved. That is a property of compose, not a bug here.
+
+Fix it in either direction:
+
+```bash
+scripts/onboarding.sh            # generates one, in both --usage and --develop
+# or, by hand:
+echo "GRAFANA_PASSWORD=$(openssl rand -base64 24)" >> .env
+```
+
+If you copied `.env.example` and skipped onboarding, you will hit this: the file
+ships `GRAFANA_PASSWORD=` blank **on purpose**. `onboarding.sh` generates
+secrets with `set_if_blank`, which returns early for any key that already has a
+value — so the old shipped default silently guaranteed the generator never
+fired, and every install kept the published password.
+
+**Already running a Grafana that used the old default?** Setting the variable is
+not enough. `GF_SECURITY_ADMIN_PASSWORD` seeds the admin user when Grafana first
+provisions its database; on later starts an existing admin keeps the password it
+already has. Since `grafana-data` is a named volume that survives
+`docker compose down`, an instance created before this change is still on the
+published default until you rotate it explicitly:
+
+```bash
+# Grafana 9+ (the `latest` image). Older images use `grafana-cli` instead.
+docker compose exec grafana grafana cli admin reset-admin-password '<new password>'
+```
+
+Confirm which one your image has with
+`docker compose exec grafana sh -c 'command -v grafana grafana-cli'`.
+
 ## When to escalate
 
 If the issue is:

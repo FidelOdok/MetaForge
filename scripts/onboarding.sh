@@ -419,8 +419,12 @@ set_if_blank() {
 }
 
 if [ "$MODE" = "usage" ]; then
-  # Postgres creds aren't in .env.example at all (compose defaults them all
-  # to "metaforge") — pin real ones so this doesn't run on the dev default.
+  # Postgres and Neo4j creds aren't in .env.example at all (compose still
+  # defaults them to "metaforge") — pin real ones so this doesn't run on the
+  # dev default. GRAFANA_PASSWORD is different as of FORGE-556: it has no
+  # compose default any more, and .env.example ships it blank precisely so
+  # set_if_blank fires. A shipped default silently defeated this generator,
+  # because set_if_blank skips any key that already has a value.
   set_if_blank POSTGRES_USER "metaforge"
   set_if_blank POSTGRES_DB "metaforge"
   set_if_blank POSTGRES_PASSWORD "$(rand_secret)"
@@ -434,6 +438,12 @@ if [ "$MODE" = "usage" ]; then
   chmod 600 .env
   ok ".env permissions set to 600 (owner read/write only)"
 else
+  # FORGE-556: dev mode keeps the local-only defaults, with one exception.
+  # Grafana no longer has a default at all -- the old one was published in this
+  # repository -- so compose refuses to start without this, in every mode.
+  # Generating it here keeps `docker compose up` working straight after
+  # onboarding instead of failing on a variable the user never heard of.
+  set_if_blank GRAFANA_PASSWORD "$(rand_secret)"
   ok "Dev-mode defaults kept as-is (local-only, matches docker-compose.override.yml)"
 fi
 
