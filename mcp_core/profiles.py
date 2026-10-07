@@ -216,6 +216,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "kicad.run_drc",
         "kicad.run_erc",
         "knowledge.populate_bom",
+        # FORGE-544: the per-rail budget, computed rather than hand-summed.
+        "power.check_budget",
         "twin.commit_procurement_record",
         "twin.record_component_selection",
     },

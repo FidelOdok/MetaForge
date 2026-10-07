@@ -29,6 +29,10 @@ from domain_agents.base_agent import (
     get_llm_model,
     is_llm_available,
 )
+from domain_agents.electronics.skills.check_power_budget.handler import (
+    CheckPowerBudgetHandler,
+)
+from domain_agents.electronics.skills.check_power_budget.schema import CheckPowerBudgetInput
 from domain_agents.electronics.skills.run_drc.handler import RunDrcHandler
 from domain_agents.electronics.skills.run_drc.schema import RunDrcInput
 from domain_agents.electronics.skills.run_erc.handler import RunErcHandler
@@ -107,8 +111,10 @@ You have access to the following tools:
 for unconnected pins, missing power flags, and other schematic errors.
 - **run_drc**: Run Design Rules Check on a KiCad PCB layout file. Checks for \
 clearance violations, unconnected nets, and manufacturing rule violations.
-- **check_power_budget**: Analyze power consumption of all components against \
-available power supply capacity (not yet implemented).
+- **check_power_budget**: Check each supply rail's worst-case load against its \
+derated rating, carrying regulator input current upstream. Needs every rail, \
+every load with a sourced figure, and the user's derating rule; an unknown \
+figure leaves a rail not established.
 
 Given a user request, determine which tools to call and in what order. \
 Analyze the results and provide a clear assessment with pass/fail status \
@@ -236,19 +242,40 @@ def _get_or_create_pydantic_agent() -> Any:
     @agent.tool
     async def check_power_budget(
         ctx: RunContext[AgentDependencies],
-        components: list[dict[str, Any]],
+        rails: list[dict[str, Any]],
+        loads: list[dict[str, Any]],
+        derating: float,
     ) -> dict[str, Any]:
-        """Analyze power budget for the design.
+        """Check the power budget per supply rail (FORGE-544).
 
         Args:
-            components: List of components with power ratings
-                (each has 'name' and 'power_mw' fields).
+            rails: Each rail: name, voltage_v, source_kind (supply/ldo/switching),
+                rated_current_ma, input_rail (regulators), efficiency (switching),
+                quiescent_ma (ldo), source.
+            loads: Each load: name, rail, current_ma or power_mw, source.
+            derating: Allowed share of each rated output (0.8 = 80 %), from the user.
         """
+        skill_ctx = SkillContext(
+            twin=ctx.deps.twin,
+            mcp=ctx.deps.mcp_bridge,
+            logger=logger,
+            session_id=UUID(ctx.deps.session_id),
+            branch=ctx.deps.branch,
+        )
+        result = await CheckPowerBudgetHandler(skill_ctx).run(
+            CheckPowerBudgetInput(rails=rails, loads=loads, derating=derating)
+        )
+        if not result.success:
+            return {"skill": "check_power_budget", "success": False, "errors": result.errors}
+        output = result.data
         return {
             "skill": "check_power_budget",
-            "status": "not_implemented",
-            "num_components": len(components),
-            "error": "check_power_budget skill is not yet implemented",
+            "success": True,
+            "verdict": output.verdict,
+            "passed": output.passed,
+            "worst_rail": output.worst_rail,
+            "rails": output.rails,
+            "summary": output.summary,
         }
 
     _pydantic_agent = agent
@@ -536,30 +563,42 @@ class ElectronicsAgent:
         )
 
     async def _run_check_power_budget(self, request: TaskRequest) -> TaskResult:
-        """Check power budget against component power ratings."""
-        components: list[dict[str, Any]] = request.parameters.get("components", [])
-        if not components:
+        """Check each rail's worst-case load against its derated rating (FORGE-544)."""
+        rails: list[dict[str, Any]] = request.parameters.get("rails", [])
+        derating = request.parameters.get("derating")
+        missing = [name for name, value in (("rails", rails), ("derating", derating)) if not value]
+        if missing:
             return TaskResult(
                 task_type=request.task_type,
                 work_product_id=request.work_product_id,
                 success=False,
-                errors=["Missing required parameter: components"],
+                errors=[f"Missing required parameter: {', '.join(missing)}"],
             )
 
-        self.logger.info("Power budget check requested", num_components=len(components))
-
+        self.logger.info("Power budget check requested", rails=len(rails))
+        handler = CheckPowerBudgetHandler(self._create_skill_context(request.branch))
+        result = await handler.run(
+            CheckPowerBudgetInput(
+                work_product_id=request.work_product_id,
+                rails=rails,
+                loads=request.parameters.get("loads", []),
+                derating=float(derating),
+            )
+        )
+        if not result.success:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=result.errors,
+            )
+        output = result.data
         return TaskResult(
             task_type=request.task_type,
             work_product_id=request.work_product_id,
-            success=False,
-            errors=["check_power_budget skill is not yet implemented"],
-            skill_results=[
-                {
-                    "skill": "check_power_budget",
-                    "status": "not_implemented",
-                    "num_components": len(components),
-                }
-            ],
+            success=output.passed,
+            skill_results=[{"skill": "check_power_budget", **output.model_dump(mode="json")}],
+            warnings=[] if output.verdict == "pass" else [output.summary],
         )
 
     async def _run_full_validation(self, request: TaskRequest) -> TaskResult:
@@ -590,8 +629,8 @@ class ElectronicsAgent:
                 overall_success = False
             checks_run += 1
 
-        # Run power budget check if components are provided
-        if request.parameters.get("components"):
+        # Run power budget check if rails are provided
+        if request.parameters.get("rails"):
             power_result = await self._run_check_power_budget(request)
             all_results.extend(power_result.skill_results)
             all_errors.extend(power_result.errors)
@@ -608,7 +647,7 @@ class ElectronicsAgent:
                 success=False,
                 errors=[
                     "No validation checks could be run. "
-                    "Provide at least one of: schematic_file, pcb_file, components"
+                    "Provide at least one of: schematic_file, pcb_file, rails"
                 ],
             )
 

@@ -89,13 +89,14 @@ class TestBootstrapToolRegistry:
         Gazebo (3 tools, opt-in like freecad/kicad -- registers regardless
         of whether a real `gz` binary is present) for 7 adapters.
         MET-635/636 added the Isaac Sim adapter (2 tools, opt-in like
-        freecad/kicad) for 8.
+        freecad/kicad) for 8. FORGE-544 added the in-process power budget
+        adapter for 9.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 8
+        assert len(adapters) == 9
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -106,6 +107,7 @@ class TestBootstrapToolRegistry:
             "omniverse_usd",
             "gazebo",
             "isaac_sim",
+            "power",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -113,7 +115,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 8
+        assert len(registry.list_adapters()) == 9
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -219,12 +221,13 @@ class TestBootstrapToolRegistry:
         convergence for 82. FORGE-281 adds
         calculix.cross_check_cantilever_frequency for 83. FORGE-283 adds
         calculix.compute_joint_loads for 84. FORGE-282 adds
-        calculix.cross_check_thermal_steady_state for 85.
+        calculix.cross_check_thermal_steady_state for 85. FORGE-544 adds
+        power.check_budget for 86.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 85
+        assert len(tools) == 86
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

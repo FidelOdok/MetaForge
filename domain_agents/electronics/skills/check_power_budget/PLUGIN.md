@@ -9,11 +9,13 @@ and leave behind a budget a reviewer can audit: every load with the source of
 its number, every rail's capacity with its source, the margin rule, and a
 per-rail pass or fail.
 
-**There is no MetaForge tool that computes a power budget.** The skill's
-server-side handler is not implemented, and no MCP tool exposes it. You do
-the arithmetic yourself, from figures you read out of the design and its
-datasheets with real tools, and you record the result with real twin tools.
-Say this to the user so nobody mistakes your sum for a tool's output.
+**`power.check_budget` does the arithmetic; you supply the figures.** The
+tool sums each rail's worst-case load, carries regulator input current
+upstream, applies the derating rule, and returns a per-rail pass, fail or
+not established. It reads nothing from the design: every rail rating and
+every load comes from you, read out of the design and its datasheets with
+real tools, each with its source. A figure you do not pass is unknown, and
+the tool never fills one in.
 
 ## When to use it
 
@@ -43,6 +45,7 @@ user, rather than working around it silently.
 | Parts, values and which rail each sits on | `kicad.get_pin_mapping` | electronics |
 | Part numbers already chosen | BOMItems via `twin.find_by_property` (`property: "mpn"`) / `twin.get_node` | all |
 | Datasheet figures | `knowledge.search`; `web.search` then `web.fetch`; `knowledge.extract` only if listed | all / core / no profile |
+| The budget arithmetic | `power.check_budget` | electronics |
 | Keep a datasheet for next time | `knowledge.ingest` | core |
 | Record the budget | `twin.record_document`, `twin.record_decision` | core / all |
 | Budget entity and evidence | `twin.record_engineering_entity`, `twin.record_evidence`, only if listed | not on the dev server |
@@ -106,26 +109,32 @@ If a figure is not in any datasheet you can read, the honest entry is
    - Use maximum, not typical, unless the user explicitly asks for typical.
    - Note the source of every number: document, page or table.
 
-### 3. Do the arithmetic
+### 3. Compute the budget
 
-For each rail, in a table you show the user:
+Call `power.check_budget` with:
 
-1. Sum the worst-case currents of its loads (convert power to current at the
-   rail voltage where a datasheet gives power).
-2. Compare with the capacity: rated output current of its source. Apply the
-   user's margin: allowed = rated x derating, or required headroom.
-3. Headroom = allowed minus load, in mA and as a percentage. Pass when load
-   <= allowed.
-4. Propagate upstream: an LDO draws its output current plus its quiescent
-   current from its input rail; a switching regulator draws
-   (Vout x Iout) / (efficiency x Vin) from its input, using the efficiency at
-   that load from its datasheet. Add that to the upstream rail and repeat.
-5. Total power at the source, if a requirement limits it.
-6. Name the worst rail: smallest headroom, or any rail that fails.
+- `rails`: one object per rail with `name`, `voltage_v`, `source_kind`
+  (`supply` for a battery or external input, `ldo`, or `switching`),
+  `rated_current_ma` (the source's rated output), and `source` (where the
+  rating came from). A regulator also needs `input_rail`; a switching one
+  needs `efficiency` at that load (0 to 1); an LDO takes `quiescent_ma`.
+- `loads`: one object per load with `name`, `rail`, either `current_ma` or
+  `power_mw` (converted at the rail voltage), and `source`. Leave both
+  figures out for a load you could not source; it stays unknown.
+- `derating`: the user's margin rule as a share of rated output, e.g. `0.8`
+  for "load <= 80 % of rated".
 
-Double-check units (mA vs A, mW vs W) and show the working. Every number in
-the table needs a source or the word "unknown".
+It returns `verdict` (`pass`, `fail` or `not_established`), `passed`,
+`worst_rail`, `source_power_mw`, and per rail `load_ma` (own loads plus the
+input current of regulators it feeds: an LDO's output plus quiescent, a
+switching regulator's `Vout x Iout / (efficiency x Vin)`), `allowed_ma`
+(rated x derating), `headroom_ma`, `headroom_pct`, `status`, `unknowns` and
+`notes`. A rail whose known load already exceeds its allowance fails even
+with unknowns; otherwise any unknown leaves it `not_established`.
 
+Show the user the per-rail table from the result, with the source of every
+figure you passed in. If the tool is not in your list, the same rules apply
+by hand; say the sum is yours, not a tool's.
 ### 4. Record the budget
 
 Only when the user wants it kept, or a flow phase needs it:
@@ -143,9 +152,8 @@ Only when the user wants it kept, or a flow phase needs it:
    wants a tracked budget, record `entity_type: "budget"` with `extra`
    holding `metric`, `unit`, `system_total` and per-rail `allocations`. If
    `twin.record_evidence` is listed, record `evidence_type: "calculation"`
-   with `producer` naming your client (not a MetaForge tool, since none
-   produced it), `inputs` holding the sourced load list and `result` the
-   per-rail table. If neither is listed, tell the user the budget is stored
+   with `producer: "power.check_budget"`, `inputs` holding the sourced rails
+   and loads you passed, and `result` the tool's per-rail table. If neither is listed, tell the user the budget is stored
    as a document only and is not linked to the requirement.
 
 ### 5. Report
@@ -153,8 +161,8 @@ Only when the user wants it kept, or a flow phase needs it:
 - Verdict per rail and overall, with the margin rule
 - The worst rail and its headroom
 - Every unknown or weak figure, and what would close it
-- The fact that this is a hand calculation from cited figures, not a tool
-  result
+- That `power.check_budget` computed it from the cited figures you gave it
+  (or, if the tool was unavailable, that the sum is yours)
 - What was recorded, with node ids; then re-read the requirements resource
   and give each power requirement's status as shown
 
@@ -163,10 +171,10 @@ Only when the user wants it kept, or a flow phase needs it:
 - [ ] Every load and capacity has a cited source, or is marked unknown
 - [ ] Maximum figures used, or the user chose typical and you said so
 - [ ] Margin rule came from the user
-- [ ] Units consistent; working shown
-- [ ] Upstream rails include regulator input current and efficiency loss
+- [ ] Units consistent (`current_ma`, `power_mw`, `voltage_v`)
+- [ ] Every regulator has its `input_rail`; every switching one its `efficiency`
 - [ ] Off-board loads asked about
-- [ ] Nothing claimed as a MetaForge tool result
+- [ ] Unknowns left unknown, not filled with a typical value
 
 ## Failure handling
 
@@ -183,6 +191,7 @@ Only when the user wants it kept, or a flow phase needs it:
 
 - Static worst-case sum only. No transients, inrush, brown-out, ripple or
   regulator thermal derating unless the user supplies those figures.
-- No tool checks your arithmetic; show it so a person can.
+- The tool checks the arithmetic, not the figures: a wrong datasheet
+  number gives a wrong budget. Cite every one so a person can check it.
 - The budget is valid for the BOM and schematic revision it was built from.
   A part change makes it stale; re-run it.

@@ -105,6 +105,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "memory.retrieve_similar_experience",
         "web.fetch",
         "web.search",
+        # FORGE-544: arithmetic over the arguments; reads and writes nothing.
+        "power.check_budget",
         # Twin reads
         "constraint.validate",
         "project.get",
