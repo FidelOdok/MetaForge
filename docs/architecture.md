@@ -33,7 +33,7 @@ These five rules are non-negotiable across all phases:
 | CLI Libraries | Commander.js, Inquirer, Chalk | Interactive terminal UX |
 | Gateway | FastAPI + Uvicorn | HTTP/WebSocket API server |
 | Agent Framework | PydanticAI + Temporal | ADR-001: structured agent outputs + durable workflows |
-| LLM Providers | `openai` + `anthropic` SDKs | Unified abstraction layer |
+| LLM Providers | `openai` + `anthropic` SDKs | Unified abstraction layer; which features need a model, and which settings drive each, are in [model usage](architecture/model-usage.md) |
 | Validation | Pydantic v2 | All schemas, configs, messages |
 | Workflow Engine | Temporal (Python SDK) | Durable execution, retries, sagas — see [wired vs in-process](#durable-tiers-wired-vs-in-process) |
 | Graph Database | Neo4j | Digital Twin work_product graph |

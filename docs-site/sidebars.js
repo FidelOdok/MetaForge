@@ -51,6 +51,7 @@ const sidebars = {
         'architecture/robust-harness-design',
         'architecture/design-flow-harness',
         'architecture/workflow-lifecycle',
+        'architecture/model-usage',
         'architecture/migrations',
         'roadmap',
         'testing-strategy',

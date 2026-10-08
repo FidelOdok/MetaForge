@@ -4,6 +4,10 @@ Drive the MetaForge harness on a **ChatGPT Plus/Pro subscription** — no API ke
 — via the `openai-codex` provider (MET-550). This mirrors how Hermes/OpenClaw
 use a subscription: the subscription itself pays for model calls.
 
+This provider serves the harness model only. The knowledge and memory
+consolidation models keep using OpenRouter; see
+[model usage](architecture/model-usage.md).
+
 > **Caveats.** The Codex backend is an **undocumented API that can change
 > without notice**, and subscription-driven programmatic use is a **gray area**
 > under OpenAI's terms. Use a real API key or OpenRouter if you need a
