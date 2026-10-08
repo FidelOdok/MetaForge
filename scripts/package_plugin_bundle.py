@@ -72,6 +72,31 @@ def to_portable_manifest(codex_manifest: dict) -> dict:
     return out
 
 
+def retarget(mcp: dict, gateway_url: str) -> dict:
+    """Point every server at ``gateway_url``, keeping its query string.
+
+    The committed default is ``http://localhost:8765/mcp``, which is right for
+    a local harness and unreachable from ChatGPT cloud -- it runs in someone
+    else's datacentre. A bundle uploaded with that URL installs and then
+    connects to nothing, which presents as the plugin being broken.
+
+    ``?profile=core`` is carried across rather than rebuilt: it caps the served
+    tool set, and a host with a hard cap truncates a full list without saying so.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    target = urlsplit(gateway_url)
+    out = {**mcp, "mcpServers": {}}
+    for name, entry in (mcp.get("mcpServers") or {}).items():
+        existing = urlsplit(entry.get("url", ""))
+        query = target.query or existing.query
+        out["mcpServers"][name] = {
+            **entry,
+            "url": urlunsplit((target.scheme, target.netloc, target.path, query, "")),
+        }
+    return out
+
+
 def to_portable_mcp(codex_mcp: dict) -> dict:
     """``.mcp.json`` rewritten as ``mcp.json``, with a transport on each server.
 
@@ -85,7 +110,11 @@ def to_portable_mcp(codex_mcp: dict) -> dict:
     return {"$schema": MCP_SCHEMA, "mcpServers": servers}
 
 
-def build_bundle(source: Path = SOURCE, out_root: Path | None = None) -> Path:
+def build_bundle(
+    source: Path = SOURCE,
+    out_root: Path | None = None,
+    gateway_url: str | None = None,
+) -> Path:
     """Lay the portable bundle out on disk and return its root."""
     codex_manifest = json.loads((source / ".codex-plugin" / "plugin.json").read_text())
     codex_mcp = json.loads((source / ".mcp.json").read_text())
@@ -99,7 +128,10 @@ def build_bundle(source: Path = SOURCE, out_root: Path | None = None) -> Path:
     (staging / "plugin.json").write_text(
         json.dumps(to_portable_manifest(codex_manifest), indent=2) + "\n"
     )
-    (staging / "mcp.json").write_text(json.dumps(to_portable_mcp(codex_mcp), indent=2) + "\n")
+    portable_mcp = to_portable_mcp(codex_mcp)
+    if gateway_url:
+        portable_mcp = retarget(portable_mcp, gateway_url)
+    (staging / "mcp.json").write_text(json.dumps(portable_mcp, indent=2) + "\n")
 
     # Kept alongside the portable manifest, not instead of it: the docs name
     # this as the compatibility fallback for hosts that predate the portable
@@ -149,16 +181,28 @@ def main() -> int:
         help="Archive format. ChatGPT accepts all of them; default writes both.",
     )
     parser.add_argument("--out", type=Path, default=DIST, help="Output directory (default: dist/)")
+    parser.add_argument(
+        "--gateway-url",
+        default=None,
+        help=(
+            "Point the bundled MCP server here instead of the committed default. "
+            "Required in practice for ChatGPT cloud, which cannot reach localhost."
+        ),
+    )
     args = parser.parse_args()
 
-    bundle = build_bundle(out_root=args.out)
+    bundle = build_bundle(out_root=args.out, gateway_url=args.gateway_url)
     version = json.loads((bundle / "plugin.json").read_text())["version"]
     skills = (
         len(list((bundle / "skills").glob("*/SKILL.md"))) if (bundle / "skills").is_dir() else 0
     )
 
     formats = ["zip", "tar.gz"] if args.format == "both" else [args.format]
+    server_url = next(iter(json.loads((bundle / "mcp.json").read_text())["mcpServers"].values()))[
+        "url"
+    ]
     print(f"bundle: {bundle}  ({skills} skills)")
+    print(f"  mcp server: {server_url}")
     for fmt in formats:
         path = archive(bundle, fmt, args.out, version)
         print(f"  {path.name}  {path.stat().st_size // 1024} KiB")

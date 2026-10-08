@@ -154,9 +154,58 @@ jobs:
           path: out/${{ matrix.asset }}
           if-no-files-found: error
 
+  build-plugin:
+    # FORGE-576: the plugin bundle ChatGPT cloud uploads was only ever built by
+    # running a script on someone's laptop, which meant the published artefact
+    # for a release depended on who cut it and what their checkout looked like.
+    # It is a build output like the binaries, so it is built here.
+    name: build plugin bundle
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No dependencies: the packager is stdlib only, so it cannot be broken by
+      # a resolver change in a release job that has nothing else to install.
+      - name: Build the portable bundle
+        run: python scripts/package_plugin_bundle.py
+
+      # A bundle that unpacks to loose files has no plugin in it to install,
+      # and a host says so only at upload time. Checked here instead.
+      - name: Check the archives carry one plugin root
+        run: |
+          python - <<'PY'
+          import pathlib, tarfile, zipfile
+          dist = pathlib.Path("dist")
+          archives = sorted(dist.glob("metaforge-plugin-*"))
+          assert archives, "packager produced no archive"
+          for path in archives:
+              if path.suffix == ".zip":
+                  names = zipfile.ZipFile(path).namelist()
+              else:
+                  names = [m.name for m in tarfile.open(path).getmembers()]
+              roots = {n.split("/")[0] for n in names}
+              assert roots == {"metaforge"}, f"{path.name}: roots {roots}"
+              assert "metaforge/plugin.json" in names, f"{path.name}: no root manifest"
+              skills = {n for n in names if n.endswith("/SKILL.md")}
+              assert len(skills) >= 20, f"{path.name}: only {len(skills)} skills"
+              print(f"{path.name}: ok, {len(skills)} skills")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          # Named to match the `forge-*` pattern the release job collects on.
+          name: forge-plugin-bundle
+          path: dist/metaforge-plugin-*
+          if-no-files-found: error
+
   release:
     name: publish release
-    needs: [version, build, build-tui]
+    needs: [version, build, build-tui, build-plugin]
     runs-on: ubuntu-latest
     if: needs.version.outputs.should_release == 'true'
     steps:

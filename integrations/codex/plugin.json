@@ -1,0 +1,36 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "metaforge",
+  "version": "0.1.0",
+  "description": "Engineer hardware against a digital twin: requirements, CAD, simulation and evidence, with writes held for human approval.",
+  "author": {
+    "name": "MetaForge",
+    "url": "https://www.metaforge.uk"
+  },
+  "homepage": "https://fidelodok.github.io/MetaForge/",
+  "repository": "https://github.com/FidelOdok/MetaForge",
+  "license": "Apache-2.0",
+  "keywords": [
+    "hardware",
+    "cad",
+    "simulation",
+    "digital-twin",
+    "engineering"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "MetaForge",
+        "shortDescription": "Hardware engineering against a digital twin",
+        "longDescription": "Turn intent into reviewable, manufacturable deliverables: typed requirements, CAD through a design IR, simulation, component selection with margins, and evidence pinned to the revision it came from. Writes are held for a human.",
+        "developerName": "MetaForge",
+        "category": "Engineering",
+        "websiteURL": "https://www.metaforge.uk",
+        "defaultPrompt": [
+          "Open my arm project and tell me where it stands.",
+          "Record the requirements from this brief, with units and how each is verified."
+        ]
+      }
+    }
+  }
+}
