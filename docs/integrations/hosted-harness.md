@@ -114,10 +114,22 @@ hostname is actively worse, because that hostname changes on the next restart.
 
 ## What you get, and what you do not
 
-A connector carries the MCP server: **tools** and the slash commands, which are
-exposed as MCP **prompts**. It does not carry the plugin's skills, agents or
-hooks — those are Claude Code mechanisms with no MCP equivalent, so a hosted
-harness cannot receive them. Use Claude Code if you want the full plugin.
+A **connector** carries the MCP server: **tools**, and the slash commands, which
+are exposed as MCP **prompts**. It does not carry skills, agents or hooks —
+there is no MCP method that would deliver them.
+
+A **plugin bundle** is a different mechanism and does carry more. ChatGPT
+installs one from an uploaded `.zip` or `.tar.gz` holding a `plugin.json`, an
+`mcp.json` and a `skills/` directory — so all 43 engineering skills travel with
+it. Build one with:
+
+```bash
+python scripts/package_plugin_bundle.py      # -> dist/metaforge-plugin-<version>.zip
+```
+
+So the honest summary is per-mechanism, not per-product: a connector is tools
+and prompts; a bundle is tools, prompts and skills; only Claude Code's own
+plugin format carries agents and hooks as well.
 
 ## Things that will bite you
 
