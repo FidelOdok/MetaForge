@@ -29,6 +29,7 @@ from scripts.package_plugin_bundle import (
     PLUGIN_SCHEMA,
     archive,
     build_bundle,
+    retarget,
     to_portable_manifest,
     to_portable_mcp,
 )
@@ -131,3 +132,39 @@ class TestSourceStillMatchesWhatWeTransform:
         source = REPO_ROOT / "integrations" / "codex"
         assert (source / ".codex-plugin" / "plugin.json").is_file()
         assert (source / ".mcp.json").is_file()
+
+
+class TestRetarget:
+    """`--gateway-url`, because the committed default is unreachable from a
+    hosted harness and a bundle that installs against nothing presents as a
+    broken plugin (FORGE-576)."""
+
+    def test_the_server_url_is_replaced(self) -> None:
+        out = retarget(
+            {"mcpServers": {"m": {"url": "http://localhost:8765/mcp?profile=core"}}},
+            "https://mcp.example.com/mcp",
+        )
+        assert out["mcpServers"]["m"]["url"].startswith("https://mcp.example.com/mcp")
+
+    def test_the_profile_cap_is_carried_over(self) -> None:
+        """Losing it loads every tool, and a host with a hard cap truncates
+        the list without saying so."""
+        out = retarget(
+            {"mcpServers": {"m": {"url": "http://localhost:8765/mcp?profile=core"}}},
+            "https://mcp.example.com/mcp",
+        )
+        assert "profile=core" in out["mcpServers"]["m"]["url"]
+
+    def test_an_explicit_query_on_the_new_url_wins(self) -> None:
+        out = retarget(
+            {"mcpServers": {"m": {"url": "http://localhost:8765/mcp?profile=core"}}},
+            "https://mcp.example.com/mcp?profile=full",
+        )
+        assert "profile=full" in out["mcpServers"]["m"]["url"]
+
+    def test_other_fields_survive(self) -> None:
+        out = retarget(
+            {"mcpServers": {"m": {"url": "http://x/mcp", "type": "streamable-http"}}},
+            "https://y/mcp",
+        )
+        assert out["mcpServers"]["m"]["type"] == "streamable-http"

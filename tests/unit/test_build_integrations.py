@@ -294,7 +294,17 @@ class TestCodexPackage:
         # script that writes `.codex-plugin/plugin.json`. Still one version,
         # so TestCodexPlugin pins the field names.
         assert (root / ".codex-plugin" / "plugin.json").is_file()
-        assert not (root / "plugin.json").exists()  # not at the root
+
+        # FORGE-576 inverted the second half of this. It used to assert the
+        # manifest was *not* at the root, on the strength of 0.118.0's
+        # scaffolding script. codex-cli 0.161.0 answers "missing plugin.json"
+        # for exactly that layout -- the portable Agent Plugins format wants
+        # the manifest at the plugin root and treats `.codex-plugin/` as the
+        # compatibility fallback. Verified by installing both shapes; only the
+        # one with a root manifest came back "installed, enabled".
+        #
+        # Both are written, so an older host still finds the dotted one.
+        assert (root / "plugin.json").is_file()
 
     def test_agents_md_states_what_the_server_will_do(self, root: Path) -> None:
         text = (root / "AGENTS.md").read_text(encoding="utf-8")
@@ -507,12 +517,34 @@ class TestCodexPlugin:
         assert (pkg / manifest["skills"]).is_dir()
         assert (pkg / manifest["mcpServers"]).is_file()
 
-    def test_the_marketplace_entry_uses_a_local_source(self) -> None:
-        """`{"source": "local", "path": "./plugins/<name>"}` -- the shape the
-        scaffolder writes."""
-        market = json.loads((self._pkg() / "marketplace.json").read_text())
+    def test_the_marketplace_manifest_is_where_the_cli_reads_it(self) -> None:
+        """FORGE-576: it was written to `<root>/marketplace.json`, and nothing
+        checked. codex-cli 0.161.0 looks for `.agents/plugins/marketplace.json`
+        and answers "marketplace root does not contain a supported manifest"
+        for anything else -- so `codex plugin marketplace add` failed outright.
+
+        Moving the file back passed every other test in this class, which is
+        why this one exists rather than being implied by them.
+        """
+        pkg = self._pkg()
+        assert (pkg / ".agents" / "plugins" / "marketplace.json").is_file()
+        assert not (pkg / "marketplace.json").exists(), (
+            "a stray marketplace.json at the package root is the layout the CLI rejects"
+        )
+
+    def test_the_marketplace_entry_points_at_a_directory_that_exists(self) -> None:
+        """FORGE-576: this asserted `./plugins/metaforge`, a path that has
+        never existed in this package -- the plugin *is* the marketplace root.
+        The assertion passed because it only compared the manifest to itself,
+        so a marketplace pointing into thin air shipped for months. It now
+        checks the target resolves, which is the thing that was wrong."""
+        pkg = self._pkg()
+        market = json.loads((pkg / ".agents" / "plugins" / "marketplace.json").read_text())
         entry = market["plugins"][0]
-        assert entry["source"] == {"source": "local", "path": "./plugins/metaforge"}
+        assert entry["source"]["source"] == "local"
+        target = (pkg / entry["source"]["path"]).resolve()
+        assert target.is_dir(), f"source.path {entry['source']['path']} does not exist"
+        assert (target / "plugin.json").is_file(), "source.path has no plugin manifest"
 
     @pytest.mark.parametrize(
         ("field", "allowed"),
@@ -522,14 +554,14 @@ class TestCodexPlugin:
         ],
     )
     def test_the_policies_are_values_codex_accepts(self, field: str, allowed: set) -> None:
-        market = json.loads((self._pkg() / "marketplace.json").read_text())
+        market = json.loads((self._pkg() / ".agents" / "plugins" / "marketplace.json").read_text())
         assert market["plugins"][0]["policy"][field] in allowed
 
     def test_the_entry_names_the_plugin_the_manifest_declares(self) -> None:
         """A mismatch here installs nothing, and says nothing about why."""
         pkg = self._pkg()
         manifest = json.loads((pkg / ".codex-plugin" / "plugin.json").read_text())
-        market = json.loads((pkg / "marketplace.json").read_text())
+        market = json.loads((pkg / ".agents" / "plugins" / "marketplace.json").read_text())
         assert market["plugins"][0]["name"] == manifest["name"]
 
     def test_the_mcp_endpoint_matches_the_hand_written_config(self) -> None:

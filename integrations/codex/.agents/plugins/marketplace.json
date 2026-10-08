@@ -8,7 +8,7 @@
       "name": "metaforge",
       "source": {
         "source": "local",
-        "path": "./plugins/metaforge"
+        "path": "./"
       },
       "policy": {
         "installation": "AVAILABLE",

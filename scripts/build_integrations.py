@@ -27,6 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mcp_core.workflows import WORKFLOWS  # noqa: E402
 
+# FORGE-576: one definition of the portable manifest shape, shared with the
+# archive builder, so an installed plugin and an uploaded bundle cannot
+# describe themselves differently.
+from scripts.package_plugin_bundle import to_portable_manifest  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "integrations"
 
@@ -607,6 +612,15 @@ def build_codex(*, default_gateway_url: str) -> Path:
     (root / ".codex-plugin").mkdir(parents=True)
     (root / ".codex-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
+    # FORGE-576: a manifest only under ``.codex-plugin/`` gets "missing
+    # plugin.json" from codex-cli 0.161.0. The portable layout wants it at the
+    # plugin root, so write both -- the docs name the dotted one as the
+    # compatibility path for older hosts. The shape comes from
+    # ``package_plugin_bundle`` rather than a second copy here, so the
+    # installed plugin and the uploaded archive cannot describe themselves
+    # differently (FORGE-575).
+    (root / "plugin.json").write_text(json.dumps(to_portable_manifest(manifest), indent=2) + "\n")
+
     # The MCP server the plugin brings with it. Same endpoint as the
     # config.toml block below, which stays for anyone wiring Codex up by
     # hand rather than installing the plugin.
@@ -635,13 +649,28 @@ def build_codex(*, default_gateway_url: str) -> Path:
         "plugins": [
             {
                 "name": PLUGIN_NAME,
-                "source": {"source": "local", "path": f"./plugins/{PLUGIN_NAME}"},
+                # The plugin *is* the marketplace root; there is no plugins/ subtree.
+                "source": {"source": "local", "path": "./"},
                 "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"},
                 "category": "Engineering",
             }
         ],
     }
-    (root / "marketplace.json").write_text(json.dumps(marketplace, indent=2) + "\n")
+    # FORGE-576: this was written to ``<root>/marketplace.json`` with a
+    # ``source.path`` of ``./plugins/metaforge`` -- a directory that has never
+    # existed here, since the plugin content sits at the marketplace root.
+    # codex-cli 0.161.0 answers both mistakes the same way:
+    #
+    #   marketplace root does not contain a supported manifest
+    #
+    # It looks for ``.agents/plugins/marketplace.json``, which the comment
+    # above this function already recorded and the writer did not follow.
+    # ``./`` is accepted for a plugin that *is* the marketplace root, verified
+    # by installing one.
+    (root / ".agents" / "plugins").mkdir(parents=True, exist_ok=True)
+    (root / ".agents" / "plugins" / "marketplace.json").write_text(
+        json.dumps(marketplace, indent=2) + "\n"
+    )
 
     (root / "AGENTS.md").write_text(
         "# MetaForge\n\n"

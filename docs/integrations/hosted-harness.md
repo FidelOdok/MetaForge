@@ -123,9 +123,27 @@ installs one from an uploaded `.zip` or `.tar.gz` holding a `plugin.json`, an
 `mcp.json` and a `skills/` directory — so all 43 engineering skills travel with
 it. Build one with:
 
+Every release attaches the bundle, so the normal route is to download
+`metaforge-plugin-<version>.zip` (or `.tar.gz`) from the
+[latest release](https://github.com/FidelOdok/MetaForge/releases/latest) rather
+than to build one.
+
+Build it yourself only when you need a different server address:
+
 ```bash
-python scripts/package_plugin_bundle.py      # -> dist/metaforge-plugin-<version>.zip
+python scripts/package_plugin_bundle.py --gateway-url https://your-hostname/mcp
 ```
+
+:::warning[A released bundle points at `localhost`]
+
+Each user runs their own gateway, so there is no address a published bundle
+could correctly bake in — it ships the local default. ChatGPT cloud runs in
+someone else's datacentre and cannot reach `localhost`, so a bundle uploaded
+unmodified installs and then connects to nothing, which presents as the plugin
+being broken rather than as a configuration gap. Rebuild with `--gateway-url`,
+or edit `mcp.json` inside the archive before uploading.
+
+:::
 
 So the honest summary is per-mechanism, not per-product: a connector is tools
 and prompts; a bundle is tools, prompts and skills; only Claude Code's own
