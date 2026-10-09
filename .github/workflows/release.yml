@@ -239,6 +239,12 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Required for keyless signing: cosign exchanges this token for a
+      # short-lived Fulcio certificate. Without it the sign step fails with an
+      # OIDC error rather than silently publishing something unsigned.
+      id-token: write
+    env:
+      IMAGE: ghcr.io/fidelodok/metaforge-gateway
     steps:
       - uses: actions/checkout@v4
 
@@ -257,7 +263,7 @@ jobs:
           SHOULD_RELEASE: ${{ needs.version.outputs.should_release }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          image="ghcr.io/fidelodok/metaforge-gateway"
+          image="$IMAGE"
           tags="${image}:latest"
           [ "$SHOULD_RELEASE" = "true" ] && tags="${tags}
           ${image}:${VERSION}"
@@ -268,12 +274,20 @@ jobs:
           } >>"$GITHUB_OUTPUT"
 
       - name: Build + push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          # Attestations travel with the image: what built it, from which
+          # source, and what is inside it. `mode=max` records the build
+          # arguments and base images too, which is the difference between
+          # "a workflow built this" and a bill of materials you can audit
+          # when a CVE lands against something three layers down.
+          provenance: mode=max
+          sbom: true
           # FORGE-411: stamp the commit, so a running container can say
           # whether it matches the checkout beside it. Without this the
           # staleness check in health/check reports "cannot be detected"
@@ -282,3 +296,26 @@ jobs:
             METAFORGE_BUILD_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Sign the image with Sigstore, keyless (FORGE-585).
+      #
+      # Not `docker trust`: Docker Content Trust is being retired and the
+      # notary.docker.io service closes 2026-12-08, so a signature made with
+      # it would outlive its own verifier by weeks.
+      #
+      # Keyless means there is no private key to store, rotate or leak. Cosign
+      # exchanges this job's GitHub OIDC token for a short-lived certificate
+      # from Fulcio, signs with it, and records the result in the Rekor
+      # transparency log. What a verifier checks is therefore not "someone had
+      # the key" but "this workflow, in this repository, on this ref, produced
+      # this digest" -- which is the claim actually worth making.
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign the pushed image
+        env:
+          # By DIGEST, never by tag. A tag is a moving pointer: signing
+          # `:latest` says nothing about what `:latest` is tomorrow, and a
+          # verifier resolving the tag would be trusting the registry to hand
+          # it the same bytes. The digest IS the bytes.
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
