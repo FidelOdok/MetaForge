@@ -191,6 +191,9 @@ def _app():
         def attach_service_auth(self, key, verifier) -> bool:
             return False
 
+        def attach_client_task_grant(self, verifier) -> bool:
+            return False
+
         async def authenticate_service_caller(self, ctx, presented_key, inbound):
             return ctx
 

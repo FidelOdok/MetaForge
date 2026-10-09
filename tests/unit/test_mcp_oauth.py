@@ -323,6 +323,9 @@ def client():
         def attach_service_auth(self, key, verifier) -> bool:
             return False
 
+        def attach_client_task_grant(self, verifier) -> bool:
+            return False
+
         async def authenticate_service_caller(self, ctx, presented_key, inbound):
             return ctx
 
@@ -363,6 +366,9 @@ def test_http_app_declares_oauth_posture() -> None:
 
         # FORGE-487: build_http_app attaches service auth unconditionally.
         def attach_service_auth(self, key, verifier) -> bool:
+            return False
+
+        def attach_client_task_grant(self, verifier) -> bool:
             return False
 
         async def authenticate_service_caller(self, ctx, presented_key, inbound):
@@ -508,6 +514,9 @@ class TestIssuerDerivation:
                 pass
 
             def attach_service_auth(self, key, verifier) -> bool:
+                return False
+
+            def attach_client_task_grant(self, verifier) -> bool:
                 return False
 
             async def authenticate_service_caller(self, ctx, presented_key, inbound):
