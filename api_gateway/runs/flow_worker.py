@@ -314,7 +314,13 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
     Reuses the same ``HybridBrain`` the in-process executor builds, so the
     two engines run identical phase logic and a difference between them is a
     difference in durability only — not in what the agent does.
+
+    FORGE-581: a client-mode run calls no model here. The phase is posted to
+    the gateway as a task and this waits for the connected client's
+    submission; the gate that follows checks the twin as usual.
     """
+    if request.intelligence == "client":
+        return await _run_client_phase(request)
     # FORGE-503: point the route modules at the real project store and twin
     # before the brain is built. The design handler's cad_model probe reads
     # the project store while the phase runs; after a worker restart the first
@@ -373,6 +379,24 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
         artifacts=list(outcome.artifacts),
         status=phase_status(outcome.summary, outcome.status),
     )
+
+
+async def _run_client_phase(request: PhaseRequest) -> PhaseResult:
+    """Post the phase for the client and wait for its submission (FORGE-581)."""
+    from api_gateway.runs.client_phase import HttpTaskChannel, run_client_phase_request
+    from api_gateway.runs.gate_announce import gateway_url
+
+    key = (os.environ.get("METAFORGE_GATEWAY_API_KEY") or "").strip() or None
+    with tracer.start_as_current_span("design_flow_worker.run_client_phase") as span:
+        span.set_attribute("run.id", request.run_id)
+        span.set_attribute("phase.id", request.phase.id)
+        logger.info(
+            "design_flow_phase_on_client",
+            run_id=request.run_id,
+            phase=request.phase.id,
+            attempt=request.attempt,
+        )
+        return await run_client_phase_request(HttpTaskChannel(gateway_url(), api_key=key), request)
 
 
 async def _check_gate(payload: dict[str, Any]) -> GateCheck:

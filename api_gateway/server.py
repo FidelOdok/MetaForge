@@ -32,6 +32,7 @@ from api_gateway.cad.routes import router as cad_router
 from api_gateway.cad_export.routes import router as cad_export_router
 from api_gateway.chat.routes import router as chat_router
 from api_gateway.chat.tool_approvals import router as tool_approvals_router
+from api_gateway.client_tasks.routes import router as client_tasks_router
 from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.component_selection.routes import router as component_selection_router
 from api_gateway.constraint.routes import router as constraint_router
@@ -1540,6 +1541,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from orchestrator.harness.ledger import SqliteRunLedger, default_tool_approvals_ledger_path
 
         init_approval_ledger(SqliteRunLedger(str(default_tool_approvals_ledger_path())))
+        # FORGE-581: client-mode phase tasks wait for hours; a restart must
+        # not drop one a client is working on.
+        from api_gateway.client_tasks.routes import init_client_task_store
+        from orchestrator.design_flow.client_tasks import (
+            SqliteClientTaskStore,
+            default_client_tasks_path,
+        )
+
+        init_client_task_store(SqliteClientTaskStore(str(default_client_tasks_path())))
     # FORGE-482: flow versions (proposed, approved, rejected) were process
     # memory, so a routine reload lost every human approval while the
     # Temporal run using it survived. Same disable flag as the ledgers.
@@ -2089,6 +2099,7 @@ def create_app(
     app.include_router(runs_router)
     app.include_router(tool_approvals_router)
     app.include_router(approvals_router)
+    app.include_router(client_tasks_router)
     app.include_router(cad_router)
     app.include_router(cad_export_router)
     app.include_router(robot_loads_router)

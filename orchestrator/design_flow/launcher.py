@@ -172,6 +172,7 @@ class DesignFlowLauncher:
         gate_timeout_seconds: float | None = None,
         max_phase_retries: int | None = None,
         max_rework_cycles: int | None = None,
+        intelligence: str = "server",
     ) -> str:
         """Start a run. Returns the workflow id."""
         flow.verify()
@@ -181,6 +182,7 @@ class DesignFlowLauncher:
             flow=flow,
             project_id=project_id,
             session_id=session_id,
+            intelligence=intelligence,
         )
         if gate_timeout_seconds is not None:
             payload.gate_timeout_seconds = gate_timeout_seconds
