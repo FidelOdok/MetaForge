@@ -75,6 +75,13 @@ tailoring, and MetaForge only validates and stores it. **Running** that flow
 is different. Each phase is carried out by a phase brain on the harness
 model, so a run needs a working harness provider for as long as it runs.
 
+A run started in **client mode** (`intelligence: client`, see
+[client intelligence mode](../architecture.md#client-intelligence-mode-and-gates-in-the-chat-forge-581-forge-582))
+calls no model for its phases at all: each phase is posted as a task, and the
+connected client does it with its own model and hands it back. Gates are then
+answered by the person in the client's chat. Such a run needs no harness
+provider and no credit.
+
 When the harness provider refuses a call (for example OpenRouter's
 `402 in_flight_budget_exhausted` once an account is nearly out of credit),
 the phase fails with `ProviderUnavailable` and the run stops at that phase.

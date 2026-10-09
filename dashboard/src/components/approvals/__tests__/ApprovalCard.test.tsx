@@ -9,7 +9,7 @@ vi.mock('../../../api/endpoints/approvals', () => ({
 }));
 
 import { decideApproval } from '../../../api/endpoints/approvals';
-import { ApprovalCard } from '../ApprovalCard';
+import { ApprovalCard, decidedBy } from '../ApprovalCard';
 import { makeApproval } from '../../../test/approval-fixtures';
 
 const mockDecide = vi.mocked(decideApproval);
@@ -172,5 +172,58 @@ describe('ApprovalCard', () => {
     await user.click(screen.getByRole('button', { name: /approve/i }));
     await user.click(screen.getByRole('button', { name: 'Confirm approve' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/can no longer be decided/);
+  });
+
+  it('says who decided and where, for a gate answered in the client chat', () => {
+    render(
+      <ApprovalCard
+        item={makeApproval({
+          status: 'approved',
+          decidable: false,
+          allowed_decisions: [],
+          decision: {
+            decision: 'approve',
+            reason: null,
+            approver: 'user:fidel',
+            approver_verified: false,
+            surface: 'chat',
+            on_behalf_of: null,
+            decided_at: new Date().toISOString(),
+          },
+        })}
+      />,
+    );
+    expect(screen.getByTestId('approval-decided-by')).toHaveTextContent(
+      "by user:fidel (unverified) in the client's chat",
+    );
+  });
+});
+
+describe('decidedBy', () => {
+  const base = {
+    decision: 'approve' as const,
+    reason: null,
+    approver: null,
+    approver_verified: false,
+    surface: null,
+    on_behalf_of: null,
+    decided_at: '',
+  };
+
+  it('names the agent and whom it acted for', () => {
+    expect(
+      decidedBy({
+        ...base,
+        approver: 'user:fidel',
+        approver_verified: true,
+        surface: 'agent',
+        agent: 'claude-code',
+        on_behalf_of: 'fidel',
+      }),
+    ).toBe('by user:fidel through an agent (claude-code for fidel)');
+  });
+
+  it('says nothing for an unknown surface and no approver', () => {
+    expect(decidedBy({ ...base, surface: 'unknown' })).toBeNull();
   });
 });

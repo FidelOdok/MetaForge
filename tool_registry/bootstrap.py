@@ -301,6 +301,11 @@ async def bootstrap_tool_registry(
     design_flow_capability_reader: Any = None,
     design_flow_lifecycle_reader: Any = None,
     design_flow_patcher: Any = None,
+    # FORGE-582: a gate put to the person in the client's chat.
+    design_flow_gate_reader: Any = None,
+    design_flow_gate_decider: Any = None,
+    # FORGE-581: phase tasks for client-mode runs.
+    design_flow_client_tasks: Any = None,
     brief_provider: Any = None,
     parameter_optimizer: Any = None,
     device_instance_registrar: Any = None,
@@ -676,6 +681,9 @@ async def bootstrap_tool_registry(
                     capability_reader=design_flow_capability_reader,
                     lifecycle_reader=design_flow_lifecycle_reader,
                     patcher=design_flow_patcher,
+                    gate_reader=design_flow_gate_reader,
+                    gate_decider=design_flow_gate_decider,
+                    client_tasks=design_flow_client_tasks,
                 )
                 await registry.register_adapter(flow_server)
                 registered.append("design_flow")

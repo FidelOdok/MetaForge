@@ -231,6 +231,45 @@ class RemoteFlowBindings:
     capability_reader: Any = None
     lifecycle_reader: Any = None
     patcher: Any = None
+    #: FORGE-582: a gate put to the person in the client's chat.
+    gate_reader: Any = None
+    gate_decider: Any = None
+    #: FORGE-581: phase tasks for client-mode runs.
+    client_tasks: Any = None
+
+
+class RemoteClientTasks:
+    """``phase.*`` against ``/v1/client-tasks`` (FORGE-581)."""
+
+    def __init__(self, gateway: _Gateway) -> None:
+        self._gateway = gateway
+
+    async def list_tasks(
+        self, *, project_id: str | None = None, run_id: str | None = None
+    ) -> dict[str, Any]:
+        query = "&".join(
+            f"{k}={v}" for k, v in (("project_id", project_id), ("run_id", run_id)) if v
+        )
+        listing: dict[str, Any] = await self._gateway.request(
+            "GET", "/v1/client-tasks" + (f"?{query}" if query else "")
+        )
+        return listing
+
+    async def claim(self, task_id: str, client: str) -> dict[str, Any]:
+        task: dict[str, Any] = await self._gateway.request(
+            "POST", f"/v1/client-tasks/{task_id}/claim", json={"client": client}
+        )
+        return task
+
+    async def submit(
+        self, task_id: str, client: str, summary: str, artifacts: list[str]
+    ) -> dict[str, Any]:
+        task: dict[str, Any] = await self._gateway.request(
+            "POST",
+            f"/v1/client-tasks/{task_id}/submit",
+            json={"client": client, "summary": summary, "artifacts": artifacts},
+        )
+        return task
 
 
 class RemoteRunLauncher:
@@ -380,23 +419,27 @@ def build_remote_flow_bindings(
         return state
 
     async def start_run(
-        *, flow_version_id: str, goal: str, project_id: str | None
+        *,
+        flow_version_id: str,
+        goal: str,
+        project_id: str | None,
+        intelligence: str | None = None,
     ) -> dict[str, Any]:
+        request: dict[str, Any] = {
+            "kind": "design_flow",
+            "flow_version_id": flow_version_id,
+            "goal": goal,
+            "project_id": project_id,
+        }
+        if intelligence:
+            request["intelligence"] = intelligence
         with tracer.start_as_current_span("remote_flows.start_run") as span:
             span.set_attribute("flow.version_id", flow_version_id)
             try:
                 run = await gateway.request(
                     "POST",
                     "/v1/runs",
-                    json={
-                        "request": {
-                            "kind": "design_flow",
-                            "flow_version_id": flow_version_id,
-                            "goal": goal,
-                            "project_id": project_id,
-                        },
-                        "start": True,
-                    },
+                    json={"request": request, "start": True},
                 )
             except GatewayRefusedError as exc:
                 if exc.status_code == 409:
@@ -519,7 +562,44 @@ def build_remote_flow_bindings(
             "next_step": applied.get("nextStep", ""),
         }
 
+    async def read_gate(run_id: str) -> dict[str, Any]:
+        with tracer.start_as_current_span("remote_flows.read_gate") as span:
+            span.set_attribute("run.id", run_id)
+            run = await gateway.request("GET", f"/v1/runs/{run_id}")
+            status = str(run.get("status") or "")
+            gate = None
+            if status == "awaiting_approval":
+                gate = await gateway.request("GET", f"/v1/approvals/gate:{run_id}")
+        return {"run_status": status, "gate": gate}
+
+    async def decide_gate(
+        approval_id: str,
+        decision: str,
+        reason: str,
+        to_phase: str,
+        approver: str | None,
+        approver_verified: bool,
+    ) -> dict[str, Any]:
+        with tracer.start_as_current_span("remote_flows.decide_gate") as span:
+            span.set_attribute("approval.id", approval_id)
+            item: dict[str, Any] = await gateway.request(
+                "POST",
+                f"/v1/approvals/{approval_id}/inline-decision",
+                json={
+                    "decision": decision,
+                    "reason": reason,
+                    "to_phase": to_phase,
+                    "approver": approver,
+                    "approver_verified": approver_verified,
+                },
+            )
+        logger.info("design_flow_gate_decided_in_chat", approval_id=approval_id, via="gateway")
+        return item
+
     return RemoteFlowBindings(
+        gate_reader=read_gate,
+        gate_decider=decide_gate,
+        client_tasks=RemoteClientTasks(gateway),
         catalogue_reader=read_catalogue,
         proposer=propose,
         status_reader=read_status,

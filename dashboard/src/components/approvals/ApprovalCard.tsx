@@ -5,6 +5,7 @@ import { useDecideApproval } from '../../hooks/use-approvals';
 import { formatRelativeTime } from '../../utils/format-time';
 import type {
   ApprovalDecision,
+  ApprovalDecisionRecord,
   ApprovalFinding,
   ApprovalItem,
 } from '../../types/approvals';
@@ -209,6 +210,28 @@ export interface ApprovalCardProps {
  * `reason_required_for`; the whole control row is disabled, with the gateway's
  * own explanation, when the item is not decidable.
  */
+/** Where a decision was taken, in words (FORGE-583). `unknown` says nothing. */
+const SURFACE_WORDS: Record<string, string> = {
+  dashboard: 'in the dashboard',
+  cli: 'from the CLI',
+  agent: 'through an agent',
+  chat: "in the client's chat",
+};
+
+/** "by user:fidel (unverified) in the client's chat", or null when nothing is known. */
+export function decidedBy(record: ApprovalDecisionRecord): string | null {
+  const parts: string[] = [];
+  if (record.approver) {
+    parts.push(`by ${record.approver}${record.approver_verified ? '' : ' (unverified)'}`);
+  }
+  const where = record.surface ? SURFACE_WORDS[record.surface] : undefined;
+  if (where) parts.push(where);
+  if (record.surface === 'agent' && record.agent) {
+    parts.push(`(${record.agent}${record.on_behalf_of ? ` for ${record.on_behalf_of}` : ''})`);
+  }
+  return parts.length ? parts.join(' ') : null;
+}
+
 export function ApprovalCard({ item, onDecided }: ApprovalCardProps) {
   const decide = useDecideApproval();
   const [choice, setChoice] = useState<ApprovalDecision | null>(null);
@@ -428,6 +451,7 @@ export function ApprovalCard({ item, onDecided }: ApprovalCardProps) {
             {item.decision.decision} {formatRelativeTime(item.decision.decided_at)}
             {item.decision.reason && `: ${item.decision.reason}`}
           </div>
+          {decidedBy(item.decision) && <div data-testid="approval-decided-by">{decidedBy(item.decision)}</div>}
         </div>
       )}
     </article>

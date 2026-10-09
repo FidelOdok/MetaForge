@@ -703,6 +703,23 @@ groups:
             outcome="rejected", and confusing the two hides an unattended
             queue behind what looks like normal review.
 
+      # FORGE-581: client-mode phases were posted and none came back. The
+      # run is waiting for a connected client that is not there.
+      - alert: ClientTasksUnanswered
+        expr: >-
+          increase(metaforge_client_task_total{event="opened"}[2h]) > 0
+          and increase(metaforge_client_task_total{event="submitted"}[2h]) == 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Client-mode phase tasks are waiting with no client submitting"
+          description: >-
+            A client-mode run posted phase tasks in the last two hours and
+            no client submitted one. Either no Claude Code or Codex session
+            is connected to pick them up, or it is not calling phase.claim.
+            GET /v1/client-tasks lists what is waiting.
+
       # FORGE-489: a gate opened and nobody was told. The run waits silently
       # until someone polls, so this is an alarm, not an info line.
       - alert: DesignFlowGateUnannounced

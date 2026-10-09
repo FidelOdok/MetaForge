@@ -177,6 +177,12 @@ DOWNSTREAM_APPROVED: frozenset[str] = frozenset(
         # FORGE-539: propose holds the patch for a person; apply is refused
         # until that person approved it. A call hold would ask twice.
         "flow.patch",
+        # FORGE-582: the tool's whole job is to ask the person to decide a
+        # gate, in the client's own prompt, and record their answer. Holding
+        # the call first would ask that person twice for one decision. The
+        # agent cannot answer the prompt, and a client that cannot show one
+        # gets no decision at all.
+        "flow.await_gate",
     }
 )
 

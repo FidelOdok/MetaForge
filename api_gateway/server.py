@@ -32,6 +32,7 @@ from api_gateway.cad.routes import router as cad_router
 from api_gateway.cad_export.routes import router as cad_export_router
 from api_gateway.chat.routes import router as chat_router
 from api_gateway.chat.tool_approvals import router as tool_approvals_router
+from api_gateway.client_tasks.routes import router as client_tasks_router
 from api_gateway.compliance.routes import router as compliance_router
 from api_gateway.component_selection.routes import router as component_selection_router
 from api_gateway.constraint.routes import router as constraint_router
@@ -39,6 +40,9 @@ from api_gateway.convert.routes import router as convert_router
 from api_gateway.design_flows.mcp_bindings import (
     make_capability_reader,
     make_catalogue_reader,
+    make_client_task_service,
+    make_gate_decider,
+    make_gate_reader,
     make_intent_compiler,
     make_lifecycle_reader,
     make_patcher,
@@ -1264,6 +1268,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
         design_flow_capability_reader=make_capability_reader(),
         design_flow_lifecycle_reader=make_lifecycle_reader(),
         design_flow_patcher=make_patcher(),
+        # FORGE-582: the person decides a gate in the client's chat; the
+        # decision is theirs, recorded through the same approval service.
+        design_flow_gate_reader=make_gate_reader(),
+        design_flow_gate_decider=make_gate_decider(),
+        # FORGE-581: phase tasks for client-mode runs.
+        design_flow_client_tasks=make_client_task_service(),
         # FORGE-355: the project brief as an MCP resource.
         brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness
@@ -1540,6 +1550,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from orchestrator.harness.ledger import SqliteRunLedger, default_tool_approvals_ledger_path
 
         init_approval_ledger(SqliteRunLedger(str(default_tool_approvals_ledger_path())))
+        # FORGE-581: client-mode phase tasks wait for hours; a restart must
+        # not drop one a client is working on.
+        from api_gateway.client_tasks.routes import init_client_task_store
+        from orchestrator.design_flow.client_tasks import (
+            SqliteClientTaskStore,
+            default_client_tasks_path,
+        )
+
+        init_client_task_store(SqliteClientTaskStore(str(default_client_tasks_path())))
     # FORGE-482: flow versions (proposed, approved, rejected) were process
     # memory, so a routine reload lost every human approval while the
     # Temporal run using it survived. Same disable flag as the ledgers.
@@ -2089,6 +2108,7 @@ def create_app(
     app.include_router(runs_router)
     app.include_router(tool_approvals_router)
     app.include_router(approvals_router)
+    app.include_router(client_tasks_router)
     app.include_router(cad_router)
     app.include_router(cad_export_router)
     app.include_router(robot_loads_router)

@@ -16,6 +16,7 @@ one body of code.
 | `GET /v1/approvals?status=pending\|decided\|all&project_id=<id>&kind=<kind>` | List items. `decided` is every item that is not pending (the audit view). |
 | `GET /v1/approvals/{id}` | One item. |
 | `POST /v1/approvals/{id}/decision` | Body `{"decision", "reason", "to_phase"}`. Returns the updated item. |
+| `POST /v1/approvals/gate:{run_id}/inline-decision` | A gate decision a person gave in the MCP client's own prompt, recorded by the sidecar that asked. Body adds `approver` and `approver_verified`. Gates only. See [Gates in the client chat](#gates-in-the-client-chat). |
 
 The list response is `{"items": [...], "unscoped_count": n}`. When scoped to a
 project, `unscoped_count` is how many items were left out because they carry no
@@ -86,7 +87,9 @@ approver is `local:dashboard` with `approver_verified: false`.
 Clients say where the decision came from with headers:
 
 - `X-MetaForge-Surface`: `dashboard`, `cli` or `agent`. Absent is recorded as
-  `unknown`; any other value is a 422.
+  `unknown`; any other value is a 422. A fourth surface, `chat`, is never sent
+  as a header: it is recorded by the inline-decision route when a person
+  answered a gate in the MCP client's prompt.
 - `X-MetaForge-On-Behalf-Of`: the human an agent acts for. Only valid with
   `agent`.
 - `X-MetaForge-Agent`: the agent's name, such as `claude-code`. Only valid with
@@ -108,6 +111,35 @@ A decision made on an older route reports `surface: "unknown"`, because no
 surface was sent. A refused decision leaves no entry behind. A gate that was
 retried or reworked shows its decision only once the next gate resolves, since
 the item is pending again at that point.
+
+## Gates in the client chat
+
+A design-flow gate can be put to the person in the MCP client's own chat
+instead of the dashboard (FORGE-582). The agent calls `flow.await_gate` with a
+run id. The tool waits for the run's next gate, then sends an MCP elicitation
+that the client shows to the person: the gate, what its checks found, and the
+decisions it allows right now. The person answers; the agent does not, and
+cannot.
+
+- **Same rules as the dashboard.** The answer goes through the same
+  `service.decide`. Approve is not offered on a gate whose checks failed,
+  retry and rework keep their caps, and reject, retry and rework need a reason.
+- **The approver is the session's person.** The sidecar takes the identity
+  from the authenticated MCP session, never from the form, and posts it to
+  `POST /v1/approvals/gate:{run_id}/inline-decision`. It is recorded as
+  verified only when that request is itself authenticated, the same rule as a
+  held tool call's inline answer (FORGE-473). With auth off it is
+  `local:elicitation`, unverified.
+- **No answer is not a decision.** Dismissing the prompt, declining it, or
+  letting it expire leaves the gate open in the dashboard and in
+  `forge approvals`. A client that cannot show a prompt gets the gate back as
+  `awaiting_gate` with a note to answer it there.
+- **Not held at the call.** The tool's only effect is asking the person, so
+  holding the call first would ask them twice for one decision. The
+  design-flow worker cannot call it (`flow.*` is refused for the service
+  caller).
+
+The decision record shows `surface: "chat"`.
 
 ## Delegating approvals to an agent
 

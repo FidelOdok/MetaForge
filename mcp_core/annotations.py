@@ -48,6 +48,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "flow.capabilities",
         "flow.lifecycle",
         "flow.verify_completion",
+        # FORGE-581: the phase tasks waiting for a client; listing them reads.
+        "phase.list_tasks",
         # Geometry and model inspection
         "cadquery.get_properties",
         "cadquery.validate_physics_stability",
@@ -221,6 +223,13 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-539: proposing a patch writes a version and an approval;
         # applying one needs that approval. Same shape as the two above.
         "flow.patch",
+        # FORGE-582: records the gate decision a person gives in the client's
+        # own prompt. Adds a decision; overwrites nothing.
+        "flow.await_gate",
+        # FORGE-581: taking a phase task and handing it back record the
+        # client's own work on the task; neither touches design state.
+        "phase.claim",
+        "phase.submit",
         "knowledge.extract",
         "knowledge.ingest",
         "knowledge.populate_bom",

@@ -110,7 +110,8 @@ class TestAlertingRules:
         # + 1 record pin / staleness failures (FORGE-527).
         # + 1 gate approval without a baseline (FORGE-526).
         # + 1 item migration failures (FORGE-529).
-        assert len(rules) == 50
+        # + 1 client-mode phase tasks nobody submits (FORGE-581).
+        assert len(rules) == 51
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -164,7 +165,8 @@ class TestAlertingRules:
         # + 1 record pin / staleness failures (FORGE-527)
         # + 1 gate approval without a baseline (FORGE-526)
         # + 1 item migration failures (FORGE-529)
-        assert len(warnings) == 37
+        # + 1 client-mode phase tasks nobody submits (FORGE-581).
+        assert len(warnings) == 38
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -201,6 +203,8 @@ class TestAlertingRules:
                 # FORGE-520: chat replies keep claiming twin writes or node ids
                 # their own tool calls do not back up.
                 "ChatUngroundedClaimsSustained",
+                # FORGE-581: client-mode phases posted and none came back.
+                "ClientTasksUnanswered",
                 "ConsolidationContradictionsRising",
                 "ContextTruncationSpike",
                 # FORGE-532: 3D result fields failing to build or to store.

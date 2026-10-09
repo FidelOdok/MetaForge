@@ -197,6 +197,53 @@ promotion and guarded `ect.approve` against a *blank* approver, which is not
 the same as guarding it against a supplied one. Both now read the approver
 from the approval record, and both are in `HUMAN_AUTHORITY_TOOLS`.
 
+### Client intelligence mode and gates in the chat (FORGE-581, FORGE-582)
+
+A run can have its phase work done by the connected MCP client (Claude Code,
+Codex) instead of a model the gateway calls. The mode is per run:
+`intelligence` on the run request (`flow.start_run` takes it), else the
+deployment default `METAFORGE_INTELLIGENCE`, else `server`. A value that is
+not a mode is a 422, never a quiet fall back to the server's model. The mode
+is fixed when the run starts and travels in the workflow input.
+
+**A client-mode phase is a task.** The `run_phase` activity calls no model.
+It posts the phase to `/v1/client-tasks` with the brief a phase brain would
+have been given (goal, objective, required deliverables and slots, flow
+context, retry feedback, earlier summaries) and waits, heartbeating, for a
+submission. The client lists tasks with `phase.list_tasks`, takes one with
+`phase.claim`, does the work through MCP tools and hands it back with
+`phase.submit`. The gate that follows checks the twin exactly as it does
+after a server phase: a deliverable described in the summary but not
+recorded fails it.
+
+- The task id is `run:phase:attempt`, so a retried activity finds the task
+  (and any submission) the first attempt posted. A worker that stops
+  withdraws its open task; the retry reopens it.
+- Tasks live in SQLite next to the run ledger
+  (`METAFORGE_CLIENT_TASKS_PATH`, default `~/.metaforge/client_tasks.db`), so
+  a gateway restart does not lose one a client is working on.
+- A task can only be opened for a run that exists and started in client
+  mode (404 or 409 otherwise).
+- The in-process engine uses the same tasks through `ClientPhaseBrain`.
+- The `ClientTasksUnanswered` alert fires when tasks were posted for two
+  hours and none came back.
+
+**Writes during a client phase are still held.** A remote client's twin
+writes go through the ordinary guardrail, so each is held for a person
+(answered in the chat where the client supports elicitation). The design-flow
+worker avoids that with its service key bound to a verified run; giving a
+client that claimed a task the same scoped trust is a separate, open
+decision.
+
+**Gates are answered by the person, in the chat.** `flow.await_gate` waits
+for the run's next gate and asks the person through MCP elicitation, with
+only the decisions the gate allows. The decision is recorded through the
+same approval service as a dashboard click, with `surface: "chat"` and the
+person from the authenticated MCP session as approver. Dismissing the prompt
+leaves the gate open. This keeps the FORGE-400 rule intact: the agent still
+has no tool that approves anything; the tool asks. See
+[Gates in the client chat](approvals.md#gates-in-the-client-chat).
+
 ### The run record follows the workflow (FORGE-485)
 
 The gateway's run record is a cache of the workflow. A Temporal run used to

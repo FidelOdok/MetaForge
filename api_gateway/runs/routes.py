@@ -37,6 +37,11 @@ from api_gateway.twin.baseline import create_item_baseline
 from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector
 from observability.tracing import get_tracer
+from orchestrator.design_flow.client_tasks import (
+    Intelligence,
+    default_intelligence,
+    parse_intelligence,
+)
 from orchestrator.design_flow.executor import DesignFlowExecutor, GateCoordinator
 from orchestrator.design_flow.frozen import freeze_flow
 from orchestrator.design_flow.graph import build_graph, rework_candidates
@@ -663,6 +668,26 @@ def _build_in_process_executor(brain: Any, project_backend: Any) -> DesignFlowEx
     )
 
 
+def resolve_run_intelligence(request: dict[str, Any]) -> Intelligence:
+    """The mode a new run asks for, else the deployment default (FORGE-581).
+
+    Raises ``ValueError`` for a value that is not a mode: a run that asked
+    for client mode and quietly got the server's model would bill a
+    provider its owner meant not to use.
+    """
+    raw = request.get("intelligence")
+    return parse_intelligence(raw) if raw not in (None, "") else default_intelligence()
+
+
+def run_intelligence(run: Run) -> Intelligence:
+    """The mode a started run was fixed to; runs from before FORGE-581 are server."""
+    raw = run.request.get("intelligence")
+    try:
+        return parse_intelligence(raw) if raw else Intelligence.SERVER
+    except ValueError:
+        return Intelligence.SERVER
+
+
 async def _launch_flow(run_id: str) -> None:
     """Spawn the in-process executor for ``run_id`` as a tracked background task.
 
@@ -681,7 +706,14 @@ async def _launch_flow(run_id: str) -> None:
     run.request["flow_engine"] = FlowEngine.IN_PROCESS.value
     project_backend = get_project_backend()
     await _ensure_run_project(run, project_backend)
-    hybrid = await build_phase_brain(run_id, run.request.get("flow"))
+    if run_intelligence(run) is Intelligence.CLIENT:
+        # FORGE-581: the connected client does each phase; nothing calls a model.
+        from api_gateway.client_tasks.routes import get_client_task_store
+        from api_gateway.runs.client_phase import ClientPhaseBrain, LocalTaskChannel
+
+        hybrid: Any = ClientPhaseBrain(run_id, LocalTaskChannel(get_client_task_store))
+    else:
+        hybrid = await build_phase_brain(run_id, run.request.get("flow"))
     executor = _build_in_process_executor(hybrid, project_backend)
     logger.info(
         "design_flow_started_in_process",
@@ -736,6 +768,7 @@ async def _start_on_temporal(run_id: str) -> None:
             flow=frozen,
             project_id=run.request.get("project_id"),
             session_id=run.request.get("session_id"),
+            intelligence=run_intelligence(run).value,
         )
         _metrics().record_design_flow_started(FlowEngine.TEMPORAL.value, flow_id)
         return
@@ -763,6 +796,7 @@ async def _start_on_temporal(run_id: str) -> None:
         flow=frozen,
         project_id=run.request.get("project_id"),
         session_id=run.request.get("session_id"),
+        intelligence=run_intelligence(run).value,
     )
     _metrics().record_design_flow_started(FlowEngine.TEMPORAL.value, flow_id)
 
@@ -789,6 +823,12 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
                     "design_flow_version_not_approved", run_id=run.id, error=str(refused)
                 )
                 raise HTTPException(status_code=409, detail=str(refused)) from refused
+        # FORGE-581: who does the phase work, fixed now for the life of the run.
+        try:
+            run.request["intelligence"] = resolve_run_intelligence(body.request).value
+        except ValueError as exc:
+            _store.delete(run.id)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         engine = resolve_flow_engine()
         # Run status says which engine is driving it (FORGE-474).
         run.request["flow_engine"] = engine.value

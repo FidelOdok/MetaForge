@@ -419,6 +419,7 @@ annotations still say `readOnlyHint: false`.
 | `session.start`, `session.log_event`, `session.complete` | record the agent's own activity, not design state (FORGE-407) |
 | `flow.propose` | the proposal it writes is itself held for a person; an intent-only call returns `needs_input` questions and writes nothing (FORGE-471) |
 | `flow.start_run` | it starts only a flow version a person has already approved; any other version is refused with `409` (FORGE-471) |
+| `flow.await_gate` | its only effect is asking the person to decide a gate in this chat; holding it first would ask them twice (FORGE-582) |
 
 So a flow proposal takes **one approval**: the one on the flow version it
 creates. Starting a run on that version, once approved, takes none.
@@ -498,6 +499,8 @@ profile the plugin installs by default (FORGE-462):
 | `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (write; the version is held, not the call). Optional `template`, `operations` and `caller` apply your own tailoring with no server-side model call; the same invariants and approval apply, and an invalid operation is refused with the reason (FORGE-481) |
 | `flow.start_run` | start a run on a flow version a person has **approved** (write; refused unless the version is approved) |
 | `flow.status` | phase-by-phase state of one run (read) |
+| `flow.await_gate` | wait for a run's next gate and ask **you** to decide it in this chat; the agent cannot answer the prompt (FORGE-582) |
+| `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back (FORGE-581) |
 | `run.start_design_flow` | start one of the built-in flows on a goal (held write) |
 | `run.get_status` | a run's state, gate reason and result (read) |
 

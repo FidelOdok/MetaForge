@@ -59,7 +59,7 @@ def _iso(value: Any) -> str | None:
     return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
 
 
-_SURFACES = ("dashboard", "cli", "agent")
+_SURFACES = ("dashboard", "cli", "agent", "chat")
 
 
 def _surface(value: Any) -> Surface:

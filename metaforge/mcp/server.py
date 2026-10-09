@@ -2132,7 +2132,13 @@ class UnifiedMcpServer:
                 "params": params,
             }
         )
-        sub_response_text = await adapter.handle_request(sub_request)
+        # FORGE-582: a tool that asks the person itself (flow.await_gate)
+        # reaches them through this connection's elicitor, and only when this
+        # connection can be asked.
+        from mcp_core.elicitation import with_elicitor
+
+        with with_elicitor(self._elicitor if self.can_elicit else None):
+            sub_response_text = await adapter.handle_request(sub_request)
         sub_response: dict[str, Any] = json.loads(sub_response_text)
 
         if "error" in sub_response:

@@ -152,6 +152,10 @@ class PhaseRequest:
     retry_feedback: str = ""
     #: 1 for the first attempt, 2 for the first retry, and so on.
     attempt: int = 1
+    #: FORGE-581: ``"server"`` runs a phase brain; ``"client"`` posts the
+    #: phase as a task for the connected client and waits for its submission.
+    #: Payload only: the activity is the same, so no replay patch is needed.
+    intelligence: str = "server"
 
 
 @dataclass
@@ -224,6 +228,8 @@ class DesignFlowInput:
     rework_cycles: int = 0
     #: FORGE-539: phases a graph run skipped, carried across a continue-as-new.
     skipped: list[str] = field(default_factory=list)
+    #: FORGE-581: who does the phase work, fixed for the life of the run.
+    intelligence: str = "server"
 
 
 @workflow.defn(name="DesignFlow")
@@ -385,6 +391,7 @@ class DesignFlowWorkflow:
                             flow_context=inp.flow.context,
                             retry_feedback=retry_feedback,
                             attempt=self._attempt,
+                            intelligence=inp.intelligence,
                         ),
                         start_to_close_timeout=_PHASE_TIMEOUT,
                         heartbeat_timeout=_PHASE_HEARTBEAT,
@@ -609,6 +616,7 @@ class DesignFlowWorkflow:
                 flow_context=inp.flow.context,
                 retry_feedback=retry_feedback,
                 attempt=attempt,
+                intelligence=inp.intelligence,
             ),
             start_to_close_timeout=_PHASE_TIMEOUT,
             heartbeat_timeout=_PHASE_HEARTBEAT,
@@ -945,6 +953,7 @@ class DesignFlowWorkflow:
                 max_rework_cycles=inp.max_rework_cycles,
                 rework_cycles=self._rework_cycles,
                 skipped=skipped,
+                intelligence=inp.intelligence,
             )
         )
         raise AssertionError("unreachable: continue_as_new does not return")

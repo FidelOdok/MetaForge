@@ -1734,6 +1734,17 @@
         "title": "CallerOperation",
         "type": "object"
       },
+      "CancelRequest": {
+        "properties": {
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "CancelRequest",
+        "type": "object"
+      },
       "Candidate": {
         "properties": {
           "manufacturer": {
@@ -1905,6 +1916,17 @@
           "items"
         ],
         "title": "ChecklistResponse",
+        "type": "object"
+      },
+      "ClaimRequest": {
+        "properties": {
+          "client": {
+            "default": "",
+            "title": "Client",
+            "type": "string"
+          }
+        },
+        "title": "ClaimRequest",
         "type": "object"
       },
       "CompileRequest": {
@@ -3148,6 +3170,7 @@
               "dashboard",
               "cli",
               "agent",
+              "chat",
               "unknown"
             ],
             "title": "Surface",
@@ -5965,6 +5988,55 @@
         "title": "IngestResponse",
         "type": "object"
       },
+      "InlineDecisionRequest": {
+        "description": "Body for ``POST /v1/approvals/{id}/inline-decision`` (FORGE-582).\n\nA person answered a gate in the MCP client's own prompt. The sidecar that\nasked records it here. ``approver`` is who the sidecar's authenticated\nMCP session says answered; it is recorded as verified only when this\nrequest itself is authenticated, the same rule a held tool call's inline\nanswer follows (FORGE-473).",
+        "properties": {
+          "approver": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approver"
+          },
+          "approver_verified": {
+            "default": false,
+            "title": "Approver Verified",
+            "type": "boolean"
+          },
+          "decision": {
+            "enum": [
+              "approve",
+              "reject",
+              "retry",
+              "rework"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          },
+          "to_phase": {
+            "default": "",
+            "maxLength": 200,
+            "title": "To Phase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "InlineDecisionRequest",
+        "type": "object"
+      },
       "InsightKind": {
         "description": "What kind of statement the insight is.",
         "enum": [
@@ -8311,6 +8383,45 @@
           "provider"
         ],
         "title": "OkResponse",
+        "type": "object"
+      },
+      "OpenTaskRequest": {
+        "properties": {
+          "attempt": {
+            "default": 1,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "brief": {
+            "additionalProperties": true,
+            "title": "Brief",
+            "type": "object"
+          },
+          "phaseId": {
+            "title": "Phaseid",
+            "type": "string"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectid"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "phaseId"
+        ],
+        "title": "OpenTaskRequest",
         "type": "object"
       },
       "OtherRow": {
@@ -12481,6 +12592,31 @@
         "title": "StartDesignLoopRequest",
         "type": "object"
       },
+      "SubmitRequest": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "client": {
+            "default": "",
+            "title": "Client",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "title": "SubmitRequest",
+        "type": "object"
+      },
       "SynthesizeRequest": {
         "properties": {
           "delta": {
@@ -14370,6 +14506,59 @@
         ]
       }
     },
+    "/v1/approvals/{approval_id}/inline-decision": {
+      "post": {
+        "description": "Record a gate decision a person gave in the MCP client's chat (FORGE-582).\n\nGates only: a held tool call's inline answer has its own route\n(``/v1/tool-approvals/{id}/resolve``). The decision goes through the same\n``service.decide`` as a dashboard click, so a gate that is not ready\nstill cannot be approved, and retry and rework caps still apply.",
+        "operationId": "decide_inline_v1_approvals__approval_id__inline_decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "title": "Approval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InlineDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Inline",
+        "tags": [
+          "approvals"
+        ]
+      }
+    },
     "/v1/assistant/proposals": {
       "get": {
         "description": "List pending design-change proposals, optionally filtered by session/project.",
@@ -16115,6 +16304,342 @@
         "summary": "Resolve Unanswered Hold",
         "tags": [
           "chat-tool-approvals"
+        ]
+      }
+    },
+    "/v1/client-tasks": {
+      "get": {
+        "description": "Tasks, open ones by default. ``status=all`` lists every state.",
+        "operationId": "list_tasks_v1_client_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "open",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Tasks V1 Client Tasks Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tasks",
+        "tags": [
+          "client-tasks"
+        ]
+      },
+      "post": {
+        "description": "Post a phase for the client. Idempotent on ``run:phase:attempt``.",
+        "operationId": "open_task_v1_client_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Open Task V1 Client Tasks Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Task",
+        "tags": [
+          "client-tasks"
+        ]
+      }
+    },
+    "/v1/client-tasks/{task_id}": {
+      "get": {
+        "operationId": "get_task_v1_client_tasks__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Task V1 Client Tasks  Task Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Task",
+        "tags": [
+          "client-tasks"
+        ]
+      }
+    },
+    "/v1/client-tasks/{task_id}/cancel": {
+      "post": {
+        "description": "Withdraw a task nobody will wait on any more (the worker's activity ended).",
+        "operationId": "cancel_task_v1_client_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Task V1 Client Tasks  Task Id  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Task",
+        "tags": [
+          "client-tasks"
+        ]
+      }
+    },
+    "/v1/client-tasks/{task_id}/claim": {
+      "post": {
+        "description": "Take a task and get its full brief.",
+        "operationId": "claim_task_v1_client_tasks__task_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Claim Task V1 Client Tasks  Task Id  Claim Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Task",
+        "tags": [
+          "client-tasks"
+        ]
+      }
+    },
+    "/v1/client-tasks/{task_id}/submit": {
+      "post": {
+        "description": "Hand the phase back. The run's gate then checks the twin as usual.",
+        "operationId": "submit_task_v1_client_tasks__task_id__submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Submit Task V1 Client Tasks  Task Id  Submit Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Task",
+        "tags": [
+          "client-tasks"
         ]
       }
     },
