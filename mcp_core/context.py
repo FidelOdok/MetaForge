@@ -123,6 +123,17 @@ class McpCallContext(BaseModel):
         default=None,
         description="Why a call carrying a valid service key was refused. Server-set only.",
     )
+    # FORGE-584: a session working a phase task it claimed. Server-set only,
+    # like ``service_verified``: never read from a header, and only after the
+    # owner turned the grant on and the gateway confirmed the claim.
+    client_task_id: str | None = Field(
+        default=None,
+        description="The claimed phase task this call works on. Server-set only.",
+    )
+    client_task_verified: bool = Field(
+        default=False,
+        description="True only when the server confirmed this session's claimed task.",
+    )
 
     model_config = ConfigDict(frozen=True)
 
@@ -333,6 +344,74 @@ def clear_session_project(session_id: UUID) -> None:
 def reset_session_projects() -> None:
     """Clear every binding — tests only."""
     _session_projects.clear()
+
+
+# --- Session-scoped phase task (FORGE-584) ------------------------------------
+#
+# ``phase.claim`` records which task a session took, keyed on the session id
+# like the project binding above and for the same reason: the sidecar serves
+# several clients, and a process-wide "last claimed task" would hand one
+# client's grant to another. A session with no stable id gets no binding. The
+# binding is only a claim: the server re-checks it with the gateway before it
+# grants anything.
+
+
+class TaskBinding(BaseModel):
+    """The phase task a session claimed."""
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: str
+    run_id: str
+    phase: str
+    project_id: UUID | None = None
+
+
+_session_tasks: OrderedDict[UUID, TaskBinding] = OrderedDict()
+
+
+def bind_current_session_task(
+    task_id: str, run_id: str, phase: str, project_id: str | UUID | None
+) -> bool:
+    """Record that this session claimed ``task_id``. Returns whether it stuck."""
+    ctx = current_context()
+    if not ctx.session_is_stable or not task_id or not run_id:
+        return False
+    parsed: UUID | None
+    try:
+        parsed = (
+            project_id
+            if isinstance(project_id, UUID)
+            else (UUID(str(project_id)) if project_id else None)
+        )
+    except (ValueError, TypeError):
+        parsed = None
+    _session_tasks.pop(ctx.session_id, None)
+    _session_tasks[ctx.session_id] = TaskBinding(
+        task_id=task_id, run_id=run_id, phase=phase, project_id=parsed
+    )
+    while len(_session_tasks) > _MAX_SESSION_BINDINGS:
+        _session_tasks.popitem(last=False)
+    return True
+
+
+def bound_task(session_id: UUID | None) -> TaskBinding | None:
+    """The task bound to ``session_id``, if any."""
+    if session_id is None:
+        return None
+    return _session_tasks.get(session_id)
+
+
+def clear_session_task(session_id: UUID, task_id: str | None = None) -> None:
+    """Drop a session's task binding (on submit). With ``task_id``, only that task's."""
+    current = _session_tasks.get(session_id)
+    if current is not None and (task_id is None or current.task_id == task_id):
+        _session_tasks.pop(session_id, None)
+
+
+def reset_session_tasks() -> None:
+    """Clear every task binding — tests only."""
+    _session_tasks.clear()
 
 
 def _apply_session_binding(fields: dict[str, object], session: UUID | None) -> None:

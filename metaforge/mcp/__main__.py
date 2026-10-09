@@ -609,6 +609,10 @@ def build_http_app(
     # present ``service_key`` AND name a run the gateway confirms. Off unless
     # both are supplied, in any auth mode.
     server.attach_service_auth(service_key, service_verifier)
+    # FORGE-584: scoped writes for a client working a claimed phase task.
+    # Off unless the owner sets METAFORGE_CLIENT_TASK_WRITES, and only with a
+    # gateway to confirm each claim against.
+    server.attach_client_task_grant(_client_task_verifier_from_env())
     app = FastAPI(
         title="MetaForge MCP",
         version="0.1.0",
@@ -1954,6 +1958,33 @@ def _build_flow_bindings() -> dict[str, Any]:
         "design_flow_client_tasks": make_client_task_service(),
         "run_launcher": make_run_launcher(),
     }
+
+
+def _client_task_verifier_from_env() -> Any:
+    """What confirms a client's claimed task, or ``None`` with the grant off (FORGE-584).
+
+    On only when the owner set ``METAFORGE_CLIENT_TASK_WRITES`` *and*
+    ``METAFORGE_GATEWAY_URL`` says where tasks and runs live. The switch
+    without a gateway is logged and left off: a grant nobody can confirm
+    must not be given.
+    """
+    from metaforge.mcp.client_task_grant import (
+        CLIENT_TASK_WRITES_ENV,
+        GatewayClientTaskVerifier,
+        client_task_writes_enabled,
+    )
+
+    if not client_task_writes_enabled():
+        return None
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if not gateway_url:
+        logger.error(
+            "mcp_client_task_writes_no_gateway",
+            detail=f"{CLIENT_TASK_WRITES_ENV} is set but METAFORGE_GATEWAY_URL is not; "
+            "client-task writes stay off",
+        )
+        return None
+    return GatewayClientTaskVerifier(gateway_url)
 
 
 def _service_auth_from_env() -> tuple[str | None, ServiceRunVerifier | None]:

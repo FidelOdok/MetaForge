@@ -500,7 +500,7 @@ profile the plugin installs by default (FORGE-462):
 | `flow.start_run` | start a run on a flow version a person has **approved** (write; refused unless the version is approved) |
 | `flow.status` | phase-by-phase state of one run (read) |
 | `flow.await_gate` | wait for a run's next gate and ask **you** to decide it in this chat; the agent cannot answer the prompt (FORGE-582) |
-| `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back (FORGE-581) |
+| `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back (FORGE-581). If the sidecar owner set `METAFORGE_CLIENT_TASK_WRITES=on`, approving the claim once lets this session's writes for that phase run without further holds until you submit (FORGE-584) |
 | `run.start_design_flow` | start one of the built-in flows on a goal (held write) |
 | `run.get_status` | a run's state, gate reason and result (read) |
 
