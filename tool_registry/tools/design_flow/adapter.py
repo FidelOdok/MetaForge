@@ -56,6 +56,9 @@ class DesignFlowServer(McpToolServer):
         capability_reader: Any = None,
         lifecycle_reader: Any = None,
         patcher: Any = None,
+        gate_reader: Any = None,
+        gate_decider: Any = None,
+        client_tasks: Any = None,
     ) -> None:
         super().__init__(adapter_id="design_flow", version="0.1.0")
         self._catalogue_reader = catalogue_reader
@@ -66,6 +69,9 @@ class DesignFlowServer(McpToolServer):
         self._capability_reader = capability_reader
         self._lifecycle_reader = lifecycle_reader
         self._patcher = patcher
+        self._gate_reader = gate_reader
+        self._gate_decider = gate_decider
+        self._client_tasks = client_tasks
 
         if catalogue_reader is not None:
             self._register_list_flows()
@@ -86,6 +92,13 @@ class DesignFlowServer(McpToolServer):
             self._register_lifecycle()
         if patcher is not None:
             self._register_patch()
+        # FORGE-582: a gate put to the person in the client's chat. Needs both
+        # halves: reading the gate and recording the person's answer.
+        if gate_reader is not None and gate_decider is not None:
+            self._register_await_gate()
+        # FORGE-581: phase tasks for client-mode runs.
+        if client_tasks is not None:
+            self._register_phase_tasks()
 
     # ── tools ────────────────────────────────────────────────────────────
 
@@ -295,6 +308,16 @@ class DesignFlowServer(McpToolServer):
                         "flow_version_id": {"type": "string"},
                         "goal": {"type": "string"},
                         "project_id": {"type": "string"},
+                        "intelligence": {
+                            "type": "string",
+                            "enum": ["server", "client"],
+                            "description": (
+                                "Who does the phase work. 'client': each phase waits for "
+                                "you to take it with phase.claim and hand it back with "
+                                "phase.submit; MetaForge calls no model. Omit for the "
+                                "deployment default."
+                            ),
+                        },
                     },
                     "required": ["flow_version_id", "goal"],
                 },
@@ -448,7 +471,172 @@ class DesignFlowServer(McpToolServer):
             handler=self.patch,
         )
 
+    def _register_await_gate(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="flow.await_gate",
+                adapter_id="design_flow",
+                name="Wait for a design-run gate and ask the person",
+                description=(
+                    "Wait until a design run reaches its next gate, then ask the PERSON in "
+                    "this chat to decide it (approve, retry, rework or reject). The person "
+                    "answers in a prompt this client shows them; you do not answer it and "
+                    "cannot decide for them. Only the decisions the gate allows are "
+                    "offered: approve is not offered when the gate's checks failed. If "
+                    "the person dismisses the prompt, or this client cannot show one, the "
+                    "gate stays open for them in the dashboard or `forge approvals`. "
+                    "Returns no_gate_yet if none opened within wait_seconds; call again."
+                ),
+                capability="design_flow_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "run_id": {"type": "string"},
+                        "wait_seconds": {
+                            "type": "number",
+                            "description": "How long to wait for a gate (default 120, max 1800).",
+                        },
+                        "answer_seconds": {
+                            "type": "number",
+                            "description": "How long the person has to answer (default 300).",
+                        },
+                    },
+                    "required": ["run_id"],
+                },
+            ),
+            handler=self.await_gate,
+        )
+
+    def _register_phase_tasks(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="phase.list_tasks",
+                adapter_id="design_flow",
+                name="List phases waiting for this client",
+                description=(
+                    "Phases of client-mode design runs that are waiting for a client to do "
+                    "them. Filter by project_id or run_id. Take one with phase.claim."
+                ),
+                capability="design_flow_read",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {"type": "string"},
+                        "run_id": {"type": "string"},
+                    },
+                },
+            ),
+            handler=self.list_tasks,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="phase.claim",
+                adapter_id="design_flow",
+                name="Take a phase task",
+                description=(
+                    "Take a waiting phase of a client-mode design run and get its brief: "
+                    "goal, objective, required deliverables and slots, flow context and "
+                    "any retry feedback. Do the work with MetaForge tools, recording each "
+                    "required deliverable in the twin under the run's project, then call "
+                    "phase.submit."
+                ),
+                capability="design_flow_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {"task_id": {"type": "string"}},
+                    "required": ["task_id"],
+                },
+            ),
+            handler=self.claim_task,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="phase.submit",
+                adapter_id="design_flow",
+                name="Hand a phase task back",
+                description=(
+                    "Finish a phase task you claimed: a short summary of what you did and "
+                    "the ids of what you recorded. The run's gate then checks the twin, not "
+                    "the summary. Afterwards call flow.await_gate so the person can decide "
+                    "the gate in this chat."
+                ),
+                capability="design_flow_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "artifacts": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["task_id", "summary"],
+                },
+            ),
+            handler=self.submit_task,
+        )
+
     # ── handlers ─────────────────────────────────────────────────────────
+
+    async def await_gate(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from tool_registry.tools.design_flow.gates import await_gate
+
+        run_id = str(arguments.get("run_id") or "").strip()
+        if not run_id:
+            raise ValueError("flow.await_gate: 'run_id' is required")
+        return await await_gate(
+            run_id,
+            reader=self._gate_reader,
+            decider=self._gate_decider,
+            wait_seconds=arguments.get("wait_seconds"),
+            answer_seconds=arguments.get("answer_seconds"),
+        )
+
+    @staticmethod
+    def _client_name() -> str:
+        from mcp_core.context import current_context
+
+        actor = current_context().actor_id
+        return actor if actor and actor != "system:unattributed" else "unknown"
+
+    async def list_tasks(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("phase.list_tasks"):
+            result: dict[str, Any] = await self._client_tasks.list_tasks(
+                project_id=arguments.get("project_id") or None,
+                run_id=arguments.get("run_id") or None,
+            )
+        return result
+
+    async def claim_task(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(arguments.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("phase.claim: 'task_id' is required")
+        with tracer.start_as_current_span("phase.claim") as span:
+            span.set_attribute("task.id", task_id)
+            result: dict[str, Any] = await self._client_tasks.claim(task_id, self._client_name())
+        logger.info("phase_task_claimed_over_mcp", task_id=task_id)
+        return result
+
+    async def submit_task(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        task_id = str(arguments.get("task_id") or "").strip()
+        summary = str(arguments.get("summary") or "").strip()
+        if not task_id:
+            raise ValueError("phase.submit: 'task_id' is required")
+        if not summary:
+            raise ValueError("phase.submit: 'summary' is required")
+        with tracer.start_as_current_span("phase.submit") as span:
+            span.set_attribute("task.id", task_id)
+            result: dict[str, Any] = await self._client_tasks.submit(
+                task_id,
+                self._client_name(),
+                summary,
+                [str(a) for a in arguments.get("artifacts") or []],
+            )
+        logger.info("phase_task_submitted_over_mcp", task_id=task_id)
+        return {
+            **result,
+            "next_step": (
+                "Call flow.await_gate with this run_id so the person can decide the gate here."
+            ),
+        }
 
     async def list_flows(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("flow.list"):
@@ -499,10 +687,14 @@ class DesignFlowServer(McpToolServer):
             raise ValueError("flow.start_run: 'goal' is required")
         with tracer.start_as_current_span("flow.start_run") as span:
             span.set_attribute("flow.version_id", version_id)
+            extra: dict[str, Any] = {}
+            if arguments.get("intelligence"):
+                extra["intelligence"] = str(arguments["intelligence"])
             result: dict[str, Any] = await self._run_starter(
                 flow_version_id=version_id,
                 goal=goal,
                 project_id=arguments.get("project_id"),
+                **extra,
             )
         return result
 

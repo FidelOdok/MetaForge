@@ -1906,6 +1906,9 @@ def _build_flow_bindings() -> dict[str, Any]:
             "design_flow_capability_reader": remote.capability_reader,
             "design_flow_lifecycle_reader": remote.lifecycle_reader,
             "design_flow_patcher": remote.patcher,
+            "design_flow_gate_reader": remote.gate_reader,
+            "design_flow_gate_decider": remote.gate_decider,
+            "design_flow_client_tasks": remote.client_tasks,
             "run_launcher": remote.run_launcher,
         }
 
@@ -1913,6 +1916,9 @@ def _build_flow_bindings() -> dict[str, Any]:
         from api_gateway.design_flows.mcp_bindings import (
             make_capability_reader,
             make_catalogue_reader,
+            make_client_task_service,
+            make_gate_decider,
+            make_gate_reader,
             make_intent_compiler,
             make_lifecycle_reader,
             make_patcher,
@@ -1943,6 +1949,9 @@ def _build_flow_bindings() -> dict[str, Any]:
         "design_flow_capability_reader": make_capability_reader(),
         "design_flow_lifecycle_reader": make_lifecycle_reader(),
         "design_flow_patcher": make_patcher(),
+        "design_flow_gate_reader": make_gate_reader(),
+        "design_flow_gate_decider": make_gate_decider(),
+        "design_flow_client_tasks": make_client_task_service(),
         "run_launcher": make_run_launcher(),
     }
 

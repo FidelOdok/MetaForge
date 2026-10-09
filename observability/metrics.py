@@ -575,12 +575,6 @@ class MetricsRegistry:
         ),
         labels=["event"],
     )
-    AGENT_GATE_POLICY_TOTAL = MetricDefinition(
-        name="metaforge_agent_gate_policy_total",
-        type="counter",
-        description="Agent gate decisions checked against an approval policy (FORGE-582)",
-        labels=["decision", "outcome"],
-    )
 
     # ── Chat harness loop metrics (production-harness audit follow-up) ─
     HARNESS_TURN_DURATION = MetricDefinition(
@@ -813,7 +807,6 @@ class MetricsRegistry:
             cls.DESIGN_FLOW_GATE_TOTAL,
             cls.DESIGN_FLOW_GATE_ANNOUNCE_TOTAL,
             cls.CLIENT_TASK_TOTAL,
-            cls.AGENT_GATE_POLICY_TOTAL,
             cls.APPROVAL_GATE_NO_RUNTIME_TOTAL,
             cls.ITERATION_GATE_UNATTENDED_TOTAL,
         ]
@@ -1543,12 +1536,6 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CLIENT_TASK_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"event": event})
-
-    def record_agent_gate_policy(self, decision: str, outcome: str) -> None:
-        """One agent gate decision checked against a policy: allowed or refused (FORGE-582)."""
-        counter = self._instruments.get(MetricsRegistry.AGENT_GATE_POLICY_TOTAL.name)
-        if counter is not None:
-            counter.add(1, attributes={"decision": decision, "outcome": outcome})
 
     def record_mcp_error(self, tool_id: str, error_class: str, client: str = "unknown") -> None:
         """Record one MCP error, classified."""

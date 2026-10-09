@@ -18,6 +18,7 @@ from api_gateway.approvals.schemas import (
     ApprovalKind,
     ApprovalListResponse,
     DecisionRequest,
+    InlineDecisionRequest,
     Surface,
 )
 from api_gateway.auth.approver import approver_from_request
@@ -202,5 +203,54 @@ async def decide_approval(
         surface=surface,
         on_behalf_of=on_behalf_of,
         agent=agent,
+    )
+    return item
+
+
+@router.post("/{approval_id}/inline-decision", response_model=ApprovalItem)
+async def decide_inline(
+    approval_id: str, body: InlineDecisionRequest, request: Request
+) -> ApprovalItem:
+    """Record a gate decision a person gave in the MCP client's chat (FORGE-582).
+
+    Gates only: a held tool call's inline answer has its own route
+    (``/v1/tool-approvals/{id}/resolve``). The decision goes through the same
+    ``service.decide`` as a dashboard click, so a gate that is not ready
+    still cannot be approved, and retry and rework caps still apply.
+    """
+    from api_gateway.auth.dependencies import current_principal
+    from mcp_core.elicitation import LOCAL_ELICITATION_ACTOR
+
+    if approval_id.partition(":")[0] != "gate":
+        raise HTTPException(
+            status_code=422,
+            detail="inline decisions are recorded here for design-flow gates only",
+        )
+    verified = bool(body.approver and body.approver_verified) and (
+        current_principal(request) is not None
+    )
+    approver = Approver(actor_id=body.approver or LOCAL_ELICITATION_ACTOR, verified=verified)
+    try:
+        item = await service.decide(
+            request.app,
+            approval_id,
+            decision=body.decision,
+            reason=body.reason,
+            to_phase=body.to_phase,
+            approver=approver,
+            surface="chat",
+            on_behalf_of=None,
+        )
+    except HTTPException as exc:
+        outcome = "refused" if exc.status_code < 500 else "error"
+        _collector().record_approval_decision("gate", body.decision, "chat", outcome)
+        raise
+    _collector().record_approval_decision("gate", body.decision, "chat", "ok")
+    logger.info(
+        "approval_decided_inline",
+        approval_id=approval_id,
+        decision=body.decision,
+        decided_by=approver.actor_id,
+        approver_verified=approver.verified,
     )
     return item

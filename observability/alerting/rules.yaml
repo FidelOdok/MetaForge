@@ -720,21 +720,6 @@ groups:
             is connected to pick them up, or it is not calling phase.claim.
             GET /v1/client-tasks lists what is waiting.
 
-      # FORGE-582: an agent asked to decide a gate and the policy refused it.
-      - alert: AgentGateDecisionRefused
-        expr: >-
-          increase(metaforge_agent_gate_policy_total{outcome="refused"}[30m]) > 3
-        for: 0m
-        labels:
-          severity: info
-        annotations:
-          summary: "Agents keep asking to decide gates the approval policy does not allow"
-          description: >-
-            Repeated refusals mean a client-mode run is waiting at gates its
-            agent may not approve. A person needs to answer them, or the
-            owner needs to widen the policy. See agent_gate_policy_refused
-            log events for the rule that refused each one.
-
       # FORGE-489: a gate opened and nobody was told. The run waits silently
       # until someone polls, so this is an alarm, not an info line.
       - alert: DesignFlowGateUnannounced

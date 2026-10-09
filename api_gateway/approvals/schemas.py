@@ -19,7 +19,9 @@ ApprovalKind = Literal[
     "drawing",
 ]
 DecisionName = Literal["approve", "reject", "retry", "rework"]
-Surface = Literal["dashboard", "cli", "agent", "unknown"]
+#: ``chat``: a person answered in the MCP client's own prompt (elicitation),
+#: recorded by the sidecar that asked (FORGE-582).
+Surface = Literal["dashboard", "cli", "agent", "chat", "unknown"]
 
 #: Id prefixes (``<prefix>:<native id>``) are coarser than ``kind``: a held
 #: tool call, a flow proposal and a human-authority call all live in the tool
@@ -105,3 +107,20 @@ class DecisionRequest(BaseModel):
     decision: DecisionName
     reason: str = Field(default="", max_length=2000)
     to_phase: str = Field(default="", max_length=200)
+
+
+class InlineDecisionRequest(BaseModel):
+    """Body for ``POST /v1/approvals/{id}/inline-decision`` (FORGE-582).
+
+    A person answered a gate in the MCP client's own prompt. The sidecar that
+    asked records it here. ``approver`` is who the sidecar's authenticated
+    MCP session says answered; it is recorded as verified only when this
+    request itself is authenticated, the same rule a held tool call's inline
+    answer follows (FORGE-473).
+    """
+
+    decision: DecisionName
+    reason: str = Field(default="", max_length=2000)
+    to_phase: str = Field(default="", max_length=200)
+    approver: str | None = Field(default=None, max_length=200)
+    approver_verified: bool = False

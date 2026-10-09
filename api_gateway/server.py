@@ -40,6 +40,9 @@ from api_gateway.convert.routes import router as convert_router
 from api_gateway.design_flows.mcp_bindings import (
     make_capability_reader,
     make_catalogue_reader,
+    make_client_task_service,
+    make_gate_decider,
+    make_gate_reader,
     make_intent_compiler,
     make_lifecycle_reader,
     make_patcher,
@@ -1265,6 +1268,12 @@ async def _init_orchestrator(app: FastAPI) -> None:
         design_flow_capability_reader=make_capability_reader(),
         design_flow_lifecycle_reader=make_lifecycle_reader(),
         design_flow_patcher=make_patcher(),
+        # FORGE-582: the person decides a gate in the client's chat; the
+        # decision is theirs, recorded through the same approval service.
+        design_flow_gate_reader=make_gate_reader(),
+        design_flow_gate_decider=make_gate_decider(),
+        # FORGE-581: phase tasks for client-mode runs.
+        design_flow_client_tasks=make_client_task_service(),
         # FORGE-355: the project brief as an MCP resource.
         brief_provider=brief_provider_fn,
         # FORGE-320: bisection search for the minimum-mass wall thickness

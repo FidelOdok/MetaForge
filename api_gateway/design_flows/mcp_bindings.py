@@ -24,6 +24,9 @@ __all__ = [
     "INTENT_NEXT_STEP",
     "make_capability_reader",
     "make_catalogue_reader",
+    "make_client_task_service",
+    "make_gate_decider",
+    "make_gate_reader",
     "make_intent_compiler",
     "make_lifecycle_reader",
     "make_patcher",
@@ -228,22 +231,30 @@ def make_run_starter() -> Any:
     """``flow.start_run`` — start a run on an approved flow version."""
 
     async def start_run(
-        *, flow_version_id: str, goal: str, project_id: str | None
+        *,
+        flow_version_id: str,
+        goal: str,
+        project_id: str | None,
+        intelligence: str | None = None,
     ) -> dict[str, Any]:
         from fastapi import HTTPException
 
         from api_gateway.runs.routes import create_run
         from api_gateway.runs.schemas import CreateRunRequest
 
+        request: dict[str, Any] = {
+            "kind": "design_flow",
+            "flow_version_id": flow_version_id,
+            "goal": goal,
+            "project_id": project_id,
+        }
+        if intelligence:
+            # FORGE-581: who does the phase work; the gateway validates it.
+            request["intelligence"] = intelligence
         try:
             run = await create_run(
                 CreateRunRequest(
-                    request={
-                        "kind": "design_flow",
-                        "flow_version_id": flow_version_id,
-                        "goal": goal,
-                        "project_id": project_id,
-                    },
+                    request=request,
                     start=True,
                 )
             )
@@ -422,3 +433,113 @@ def make_patcher() -> Any:
         }
 
     return patch
+
+
+def make_gate_reader() -> Any:
+    """``flow.await_gate``: the run's status and, at a gate, its approval item (FORGE-582)."""
+
+    async def read_gate(run_id: str) -> dict[str, Any]:
+        from api_gateway.approvals import service
+        from api_gateway.runs import routes as run_routes
+        from orchestrator.harness.runs import RunNotFoundError, RunStatus
+
+        try:
+            run = run_routes.get_run_store().get(run_id)
+        except RunNotFoundError as exc:
+            raise RuntimeError(f"run '{run_id}' not found") from exc
+        if run.status is RunStatus.AWAITING_APPROVAL:
+            run = await run_routes._reconcile_run(run)  # noqa: SLF001
+        gate = None
+        if run.status is RunStatus.AWAITING_APPROVAL:
+            gate = (await service.get_item(None, f"gate:{run_id}")).model_dump()
+        return {"run_status": run.status.value, "gate": gate}
+
+    return read_gate
+
+
+def make_gate_decider() -> Any:
+    """Record the decision a person gave in the client's chat, through ``service.decide``."""
+
+    async def decide_gate(
+        approval_id: str,
+        decision: str,
+        reason: str,
+        to_phase: str,
+        approver: str | None,
+        approver_verified: bool,
+    ) -> dict[str, Any]:
+        from fastapi import HTTPException
+
+        from api_gateway.approvals import service
+        from mcp_core.elicitation import LOCAL_ELICITATION_ACTOR
+        from mcp_core.guardrails import Approver
+
+        try:
+            item = await service.decide(
+                None,
+                approval_id,
+                decision=decision,
+                reason=reason,
+                to_phase=to_phase,
+                approver=Approver(
+                    actor_id=approver or LOCAL_ELICITATION_ACTOR,
+                    verified=bool(approver and approver_verified),
+                ),
+                surface="chat",
+                on_behalf_of=None,
+            )
+        except HTTPException as exc:
+            raise RuntimeError(str(exc.detail)) from exc
+        logger.info("design_flow_gate_decided_in_chat", approval_id=approval_id, decision=decision)
+        return item.model_dump()
+
+    return decide_gate
+
+
+class _ClientTaskService:
+    """``phase.*`` over the gateway's own task store (FORGE-581)."""
+
+    @staticmethod
+    def _store() -> Any:
+        from api_gateway.client_tasks.routes import get_client_task_store
+
+        return get_client_task_store()
+
+    async def list_tasks(
+        self, *, project_id: str | None = None, run_id: str | None = None
+    ) -> dict[str, Any]:
+        from api_gateway.client_tasks.routes import _summary_view
+
+        tasks = self._store().list_tasks(status="open", project_id=project_id, run_id=run_id)
+        return {"tasks": [_summary_view(t) for t in tasks]}
+
+    async def claim(self, task_id: str, client: str) -> dict[str, Any]:
+        from orchestrator.design_flow.client_tasks import TaskNotFoundError, TaskStateError
+
+        try:
+            task: dict[str, Any] = self._store().claim(task_id, client).as_dict()
+        except TaskNotFoundError as exc:
+            raise RuntimeError(f"client task '{task_id}' not found") from exc
+        except TaskStateError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return task
+
+    async def submit(
+        self, task_id: str, client: str, summary: str, artifacts: list[str]
+    ) -> dict[str, Any]:
+        from orchestrator.design_flow.client_tasks import TaskNotFoundError, TaskStateError
+
+        try:
+            task: dict[str, Any] = (
+                self._store().submit(task_id, client, summary, artifacts).as_dict()
+            )
+        except TaskNotFoundError as exc:
+            raise RuntimeError(f"client task '{task_id}' not found") from exc
+        except TaskStateError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return task
+
+
+def make_client_task_service() -> Any:
+    """``phase.list_tasks`` / ``phase.claim`` / ``phase.submit`` in the gateway process."""
+    return _ClientTaskService()

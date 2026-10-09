@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -59,9 +61,11 @@ __all__ = [
     "ElicitationUnavailableError",
     "approval_request",
     "cancelled_notification",
+    "current_elicitor",
     "elicitation_gate",
     "inline_approver",
     "result_from_payload",
+    "with_elicitor",
 ]
 
 #: The protocol revision that introduced ``elicitation/create``. A client
@@ -386,3 +390,29 @@ def first_available_gate(
 
 
 ElicitorFactory = Callable[[], Elicitor | None]
+
+
+# --- The person, for a tool that asks them itself (FORGE-582) ---------------
+#
+# Held calls are asked by the server before the tool runs. A few tools ask the
+# person as their own work: ``flow.await_gate`` puts a design-flow gate to the
+# person in the chat. The server installs this connection's elicitor for the
+# length of one tool call, and only when this connection can actually be
+# asked; a tool sees ``None`` otherwise and falls back to the dashboard.
+
+_active_elicitor: ContextVar[Elicitor | None] = ContextVar("mcp_active_elicitor", default=None)
+
+
+def current_elicitor() -> Elicitor | None:
+    """The elicitor for the person behind this tool call, if they can be asked."""
+    return _active_elicitor.get()
+
+
+@contextmanager
+def with_elicitor(elicitor: Elicitor | None) -> Iterator[Elicitor | None]:
+    """Make ``elicitor`` the one :func:`current_elicitor` returns inside the block."""
+    token = _active_elicitor.set(elicitor)
+    try:
+        yield elicitor
+    finally:
+        _active_elicitor.reset(token)
