@@ -228,12 +228,28 @@ recorded fails it.
 - The `ClientTasksUnanswered` alert fires when tasks were posted for two
   hours and none came back.
 
-**Writes during a client phase are still held.** A remote client's twin
-writes go through the ordinary guardrail, so each is held for a person
-(answered in the chat where the client supports elicitation). The design-flow
-worker avoids that with its service key bound to a verified run; giving a
-client that claimed a task the same scoped trust is a separate, open
-decision.
+**Writes during a client phase: held, unless the owner opts in
+(FORGE-584).** By default a remote client's twin writes go through the
+ordinary guardrail, so each is held for a person (answered in the chat where
+the client supports elicitation). The owner can set
+`METAFORGE_CLIENT_TASK_WRITES=on` on the MCP sidecar (it also needs
+`METAFORGE_GATEWAY_URL`). Then:
+
+- `phase.claim` is still a held write, so the person approves letting the
+  client take the phase, once.
+- From then on, calls in that MCP session (which must send a stable
+  `X-MetaForge-Session`) run as the `client_task` caller. Before each call
+  the sidecar asks the gateway whether the task is still `claimed`, the run
+  is `running` in client mode, and the run belongs to the session's project.
+  Anything it cannot confirm fails closed: the call is held as before.
+- A `client_task` caller has the design-flow worker's bounds: no
+  `project.*`, `flow.*` or `run.*` administration (except `flow.await_gate`),
+  no human-authority tools, nothing destructive, and nothing outside the
+  run's project. Those calls are refused, not held. Its writes carry the
+  run and phase, so they land as drafts in the run's change set.
+- The grant ends when the client calls `phase.submit`, or when the gateway
+  stops confirming the claim. Every call it covers is logged
+  (`mcp_client_task_call_authorised`).
 
 **Gates are answered by the person, in the chat.** `flow.await_gate` waits
 for the run's next gate and asks the person through MCP elicitation, with

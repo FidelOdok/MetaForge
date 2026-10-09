@@ -58,6 +58,11 @@ class Caller(StrEnum):
     #: bound to a running, approved run and its project (FORGE-487). Assigned
     #: per request by the HTTP transport, never as a server-wide default.
     SERVICE = "service"
+    #: An MCP session working a phase task it claimed, on a running
+    #: client-mode run (FORGE-584). Assigned per request only when the owner
+    #: turned the grant on (``METAFORGE_CLIENT_TASK_WRITES``) and the gateway
+    #: confirms the claim; never a transport default.
+    CLIENT_TASK = "client_task"
 
 
 @dataclass(frozen=True)
@@ -203,12 +208,23 @@ ARGUMENT_CLASSIFIED: frozenset[str] = frozenset({"twin.query_cypher"})
 #: ``project.*`` creates, renames or deletes projects, ``flow.*`` and ``run.*``
 #: propose flows and start runs. A phase works inside the project and run it
 #: was given; reshaping either is an administrator's call (FORGE-487).
-SERVICE_REFUSED_PREFIXES: tuple[str, ...] = ("project.", "flow.", "run.")
+#: FORGE-584: ``phase.*`` too. The worker's phase brain has no business
+#: taking client tasks.
+SERVICE_REFUSED_PREFIXES: tuple[str, ...] = ("project.", "flow.", "run.", "phase.")
+
+#: What a client working a claimed phase task may call that the service
+#: worker may not (FORGE-584): handing tasks back, and asking the person to
+#: decide the gate that follows.
+CLIENT_TASK_ALLOWED: frozenset[str] = frozenset(
+    {"phase.list_tasks", "phase.claim", "phase.submit", "flow.await_gate"}
+)
 
 
-def _service_refusal(tool_id: str, *, destructive: bool) -> str | None:
-    """Why the service caller may not make this write, or ``None``."""
-    if tool_id.startswith(SERVICE_REFUSED_PREFIXES):
+def _service_refusal(
+    tool_id: str, *, destructive: bool, allowed: frozenset[str] = frozenset()
+) -> str | None:
+    """Why the service (or client-task) caller may not make this write, or ``None``."""
+    if tool_id.startswith(SERVICE_REFUSED_PREFIXES) and tool_id not in allowed:
         return "administers projects, flows or runs"
     if requires_human_authority(tool_id):
         return "records a human decision, which a service cannot supply"
@@ -313,6 +329,27 @@ def decide(
             tool_id,
             False,
             "design-flow service caller inside a running, approved run and its project",
+        )
+
+    if caller is Caller.CLIENT_TASK:
+        # FORGE-584. The same bounds as the service worker, for a session the
+        # server confirmed is working a claimed task on a running client-mode
+        # run, and only when the owner turned the grant on. Refused rather
+        # than held for the same reason as the service caller: a write the
+        # task may never make should not wait for a person.
+        refusal = _service_refusal(
+            tool_id,
+            destructive=bool(annotations["destructiveHint"]),
+            allowed=CLIENT_TASK_ALLOWED,
+        )
+        if refusal is not None:
+            return Decision(
+                tool_id, False, f"refused while working a phase task: {refusal}", refused=True
+            )
+        return Decision(
+            tool_id,
+            False,
+            "client working a claimed phase task inside a running, approved run and its project",
         )
 
     if tool_id in DOWNSTREAM_APPROVED:

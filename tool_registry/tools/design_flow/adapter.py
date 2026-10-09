@@ -612,8 +612,19 @@ class DesignFlowServer(McpToolServer):
         with tracer.start_as_current_span("phase.claim") as span:
             span.set_attribute("task.id", task_id)
             result: dict[str, Any] = await self._client_tasks.claim(task_id, self._client_name())
-        logger.info("phase_task_claimed_over_mcp", task_id=task_id)
-        return result
+        # FORGE-584: remember which task this session took. Only a claim: the
+        # server grants scoped writes for it only when the owner turned that
+        # on and the gateway confirms the claim on each call.
+        from mcp_core.context import bind_current_session_task
+
+        bound = bind_current_session_task(
+            task_id,
+            str(result.get("run_id") or ""),
+            str(result.get("phase_id") or ""),
+            result.get("project_id"),
+        )
+        logger.info("phase_task_claimed_over_mcp", task_id=task_id, session_bound=bound)
+        return {**result, "session_bound": bound}
 
     async def submit_task(self, arguments: dict[str, Any]) -> dict[str, Any]:
         task_id = str(arguments.get("task_id") or "").strip()
@@ -630,6 +641,12 @@ class DesignFlowServer(McpToolServer):
                 summary,
                 [str(a) for a in arguments.get("artifacts") or []],
             )
+        # FORGE-584: the grant ends with the task.
+        from mcp_core.context import clear_session_task, current_context
+
+        ctx = current_context()
+        if ctx.session_is_stable:
+            clear_session_task(ctx.session_id, task_id)
         logger.info("phase_task_submitted_over_mcp", task_id=task_id)
         return {
             **result,

@@ -285,6 +285,10 @@ class UnifiedMcpServer:
         # gave it.
         self._service_key: str | None = None
         self._service_verifier: ServiceRunVerifier | None = None
+        # FORGE-584: confirms a session's claimed phase task. None = the
+        # owner has not turned client-task writes on, and a client working a
+        # task stays an ordinary caller whose writes are held.
+        self._client_task_verifier: Any = None
         self._approval_gate = approval_gate
         # FORGE-473: where an inline (elicitation) hold is written down, so it
         # has an approval id and an approver like a dashboard one. None keeps
@@ -501,11 +505,63 @@ class UnifiedMcpServer:
         try:
             from mcp_core.context import current_context
 
-            if current_context().service_verified:
+            ctx = current_context()
+            if ctx.service_verified:
                 return Caller.SERVICE
+            if ctx.client_task_verified:
+                return Caller.CLIENT_TASK
         except Exception:  # noqa: BLE001 - no context means the transport's answer
             pass
         return self._caller
+
+    def attach_client_task_grant(self, verifier: Any) -> bool:
+        """Turn on scoped writes for a client working a claimed task (FORGE-584).
+
+        Called only when the owner set ``METAFORGE_CLIENT_TASK_WRITES`` and
+        there is a gateway to confirm claims with. ``None`` turns it off.
+        """
+        self._client_task_verifier = verifier
+        enabled = verifier is not None
+        logger.info("mcp_client_task_writes", enabled=enabled)
+        return enabled
+
+    async def _client_task_scope(self) -> Any:
+        """This call's context with the client-task grant, or ``None`` for no grant.
+
+        No grant unless the owner turned it on, the session claimed a task in
+        this process, and the gateway confirms the claim now. Anything less
+        leaves the call exactly as untrusted as before: its writes are held.
+        """
+        if self._client_task_verifier is None:
+            return None
+        from mcp_core.context import bound_task, clear_session_task, current_context
+        from metaforge.mcp.client_task_grant import ClientTaskNotConfirmedError
+
+        ctx = current_context()
+        if ctx.service_verified or not ctx.session_is_stable:
+            return None
+        binding = bound_task(ctx.session_id)
+        if binding is None:
+            return None
+        try:
+            await self._client_task_verifier.confirm(binding)
+        except ClientTaskNotConfirmedError as exc:
+            # Submitted, cancelled, or the run moved on: the grant is over.
+            clear_session_task(ctx.session_id, binding.task_id)
+            logger.info("mcp_client_task_grant_ended", task_id=binding.task_id, reason=str(exc))
+            return None
+        except Exception as exc:  # noqa: BLE001 - fail closed: held, not trusted
+            logger.warning("mcp_client_task_unconfirmable", task_id=binding.task_id, error=str(exc))
+            return None
+        return ctx.model_copy(
+            update={
+                "client_task_verified": True,
+                "client_task_id": binding.task_id,
+                "run_id": binding.run_id,
+                "phase": binding.phase,
+                "project_id": binding.project_id or ctx.project_id,
+            }
+        )
 
     @staticmethod
     def _service_log_fields() -> dict[str, Any]:
@@ -532,7 +588,9 @@ class UnifiedMcpServer:
         ctx = current_context()
         if ctx.service_refusal:
             raise ServiceScopeError(tool_id, ctx.service_refusal)
-        if not ctx.service_verified:
+        # FORGE-584: a client working a claimed task is held to its run's
+        # project the same way.
+        if not ctx.service_verified and not ctx.client_task_verified:
             return
         explicit = arguments.get("project_id")
         if explicit in (None, ""):
@@ -1831,6 +1889,14 @@ class UnifiedMcpServer:
                 tool_id=tool_id,
                 **self._service_log_fields(),
             )
+        if caller is Caller.CLIENT_TASK:
+            # Every call the grant covers is on the record.
+            logger.info(
+                "mcp_client_task_call_authorised",
+                tool_id=tool_id,
+                held=decision.requires_approval,
+                **self._service_log_fields(),
+            )
         if not decision.requires_approval:
             return None
 
@@ -2054,6 +2120,16 @@ class UnifiedMcpServer:
         return self._approval_records.pop(call_id, None)
 
     async def _dispatch_tool_call(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Route ``tool/call``, under a client-task grant when one applies (FORGE-584)."""
+        scoped = await self._client_task_scope()
+        if scoped is None:
+            return await self._dispatch_tool_call_unscoped(params)
+        from mcp_core.context import with_context
+
+        with with_context(scoped):
+            return await self._dispatch_tool_call_unscoped(params)
+
+    async def _dispatch_tool_call_unscoped(self, params: dict[str, Any]) -> dict[str, Any]:
         """Route ``tool/call`` to the adapter that owns ``tool_id``."""
         tool_id = self._resolve_tool_id(params.get("tool_id", ""))
         adapter = self._tool_index[tool_id]
