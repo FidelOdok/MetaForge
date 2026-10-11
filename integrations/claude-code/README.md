@@ -11,6 +11,22 @@
 
 Claude Code asks for your gateway URL on first enable. The default suits a gateway running on your own machine; a team or hosted gateway is the same package with a different URL.
 
+### On claude.ai
+
+The same marketplace works from **Customize → Plugins → Add → Add marketplace**, and the skills and commands load straight away.
+
+The bundled connector does not. Its URL is written as `${user_config.gateway_url}`, and per-user configuration prompts are a Claude Code feature — claude.ai shows the template literally and asks you to replace it. That is the web app behaving as designed, not a broken plugin.
+
+Open the plugin's **Connectors** tab and replace the whole URL with your own gateway, keeping the profile:
+
+```
+https://your-gateway.example.com/mcp?profile=core
+```
+
+If an `Authorization` field also shows a `${...}` template, clear it: a literal `Bearer ${user_config.api_token}` is a malformed credential, which a gateway rejects less helpfully than no credential at all. claude.ai cannot send a static token anyway — it runs OAuth, and your gateway advertises that in its 401.
+
+There is no URL this package could carry instead. Every user runs their own gateway, so no literal is correct for the next installer; a single address only becomes possible once a broker routes to each account's gateway.
+
 ## Commands
 
 - `/metaforge:connect`

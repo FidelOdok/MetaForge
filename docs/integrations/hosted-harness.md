@@ -149,6 +149,35 @@ So the honest summary is per-mechanism, not per-product: a connector is tools
 and prompts; a bundle is tools, prompts and skills; only Claude Code's own
 plugin format carries agents and hooks as well.
 
+### The plugin's connector needs editing on claude.ai
+
+Install the plugin from **Customize → Plugins → Add → Add marketplace** with
+`FidelOdok/MetaForge` and its skills and commands work immediately. Its bundled
+connector does not.
+
+The plugin writes its URL as `${user_config.gateway_url}`, because Claude Code
+prompts for that value on first enable. Per-user configuration prompts are a
+Claude Code feature: **claude.ai shows the template literally** and asks you to
+replace it. The web app is behaving as designed.
+
+Open the plugin's **Connectors** tab and replace the whole URL with your own
+gateway, keeping the profile:
+
+```
+https://your-gateway.example.com/mcp?profile=core
+```
+
+Clear any `Authorization` field still showing a `${...}` template. A literal
+`Bearer ${user_config.api_token}` is a malformed credential, which a gateway
+rejects less helpfully than no credential at all — and claude.ai cannot send a
+static token regardless, since it runs OAuth off your gateway's 401.
+
+**No manifest change fixes this.** Every user runs their own gateway, so there
+is no literal URL a published plugin could carry that is right for the next
+person who installs it. Other plugins connect on install because they point at
+one hosted service. A single address becomes possible here only once a broker
+routes each account to its own gateway.
+
 ## Things that will bite you
 
 **A quick tunnel's hostname is temporary.** `cloudflared tunnel --url` and

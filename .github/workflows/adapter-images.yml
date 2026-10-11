@@ -32,6 +32,10 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Keyless signing needs the OIDC token (FORGE-585). Declared per job
+      # rather than at workflow level so a job that does not publish cannot
+      # mint a signing identity.
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +53,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build + push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -57,7 +62,23 @@ jobs:
           tags: |
             ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter:latest
             ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter:${{ github.sha }}
+          # These images carry a whole CAD or FEA stack, so the SBOM is worth
+          # more here than on the gateway: it is the only practical way to
+          # answer "does our FreeCAD image ship the thing in this advisory".
+          provenance: mode=max
+          sbom: true
           build-args: |
             METAFORGE_BUILD_SHA=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.adapter }}-adapter
           cache-to: type=gha,mode=max,scope=${{ matrix.adapter }}-adapter
+
+      # Sign with Sigstore, keyless (FORGE-585). See the matching step in
+      # release.yml for why this is cosign rather than `docker trust`, and why
+      # it signs a digest rather than a tag.
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign the pushed image
+        env:
+          IMAGE: ghcr.io/fidelodok/metaforge-${{ matrix.adapter }}-adapter
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
