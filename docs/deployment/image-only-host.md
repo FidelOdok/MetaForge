@@ -12,6 +12,7 @@ published to GitHub Container Registry and signed (FORGE-593):
 | `metaforge-gateway` (also runs the MCP server and both workers) | `release.yml`, every push to `main` |
 | `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter` | `adapter-images.yml`, when their code changes |
 | `metaforge-occt`, `metaforge-dashboard` | `adapter-images.yml`, when their code changes |
+| `metaforge-seaweedfs` (the object store) | `mirror-images.yml`: the signed upstream release, copied and re-signed as ours |
 
 Each is tagged `:latest` and `:<commit sha>`. So a host keeps a small deploy
 folder and updates by pulling, never by building.
@@ -74,3 +75,50 @@ same databases.
    it. Remove `docker-compose.override.yml` from `COMPOSE_FILE` if it is set.
 2. Run `scripts/host_update.sh --dir <folder>` once.
 3. Check the stack, then delete the old checkout.
+
+## The object store
+
+Blobs (knowledge documents, CAD files, simulation fields) live in the
+`object-store` service, SeaweedFS (FORGE-577). It replaced MinIO, whose
+community images were discontinued and then deleted from Docker Hub, which
+broke every host that pulled them. The image is our own GHCR copy of the
+signed upstream release, pinned by tag and digest, so an upstream deletion
+cannot happen to it.
+
+- It serves S3 on port 9000 and answers to `minio` on the `storage` network,
+  so `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` keep working
+  unchanged. Only the gateway, `mcp-http`, the design-flow worker and
+  Prometheus are on that network.
+- Its storage internals listen on loopback inside the container; only the S3
+  gateway is reachable, and it refuses a wrong or missing key.
+- Bucket versioning works. Lifecycle transitions to a cold storage class do
+  not (`NotImplemented`), so `scripts/storage/provision_minio.py` reports its
+  lifecycle step as failed on this store. Use an external S3 service that
+  supports transitions if you need cold-tier archiving.
+- There is no web console, unlike MinIO's on port 9001.
+
+### Moving a host's data from MinIO
+
+The old data stays in the `minio-data` volume until you copy it. Once the new
+store is up:
+
+```bash
+set -a; . .env; set +a
+# The old MinIO, read-only use, from the image the host already has
+docker run -d --name minio-old --network metaforge_storage \
+  -v metaforge_minio-data:/data \
+  -e MINIO_ROOT_USER="${MINIO_ACCESS_KEY:-minioadmin}" -e MINIO_ROOT_PASSWORD="$MINIO_SECRET_KEY" \
+  minio/minio server /data
+# Copy (safe to re-run; ends by comparing counts and bytes per bucket)
+docker run --rm --network metaforge_storage \
+  -e SRC_ENDPOINT=minio-old:9000 -e SRC_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}" -e SRC_SECRET_KEY="$MINIO_SECRET_KEY" \
+  -e DST_ENDPOINT=object-store:9000 -e DST_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}" -e DST_SECRET_KEY="$MINIO_SECRET_KEY" \
+  -v "$PWD/copy_objects.py:/c.py:ro" --entrypoint python \
+  ghcr.io/fidelodok/metaforge-gateway:latest /c.py
+docker rm -f minio-old
+```
+
+`copy_objects.py` is `scripts/storage/copy_objects.py`; fetch it once like
+`host_update.sh`. Delete the `minio-data` volume only after checking the
+copy.
+

@@ -540,36 +540,21 @@ groups:
             reconcile or mark the conflicting insights stale.
           runbook_url: "observability/runbooks/consolidation-contradictions.md"
 
-  # MET-476 — KB object-store (MinIO) operational alerts. These rules
-  # activate once Prometheus scrapes the MinIO ``/minio/v2/metrics/*``
-  # endpoints; on a single-node MinIO they evaluate normally, and on a
-  # MinIO-less environment they're inert (no series to match). The three
-  # warnings cover bucket size, write latency, and access errors per the
-  # MET-476 acceptance criteria.
+  # MET-476 — KB object-store operational alerts. FORGE-577: the store is
+  # SeaweedFS now (MinIO's images were withdrawn), scraped on
+  # object-store:9327. Its S3 gateway labels every request with bucket, type
+  # (GET/PUT/LIST/...) and HTTP code. The old bucket-size alert is gone: the
+  # gateway does not report stored size, and the storage server that does
+  # listens on loopback only. The MinIO rules never fired either -- nothing
+  # scraped MinIO.
   - name: metaforge_storage_alerts
     rules:
-      - alert: MinIOKBBucketSizeHigh
-        expr: minio_bucket_usage_total_bytes{bucket="metaforge-kb"} > 1.0995116e+11  # 100 GiB
-        for: 30m
-        labels:
-          severity: warning
-          sev: "3"
-        annotations:
-          summary: "MinIO KB bucket usage above 100 GiB"
-          description: >-
-            ``metaforge-kb`` bucket has exceeded 100 GiB of stored bytes for
-            >30 minutes. Lifecycle is configured to transition objects to
-            cold storage after 365 days; check whether the configured tier
-            is healthy and whether ingest volume warrants raising this
-            threshold.
-          runbook_url: "observability/runbooks/minio-bucket-size.md"
-
-      - alert: MinIOKBWriteLatencyHigh
+      - alert: ObjectStoreWriteLatencyHigh
         expr: |
           histogram_quantile(
             0.95,
             sum by (le) (
-              rate(minio_s3_requests_seconds_bucket{api="PutObject",bucket="metaforge-kb"}[5m])
+              rate(SeaweedFS_s3_request_seconds_bucket{type="PUT",bucket="metaforge-kb"}[5m])
             )
           ) > 5
         for: 10m
@@ -577,29 +562,29 @@ groups:
           severity: warning
           sev: "3"
         annotations:
-          summary: "MinIO KB write p95 latency > 5s"
+          summary: "Object store KB write p95 latency > 5s"
           description: >-
-            PutObject p95 latency on ``metaforge-kb`` exceeded 5s for
-            10 minutes. Check MinIO node health, network egress, and
-            backing-disk saturation; ingest pipelines (MET-468) will
-            stall under sustained slow writes.
-          runbook_url: "observability/runbooks/minio-write-latency.md"
+            PUT p95 latency on ``metaforge-kb`` exceeded 5s for 10 minutes.
+            Check the object-store container's disk and CPU; ingest
+            pipelines (MET-468) stall under sustained slow writes.
 
-      - alert: MinIOKBAccessErrorsRising
+      - alert: ObjectStoreAccessErrorsRising
+        # 404s are not errors here: a bucket or object existence check
+        # answers 404 routinely. Refused credentials (401/403) and server
+        # errors (5xx) are.
         expr: |
-          sum(rate(minio_s3_requests_errors_total{bucket="metaforge-kb"}[5m])) > 0.5
+          sum(rate(SeaweedFS_s3_request_total{code=~"401|403|5.."}[5m])) > 0.5
         for: 15m
         labels:
           severity: warning
           sev: "3"
         annotations:
-          summary: "MinIO KB error rate > 0.5 req/s"
+          summary: "Object store refused or failed requests > 0.5 req/s"
           description: >-
-            Sustained access-error rate on ``metaforge-kb`` above
-            0.5 req/s for 15 minutes. Inspect MinIO logs for 4xx /
-            5xx patterns, verify credentials + IAM policies, and check
-            for client misconfigurations.
-          runbook_url: "observability/runbooks/minio-access-errors.md"
+            Sustained rate of refused (401/403) or failed (5xx) S3 requests
+            above 0.5 req/s for 15 minutes. A credential mismatch between
+            MINIO_ACCESS_KEY/MINIO_SECRET_KEY and the services that use the
+            store shows up here; check the object-store logs.
 
   # ── MCP surface: the plugins' front door (FORGE-379) ──────────────────
   - name: metaforge_mcp

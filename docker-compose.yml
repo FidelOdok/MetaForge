@@ -167,6 +167,8 @@ services:
         condition: service_healthy
     networks:
       - metaforge
+      # FORGE-577: reaches the object store
+      - storage
     restart: unless-stopped
 
   # ── OCCT Converter (STEP/IGES → GLB microservice) ──────────────
@@ -250,32 +252,54 @@ services:
       - metaforge
     restart: unless-stopped
 
-  # ── MinIO (KB object-storage source of truth — MET-476) ─────────
+  # ── Object store (S3; KB object-storage source of truth — MET-476) ──
   # Authoritative store for L1-L3 knowledge data (datasheets, extracted
-  # properties, design decisions, BOM specs). Neo4j + pgvector are
-  # regenerable caches built from these objects. Dev creds default to
-  # MINIO_ACCESS_KEY identifies the account and keeps a default;
-  # MINIO_SECRET_KEY is the credential and has none (FORGE-558).
-  # in real environments.
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  # properties, design decisions, BOM specs), CAD blobs and simulation
+  # fields. Neo4j + pgvector are regenerable caches built from these
+  # objects. MINIO_ACCESS_KEY identifies the account and keeps a default;
+  # MINIO_SECRET_KEY is the credential and has none (FORGE-558). The
+  # variable names stay MINIO_* so existing .env files keep working.
+  #
+  # FORGE-577: SeaweedFS replaced MinIO, whose community images were
+  # discontinued and then removed from Docker Hub. The image is our own
+  # GHCR copy of the signed upstream release (mirror-images.yml), so an
+  # upstream deletion cannot break a host again.
+  #
+  # One container, two processes: the storage server (master, volume,
+  # filer) listens on loopback only, so its unauthenticated HTTP and gRPC
+  # APIs (including the filer's IAM service) are unreachable from other
+  # containers; the S3 gateway is the only thing on the network, on the
+  # port MinIO used. The admin identity comes from AWS_ACCESS_KEY_ID /
+  # AWS_SECRET_ACCESS_KEY; a wrong or missing key is refused. The S3
+  # gateway's own gRPC port cannot be bound separately, so the service sits
+  # on a `storage` network shared only with the services that use it.
+  object-store:
+    image: ghcr.io/fidelodok/metaforge-seaweedfs:${METAFORGE_SEAWEEDFS_TAG:-4.48}
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        weed server -dir=/data -ip=127.0.0.1 -ip.bind=127.0.0.1
+        -filer -filer.disableHttp
+        -master.volumeSizeLimitMB=1024 -volume.max=0 &
+        exec weed s3 -filer=127.0.0.1:8888 -ip.bind=0.0.0.0 -port=9000
+        -port.iceberg=0 -port.lance=0 -metricsPort=9327
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
     volumes:
-      - minio-data:/data
+      - object-store-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9000/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 20s
     networks:
-      - metaforge
+      storage:
+        # Every MINIO_ENDPOINT default is minio:9000; the name stays.
+        aliases: [minio]
     restart: unless-stopped
 
   # ── Kafka (Event Bus) ───────────────────────────────────────────
@@ -558,6 +582,8 @@ services:
         condition: service_healthy
     networks:
       - metaforge
+      # FORGE-577: reaches the object store
+      - storage
     restart: unless-stopped
 
   # ── Design-flow worker (FORGE-401) ──────────────────────────────
@@ -654,6 +680,8 @@ services:
         condition: service_healthy
     networks:
       - metaforge
+      # FORGE-577: reaches the object store
+      - storage
     restart: unless-stopped
 
   # ── SPICE Adapter (FORGE-542: ngspice circuit simulation) ──────
@@ -979,6 +1007,8 @@ services:
       - "--web.enable-lifecycle"
     networks:
       - metaforge
+      # FORGE-577: reaches the object store
+      - storage
     restart: unless-stopped
 
   grafana:
@@ -1052,7 +1082,10 @@ volumes:
   postgres-data:
   neo4j-data:
   neo4j-logs:
+  # FORGE-577: kept so an existing host's MinIO data can be copied into
+  # object-store-data (scripts/storage/copy_objects.py); nothing mounts it.
   minio-data:
+  object-store-data:
   zookeeper-data:
   kafka-data:
   temporal-db-data:
@@ -1069,4 +1102,7 @@ volumes:
 
 networks:
   metaforge:
+    driver: bridge
+  # FORGE-577: only the object store and the services that use S3.
+  storage:
     driver: bridge

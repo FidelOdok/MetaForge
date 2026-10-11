@@ -19,6 +19,7 @@ repository's CI built.
 | `ghcr.io/fidelodok/metaforge-spice-adapter` | SPICE tool adapter |
 | `ghcr.io/fidelodok/metaforge-occt` | STEP to GLB converter for the viewer |
 | `ghcr.io/fidelodok/metaforge-dashboard` | The production dashboard (static build behind nginx) |
+| `ghcr.io/fidelodok/metaforge-seaweedfs` | The object store: a byte-for-byte copy of the signed SeaweedFS release, mirrored by `mirror-images.yml` (FORGE-577) |
 
 ## Verify a signature
 

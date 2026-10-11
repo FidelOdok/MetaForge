@@ -393,7 +393,7 @@ services that publish host ports by default:
 |---|---|---|---|
 | `POSTGRES_PASSWORD` | `metaforge` | Postgres | `5432` |
 | `NEO4J_PASSWORD` | `metaforge` | Neo4j | `7474`, `7687` |
-| `MINIO_SECRET_KEY` | `minioadmin` | MinIO | `9000`, `9001` |
+| `MINIO_SECRET_KEY` | `minioadmin` | object store (`object-store`, SeaweedFS since FORGE-577) | `9000` |
 | `TEMPORAL_POSTGRES_PASSWORD` | `temporal` | Temporal's database | not published |
 | `GRAFANA_PASSWORD` | `metaforge` | Grafana | `3001`, `--profile observability` |
 
@@ -426,11 +426,16 @@ the old shipped defaults silently guaranteed the generator never fired, and
 every install kept the published passwords.
 
 **Already running services that used the old defaults?** Setting the variables is
-not enough. Postgres, Neo4j, MinIO and Grafana all seed their credentials when
+not enough. Postgres, Neo4j and Grafana all seed their credentials when
 they first provision their data directory, and those live in named volumes that
 survive `docker compose down`. An existing stack keeps the published passwords
 until each service is rotated in place, or its volume is deleted and the stack
 recreated from scratch (which destroys the data in it).
+
+The object store is the exception: it takes `MINIO_ACCESS_KEY` /
+`MINIO_SECRET_KEY` from the environment on every start (FORGE-577), so a
+changed secret takes effect when the stack restarts, for the store and for the
+services that use it alike.
 
 For Grafana specifically: `GF_SECURITY_ADMIN_PASSWORD` seeds the admin user when Grafana first
 provisions its database; on later starts an existing admin keeps the password it

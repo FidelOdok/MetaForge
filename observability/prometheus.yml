@@ -12,6 +12,12 @@ alerting:
 
 scrape_configs:
   # Gateway metrics flow: Gateway → OTLP → OTel Collector → Prometheus exporter on :8889
+  # FORGE-577: the object store's S3 gateway metrics (SeaweedFS). Reached
+  # over the `storage` network, which Prometheus joins for this alone.
+  - job_name: "object-store"
+    static_configs:
+      - targets: ["object-store:9327"]
+
   - job_name: "otel-collector"
     static_configs:
       - targets: ["otel-collector:8889"]
