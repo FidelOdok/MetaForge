@@ -254,3 +254,80 @@ def test_start_run_passes_the_mode_only_when_given() -> None:
     asyncio.run(server.start_run({"flow_version_id": "v", "goal": "g", "intelligence": "client"}))
     assert "intelligence" not in seen[0]
     assert seen[1]["intelligence"] == "client"
+
+
+# FORGE-589: the default call fits inside a 120 s client timeout.
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _answer_window(person: _Person) -> int:
+    message = person.asked[0][0]
+    return int(message.split("Answer within ")[1].split(" seconds")[0])
+
+
+def test_default_waiting_plus_answering_fits_a_120s_client_call() -> None:
+    from tool_registry.tools.design_flow.gates import (
+        CALL_BUDGET_SECONDS,
+        DEFAULT_ANSWER_SECONDS,
+        DEFAULT_WAIT_SECONDS,
+    )
+
+    assert DEFAULT_WAIT_SECONDS + DEFAULT_ANSWER_SECONDS <= CALL_BUDGET_SECONDS < 120
+
+
+def test_the_default_answer_window_shrinks_by_the_time_spent_waiting() -> None:
+    clock = _Clock()
+    states = [{"run_status": "running"}] * 3 + [
+        {"run_status": "awaiting_approval", "gate": _gate()}
+    ]
+    gw = _Gateway(list(states))
+
+    async def tick(_: float) -> None:
+        clock.now += 10.0
+
+    person = _Person(ElicitResult(ElicitAction.ACCEPT, {"decision": "approve"}))
+
+    async def go() -> dict[str, Any]:
+        with with_elicitor(person):
+            return await await_gate(
+                "run-1", reader=gw.read, decider=gw.decide, sleep=tick, clock=clock
+            )
+
+    asyncio.run(go())
+    # 30 s spent waiting: 110 - 30 leaves 80, the default; one more poll would trim it.
+    assert _answer_window(person) == 80
+
+    clock.now = 0.0
+    gw = _Gateway(
+        [{"run_status": "running"}] * 6 + [{"run_status": "awaiting_approval", "gate": _gate()}]
+    )
+    person = _Person(ElicitResult(ElicitAction.ACCEPT, {"decision": "approve"}))
+
+    async def go_long() -> dict[str, Any]:
+        with with_elicitor(person):
+            return await await_gate(
+                "run-1",
+                reader=gw.read,
+                decider=gw.decide,
+                sleep=tick,
+                clock=clock,
+                wait_seconds=100,
+            )
+
+    asyncio.run(go_long())
+    # 60 s waiting under an explicit wait window: the default answer shrinks to 50.
+    assert _answer_window(person) == 50
+
+
+def test_an_explicit_answer_window_is_kept() -> None:
+    gw = _Gateway([{"run_status": "awaiting_approval", "gate": _gate()}])
+    person = _Person(ElicitResult(ElicitAction.ACCEPT, {"decision": "approve"}))
+    _run(gw, person, answer_seconds=600)
+    assert _answer_window(person) == 600

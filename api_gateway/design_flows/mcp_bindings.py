@@ -525,13 +525,19 @@ class _ClientTaskService:
         return task
 
     async def submit(
-        self, task_id: str, client: str, summary: str, artifacts: list[str]
+        self,
+        task_id: str,
+        client: str,
+        summary: str,
+        artifacts: list[str],
+        *,
+        outcome: str = "complete",
     ) -> dict[str, Any]:
         from orchestrator.design_flow.client_tasks import TaskNotFoundError, TaskStateError
 
         try:
             task: dict[str, Any] = (
-                self._store().submit(task_id, client, summary, artifacts).as_dict()
+                self._store().submit(task_id, client, summary, artifacts, outcome=outcome).as_dict()
             )
         except TaskNotFoundError as exc:
             raise RuntimeError(f"client task '{task_id}' not found") from exc

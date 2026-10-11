@@ -213,6 +213,18 @@ class TwinConstraintChecker:
         """The latest cad_model per name for the project, as ``(name, metadata)``."""
         return [(n, m) for _, n, m in await self._current_cad_entries(project_id)]
 
+    async def _closed_draft(self, node_id: str) -> bool:
+        """Whether ``node_id`` is a revision whose draft was closed (FORGE-597)."""
+        try:
+            from twin_core.items.change_sets import CLOSED_STATUSES
+            from twin_core.items.service import revision_status
+
+            status = await revision_status(self._twin, UUID(node_id))
+        except Exception as exc:  # noqa: BLE001 - an unreadable status keeps the node
+            logger.warning("gate_eval_revision_status_failed", node_id=node_id, error=str(exc))
+            return False
+        return status in CLOSED_STATUSES
+
     async def _current_cad_entries(
         self, project_id: str, since_ts: float = 0.0, *, drop_superseded: bool = False
     ) -> list[tuple[str, str, dict[str, Any]]]:
@@ -229,7 +241,7 @@ class TwinConstraintChecker:
         project = await self._backend.get_project(project_id)
         if project is None:
             return []
-        latest: dict[str, tuple[float, Any]] = {}
+        by_name: dict[str, list[tuple[float, Any]]] = {}
         for wp in project.work_products:
             wp_type = getattr(wp, "type", None)
             if str(getattr(wp_type, "value", wp_type)) != "cad_model":
@@ -239,19 +251,28 @@ class TwinConstraintChecker:
                 continue
             ts = raw_ts or 0.0
             name = str(getattr(wp, "name", "") or getattr(wp, "id", ""))
-            if name not in latest or ts >= latest[name][0]:
-                latest[name] = (ts, wp)
+            by_name.setdefault(name, []).append((ts, wp))
         models: list[tuple[str, str, dict[str, Any]]] = []
-        for name, (_, wp) in latest.items():
-            try:
-                node = await getter(UUID(str(getattr(wp, "id", ""))))
-            except Exception as exc:  # noqa: BLE001 - one unreadable model must not crash the gate
-                logger.warning("gate_eval_cad_read_failed", name=name, error=str(exc))
-                continue
-            if node is not None:
-                models.append(
-                    (str(getattr(wp, "id", "")), name, dict(getattr(node, "metadata", None) or {}))
-                )
+        for name, candidates in by_name.items():
+            # Newest first. FORGE-597: a revision a retry or rework turned
+            # down (its draft closed as rejected/abandoned) is not part of the
+            # design any more, so it is skipped and the newest revision that
+            # is still open or approved stands for the name instead. Without
+            # this an abandoned attempt's model kept failing every later
+            # attempt's gate.
+            for _, wp in sorted(candidates, key=lambda c: c[0], reverse=True):
+                node_id = str(getattr(wp, "id", ""))
+                if await self._closed_draft(node_id):
+                    logger.info("gate_eval_closed_draft_skipped", name=name, node_id=node_id)
+                    continue
+                try:
+                    node = await getter(UUID(node_id))
+                except Exception as exc:  # noqa: BLE001 - one unreadable model must not crash the gate
+                    logger.warning("gate_eval_cad_read_failed", name=name, error=str(exc))
+                    break
+                if node is not None:
+                    models.append((node_id, name, dict(getattr(node, "metadata", None) or {})))
+                break
         if drop_superseded:
             replaced: set[str] = set()
             for _, _, meta in models:

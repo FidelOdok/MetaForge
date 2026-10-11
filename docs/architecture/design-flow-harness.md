@@ -173,7 +173,17 @@ last). A `cad_model` committed with `model_role: "analysis"` (and `idealises`,
 the design part it stands for), such as an FEA idealisation with simplified
 supports, is left out of both geometry checks: it is not product geometry, so
 it is neither a loose design part nor held to the product's size, stock or
-material limits. Where a real analysis needs a
+material limits.
+
+A revision that a retry or rework turned down is not part of the design
+either (FORGE-597). When a reviewer retries or reworks a phase, that
+attempt's drafts are closed as `rejected` or `abandoned` on their
+`REVISION_OF` edge. The geometry checks skip a closed revision and judge the
+newest one under the same name that is still open or approved. Before this,
+a loose model left by an abandoned attempt kept failing every later
+attempt's gate, because the Temporal gate's window is the whole project.
+
+Where a real analysis needs a
 capability MetaForge doesn't have in Phase 1 (ERC/DRC on an authored schematic,
 Gerber export), the handler records the result **honestly as deferred** rather
 than asserting a compliance the tools never established.

@@ -134,6 +134,13 @@ cannot.
   letting it expire leaves the gate open in the dashboard and in
   `forge approvals`. A client that cannot show a prompt gets the gate back as
   `awaiting_gate` with a note to answer it there.
+- **Fits the client's own call timeout.** Waiting for the gate and the
+  person's answer happen inside one tool call, and Claude Code ends a call
+  after 120 s. By default the tool waits up to 30 s for a gate and gives the
+  person 80 s to answer, less any time spent waiting, so the call ends inside
+  110 s (FORGE-589). `wait_seconds` and `answer_seconds` override this for a
+  client that allows longer calls. When nobody answers in time the gate stays
+  open and the agent can call the tool again.
 - **Not held at the call.** The tool's only effect is asking the person, so
   holding the call first would ask them twice for one decision. The
   design-flow worker cannot call it (`flow.*` is refused for the service

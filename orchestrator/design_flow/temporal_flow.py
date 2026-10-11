@@ -52,7 +52,11 @@ with workflow.unsafe.imports_passed_through():
         is_linear,
         rework_candidates,
     )
-    from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
+    from orchestrator.design_flow.grounding import (
+        INCOMPLETE_STATUS,
+        UNGROUNDED_STATUS,
+        phase_status,
+    )
     from orchestrator.design_flow.retry import DEFAULT_MAX_PHASE_RETRIES, build_retry_feedback
     from orchestrator.design_flow.rework import (
         DEFAULT_MAX_REWORK_CYCLES,
@@ -128,6 +132,15 @@ _CHECK_TIMEOUT = timedelta(minutes=5)
 
 def result_ungrounded(entry: dict[str, Any]) -> bool:
     return entry.get("status") == UNGROUNDED_STATUS
+
+
+def result_incomplete(entry: dict[str, Any]) -> bool:
+    """FORGE-590: the phase itself reported its objective was not met.
+
+    Replay-safe without a patch marker: no history recorded before this
+    status existed can carry it, so old runs take exactly the old branches.
+    """
+    return entry.get("status") == INCOMPLETE_STATUS
 
 
 @dataclass
@@ -882,6 +895,11 @@ class DesignFlowWorkflow:
             findings.append(
                 f"phase '{phase.id}' reply was flagged ungrounded (no tool calls were made), "
                 "so its claimed work is unverified"
+            )
+        if result_incomplete(entry):
+            blocking = True
+            findings.append(
+                f"phase '{phase.id}' reported its objective was not met (outcome incomplete)"
             )
         if check.constraints_checked and not check.constraints_passed:
             if gate.enforce_constraints:

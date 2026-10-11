@@ -12606,6 +12606,15 @@
             "title": "Client",
             "type": "string"
           },
+          "outcome": {
+            "default": "complete",
+            "enum": [
+              "complete",
+              "incomplete"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
           "summary": {
             "title": "Summary",
             "type": "string"

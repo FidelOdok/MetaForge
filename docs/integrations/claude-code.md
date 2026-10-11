@@ -503,8 +503,8 @@ profile the plugin installs by default (FORGE-462):
 | `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (write; the version is held, not the call). Optional `template`, `operations` and `caller` apply your own tailoring with no server-side model call; the same invariants and approval apply, and an invalid operation is refused with the reason (FORGE-481) |
 | `flow.start_run` | start a run on a flow version a person has **approved** (write; refused unless the version is approved) |
 | `flow.status` | phase-by-phase state of one run (read) |
-| `flow.await_gate` | wait for a run's next gate and ask **you** to decide it in this chat; the agent cannot answer the prompt (FORGE-582) |
-| `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back (FORGE-581). If the sidecar owner set `METAFORGE_CLIENT_TASK_WRITES=on`, approving the claim once lets this session's writes for that phase run without further holds until you submit (FORGE-584) |
+| `flow.await_gate` | wait for a run's next gate and ask **you** to decide it in this chat; the agent cannot answer the prompt (FORGE-582). Its default windows (30 s for a gate, then 80 s to answer) end before Claude Code's 120 s call timeout (FORGE-589) |
+| `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back (FORGE-581). Submit with `outcome: incomplete` when the objective was not met, so the gate reads not ready (FORGE-590). If the sidecar owner set `METAFORGE_CLIENT_TASK_WRITES=on`, approving the claim once lets this session's writes for that phase run without further holds until you submit (FORGE-584) |
 | `run.start_design_flow` | start one of the built-in flows on a goal (held write) |
 | `run.get_status` | a run's state, gate reason and result (read) |
 

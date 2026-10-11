@@ -37,6 +37,7 @@ logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.design_flow.gates")
 
 __all__ = [
+    "CALL_BUDGET_SECONDS",
     "DEFAULT_ANSWER_SECONDS",
     "DEFAULT_WAIT_SECONDS",
     "GateDecider",
@@ -52,11 +53,19 @@ GateReader = Callable[[str], Awaitable[dict[str, Any]]]
 #: ``-> <approval item dict>``. Raises with the gateway's reason on refusal.
 GateDecider = Callable[[str, str, str, str, str | None, bool], Awaitable[dict[str, Any]]]
 
+#: FORGE-589: one tool call must finish inside the client's own MCP call
+#: timeout (Claude Code cuts a call at 120 s), or the prompt dies with the
+#: call. The defaults keep waiting plus answering under this budget; a caller
+#: whose client allows longer can still pass larger windows.
+CALL_BUDGET_SECONDS = 110.0
 #: How long the tool waits for the run to reach a gate before handing back.
-DEFAULT_WAIT_SECONDS = 120.0
+DEFAULT_WAIT_SECONDS = 30.0
 MAX_WAIT_SECONDS = 1800.0
-#: How long the person has to answer the prompt.
-DEFAULT_ANSWER_SECONDS = 300.0
+#: How long the person has to answer the prompt. Without an explicit
+#: ``answer_seconds`` this shrinks by the time spent waiting, down to
+#: ``MIN_DEFAULT_ANSWER_SECONDS``, so the whole call stays inside the budget.
+DEFAULT_ANSWER_SECONDS = 80.0
+MIN_DEFAULT_ANSWER_SECONDS = 20.0
 MAX_ANSWER_SECONDS = 1800.0
 _POLL_SECONDS = 3.0
 
@@ -164,7 +173,8 @@ async def await_gate(
     answer = _bounded(answer_seconds, DEFAULT_ANSWER_SECONDS, MAX_ANSWER_SECONDS)
     with tracer.start_as_current_span("flow.await_gate") as span:
         span.set_attribute("run.id", run_id)
-        deadline = clock() + wait
+        started = clock()
+        deadline = started + wait
         while True:
             state = await reader(run_id)
             status = str(state.get("run_status") or "")
@@ -199,6 +209,10 @@ async def await_gate(
                 gate, f"A gate is waiting, and this client cannot show a prompt. {_ASK_ELSEWHERE}"
             )
 
+        if answer_seconds is None:
+            left = CALL_BUDGET_SECONDS - (clock() - started)
+            answer = max(MIN_DEFAULT_ANSWER_SECONDS, min(answer, left))
+        span.set_attribute("answer.seconds", answer)
         message, schema = gate_question(gate, answer)
         try:
             result = await asyncio.wait_for(elicitor(message, schema), timeout=answer)

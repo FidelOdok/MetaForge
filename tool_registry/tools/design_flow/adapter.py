@@ -494,11 +494,17 @@ class DesignFlowServer(McpToolServer):
                         "run_id": {"type": "string"},
                         "wait_seconds": {
                             "type": "number",
-                            "description": "How long to wait for a gate (default 120, max 1800).",
+                            "description": (
+                                "How long to wait for a gate (default 30, max 1800). "
+                                "Defaults keep the whole call under a 120 s client timeout."
+                            ),
                         },
                         "answer_seconds": {
                             "type": "number",
-                            "description": "How long the person has to answer (default 300).",
+                            "description": (
+                                "How long the person has to answer (default 80, less "
+                                "the time spent waiting; max 1800)."
+                            ),
                         },
                     },
                     "required": ["run_id"],
@@ -557,8 +563,10 @@ class DesignFlowServer(McpToolServer):
                 description=(
                     "Finish a phase task you claimed: a short summary of what you did and "
                     "the ids of what you recorded. The run's gate then checks the twin, not "
-                    "the summary. Afterwards call flow.await_gate so the person can decide "
-                    "the gate in this chat."
+                    "the summary. Set outcome to 'incomplete' when the phase's objective was "
+                    "not met (say what is missing in the summary): the gate then reads not "
+                    "ready rather than offering approval. Afterwards call flow.await_gate so "
+                    "the person can decide the gate in this chat."
                 ),
                 capability="design_flow_write",
                 input_schema={
@@ -567,6 +575,13 @@ class DesignFlowServer(McpToolServer):
                         "task_id": {"type": "string"},
                         "summary": {"type": "string"},
                         "artifacts": {"type": "array", "items": {"type": "string"}},
+                        "outcome": {
+                            "type": "string",
+                            "enum": ["complete", "incomplete"],
+                            "description": (
+                                "Whether the phase's objective was met (default complete)."
+                            ),
+                        },
                     },
                     "required": ["task_id", "summary"],
                 },
@@ -633,13 +648,18 @@ class DesignFlowServer(McpToolServer):
             raise ValueError("phase.submit: 'task_id' is required")
         if not summary:
             raise ValueError("phase.submit: 'summary' is required")
+        outcome = str(arguments.get("outcome") or "complete").strip().lower()
+        if outcome not in ("complete", "incomplete"):
+            raise ValueError("phase.submit: 'outcome' must be 'complete' or 'incomplete'")
         with tracer.start_as_current_span("phase.submit") as span:
             span.set_attribute("task.id", task_id)
+            span.set_attribute("task.outcome", outcome)
             result: dict[str, Any] = await self._client_tasks.submit(
                 task_id,
                 self._client_name(),
                 summary,
                 [str(a) for a in arguments.get("artifacts") or []],
+                outcome=outcome,
             )
         # FORGE-584: the grant ends with the task.
         from mcp_core.context import clear_session_task, current_context
@@ -647,7 +667,7 @@ class DesignFlowServer(McpToolServer):
         ctx = current_context()
         if ctx.session_is_stable:
             clear_session_task(ctx.session_id, task_id)
-        logger.info("phase_task_submitted_over_mcp", task_id=task_id)
+        logger.info("phase_task_submitted_over_mcp", task_id=task_id, outcome=outcome)
         return {
             **result,
             "next_step": (

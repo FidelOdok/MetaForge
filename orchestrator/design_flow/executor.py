@@ -34,7 +34,11 @@ from orchestrator.design_flow.graph import (
     is_linear,
     rework_candidates,
 )
-from orchestrator.design_flow.grounding import UNGROUNDED_STATUS, phase_status
+from orchestrator.design_flow.grounding import (
+    INCOMPLETE_STATUS,
+    UNGROUNDED_STATUS,
+    phase_status,
+)
 from orchestrator.design_flow.retry import build_retry_feedback, max_phase_retries
 from orchestrator.design_flow.rework import (
     build_rework_feedback,
@@ -658,6 +662,11 @@ class DesignFlowExecutor:
             findings.append(
                 f"phase '{phase.id}' reply was flagged ungrounded (no tool calls were "
                 "made), so its claimed work is unverified"
+            )
+        if outcome.status == INCOMPLETE_STATUS:
+            # FORGE-590: whoever did the phase said its objective was not met.
+            findings.append(
+                f"phase '{phase.id}' reported its objective was not met (outcome incomplete)"
             )
 
         # MET-583 constraint-as-gate-criteria: evaluate the project's
