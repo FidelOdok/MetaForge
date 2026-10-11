@@ -29,7 +29,9 @@ folder and updates by pulling, never by building.
 
 There is no `docker-compose.override.yml` on a host. That file mounts the
 source into the containers for hot reload, which is what a host without a
-checkout must not do.
+checkout must not do. Everything a host serves is in `docker-compose.yml`,
+including the MCP server the harness plugins connect to (`mcp-http`, port
+8765), which runs the gateway image.
 
 Put `prod` in `COMPOSE_PROFILES` to run the production dashboard, a static
 build behind nginx on `DASHBOARD_PORT` (default 3000). It proxies `/api`,

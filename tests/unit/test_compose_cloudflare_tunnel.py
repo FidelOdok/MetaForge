@@ -21,12 +21,19 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OVERRIDE = REPO_ROOT / "docker-compose.override.yml"
+BASE = REPO_ROOT / "docker-compose.yml"
 
 
 def _services() -> dict:
     data = yaml.safe_load(OVERRIDE.read_text(encoding="utf-8"))
     assert isinstance(data, dict) and "services" in data, "override must declare services"
     return data["services"]
+
+
+def _sidecar() -> dict:
+    """FORGE-593: mcp-http is defined in the base compose (a host runs it from
+    the image alone); the override only adds source mounts."""
+    return yaml.safe_load(BASE.read_text(encoding="utf-8"))["services"]["mcp-http"]
 
 
 def _env_list(service: dict) -> list[str]:
@@ -69,7 +76,7 @@ def test_cloudflared_shares_metaforge_network_with_sidecar() -> None:
     ``mcp-http:8765`` by service name."""
     services = _services()
     assert "metaforge" in services["cloudflared"].get("networks", [])
-    assert "metaforge" in services["mcp-http"].get("networks", [])
+    assert "metaforge" in _sidecar().get("networks", [])
 
 
 def test_cloudflared_depends_on_sidecar() -> None:
@@ -80,14 +87,14 @@ def test_cloudflared_depends_on_sidecar() -> None:
 
 
 def test_sidecar_exposes_mcp_port() -> None:
-    ports = [str(p) for p in _services()["mcp-http"].get("ports", [])]
+    ports = [str(p) for p in _sidecar().get("ports", [])]
     assert any("8765" in p for p in ports), ports
 
 
 def test_sidecar_supports_api_key_auth() -> None:
     """The public endpoint must be protectable via the MET-338 static key,
     sourced from the environment."""
-    env = _env_list(_services()["mcp-http"])
+    env = _env_list(_sidecar())
     key = next((e for e in env if e.startswith("METAFORGE_MCP_API_KEY=")), None)
     assert key is not None, env
     assert "${METAFORGE_MCP_API_KEY" in key, "METAFORGE_MCP_API_KEY must come from the environment"

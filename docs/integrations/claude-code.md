@@ -487,7 +487,7 @@ echo "METAFORGE_MCP_SERVICE_KEY=$(openssl rand -hex 32)" >> .env
 ```
 
 `docker-compose.yml` passes `${METAFORGE_MCP_SERVICE_KEY:-}` to the worker and
-`docker-compose.override.yml` passes the same to `mcp-http`. There is
+to `mcp-http`. There is
 deliberately no default: unset, the feature is off and the worker log says
 `design_flow_worker_no_service_key`. `mcp-http` also needs
 `METAFORGE_GATEWAY_URL` (already set there) to verify runs.
