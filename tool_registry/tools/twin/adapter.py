@@ -1593,6 +1593,17 @@ class TwinServer(McpToolServer):
                                             "(e.g. 'cad_model'). Free text, not enforced."
                                         ),
                                     },
+                                    "limit_source": {
+                                        "type": "object",
+                                        "description": (
+                                            "FORGE-586: where 'limit' came from, as "
+                                            "{kind, ...}: kind user | project_document | "
+                                            "standard | past_work | component | analysis "
+                                            "| measurement | assumption, with the fields "
+                                            "that kind needs (see design_value in "
+                                            "twin.record_engineering_entity)."
+                                        ),
+                                    },
                                     "acceptance_criteria": {
                                         "type": "string",
                                         "description": (
@@ -1784,7 +1795,16 @@ class TwinServer(McpToolServer):
                     "(e.g. mass_kg/cost_usd/risk/performance) and optional "
                     "evidence_backed_criteria=[metric, ...] naming which scores "
                     "came from a real measured source rather than an assertion; "
-                    "record 2-4 of these then call twin.select_concept."
+                    "record 2-4 of these then call twin.select_concept. A "
+                    "'design_value' (FORGE-586) is one engineering value and where "
+                    "it came from -- extra: name, value, optional unit, and source "
+                    "= {kind, ...} where kind is user | project_document "
+                    "(document, optional locator) | standard (standard, optional "
+                    "clause/url) | past_work (node_id, or project_id + ref) | "
+                    "component (mpn or stock) | analysis (evidence, or method + "
+                    "inputs) | measurement (artefact) | assumption (rationale). A "
+                    "value whose source cannot be identified is refused; an "
+                    "'assumption' source is flagged for the person to review."
                 ),
                 capability="twin_engineering_entity",
                 input_schema={
@@ -1806,6 +1826,7 @@ class TwinServer(McpToolServer):
                                 "waiver",
                                 "release_approval",
                                 "concept_option",
+                                "design_value",
                             ],
                         },
                         "statement": {

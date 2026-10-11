@@ -16,7 +16,7 @@ Call `project.list`, pick the project, then `session.start` with its `project_id
 
 Follow the bundled `intent-to-verified-design` skill. In short:
 
-- Ask the user for values you were not given (loads, materials, manufacturing route, maturity). Unknown is a valid answer; a guess is not.
+- Never use an engineering value without a source. Find missing values with the `source-engineering-values` skill (the user, project documents, standards, past work, components and stock, analysis, measurement) and record each as a `design_value` with its source; a default only as a stated assumption for the person to review. Budget, quantity, machines and look come only from the user. Unknown is a valid answer; an unsourced guess is not.
 - Only create a project when the user asked for one. A flow can be proposed without one.
 - Propose a flow with `flow.propose`, passing `template` and `operations` together. Never `template` alone: that means 'use it unchanged'. Then stop: a person approves it, and there is no tool that lets you.
 

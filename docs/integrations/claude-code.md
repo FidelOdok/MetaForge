@@ -225,7 +225,11 @@ Two more sources feed the package's skills (FORGE-533):
 - **`mcp_core/plugin_skills/<name>/SKILL.md`** holds skills that exist only
   for plugin clients, such as `intent-to-verified-design`, the lifecycle from
   intent through requirements, flow, design, verification and the release
-  gate. These carry their own frontmatter and ship verbatim.
+  gate, and `source-engineering-values`, which finds a missing value (from
+  the user, project documents, standards, past work, components and stock,
+  analysis or measurement, then a stated assumption) and records it as a
+  `design_value` with its source (FORGE-586). These carry their own
+  frontmatter and ship verbatim.
 
 A test checks that every tool a shipped skill names is one the repo
 registers, so a skill cannot send a client to a tool that does not exist.

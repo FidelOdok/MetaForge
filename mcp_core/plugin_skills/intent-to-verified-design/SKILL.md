@@ -12,11 +12,16 @@ the digital twin, and stop and say so when the next move is a human's.
 
 Three rules hold for every stage:
 
-1. **Never invent an engineering value.** A load, a material, a tolerance, a
-   manufacturing route or a budget the user did not give is a question for the
-   user, not a default for you to pick. Unknown is a valid answer and the
-   server knows how to handle it ("loads unknown" keeps verification in the
-   flow). A plausible guess is not.
+1. **Never use an engineering value without a source.** Every value you put
+   into a design (a load, a dimension, a material, a tolerance, a section
+   size) comes from somewhere a reviewer can find again, and you record that
+   source with `twin.record_engineering_entity` (`design_value`). Find values
+   the way the `source-engineering-values` skill describes: the user, the
+   project's documents, standards, past work, real components and stock,
+   analysis, measurement, and only then a stated assumption the person
+   reviews at the gate. Choices only the user can make (budget, quantity,
+   machines available, the look) still come only from the user. Unknown is a
+   valid answer; a plausible number with no source is not.
 2. **Never approve your own work.** Proposals, gates, waivers and promotions are
    decided by a person. There is no tool that approves a flow proposal and you
    must not look for a workaround. Report the approval id and stop.

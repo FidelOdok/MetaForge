@@ -31,8 +31,11 @@ from typing import Any
 
 SESSION_RULES = (
     "MetaForge plugin rules for this session:\n"
-    "- Never invent an engineering value (load, material, tolerance, route, budget). "
-    "Ask the user; 'unknown' is a valid answer.\n"
+    "- Never use an engineering value without a source. Find it (user, project "
+    "documents, standards, past work, components and stock, analysis, measurement) "
+    "and record it as a design_value with its source; a default only as a stated "
+    "assumption for the person to review. Budget, quantity, machines and look come "
+    "only from the user; 'unknown' is a valid answer.\n"
     "- Before proposing a design flow: flow.compile_intent, then flow.capabilities. "
     "Propose with template AND operations together (never template alone).\n"
     "- Proposals, patches, gates and waivers are approved by a person. No tool "

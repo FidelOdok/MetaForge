@@ -62,6 +62,7 @@ from api_gateway.twin.item_revisions import (
 from observability.tracing import get_tracer
 from twin_core.models.constraint import Constraint
 from twin_core.models.enums import ConstraintSeverity, EdgeType, WorkProductType
+from twin_core.provenance import describe_source, source_errors
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.constraint_recorder")
@@ -118,6 +119,13 @@ def _validate_entry(index: int, entry: Any) -> dict[str, Any]:
         raise ValueError(
             f"constraint[{index}] '{name}': severity must be one of {sorted(_SEVERITIES)}"
         )
+    # FORGE-586: where the limit came from (the user, a standard, ...),
+    # checked like a design value's source. Optional: older callers omit it.
+    limit_source = entry.get("limit_source")
+    if limit_source is not None:
+        errors = source_errors(limit_source)
+        if errors:
+            raise ValueError(f"constraint[{index}] '{name}': limit_source: {'; '.join(errors)}")
     raw_parent_refs = entry.get("parent_refs") or []
     if not isinstance(raw_parent_refs, list) or not all(
         isinstance(r, str) and r.strip() for r in raw_parent_refs
@@ -144,6 +152,7 @@ def _validate_entry(index: int, entry: Any) -> dict[str, Any]:
         "limit": float(limit) if limit is not None else None,
         "unit": str(entry.get("unit") or ""),
         "target_node_type": str(entry.get("target_node_type") or ""),
+        "limit_source": limit_source,
     }
 
 
@@ -257,6 +266,9 @@ def make_constraint_recorder(twin: Any, project_backend: Any = None) -> Any:
                 }
                 if parent_ids:
                     metadata["parent_refs"] = [str(p) for p in parent_ids]
+                if e["limit_source"] is not None:
+                    metadata["limit_source"] = e["limit_source"]
+                    metadata["limit_source_summary"] = describe_source(e["limit_source"])
                 node = Constraint(
                     name=e["name"],
                     expression=e["expression"],

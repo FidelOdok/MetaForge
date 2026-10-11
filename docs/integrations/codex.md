@@ -215,7 +215,8 @@ single `event: done` block.
 and the same skills as the Claude Code package: the 30 engineering skills,
 shipped from each skill's detailed `PLUGIN.md`, plus the
 `intent-to-verified-design` lifecycle skill (FORGE-533). Codex has no slash
-commands, so the lifecycle rules (ask for values you were not given; propose
+commands, so the lifecycle rules (never use a value without a source, found
+with the `source-engineering-values` skill and recorded with it; propose
 a flow with `template` and `operations` together; stop at the approval) live
 in `AGENTS.md` and that skill. The package's README covers the marketplace
 layout Codex expects.
