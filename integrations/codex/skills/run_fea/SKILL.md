@@ -70,6 +70,20 @@ rather than asking again.
    authored the part yourself earlier: a FreeCAD session id goes stale, the
    staged file does not.
 
+### Analysis models (when the part cannot be solved as it is)
+
+Sometimes the committed part cannot carry the boundary conditions you need:
+the solver allows one fixed face, so modelling a top on four leg pads, or
+bounding a support between bonded and pinned, needs a separate simplified
+model. Build it, and commit it with `twin.commit_geometry` using
+`model_role: "analysis"` and `idealises: "<the design part's item key or
+node id>"` (for example `CAD-TABLETOP`). An analysis model is left out of the
+gate's geometry and assembly checks (FORGE-596): it is not product geometry,
+so it must not be counted as a loose design part, put into the product's
+assembly, or grouped into an assembly of its own to satisfy a check. Pin the
+results to the analysis model, and say in the result which design part it
+stands for and what it simplifies.
+
 ### 2. Mesh it and identify the faces
 
 1. Call `freecad.generate_mesh` with `input_file` = the staged path and
