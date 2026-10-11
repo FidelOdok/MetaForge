@@ -119,7 +119,8 @@ onto it.
 | Execution, eligibility, validity, objective | `flow.lifecycle` per phase. Validity turns `STALE` when a twin item the phase recorded is superseded. |
 | Failure classification | A failed run's `failure.failure_class` and recommended response. |
 | Local repair, patch | A gate's rework (re-runs the target and its downstream), or `flow.patch` with `action: propose` then, once a person approves, `action: apply`. |
-| Approval | A person, in the dashboard or the client's inline prompt. No tool approves. |
+| Approval | A person, in the dashboard or the client's inline prompt. No tool approves. After a run reaches a gate, call `flow.await_gate`: it asks the person in this chat and records their answer. Never answer for them, and never report a gate as decided unless the tool says so. |
+| Client mode | `flow.start_run` with `intelligence: client`: MetaForge calls no model, and each phase waits as a task. `phase.list_tasks`, then `phase.claim` (the brief), do the work and record every required deliverable under the run's project, then `phase.submit`, then `flow.await_gate`. |
 | Completion | `flow.verify_completion` (or `flow.lifecycle`'s `completion`): `COMPLETED_VERIFIED` only when every mandatory requirement passes with current evidence. |
 | Evidence | `twin.record_document` (`simulation_result`, pinned to the geometry revision), and `twin.record_evidence` where served. |
 
