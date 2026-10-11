@@ -1913,6 +1913,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     reconcile_task = asyncio.create_task(run_reconcile_loop())
     app.state.run_reconcile_task = reconcile_task
+    # FORGE-594: create the KB bucket with versioning on. In the background,
+    # retried, and alarmed on failure; it never holds up start-up.
+    from api_gateway.knowledge.storage_init import ensure_kb_storage
+
+    kb_storage_task = asyncio.create_task(ensure_kb_storage())
+    app.state.kb_storage_task = kb_storage_task
     from api_gateway.twin.file_watcher import file_watcher
 
     if hasattr(app.state, "twin"):
@@ -1921,6 +1927,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     logger.info("gateway_stopping")
     reconcile_task.cancel()
+    kb_storage_task.cancel()
     await file_watcher.stop()
     if hasattr(app.state, "tool_registry"):
         await app.state.tool_registry.close_all()

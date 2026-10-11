@@ -95,6 +95,17 @@ cannot happen to it.
   not (`NotImplemented`), so `scripts/storage/provision_minio.py` reports its
   lifecycle step as failed on this store. Use an external S3 service that
   supports transitions if you need cold-tier archiving.
+- The gateway sets up the `metaforge-kb` bucket itself when it starts
+  (FORGE-594): it creates the bucket, turns versioning on and reads the
+  setting back. It runs in the background and retries for about five
+  minutes, so an object store that starts after the gateway is fine. If it
+  still fails, the gateway logs `kb_storage_init_failed`, counts it on
+  `metaforge_kb_storage_init_total{outcome="failed"}`, and the
+  `KBStorageInitFailed` alert fires; everything else keeps working. Before
+  this, nothing ran that set-up, and the bucket was created by the first blob
+  write with versioning off. A host whose bucket already exists gets
+  versioning turned on at the next gateway start; objects written before that
+  keep only their current version.
 - There is no web console, unlike MinIO's on port 9001.
 
 ### Moving a host's data from MinIO

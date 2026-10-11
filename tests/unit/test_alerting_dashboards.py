@@ -112,7 +112,8 @@ class TestAlertingRules:
         # + 1 item migration failures (FORGE-529).
         # + 1 client-mode phase tasks nobody submits (FORGE-581).
         # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
-        assert len(rules) == 50
+        # + 1 KB storage set-up failed at gateway start (FORGE-594).
+        assert len(rules) == 51
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -168,7 +169,8 @@ class TestAlertingRules:
         # + 1 item migration failures (FORGE-529)
         # + 1 client-mode phase tasks nobody submits (FORGE-581).
         # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
-        assert len(warnings) == 37
+        # + 1 KB storage set-up failed at gateway start (FORGE-594).
+        assert len(warnings) == 38
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -209,6 +211,8 @@ class TestAlertingRules:
                 "ClientTasksUnanswered",
                 "ConsolidationContradictionsRising",
                 "ContextTruncationSpike",
+                # FORGE-594: the KB bucket was not set up (no versioning).
+                "KBStorageInitFailed",
                 # FORGE-532: 3D result fields failing to build or to store.
                 "SimFieldPayloadFailures",
                 "SimFieldStoreFailures",

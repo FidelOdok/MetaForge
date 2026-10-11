@@ -586,6 +586,24 @@ groups:
             MINIO_ACCESS_KEY/MINIO_SECRET_KEY and the services that use the
             store shows up here; check the object-store logs.
 
+      # FORGE-594: the gateway could not set up the KB bucket (create it and
+      # turn versioning on) after retrying for about five minutes.
+      - alert: KBStorageInitFailed
+        expr: |
+          increase(metaforge_kb_storage_init_total{outcome="failed"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          sev: "3"
+        annotations:
+          summary: "Knowledge-base storage set-up failed at gateway start"
+          description: >-
+            The gateway could not create the metaforge-kb bucket or turn its
+            versioning on, so datasheet history can be overwritten in place.
+            Look for kb_storage_init_failed in the gateway logs, fix the
+            object store or its credentials, then restart the gateway or run
+            scripts/storage/provision_minio.py.
+
   # ── MCP surface: the plugins' front door (FORGE-379) ──────────────────
   - name: metaforge_mcp
     rules:
