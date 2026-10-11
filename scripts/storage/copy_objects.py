@@ -9,8 +9,9 @@ gateway image has it) and both stores are reachable::
     python scripts/storage/copy_objects.py [--dry-run]
 
 Safe to run again: an object already in the destination with the same size
-is skipped. It never deletes anything. It ends by comparing object counts
-and total bytes per bucket, and exits non-zero if they differ.
+is skipped. It never deletes anything. A bucket with versioning enabled at
+the source gets it enabled at the destination too. It ends by comparing
+object counts and total bytes per bucket, and exits non-zero if they differ.
 """
 
 from __future__ import annotations
@@ -57,6 +58,20 @@ def _totals(client: Minio, bucket: str) -> Totals:
     return totals
 
 
+def _copy_versioning(src: Minio, dst: Minio, bucket: str) -> str:
+    """Enable versioning at the destination when the source has it.
+
+    Only "Enabled" is carried over: a destination never has versioning
+    suspended or removed by this script.
+    """
+    from minio.versioningconfig import ENABLED, VersioningConfig
+
+    status = src.get_bucket_versioning(bucket).status
+    if status == ENABLED and dst.get_bucket_versioning(bucket).status != ENABLED:
+        dst.set_bucket_versioning(bucket, VersioningConfig(ENABLED))
+    return str(status or "off")
+
+
 def copy_all(src: Minio, dst: Minio, *, dry_run: bool = False) -> bool:
     """Copy everything; return whether every bucket matches afterwards."""
     ok = True
@@ -64,6 +79,11 @@ def copy_all(src: Minio, dst: Minio, *, dry_run: bool = False) -> bool:
         name = bucket.name
         if not dry_run and not dst.bucket_exists(name):
             dst.make_bucket(name)
+        versioning = (
+            src.get_bucket_versioning(name).status or "off"
+            if dry_run
+            else _copy_versioning(src, dst, name)
+        )
         copied = skipped = 0
         for obj in src.list_objects(name, recursive=True):
             key = obj.object_name
@@ -100,7 +120,8 @@ def copy_all(src: Minio, dst: Minio, *, dry_run: bool = False) -> bool:
         print(
             f"{name}: {'would copy' if dry_run else 'copied'} {copied}, skipped {skipped}; "
             f"source {before.objects} objects / {before.size} bytes, "
-            f"destination {after.objects} / {after.size}" + ("" if same else "  MISMATCH")
+            f"destination {after.objects} / {after.size}; versioning {versioning}"
+            + ("" if same else "  MISMATCH")
         )
     return ok
 
