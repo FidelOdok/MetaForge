@@ -187,7 +187,8 @@ class MinIOKBStorage:
         with tracer.start_as_current_span("kb_storage.minio.initialize") as span:
             span.set_attribute("storage.bucket", self._settings.bucket)
             await asyncio.to_thread(self._ensure_bucket)
-            await asyncio.to_thread(self._enable_versioning)
+            versioning = await asyncio.to_thread(self._enable_versioning)
+            span.set_attribute("storage.versioning", versioning)
             for prefix in KBPrefix:
                 key = object_key(prefix, _PREFIX_MARKER)
                 if not await asyncio.to_thread(self._object_exists, key):
@@ -296,24 +297,40 @@ class MinIOKBStorage:
             self._client.make_bucket(self._settings.bucket, location=self._settings.region)
             logger.info("kb_bucket_created", bucket=self._settings.bucket)
 
-    def _enable_versioning(self) -> None:
-        # The minio SDK exposes ``set_bucket_versioning`` on newer releases;
-        # call it via the ``VersioningConfig`` helper when present, else fall
-        # back to a no-op so older test fakes don't have to implement it.
+    def _enable_versioning(self) -> str:
+        """Turn versioning on and confirm it; returns the bucket's status.
+
+        FORGE-594: a failure here used to be a warning, so a bucket without
+        versioning (datasheet history overwritten in place) looked healthy.
+        It now raises :class:`KBStorageError`. A client with no versioning
+        API at all (an older test fake) is reported as ``"unsupported"``.
+        """
         try:
             minio_mod = _resolve_minio_module()
         except MinIODependencyError:
-            return
+            return "unsupported"
         cfg_cls = getattr(getattr(minio_mod, "commonconfig", object()), "ENABLED", None)
         setter = getattr(self._client, "set_bucket_versioning", None)
         if cfg_cls is None or setter is None:
-            return
+            return "unsupported"
         try:
             from minio.versioningconfig import VersioningConfig  # noqa: PLC0415
 
             setter(self._settings.bucket, VersioningConfig(cfg_cls))
-        except Exception as exc:  # pragma: no cover — best effort
-            logger.warning("kb_versioning_setup_failed", error=str(exc))
+        except Exception as exc:
+            raise KBStorageError(
+                f"could not enable versioning on bucket '{self._settings.bucket}': {exc}"
+            ) from exc
+        getter = getattr(self._client, "get_bucket_versioning", None)
+        if getter is None:
+            return str(cfg_cls)
+        status = str(getattr(getter(self._settings.bucket), "status", "") or "")
+        if status != str(cfg_cls):
+            raise KBStorageError(
+                f"bucket '{self._settings.bucket}' versioning reads '{status or 'off'}' "
+                "after it was enabled"
+            )
+        return status
 
     def _object_exists(self, key: str) -> bool:
         try:

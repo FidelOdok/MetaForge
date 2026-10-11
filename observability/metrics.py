@@ -481,6 +481,16 @@ class MetricsRegistry:
         buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0],
     )
 
+    KB_STORAGE_INIT_TOTAL = MetricDefinition(
+        name="metaforge_kb_storage_init_total",
+        type="counter",
+        description=(
+            "Knowledge-base object storage set-up at gateway start by outcome: "
+            "ready, failed, skipped (FORGE-594)"
+        ),
+        labels=["outcome"],
+    )
+
     # ── Consolidation / agent-memory metrics (MET-454 / MET-455) ───────
     CONSOLIDATION_PASS_DURATION = MetricDefinition(
         name="metaforge_consolidation_pass_duration_seconds",
@@ -886,6 +896,7 @@ class MetricsRegistry:
         """MET-401 / L1-A7 knowledge-service latency metrics."""
         return [
             cls.KNOWLEDGE_SEARCH_DURATION,
+            cls.KB_STORAGE_INIT_TOTAL,
         ]
 
     @classmethod
@@ -1528,6 +1539,12 @@ class MetricsCollector:
     def record_design_flow_gate_announce(self, outcome: str) -> None:
         """One gate announcement: announced, unannounced or failed (FORGE-489)."""
         counter = self._instruments.get(MetricsRegistry.DESIGN_FLOW_GATE_ANNOUNCE_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"outcome": outcome})
+
+    def record_kb_storage_init(self, outcome: str) -> None:
+        """One knowledge-base storage set-up at gateway start (FORGE-594)."""
+        counter = self._instruments.get(MetricsRegistry.KB_STORAGE_INIT_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome})
 
