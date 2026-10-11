@@ -90,11 +90,33 @@ echo "$sha" > .metaforge-bundle
 echo "bundle ${before:0:12} -> ${sha:0:12}"
 
 log "pull"
-docker compose pull -q
+owner="${REPO%%/*}"
+images=$(docker compose config --images 2>/dev/null | sort -u)
+ours=$(grep "^ghcr.io/${owner,,}/metaforge-" <<<"$images" || true)
+# MetaForge images must come fresh from the registry: a failed pull here
+# stops the update, because running an old local copy would be silent drift.
+for img in $ours; do
+  docker pull -q "$img" >/dev/null || { echo "could not pull $img; nothing restarted" >&2; exit 1; }
+done
+# Third-party images are pulled too, but one the registry no longer serves
+# (an upstream that stopped publishing) only blocks the update if this host
+# does not already have it.
+docker compose pull -q --ignore-pull-failures 2>"$tmp/pull.err" || true
+missing=()
+for img in $images; do
+  docker image inspect "$img" >/dev/null 2>&1 || missing+=("$img")
+done
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "images neither pullable nor present: ${missing[*]}; nothing restarted" >&2
+  exit 1
+fi
+if grep -q "Error" "$tmp/pull.err"; then
+  echo "could not refresh (using the local copy):" >&2
+  grep -oE "for [^ ,]+" "$tmp/pull.err" | sort -u | sed "s/^for /  /" >&2
+fi
 
 log "verify signatures"
-owner="${REPO%%/*}"
-for img in $(docker compose config --images 2>/dev/null | sort -u | grep "^ghcr.io/${owner,,}/metaforge-" || true); do
+for img in $ours; do
   digest=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$img" \
     | grep -m1 "^${img%:*}@" || true)
   [ -n "$digest" ] || { echo "no registry digest for $img" >&2; exit 1; }
