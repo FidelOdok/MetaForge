@@ -693,3 +693,46 @@ class TestHookScript:
         monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
         assert hook.main(["x", "session-start"]) == 0
         assert capsys.readouterr().out == ""
+
+
+class TestClaudeAiConnectorIsDocumented:
+    """claude.ai does not substitute `${user_config.*}` (FORGE-591).
+
+    Per-user configuration prompts are a Claude Code feature. On claude.ai the
+    plugin's bundled connector therefore shows its URL template literally, and
+    the user has to replace it by hand. That looks exactly like a broken
+    plugin, and the generated README used to say only "Claude Code asks for
+    your gateway URL on first enable" -- true there, false on the web.
+
+    No manifest change fixes it: every user runs their own gateway, so no
+    literal URL is correct for the next installer. Documentation is the fix,
+    which makes it the kind that rots silently -- hence this test.
+    """
+
+    @staticmethod
+    def _readme() -> str:
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parents[2] / "integrations" / "claude-code" / "README.md"
+        ).read_text(encoding="utf-8")
+
+    def test_the_readme_names_claude_ai_at_all(self) -> None:
+        assert "claude.ai" in self._readme()
+
+    def test_it_says_the_template_is_shown_literally(self) -> None:
+        """The specific surprise. Without this a user reads 'Claude Code asks
+        for your gateway URL' and concludes the plugin is broken."""
+        text = self._readme()
+        assert "${user_config.gateway_url}" in text
+        assert "literal" in text.lower()
+
+    def test_it_shows_what_to_paste_instead(self) -> None:
+        """Naming the problem without the replacement is half a fix."""
+        assert "?profile=core" in self._readme()
+
+    def test_it_warns_about_the_authorization_template(self) -> None:
+        """A literal `Bearer ${...}` is a malformed credential, which reads
+        worse than sending none -- the same reasoning the codex config.toml
+        already applies to an empty bearer."""
+        assert "Bearer ${user_config.api_token}" in self._readme()
