@@ -250,7 +250,11 @@ class TestTheDeployMakesTheCheckPossible:
         `docker compose build mcp-http` would clobber a hand-applied fix."""
         import yaml
 
-        compose = yaml.safe_load(Path("docker-compose.override.yml").read_text())
+        # FORGE-593: the service is defined in the base compose; the dev
+        # override only adds mounts, and must not bring a build back either.
+        compose = yaml.safe_load(Path("docker-compose.yml").read_text())
         sidecar = compose["services"]["mcp-http"]
         assert "build" not in sidecar
         assert sidecar["image"].startswith("ghcr.io/")
+        override = yaml.safe_load(Path("docker-compose.override.yml").read_text())
+        assert "build" not in override["services"].get("mcp-http", {})

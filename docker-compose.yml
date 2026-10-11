@@ -430,6 +430,136 @@ services:
       - metaforge
     restart: unless-stopped
 
+  # ── MCP HTTP sidecar — the unified MCP server on :8765, which the
+  # harness plugins connect to. FORGE-593: defined here, not only in the
+  # dev override, so a host running from images alone has it; the override
+  # adds the source mounts for hot reload. DATABASE_URL points at the
+  # in-cluster postgres so knowledge + memory adapters wire up.
+  mcp-http:
+    # FORGE-411: the CI-published gateway image, not a local build. This
+    # service had a `build:` and no `image:`, so it could only ever run an
+    # image built on whatever box it was started on -- which is how it ended
+    # up predating `pint` and `temporalio` and crash-looping on restart, while
+    # the gateway beside it (same Dockerfile, but with an `image:`) was fine.
+    #
+    # The `build:` is deliberately gone rather than kept alongside: a stray
+    # `docker compose build mcp-http` is what produced the divergent local
+    # image in the first place. The gateway service owns the build; this uses
+    # what it produces.
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
+    command: >
+      python -m metaforge.mcp --transport http
+      --host 0.0.0.0 --port 8765
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,offer_resolver,component,web,design_flow,run,power,spice
+      --allow-twin-mutations
+      --capture-sessions
+    ports:
+      - "8765:8765"
+    environment:
+      - METAFORGE_ENV=docker
+      - NEO4J_URI=bolt://neo4j:7687
+      # FORGE-488: the design_flow adapter starts runs through Temporal. Unset,
+      # the client falls back to localhost:7233, which inside this container is
+      # the container itself (temporal_connect_failed, connection refused).
+      - TEMPORAL_HOST=temporal:7233
+      # FORGE-406: where to park a held write. The approval store is
+      # process-level, so without this the sidecar holds calls in its own
+      # memory and the dashboard -- served by the gateway -- never sees them.
+      # Unset, the sidecar falls back to that in-process queue and says so on
+      # every start-up rather than only when somebody tries to write.
+      - METAFORGE_GATEWAY_URL=http://gateway:8000
+      # FORGE-487: matches `design-flow-worker`'s value and nothing else's.
+      # It is how this sidecar recognises the worker as a service caller (and
+      # then only for a run the gateway confirms is running an approved flow
+      # version in the call's project). No default: unset, the worker's writes
+      # are held like any untrusted caller's.
+      - METAFORGE_MCP_SERVICE_KEY=${METAFORGE_MCP_SERVICE_KEY:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      # Credentials sourced from .env — same vars the gateway service uses.
+      # No literal fallbacks: secret scanners treat a hardcoded user/pass
+      # pair in a connection string as a credential leak even for dev defaults.
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - OPEN_ROUTER_API_KEY=${OPEN_ROUTER_API_KEY:-}
+      - LIGHTRAG_MODEL=${LIGHTRAG_MODEL:-}
+      # MET-436: digikey/mouser/nexar adapters + offer_resolver need these to
+      # register with live credentials — the gateway service (docker-compose.yml)
+      # already had this passthrough; this sidecar never did, so distributor
+      # tools always skipped with "missing env vars" here regardless of .env.
+      - DIGIKEY_CLIENT_ID=${DIGIKEY_CLIENT_ID:-}
+      - DIGIKEY_CLIENT_SECRET=${DIGIKEY_CLIENT_SECRET:-}
+      - DIGIKEY_BASE_URL=${DIGIKEY_BASE_URL:-}
+      - MOUSER_API_KEY=${MOUSER_API_KEY:-}
+      - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
+      - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
+      # MET-7: same gap as the distributor creds above -- web.search/
+      # web.fetch need this to register with a live key; the gateway
+      # service (docker-compose.yml) already had this passthrough, this
+      # sidecar never did, so the web adapter always skipped with
+      # "missing env vars: BRAVE_API_KEY" here regardless of .env.
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
+      - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
+      # MET-478 follow-up: without this, kicad.* tools ran in-process inside
+      # this sidecar, which has no kicad-cli binary, so every real call
+      # failed with -32001 even though tools/list looked healthy.
+      - METAFORGE_ADAPTER_KICAD_URL=http://kicad-adapter:8103
+      # MET-658 follow-up: same gap as kicad -- the ccx solver binary isn't
+      # installed in this sidecar image, only in calculix-adapter's own.
+      - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
+      # FORGE-542: ngspice is only in spice-adapter's image.
+      - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
+      - OCCT_CONVERTER_URL=http://occt-converter:8100
+      - ADAPTER_WORKSPACE_DIR=/workspace
+      # MET-495: same MinIO config as the gateway so twin.record_decision can
+      # store decision blobs in the shared work-products bucket (without it,
+      # the blob client hangs on a misconfigured endpoint).
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}
+      - MINIO_BUCKET=${MINIO_BUCKET:-metaforge-kb}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+      # Static API-key auth (MET-338). Once the Cloudflare tunnel (MET-482)
+      # makes :8765 publicly reachable, set this in .env so the endpoint
+      # isn't open to the world. Empty => open mode (LAN-only dev).
+      - METAFORGE_MCP_API_KEY=${METAFORGE_MCP_API_KEY:-}
+      # OAuth 2.1 + PKCE for the claude.ai web connector (MET-480).
+      # Setting the login secret turns the OAuth server on; the issuer is
+      # the public tunnel hostname (else derived from forwarded headers).
+      - METAFORGE_OAUTH_LOGIN_SECRET=${METAFORGE_OAUTH_LOGIN_SECRET:-}
+      - METAFORGE_OAUTH_ISSUER=${METAFORGE_OAUTH_ISSUER:-}
+    volumes:
+      # Read-write (MET-618 follow-up): twin.stage_work_product_file and
+      # MET-612's boolean-cut staging both write into this shared workspace
+      # so any adapter can load the result — the gateway's own mount above
+      # was already read-write for the same reason; this one was never
+      # updated to match, so any write-needing tool exposed through this
+      # standalone sidecar (used by external MCP clients) failed with
+      # "Read-only file system" no matter which work product it targeted.
+      - adapter-workspace:/workspace
+    # Override the gateway image's baked-in HEALTHCHECK (it probes :8000,
+    # the gateway's port) — this sidecar serves on :8765, so without this
+    # the container reports "unhealthy" forever while working fine.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── Design-flow worker (FORGE-401) ──────────────────────────────
   # A second worker, on its own task queue. Design-flow phases are long
   # agent loops (minutes to hours); sharing a queue with the short agent

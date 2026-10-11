@@ -76,7 +76,8 @@ def test_service_key_goes_to_the_worker_and_the_sidecar_only() -> None:
     expected = "METAFORGE_MCP_SERVICE_KEY=${METAFORGE_MCP_SERVICE_KEY:-}"
 
     assert expected in base["design-flow-worker"]["environment"]
-    assert expected in override["mcp-http"]["environment"]
+    # FORGE-593: mcp-http is defined in the base compose now.
+    assert expected in base["mcp-http"]["environment"]
 
     holders = [
         name
