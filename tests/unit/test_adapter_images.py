@@ -96,3 +96,31 @@ class TestUnpublishedAdaptersCannotReachARegistry:
             assert not re.search(r"image:\s*metaforge/", stripped), (
                 f"compose names the empty public namespace: {stripped!r}"
             )
+
+
+class TestEveryHostImageIsPublished:
+    """FORGE-593: a host runs with no checkout, so nothing it runs is built there."""
+
+    def _service_images(self) -> dict[str, str]:
+        data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        include = data["jobs"]["publish-services"]["strategy"]["matrix"]["include"]
+        return {row["image"]: row["context"] for row in include}
+
+    def test_every_tool_adapter_is_published(self) -> None:
+        published = set(_published_adapters())
+        unpublished = [
+            name for name in _adapter_services() if name.removesuffix("-adapter") not in published
+        ]
+        assert not unpublished, f"adapters a host would have to build: {unpublished}"
+
+    @pytest.mark.parametrize(
+        ("service", "image"),
+        [("occt-converter", "metaforge-occt"), ("dashboard", "metaforge-dashboard")],
+    )
+    def test_the_other_services_are_named_by_their_ghcr_image(
+        self, service: str, image: str
+    ) -> None:
+        assert image in self._service_images(), f"{image} is not published"
+        svc = _services()[service]
+        assert svc.get("image", "").startswith(f"ghcr.io/fidelodok/{image}:"), svc.get("image")
+        assert svc.get("build"), f"{service} lost its build: fallback"

@@ -38,6 +38,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLISHING_JOBS = [
     (".github/workflows/release.yml", "docker-publish"),
     (".github/workflows/adapter-images.yml", "publish"),
+    # FORGE-593: the OCCT converter and the production dashboard.
+    (".github/workflows/adapter-images.yml", "publish-services"),
 ]
 
 
