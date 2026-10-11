@@ -111,7 +111,8 @@ class TestAlertingRules:
         # + 1 gate approval without a baseline (FORGE-526).
         # + 1 item migration failures (FORGE-529).
         # + 1 client-mode phase tasks nobody submits (FORGE-581).
-        assert len(rules) == 51
+        # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
+        assert len(rules) == 50
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -166,7 +167,8 @@ class TestAlertingRules:
         # + 1 gate approval without a baseline (FORGE-526)
         # + 1 item migration failures (FORGE-529)
         # + 1 client-mode phase tasks nobody submits (FORGE-581).
-        assert len(warnings) == 38
+        # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
+        assert len(warnings) == 37
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -236,9 +238,9 @@ class TestAlertingRules:
                 "KnowledgeSearchLatencySLO",
                 "LLMCostSpike",
                 "LlmRunawaySpendPerRun",
-                "MinIOKBAccessErrorsRising",
-                "MinIOKBBucketSizeHigh",
-                "MinIOKBWriteLatencyHigh",
+                # FORGE-577: the object store is SeaweedFS; no bucket-size rule.
+                "ObjectStoreAccessErrorsRising",
+                "ObjectStoreWriteLatencyHigh",
                 "OscillationDetected",
                 "RetrievalPrecisionRegression",
                 "SensorOutOfRange",
@@ -279,34 +281,30 @@ class TestAlertingRules:
                 f"Missing 'description' annotation in {rule['alert']}"
             )
 
-    def test_minio_kb_alerts_cover_met_476_criteria(self) -> None:
-        """MET-476: bucket size, write latency, and access errors each have a rule.
+    def test_object_store_alerts_cover_met_476_criteria(self) -> None:
+        """MET-476 on the SeaweedFS object store (FORGE-577).
 
-        Verifies the three MinIO KB alerts exist, target the ``metaforge-kb``
-        bucket, and use the appropriate Prometheus metric per criterion.
+        Write latency and access errors each have a rule on the S3 gateway's
+        own metrics. Bucket size has none: the gateway does not report it.
         """
         data = _load_yaml(_RULES_PATH)
         rules = {r["alert"]: r for r in _all_alert_rules(data)}
 
-        bucket_size = rules["MinIOKBBucketSizeHigh"]
-        write_latency = rules["MinIOKBWriteLatencyHigh"]
-        errors = rules["MinIOKBAccessErrorsRising"]
+        write_latency = rules["ObjectStoreWriteLatencyHigh"]
+        errors = rules["ObjectStoreAccessErrorsRising"]
+        assert "MinIOKBBucketSizeHigh" not in rules
 
-        assert bucket_size["labels"]["severity"] == "warning"
-        assert write_latency["labels"]["severity"] == "warning"
-        assert errors["labels"]["severity"] == "warning"
+        for rule in (write_latency, errors):
+            assert rule["labels"]["severity"] == "warning"
+            assert "minio_" not in rule["expr"], f"{rule['alert']} still reads MinIO metrics"
 
-        # Each rule references the canonical KB bucket.
-        for rule in (bucket_size, write_latency, errors):
-            assert 'bucket="metaforge-kb"' in rule["expr"], (
-                f"{rule['alert']} must filter on bucket=metaforge-kb"
-            )
-
-        # Each criterion is wired to the appropriate metric family.
-        assert "minio_bucket_usage_total_bytes" in bucket_size["expr"]
-        assert "minio_s3_requests_seconds_bucket" in write_latency["expr"]
+        assert 'bucket="metaforge-kb"' in write_latency["expr"]
+        assert "SeaweedFS_s3_request_seconds_bucket" in write_latency["expr"]
         assert "histogram_quantile" in write_latency["expr"]
-        assert "minio_s3_requests_errors_total" in errors["expr"]
+        # Errors are counted across buckets: a credential mismatch shows on
+        # requests that name no bucket. 404 is not an error (existence checks).
+        assert "SeaweedFS_s3_request_total" in errors["expr"]
+        assert "404" not in errors["expr"]
 
 
 # ===================================================================

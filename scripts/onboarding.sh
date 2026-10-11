@@ -71,7 +71,7 @@ Usage: onboarding.sh [options]
   --with-cadquery        start the CadQuery adapter (parametric CAD)
   --with-freecad         start the FreeCAD adapter (CAD authoring)
   --full                 shorthand for all four --with-* adapter flags
-                         (Postgres/Neo4j/MinIO/Kafka/Temporal/OCCT always
+                         (Postgres/Neo4j/object store/Kafka/Temporal/OCCT always
                          start regardless — the gateway requires them
                          healthy before it will start itself)
   --yes                  non-interactive: never prompt (defaults to
@@ -216,12 +216,12 @@ cat <<'REQS'
   1. Docker Desktop (or Docker Engine + the Compose plugin)
        https://docs.docker.com/get-docker/
   2. ~8 GB free disk space, 4 GB+ RAM free — this starts 10 containers, not
-     just the gateway/dashboard: Postgres, Neo4j, MinIO, Kafka + Zookeeper,
+     just the gateway/dashboard: Postgres, Neo4j, the object store, Kafka + Zookeeper,
      Temporal + its Postgres, and an internal STEP/GLB converter service are
      all hard startup dependencies of the gateway, not optional extras.
 REQS
 echo "  3. These ports free: 8000 (gateway), 3000 (dashboard), 7474 + 7687 (neo4j),"
-echo "     9000 + 9001 (minio), 9092 (kafka), 7233 (temporal), 8100 (occt-converter)${ADAPTER_PORTS}"
+echo "     9000 (object store), 9092 (kafka), 7233 (temporal), 8100 (occt-converter)${ADAPTER_PORTS}"
 cat <<'REQS'
   4. An API key from ONE model provider, so the chat/assistant layer can
      actually talk to an LLM:
@@ -480,7 +480,7 @@ fi
 
 # ── 7. Build + start the stack ───────────────────────────────────────
 if [ "$MODE" = "usage" ]; then
-  SERVICES=(postgres neo4j minio gateway dashboard)
+  SERVICES=(postgres neo4j object-store gateway dashboard)
   # Kafka/zookeeper/temporal/temporal-db/occt-converter are NOT added here —
   # they start regardless, because `gateway` has a hard `depends_on:
   # condition: service_healthy` on all of them in docker-compose.yml.
@@ -521,7 +521,7 @@ if [ "$MODE" = "usage" ]; then
   fi
 else
   log "Starting dev containers (hot-reload override auto-applied)"
-  SERVICES=(postgres neo4j minio gateway dashboard-dev)
+  SERVICES=(postgres neo4j object-store gateway dashboard-dev)
   # Kafka/zookeeper/temporal/temporal-db/occt-converter are NOT added here —
   # they start regardless, because `gateway` has a hard `depends_on:
   # condition: service_healthy` on all of them in docker-compose.yml.
@@ -557,7 +557,7 @@ log "Waiting for services to become healthy (timeout ${HEALTH_TIMEOUT}s each)"
 # kafka/temporal/occt-converter are always up (gateway's depends_on forces
 # them), so report on them too rather than leaving the user guessing what
 # "docker ps" surprises are doing during a long first boot.
-for svc in postgres neo4j minio zookeeper kafka temporal-db temporal occt-converter; do
+for svc in postgres neo4j object-store zookeeper kafka temporal-db temporal occt-converter; do
   wait_for_container_health "$svc" "$HEALTH_TIMEOUT" || true
 done
 
