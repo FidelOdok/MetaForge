@@ -903,7 +903,7 @@ ENTRYPOINT ["python", "server.py"]
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge/cadquery-adapter` |
+| Docker Image | `metaforge-cadquery-adapter:latest` — built locally, not published |
 | Base Image | `python:3.11-slim` (multi-stage) |
 | Transport | stdio |
 | Tools | `cadquery.create_parametric`, `cadquery.boolean_operation`, `cadquery.get_properties`, `cadquery.export_geometry`, `cadquery.execute_script`, `cadquery.create_assembly`, `cadquery.generate_enclosure` |
@@ -924,7 +924,7 @@ ENTRYPOINT ["python", "server.py"]
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge/freecad-adapter` locally; published by CI as `ghcr.io/fidelodok/metaforge-freecad-adapter` (see below) |
+| Docker Image | `ghcr.io/fidelodok/metaforge-freecad-adapter`, published by CI (see below) |
 | Base Image | Debian system Python 3 (FreeCAD's compiled extension requires it, not a python.org image) |
 | Transport | stdio |
 | Tools | Stateful session API (`open_session`, `create_body`, `create_sketch`, `pad_sketch`, `execute_code`, `measure`, `export_model`, assembly joints, and more — 27 tools) plus a separate stateless legacy file-based surface (`export_geometry`, `generate_mesh`, `boolean_operation`, `get_properties`, `describe_step_file`, `create_parametric` — 6 tools) |
@@ -936,17 +936,28 @@ The freecad and calculix adapters copy `mcp_core/`, `tool_registry/` and
 adapter only after a rebuild. The `adapter-images` workflow builds both on
 every push to `main` that touches those paths (and on manual dispatch) and
 publishes `ghcr.io/fidelodok/metaforge-<freecad|calculix>-adapter:latest` and
-`:<commit sha>`. To deploy on a dev host without building there:
+`:<commit sha>`. `docker-compose.yml` names those images directly, so a dev
+host pulls them:
 
 ```bash
-docker pull ghcr.io/fidelodok/metaforge-freecad-adapter:latest
-docker tag ghcr.io/fidelodok/metaforge-freecad-adapter:latest metaforge/freecad-adapter:latest
-docker compose up -d --no-build freecad-adapter
+docker compose pull freecad-adapter calculix-adapter
+docker compose up -d --no-build freecad-adapter calculix-adapter
 docker compose restart mcp-http
 ```
 
-(the same for `calculix`). Building these images on the dev host itself has
-taken it offline, so prefer the published images.
+Building these images on the dev host itself has taken it offline, so prefer
+the published ones. `METAFORGE_ADAPTER_TAG` pins a commit SHA instead of
+`latest` when you need a specific build.
+
+:::note[This used to need a manual retag]
+
+Until FORGE-587 the compose file named `metaforge/<adapter>-adapter`, which
+nothing published, so every host built locally — including the dev host whose
+load this workflow exists to remove. The documented fix was to `docker tag` the
+pulled image to the name compose expected. That step is gone: the names match
+now, and `docker compose pull` is enough.
+
+:::
 
 Corrected from a stale table that listed `freecad.export_mesh`/`freecad.export_step`/`freecad.measure` — those tool ids don't exist in the current adapter. See [`capability-matrix.md`](capability-matrix.md#cad-kernel-capability-contract) for the 5-capability contract shared with CadQuery, and `tool_registry/tools/freecad/adapter.py` for the full tool list; it's large enough (33 tools across both surfaces) that duplicating it here would drift again.
 
@@ -1103,7 +1114,7 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge/spice-adapter:latest` (`tool_registry/tools/spice/Dockerfile`) |
+| Docker Image | `metaforge-spice-adapter:latest` — built locally, not published (`tool_registry/tools/spice/Dockerfile`) |
 | Base Image | `python:3.11-slim` + Debian `ngspice` |
 | Transport | HTTP JSON-RPC on port 8104 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_SPICE_URL` |
 | Workspace | Shares `adapter-workspace` with the KiCad adapter, so a netlist from `kicad.export_netlist` is simulated by path |
