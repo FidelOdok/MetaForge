@@ -51,9 +51,11 @@ Each run:
 1. Fetches the bundle for the ref and replaces the bundle files, leaving
    `.env` and any override alone.
 2. Pulls every image, and verifies each MetaForge image's signature by digest
-   with `cosign` against this repository's CI identity. A failed check stops
-   the update before anything restarts. `--no-verify` skips the check and says
-   so for every image.
+   with `cosign` against this repository's CI identity. A MetaForge image that
+   cannot be pulled, or a failed check, stops the update before anything
+   restarts. A third-party image the registry no longer serves is only fatal
+   when the host has no copy; otherwise the update says it used the local
+   copy. `--no-verify` skips the signature check and says so for every image.
 3. Starts the stack with `--no-build`, recreates every container whose image
    changed (a re-pulled tag does not move a running container), and waits for
    every service to be healthy.
