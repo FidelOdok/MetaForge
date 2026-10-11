@@ -110,8 +110,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--profile",
         default=None,
         help=(
-            "Serve only one tool profile (core, mechanical, simulation, "
-            "electronics, robotics). Every client caps how many tools it "
+            "Serve only one tool profile (core, mechanical, mechanical_product, "
+            "simulation, electronics, robotics, client_run), or 'all' for "
+            "every tool (FORGE-588). Every client caps how many tools it "
             "carries, and most drop the overflow without saying so, which "
             "leaves the model behaving as though the missing capability does "
             "not exist. A profile keeps the set inside that cap on purpose. "

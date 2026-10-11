@@ -74,10 +74,11 @@ def stdio_plugin_manifest() -> dict:
     manifest["mcpServers"] = {
         "metaforge": {
             "command": "metaforge-mcp",
-            # FORGE-410: stdio has no URL to hang `?profile=` on, so the cap
-            # comes from the flag. Same 30-tool set either way; edit or remove
-            # this to load everything.
-            "args": ["--transport", "stdio", "--profile", "core"],
+            # FORGE-410: stdio has no URL to hang `?profile=` on, so the
+            # choice comes from the flag. FORGE-588: Claude Code loads tools
+            # lazily, so this package asks for every tool; a capped set left
+            # a client-mode run without its phase, gate and CAD tools.
+            "args": ["--transport", "stdio", "--profile", "all"],
             "env": {
                 # Without a collector listening, the OTLP exporter retries on
                 # a timer and logs a connection failure every few seconds --
@@ -141,16 +142,21 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 "type": "string",
                 "title": "Tool profile",
                 "description": (
-                    "Which tool set to load: core (project, twin reads, decisions, "
-                    "flows), mechanical (stateless CAD), mechanical_product (CAD "
+                    "Which tool set to load. all (the default) loads every tool: "
+                    "Claude Code defers tools behind its tool search, and a "
+                    "client-mode run needs phase, gate, CAD, simulation and "
+                    "value-sourcing tools together, which no capped set holds. "
+                    "On a harness with a hard tool limit pick a capped set "
+                    "instead: core (project, twin reads, decisions, flows), "
+                    "client_run (drive a client-mode run and source values), "
+                    "mechanical (stateless CAD), mechanical_product (CAD "
                     "authored in a FreeCAD session), simulation, electronics or "
-                    "robotics. Each is 25-40 tools. Leave as core unless you are "
-                    "working in one discipline; "
-                    "every profile includes health.check so /metaforge:doctor always "
-                    "works. Clear it to load everything, which some harnesses will "
-                    "truncate without saying so."
+                    "robotics, each 25-40 tools. Every set includes "
+                    "health.check so /metaforge:doctor always works."
                 ),
-                "default": "core",
+                # FORGE-588: was core, which carried none of phase.*,
+                # flow.await_gate or knowledge.extract.
+                "default": "all",
             },
         },
         "mcpServers": {

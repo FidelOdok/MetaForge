@@ -22,7 +22,7 @@ import pytest
 
 from mcp_core.context import McpCallContext, with_context
 from mcp_core.guardrails import Caller
-from mcp_core.profiles import PROFILES, tools_for_profile
+from mcp_core.profiles import FULL_PROFILE, PROFILES, tools_for_profile
 
 
 def _server(**kwargs: Any) -> Any:
@@ -75,7 +75,7 @@ class TestAnUnknownProfileFailsLoudly:
 
     async def test_it_names_the_profiles_that_exist(self) -> None:
         response = await _tools(_server(), profile="nonsense")
-        assert sorted(PROFILES) == response["error"]["data"]["available"]
+        assert [*sorted(PROFILES), FULL_PROFILE] == response["error"]["data"]["available"]
 
     async def test_it_does_not_serve_everything_instead(self) -> None:
         """The failure that would matter. A client that asked for a 30-tool set
@@ -115,13 +115,15 @@ class TestTheShippedManifestsAskForOne:
         assert "profile=" in server["url"]
 
     def test_it_is_user_switchable(self) -> None:
+        # FORGE-588: Claude Code loads tools lazily, so its default is every
+        # tool, asked for by name; the capped sets stay one setting away.
         config = self._manifest("claude-code")["userConfig"]
-        assert config["tool_profile"]["default"] == "core"
+        assert config["tool_profile"]["default"] == FULL_PROFILE
 
     def test_the_stdio_plugin_passes_the_flag_instead(self) -> None:
         """stdio has no URL to hang a query on."""
         server = self._manifest("claude-code-local")["mcpServers"]["metaforge"]
-        assert server["args"][-2:] == ["--profile", "core"]
+        assert server["args"][-2:] == ["--profile", FULL_PROFILE]
 
     def test_the_codex_package_asks_too(self) -> None:
         from pathlib import Path
@@ -133,3 +135,37 @@ class TestTheShippedManifestsAskForOne:
         # A manifest asking for a profile that does not exist would now be a
         # hard error on every tools/list, which is worse than the bug.
         assert "core" in PROFILES
+
+
+@pytest.mark.asyncio
+class TestAllIsAnExplicitRequestForEverything:
+    """FORGE-588: a client-mode run needs more than any capped set holds."""
+
+    async def test_all_serves_every_tool(self) -> None:
+        response = await _tools(_server(), profile=FULL_PROFILE)
+        assert "result" in response
+        assert "profile" not in response["result"].get("_meta", {})
+
+    async def test_all_outranks_a_capped_deployment_flag(self) -> None:
+        response = await _tools(_server(profile="core"), profile=FULL_PROFILE)
+        assert "profile" not in response["result"].get("_meta", {})
+
+    async def test_all_is_a_valid_start_up_flag(self) -> None:
+        response = await _tools(_server(profile=FULL_PROFILE))
+        assert "profile" not in response["result"].get("_meta", {})
+
+
+class TestTheClientRunProfile:
+    def test_it_carries_a_client_mode_run_and_value_sourcing(self) -> None:
+        tools = set(tools_for_profile("client_run"))
+        assert {
+            "flow.start_run",
+            "flow.status",
+            "flow.await_gate",
+            "phase.list_tasks",
+            "phase.claim",
+            "phase.submit",
+            "knowledge.extract",
+            "component.search_parametric",
+            "twin.record_engineering_entity",
+        } <= tools

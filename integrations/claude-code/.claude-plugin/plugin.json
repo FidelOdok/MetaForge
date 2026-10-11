@@ -35,8 +35,8 @@
     "tool_profile": {
       "type": "string",
       "title": "Tool profile",
-      "description": "Which tool set to load: core (project, twin reads, decisions, flows), mechanical (stateless CAD), mechanical_product (CAD authored in a FreeCAD session), simulation, electronics or robotics. Each is 25-40 tools. Leave as core unless you are working in one discipline; every profile includes health.check so /metaforge:doctor always works. Clear it to load everything, which some harnesses will truncate without saying so.",
-      "default": "core"
+      "description": "Which tool set to load. all (the default) loads every tool: Claude Code defers tools behind its tool search, and a client-mode run needs phase, gate, CAD, simulation and value-sourcing tools together, which no capped set holds. On a harness with a hard tool limit pick a capped set instead: core (project, twin reads, decisions, flows), client_run (drive a client-mode run and source values), mechanical (stateless CAD), mechanical_product (CAD authored in a FreeCAD session), simulation, electronics or robotics, each 25-40 tools. Every set includes health.check so /metaforge:doctor always works.",
+      "default": "all"
     }
   },
   "mcpServers": {

@@ -84,7 +84,8 @@ class TestTheReportExplainsTheShorterList:
         assert "nothing is down" in detail
 
     def test_the_other_profiles_are_named_so_the_advice_is_actionable(self) -> None:
-        assert set(_health("core")["profile"]["available"]) == set(PROFILES)
+        # FORGE-588: plus `all`, the explicit request for every tool.
+        assert set(_health("core")["profile"]["available"]) == set(PROFILES) | {"all"}
 
     def test_tool_count_still_means_the_registered_catalogue(self) -> None:
         """Other callers read it, and it is a real fact. The fix is to

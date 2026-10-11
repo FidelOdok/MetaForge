@@ -338,7 +338,7 @@ class TestLocalFirstPackage:
         # FORGE-410: stdio has no URL to carry `?profile=`, so the cap is a
         # flag. The transport is still what this test is about.
         assert servers["metaforge"]["args"][:2] == ["--transport", "stdio"]
-        assert servers["metaforge"]["args"][-2:] == ["--profile", "core"]
+        assert servers["metaforge"]["args"][-2:] == ["--profile", "all"]
         assert "url" not in servers["metaforge"]
 
     def test_the_launch_command_is_a_real_console_script(self) -> None:
