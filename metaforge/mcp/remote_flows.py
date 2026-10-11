@@ -262,12 +262,23 @@ class RemoteClientTasks:
         return task
 
     async def submit(
-        self, task_id: str, client: str, summary: str, artifacts: list[str]
+        self,
+        task_id: str,
+        client: str,
+        summary: str,
+        artifacts: list[str],
+        *,
+        outcome: str = "complete",
     ) -> dict[str, Any]:
         task: dict[str, Any] = await self._gateway.request(
             "POST",
             f"/v1/client-tasks/{task_id}/submit",
-            json={"client": client, "summary": summary, "artifacts": artifacts},
+            json={
+                "client": client,
+                "summary": summary,
+                "artifacts": artifacts,
+                "outcome": outcome,
+            },
         )
         return task
 

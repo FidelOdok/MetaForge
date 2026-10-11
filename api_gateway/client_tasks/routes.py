@@ -12,7 +12,7 @@ would do work nobody reads.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 from fastapi import APIRouter, HTTPException, Request
@@ -86,6 +86,9 @@ class SubmitRequest(BaseModel):
     summary: str
     artifacts: list[str] = Field(default_factory=list)
     client: str = ""
+    #: FORGE-590: ``incomplete`` when the phase's objective was not met; the
+    #: gate then reads not ready.
+    outcome: Literal["complete", "incomplete"] = "complete"
 
 
 class CancelRequest(BaseModel):
@@ -112,6 +115,7 @@ def _summary_view(task: PhaseTask) -> dict[str, Any]:
         "title": task.brief.get("title", ""),
         "claimed_by": task.claimed_by,
         "submitted_by": task.submitted_by,
+        "outcome": task.outcome,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
     }
@@ -192,13 +196,15 @@ async def submit_task(task_id: str, body: SubmitRequest, request: Request) -> di
     """Hand the phase back. The run's gate then checks the twin as usual."""
     client = _client_of(request, body.client)
     try:
-        task = get_client_task_store().submit(task_id, client, body.summary, body.artifacts)
+        task = get_client_task_store().submit(
+            task_id, client, body.summary, body.artifacts, outcome=body.outcome
+        )
     except TaskNotFoundError as exc:
         raise _not_found(task_id) from exc
     except TaskStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     _collector().record_client_task("submitted")
-    logger.info("client_task_submitted", task_id=task_id, client=client)
+    logger.info("client_task_submitted", task_id=task_id, client=client, outcome=body.outcome)
     return task.as_dict()
 
 

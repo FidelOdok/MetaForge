@@ -33,6 +33,10 @@ UNVERIFIED_NODE_ID_NOTE = (
 #: Phase status for a reply that claimed work it did not do. Never "completed".
 UNGROUNDED_STATUS = "ungrounded"
 
+#: FORGE-590: phase status when whoever did the phase reported that its
+#: objective was not met. Never "completed", and it blocks the phase's gate.
+INCOMPLETE_STATUS = "incomplete"
+
 
 def is_ungrounded(summary: str | None) -> bool:
     return bool(summary) and UNGROUNDED_BANNER in (summary or "")[: len(UNGROUNDED_BANNER) + 8]

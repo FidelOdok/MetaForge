@@ -214,7 +214,12 @@ submission. The client lists tasks with `phase.list_tasks`, takes one with
 `phase.claim`, does the work through MCP tools and hands it back with
 `phase.submit`. The gate that follows checks the twin exactly as it does
 after a server phase: a deliverable described in the summary but not
-recorded fails it.
+recorded fails it. `phase.submit` also takes `outcome` (`complete`, the
+default, or `incomplete`). A client that did not meet the phase's objective
+submits `incomplete`; the phase then finishes with status `incomplete` and
+its gate reads not ready with that finding, whatever the twin holds
+(FORGE-590). Before this, a summary saying "objective NOT met" still reached
+the person as an approvable gate.
 
 - The task id is `run:phase:attempt`, so a retried activity finds the task
   (and any submission) the first attempt posted. A worker that stops

@@ -214,9 +214,10 @@ async def _no_sleep(_: float) -> None:
 def test_the_runner_waits_for_the_submission() -> None:
     store = SqliteClientTaskStore()
     channel = _ScriptedChannel(store, submit_after=3)
-    summary, artifacts = asyncio.run(run_client_phase(channel, _task(), sleep=_no_sleep))
-    assert summary == "recorded two needs"
-    assert artifacts == ["n-1", "n-2"]
+    done = asyncio.run(run_client_phase(channel, _task(), sleep=_no_sleep))
+    assert done.summary == "recorded two needs"
+    assert done.artifacts == ["n-1", "n-2"]
+    assert done.outcome == "complete"
     assert channel.polls == 3
 
 
@@ -287,13 +288,14 @@ def test_http_channel_round_trip() -> None:
         assert request.headers["Authorization"] == "Bearer k"
         body = _task().as_dict()
         if request.method == "GET":
-            body.update(status="submitted", summary="ok")
+            # A newer gateway may send fields this worker does not know yet.
+            body.update(status="submitted", summary="ok", added_later="ignored")
         return httpx.Response(201 if request.method == "POST" else 200, json=body)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     channel = HttpTaskChannel("http://gw", api_key="k", client=client)
-    summary, _ = asyncio.run(run_client_phase(channel, _task(), sleep=_no_sleep))
-    assert summary == "ok"
+    done = asyncio.run(run_client_phase(channel, _task(), sleep=_no_sleep))
+    assert done.summary == "ok"
     assert seen == [("POST", "/v1/client-tasks"), ("GET", "/v1/client-tasks/run-1:needs:1")]
 
 
@@ -362,3 +364,60 @@ def test_an_unknown_run_takes_no_tasks(api: TestClient) -> None:
 def test_unknown_task_is_404(api: TestClient) -> None:
     assert api.get("/v1/client-tasks/nope").status_code == 404
     assert api.post("/v1/client-tasks/nope/claim", json={}).status_code == 404
+
+
+# FORGE-590: the client's own verdict on the phase reaches the gate.
+
+
+def test_submit_records_an_incomplete_outcome() -> None:
+    store = SqliteClientTaskStore()
+    store.open_task(_task())
+    done = store.submit(
+        "run-1:needs:1", "codex", "objective NOT met: no route", [], outcome="incomplete"
+    )
+    assert done.outcome == "incomplete"
+    assert store.get("run-1:needs:1").outcome == "incomplete"
+
+
+def test_submit_refuses_an_unknown_outcome() -> None:
+    store = SqliteClientTaskStore()
+    store.open_task(_task())
+    with pytest.raises(TaskStateError):
+        store.submit("run-1:needs:1", "codex", "done", [], outcome="partly")
+
+
+def test_an_older_store_gains_the_outcome_column(tmp_path) -> None:
+    import sqlite3
+
+    path = tmp_path / "tasks.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE client_tasks (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, "
+        "phase_id TEXT NOT NULL, attempt INTEGER NOT NULL, project_id TEXT, "
+        "status TEXT NOT NULL, brief TEXT NOT NULL, summary TEXT NOT NULL, "
+        "artifacts TEXT NOT NULL, claimed_by TEXT, submitted_by TEXT, "
+        "cancel_reason TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO client_tasks VALUES ('t:p:1','t','p',1,NULL,'submitted','{}','old','[]',"
+        "NULL,'codex','',1.0,1.0)"
+    )
+    conn.commit()
+    conn.close()
+    store = SqliteClientTaskStore(str(path))
+    assert store.get("t:p:1").outcome == "complete"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "summary", "status"),
+    [
+        ("complete", "recorded the route", "completed"),
+        ("incomplete", "objective NOT met", "incomplete"),
+    ],
+)
+def test_the_phase_result_carries_the_outcome(outcome: str, summary: str, status: str) -> None:
+    from api_gateway.runs.client_phase import submitted_status
+
+    task = _task()
+    task.summary, task.outcome = summary, outcome
+    assert submitted_status(task) == status

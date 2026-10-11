@@ -29,12 +29,13 @@ from temporalio.exceptions import ApplicationError
 from observability.tracing import get_tracer
 from orchestrator.design_flow.client_tasks import (
     ClientTaskStore,
+    PhaseOutcomeKind,
     PhaseTask,
     TaskStatus,
     task_id_for,
 )
 from orchestrator.design_flow.executor import FlowContext, PhaseOutcome
-from orchestrator.design_flow.grounding import phase_status
+from orchestrator.design_flow.grounding import INCOMPLETE_STATUS, phase_status
 from orchestrator.design_flow.spec import Phase
 from orchestrator.design_flow.temporal_flow import PhaseRequest, PhaseResult
 
@@ -63,7 +64,9 @@ SUBMIT_GUIDANCE = (
     "in the twin under this project (pass the slot's item_key when you record one). "
     "Then call phase.submit with a short summary of what you did and the ids of what "
     "you recorded. The gate that follows checks the twin, not the summary: a "
-    "deliverable you describe but did not record fails the gate."
+    "deliverable you describe but did not record fails the gate. If the phase's "
+    "objective was not met, submit with outcome 'incomplete' and say what is missing: "
+    "the gate then reads not ready instead of offering approval."
 )
 
 
@@ -146,16 +149,26 @@ class HttpTaskChannel:
                 non_retryable=True,
             )
         resp.raise_for_status()
-        return PhaseTask(**resp.json())
+        return _task_from_json(resp.json())
 
     async def get(self, task_id: str) -> PhaseTask:
         resp = await self._request("GET", f"/{task_id}")
         resp.raise_for_status()
-        return PhaseTask(**resp.json())
+        return _task_from_json(resp.json())
 
     async def cancel(self, task_id: str, reason: str) -> None:
         resp = await self._request("POST", f"/{task_id}/cancel", json={"reason": reason})
         resp.raise_for_status()
+
+
+def _task_from_json(data: dict[str, Any]) -> PhaseTask:
+    """A task from the gateway, ignoring fields this side does not know.
+
+    The worker and the gateway can be a release apart during a deploy; a field
+    the gateway added must not make every poll raise.
+    """
+    known = PhaseTask.__dataclass_fields__
+    return PhaseTask(**{k: v for k, v in data.items() if k in known})
 
 
 def _poll_seconds() -> float:
@@ -216,8 +229,8 @@ async def run_client_phase(
     *,
     poll_seconds: float | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-) -> tuple[str, list[str]]:
-    """Post ``task`` and wait for the client's submission: ``(summary, artifacts)``.
+) -> PhaseTask:
+    """Post ``task`` and wait for the client's submission; returns the submitted task.
 
     A gateway that cannot be reached is waited out, not a failure: the
     activity's heartbeat and timeout bound the wait. A task withdrawn by
@@ -235,12 +248,14 @@ async def run_client_phase(
             while True:
                 if current.status == TaskStatus.SUBMITTED.value:
                     span.set_attribute("task.submitted_by", current.submitted_by or "")
+                    span.set_attribute("task.outcome", current.outcome)
                     logger.info(
                         "client_phase_submitted",
                         task_id=task.id,
                         submitted_by=current.submitted_by,
+                        outcome=current.outcome,
                     )
-                    return current.summary, list(current.artifacts)
+                    return current
                 if current.status == TaskStatus.CANCELLED.value:
                     raise ClientTaskCancelledError(
                         f"client task '{task.id}' was cancelled"
@@ -257,6 +272,13 @@ async def run_client_phase(
             except Exception as exc:  # noqa: BLE001 - best effort on the way out
                 logger.warning("client_phase_cancel_failed", task_id=task.id, error=str(exc))
             raise
+
+
+def submitted_status(task: PhaseTask) -> str:
+    """The phase status a submission stands for (FORGE-590)."""
+    if task.outcome == PhaseOutcomeKind.INCOMPLETE.value:
+        return INCOMPLETE_STATUS
+    return phase_status(task.summary, "completed")
 
 
 def task_from_request(request: PhaseRequest) -> PhaseTask:
@@ -281,11 +303,11 @@ def task_from_request(request: PhaseRequest) -> PhaseTask:
 async def run_client_phase_request(channel: TaskChannel, request: PhaseRequest) -> PhaseResult:
     """The worker's phase runner in client mode."""
     try:
-        summary, artifacts = await run_client_phase(channel, task_from_request(request))
+        done = await run_client_phase(channel, task_from_request(request))
     except ClientTaskCancelledError as exc:
         raise ApplicationError(str(exc), type="ClientTaskCancelled", non_retryable=True) from exc
     return PhaseResult(
-        summary=summary, artifacts=artifacts, status=phase_status(summary, "completed")
+        summary=done.summary, artifacts=list(done.artifacts), status=submitted_status(done)
     )
 
 
@@ -313,5 +335,7 @@ class ClientPhaseBrain:
                 project_id=context.project_id,
             ),
         )
-        summary, artifacts = await run_client_phase(self._channel, task)
-        return PhaseOutcome(summary=summary, artifacts=artifacts, status="completed")
+        done = await run_client_phase(self._channel, task)
+        return PhaseOutcome(
+            summary=done.summary, artifacts=list(done.artifacts), status=submitted_status(done)
+        )

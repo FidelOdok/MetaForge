@@ -309,6 +309,9 @@ def lifecycle_view(
         elif entry_status == "ungrounded":
             objective = ObjectiveStatus.UNSATISFIED
             reasons.append("its reply claimed work no tool call performed")
+        elif entry_status == "incomplete":
+            objective = ObjectiveStatus.UNSATISFIED
+            reasons.append("it reported its objective was not met")
         elif execution is ExecutionStatus.SUCCEEDED and has_gate:
             objective = ObjectiveStatus.SATISFIED
             approved.add(pid)

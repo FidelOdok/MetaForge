@@ -37,7 +37,9 @@ logger = structlog.get_logger(__name__)
 __all__ = [
     "INTELLIGENCE_ENV",
     "ClientTaskStore",
+    "PHASE_OUTCOMES",
     "Intelligence",
+    "PhaseOutcomeKind",
     "PhaseTask",
     "SqliteClientTaskStore",
     "TaskNotFoundError",
@@ -90,6 +92,18 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class PhaseOutcomeKind(StrEnum):
+    """What the client says about the phase it hands back (FORGE-590)."""
+
+    #: The phase's objective was met.
+    COMPLETE = "complete"
+    #: It was not: the gate must not read ready, whatever the twin holds.
+    INCOMPLETE = "incomplete"
+
+
+PHASE_OUTCOMES = tuple(o.value for o in PhaseOutcomeKind)
+
+
 class TaskNotFoundError(KeyError):
     """No task with that id."""
 
@@ -128,6 +142,8 @@ class PhaseTask:
     claimed_by: str | None = None
     submitted_by: str | None = None
     cancel_reason: str = ""
+    #: FORGE-590: the submitter's own verdict on the objective.
+    outcome: str = PhaseOutcomeKind.COMPLETE.value
     created_at: float = 0.0
     updated_at: float = 0.0
 
@@ -157,7 +173,13 @@ class ClientTaskStore:
         raise NotImplementedError
 
     def submit(  # pragma: no cover - interface
-        self, task_id: str, by: str, summary: str, artifacts: list[str]
+        self,
+        task_id: str,
+        by: str,
+        summary: str,
+        artifacts: list[str],
+        *,
+        outcome: str = PhaseOutcomeKind.COMPLETE.value,
     ) -> PhaseTask:
         raise NotImplementedError
 
@@ -178,6 +200,7 @@ _COLUMNS = (
     "claimed_by",
     "submitted_by",
     "cancel_reason",
+    "outcome",
     "created_at",
     "updated_at",
 )
@@ -210,6 +233,7 @@ class SqliteClientTaskStore(ClientTaskStore):
                 claimed_by    TEXT,
                 submitted_by  TEXT,
                 cancel_reason TEXT NOT NULL,
+                outcome       TEXT NOT NULL DEFAULT 'complete',
                 created_at    REAL NOT NULL,
                 updated_at    REAL NOT NULL
             );
@@ -217,6 +241,12 @@ class SqliteClientTaskStore(ClientTaskStore):
             CREATE INDEX IF NOT EXISTS idx_client_tasks_run ON client_tasks(run_id);
             """
         )
+        # FORGE-590: a store created before ``outcome`` existed gains it here.
+        columns = {r["name"] for r in self._conn.execute("PRAGMA table_info(client_tasks)")}
+        if "outcome" not in columns:
+            self._conn.execute(
+                "ALTER TABLE client_tasks ADD COLUMN outcome TEXT NOT NULL DEFAULT 'complete'"
+            )
         self._conn.commit()
         logger.info("client_task_store_opened", path=path)
 
@@ -292,7 +322,20 @@ class SqliteClientTaskStore(ClientTaskStore):
             raise TaskStateError(f"task '{task_id}' is {task.status}; it cannot be claimed")
         return self._write(task, status=TaskStatus.CLAIMED.value, claimed_by=by or "unknown")
 
-    def submit(self, task_id: str, by: str, summary: str, artifacts: list[str]) -> PhaseTask:
+    def submit(
+        self,
+        task_id: str,
+        by: str,
+        summary: str,
+        artifacts: list[str],
+        *,
+        outcome: str = PhaseOutcomeKind.COMPLETE.value,
+    ) -> PhaseTask:
+        outcome = str(outcome or PhaseOutcomeKind.COMPLETE.value).strip().lower()
+        if outcome not in PHASE_OUTCOMES:
+            raise TaskStateError(
+                f"outcome must be one of {', '.join(PHASE_OUTCOMES)}; got '{outcome}'"
+            )
         task = self.get(task_id)
         if task.status not in (TaskStatus.OPEN.value, TaskStatus.CLAIMED.value):
             raise TaskStateError(f"task '{task_id}' is {task.status}; nothing was recorded")
@@ -304,6 +347,7 @@ class SqliteClientTaskStore(ClientTaskStore):
             summary=summary.strip(),
             artifacts=[str(a) for a in artifacts],
             submitted_by=by or "unknown",
+            outcome=outcome,
         )
 
     def cancel(self, task_id: str, reason: str) -> PhaseTask:
