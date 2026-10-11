@@ -79,7 +79,7 @@ const sidebars = {
       className: 'dx-group dx-group--deployment',
       collapsible: false,
       collapsed: false,
-      items: ['deployment/vercel', 'deployment/authentication', 'deployment/verifying-images'],
+      items: ['deployment/vercel', 'deployment/authentication', 'deployment/verifying-images', 'deployment/image-only-host'],
     },
     {
       type: 'category',

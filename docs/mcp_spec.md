@@ -886,7 +886,7 @@ ENTRYPOINT ["python", "server.py"]
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge/adapter-calculix:0.1` |
+| Docker Image | `ghcr.io/fidelodok/metaforge-calculix-adapter`, published by CI (FORGE-587) |
 | Base Image | `python:3.11-slim` + `calculix-ccx` |
 | Transport | stdio |
 | Tools | `calculix.run_fea`, `calculix.run_thermal`, `calculix.validate_mesh` |
@@ -903,7 +903,7 @@ ENTRYPOINT ["python", "server.py"]
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge-cadquery-adapter:latest` — built locally, not published |
+| Docker Image | `ghcr.io/fidelodok/metaforge-cadquery-adapter`, published by CI (FORGE-593) |
 | Base Image | `python:3.11-slim` (multi-stage) |
 | Transport | stdio |
 | Tools | `cadquery.create_parametric`, `cadquery.boolean_operation`, `cadquery.get_properties`, `cadquery.export_geometry`, `cadquery.execute_script`, `cadquery.create_assembly`, `cadquery.generate_enclosure` |
@@ -1095,7 +1095,7 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge/adapter-kicad:0.1` |
+| Docker Image | `ghcr.io/fidelodok/metaforge-kicad-adapter`, published by CI (FORGE-593) |
 | Base Image | `python:3.11-slim` + KiCad CLI |
 | Transport | stdio |
 | Phase 1 Tools | Read-only: `kicad.run_erc`, `kicad.run_drc`, `kicad.export_bom`, `kicad.export_gerber` |
@@ -1114,7 +1114,7 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `metaforge-spice-adapter:latest` — built locally, not published (`tool_registry/tools/spice/Dockerfile`) |
+| Docker Image | `ghcr.io/fidelodok/metaforge-spice-adapter`, published by CI (FORGE-593; `tool_registry/tools/spice/Dockerfile`) |
 | Base Image | `python:3.11-slim` + Debian `ngspice` |
 | Transport | HTTP JSON-RPC on port 8104 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_SPICE_URL` |
 | Workspace | Shares `adapter-workspace` with the KiCad adapter, so a netlist from `kicad.export_netlist` is simulated by path |

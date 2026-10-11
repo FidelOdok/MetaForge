@@ -14,6 +14,11 @@ repository's CI built.
 | `ghcr.io/fidelodok/metaforge-gateway` | The gateway |
 | `ghcr.io/fidelodok/metaforge-freecad-adapter` | FreeCAD tool adapter |
 | `ghcr.io/fidelodok/metaforge-calculix-adapter` | CalculiX tool adapter |
+| `ghcr.io/fidelodok/metaforge-cadquery-adapter` | CadQuery tool adapter |
+| `ghcr.io/fidelodok/metaforge-kicad-adapter` | KiCad tool adapter |
+| `ghcr.io/fidelodok/metaforge-spice-adapter` | SPICE tool adapter |
+| `ghcr.io/fidelodok/metaforge-occt` | STEP to GLB converter for the viewer |
+| `ghcr.io/fidelodok/metaforge-dashboard` | The production dashboard (static build behind nginx) |
 
 ## Verify a signature
 
@@ -93,14 +98,15 @@ cannot substitute a different image without the signature failing.
 vulnerabilities. A signature is a statement about *origin*, not *quality*. The
 SBOM is what you feed to a scanner to ask the second question.
 
-## Nothing enforces this yet
+## Where it is enforced
 
-Verification is available and documented; no part of MetaForge refuses to run an
-unverified image today. That is deliberate — signatures need to exist and
-accumulate before anything is gated on them, or the first enforcement locks
-everyone out over an image predating the signing.
+The image-only host update, `scripts/host_update.sh`, verifies every MetaForge
+image it pulls by digest, with the two flags above, and restarts nothing if any
+check fails (FORGE-593). See [Running a host from images](image-only-host.md).
+Nothing else refuses an unverified image: `docker compose up` on a checkout
+still runs whatever it has.
 
-If you want to enforce it in your own deployment, run `cosign verify` in whatever
+If you want to enforce it elsewhere in your own deployment, run `cosign verify` in whatever
 pulls your images and fail the deploy on a non-zero exit. In Kubernetes, an
 admission policy such as [policy-controller](https://docs.sigstore.dev/policy-controller/overview/)
 does the same at the cluster boundary.
