@@ -121,6 +121,7 @@ class TestProfileDefinitions:
 
     def test_the_named_profiles_all_exist(self) -> None:
         assert profile_names() == [
+            "client_run",
             "core",
             "electronics",
             "mechanical",

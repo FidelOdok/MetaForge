@@ -43,6 +43,12 @@ capability does not exist.
 | `electronics` | 29 | Schematic and board checks, component search, sourcing, the per-rail power budget (`power.check_budget`, FORGE-544) and circuit simulation (`spice.run_simulation`, FORGE-542) |
 | `robotics` | 32 | Assemblies, URDF/SDF/USD export, simulators |
 | `mechanical_product` | 36 | A mechanical product end to end (FORGE-479): the FreeCAD session tools (open, sketch, pad/pocket, assembly, export, close), geometry commit, component selection. No promotion tool: promotion is a human authority |
+| `client_run` | 36 | Driving a client-mode run on a harness with a hard tool cap (FORGE-588): start and watch the run, `phase.list_tasks`/`claim`/`submit`, `flow.await_gate`, and value sourcing (`knowledge.extract`, web, component search, the records). No CAD authoring or solvers: they do not fit beside these |
+
+`all` is not a capped set: it asks for every tool by name (FORGE-588). It is
+for a client that loads tools lazily, such as Claude Code, which defers them
+behind its tool search. A client-mode run needs phase, gate, CAD, simulation
+and value-sourcing tools together, and no 40-tool set holds them all.
 
 Each profile also includes `health.check`, so `/metaforge:doctor` works on
 the connection most likely to need it — a capped one, on a harness that
@@ -64,18 +70,23 @@ shrinks it for the other. The connection's own choice wins over the flag.
 python -m metaforge.mcp --transport http --profile mechanical
 ```
 
-The plugin packages set `core` out of the box: the HTTP plugin through a
-`tool_profile` user-config option, the stdio one through `--profile core`
-(no URL to hang a query on), and the Codex package in its `.mcp.json` and
-`config.toml` together. Without this, the deployment plugins connect to ran
-with no profile at all and served every tool it had.
+The Claude Code packages ask for `all` out of the box (FORGE-588): the HTTP
+plugin through its `tool_profile` user-config option, the stdio one through
+`--profile all` (no URL to hang a query on). They used to ask for `core`,
+which carried none of `phase.*`, `flow.await_gate` or `knowledge.extract`, so
+a client-mode run or value sourcing was impossible on the default install.
+Setting `tool_profile` to a capped set still works. The Codex package asks
+for `core` in its `.mcp.json` and `config.toml` together, because a harness
+with a hard cap truncates; switch it to `client_run` to drive a client-mode
+run there.
 
 The sets live in `mcp_core/profiles.py` and are held between 20 and 40
 tools by a test rather than trimmed at runtime — a profile that outgrows
 its ceiling is a decision about what to drop, and silently dropping it is
 the failure profiles exist to prevent.
 
-An unknown profile name is refused, never resolved to "serve everything": a
+An unknown profile name is refused, never resolved to "serve everything" (only
+the explicit name `all` does that): a
 client that asked for a 30-tool set and silently received 108 has been
 handed the exact problem profiles exist to prevent. As a start-up flag it
 stops the server; as a URL parameter it is an `-32602` naming the profiles

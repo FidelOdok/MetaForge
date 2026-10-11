@@ -65,7 +65,13 @@ from mcp_core.guardrails import (
     resolve_approval,
     strip_reserved_arguments,
 )
-from mcp_core.profiles import PROFILES, UnknownProfileError, tools_for_profile
+from mcp_core.profiles import (
+    FULL_PROFILE,
+    PROFILES,
+    UnknownProfileError,
+    resolve_profile,
+    tools_for_profile,
+)
 from mcp_core.protocol import (
     AUTH_DENIED,
     INVALID_PARAMS,
@@ -265,7 +271,7 @@ class UnifiedMcpServer:
         # start-up flag should stop the server, not quietly serve a profile
         # nobody asked for or, worse, serve everything.
         if profile is not None:
-            tools_for_profile(profile)
+            resolve_profile(profile)  # raises UnknownProfileError
         self._profile = profile
         # FORGE-359: who is on the other end, and how a write gets authorised.
         # `caller` is set per transport: stdio is the engineer at the
@@ -788,7 +794,7 @@ class UnifiedMcpServer:
                         str(exc),
                         {
                             "code": "unknown_profile",
-                            "available": sorted(PROFILES),
+                            "available": [*sorted(PROFILES), FULL_PROFILE],
                             "retryable": False,
                         },
                     )
@@ -1179,12 +1185,16 @@ class UnifiedMcpServer:
             # A connection asking for a profile that does not exist is a real
             # fault and the doctor should say so, rather than this raising
             # inside a health check.
-            return {"active": None, "error": str(exc), "available": sorted(PROFILES)}
+            return {
+                "active": None,
+                "error": str(exc),
+                "available": [*sorted(PROFILES), FULL_PROFILE],
+            }
         if not profile:
             return {
                 "active": None,
                 "served_tool_count": len(self._tool_index),
-                "available": sorted(PROFILES),
+                "available": [*sorted(PROFILES), FULL_PROFILE],
                 "detail": (
                     "No profile is active, so every registered tool is served on this connection."
                 ),
@@ -1193,7 +1203,7 @@ class UnifiedMcpServer:
         return {
             "active": profile,
             "served_tool_count": served,
-            "available": sorted(PROFILES),
+            "available": [*sorted(PROFILES), FULL_PROFILE],
             "detail": (
                 f"Profile {profile!r} serves {served} of {len(self._tool_index)} "
                 "registered tools on this connection. The rest are not missing "
@@ -1222,10 +1232,9 @@ class UnifiedMcpServer:
             requested = current_context().profile
         except Exception:  # noqa: BLE001 — no context is not an error here
             requested = None
-        chosen = requested or self._profile
-        if chosen:
-            tools_for_profile(chosen)  # raises UnknownProfileError
-        return chosen
+        # FORGE-588: `all` is an explicit request for every tool, and it wins
+        # over a deployment flag like any other connection choice.
+        return resolve_profile(requested or self._profile)
 
     def _twin_mutations_enabled(self) -> bool:
         """Whether the twin adapter currently accepts mutating Cypher.

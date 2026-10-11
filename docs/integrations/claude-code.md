@@ -240,16 +240,20 @@ do when one is missing from the client's list.
 
 ## Keeping the tool list a size Claude Code can use
 
-All 97 tools are served by default. If that is more than you want in
-context, start the server with a profile:
+The plugin asks for every tool (`tool_profile` is `all`, FORGE-588). Claude
+Code defers tools behind its tool search, so a long list costs little, and a
+client-mode run needs phase, gate, CAD, simulation and value-sourcing tools
+together. If you want less in context, set `tool_profile` to a capped set, or
+start the server with one:
 
 ```bash
 python -m metaforge.mcp --transport stdio --profile mechanical
 ```
 
-`core`, `mechanical`, `simulation`, `electronics` and `robotics` are each
-between 20 and 40 tools. An unknown name stops the server rather than
-quietly serving everything.
+`core`, `client_run`, `mechanical`, `mechanical_product`, `simulation`,
+`electronics` and `robotics` are each between 20 and 40 tools. `client_run`
+drives a client-mode run and sources values, without CAD or solvers. An
+unknown name stops the server rather than quietly serving everything.
 
 Whatever the reason a tool is not in the list, the response says so.
 An adapter whose container is down contributes nothing, but appears under

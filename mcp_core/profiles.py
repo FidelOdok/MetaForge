@@ -23,6 +23,15 @@ import difflib
 MIN_TOOLS = 20
 MAX_TOOLS = 40
 
+#: FORGE-588: the name that asks for every registered tool, on purpose. It is
+#: not in :data:`PROFILES` because it has no cap: it is for a client that
+#: loads tools lazily (Claude Code defers them behind its tool search), where
+#: a capped set costs more than it saves. A client-mode run needs phase,
+#: gate, CAD, simulation and value-sourcing tools at once, which no 40-tool
+#: profile can hold. Asking for it is explicit, unlike a missing or unknown
+#: name, which still never widens to everything.
+FULL_PROFILE = "all"
+
 
 class UnknownProfileError(ValueError):
     """Asked for a profile that does not exist.
@@ -247,6 +256,36 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.commit_geometry",
         "twin.stage_work_product_file",
     },
+    # FORGE-588: driving a client-mode run on a harness with a hard tool cap.
+    # Start and watch the run, take and hand back phases, answer gates in the
+    # chat, and source engineering values (FORGE-586) and record them. CAD
+    # authoring and solvers do not fit beside these; a run whose phases need
+    # them belongs on a client that can take the full set (`all`).
+    "client_run": _BASE
+    | {
+        "flow.list",
+        "flow.start_run",
+        "flow.status",
+        "flow.lifecycle",
+        "flow.await_gate",
+        "phase.list_tasks",
+        "phase.claim",
+        "phase.submit",
+        "knowledge.extract",
+        "knowledge.ingest",
+        "memory.retrieve_similar_experience",
+        "web.search",
+        "web.fetch",
+        "component.search_intent",
+        "component.search_parametric",
+        "twin.record_component_selection",
+        "twin.record_constraint_set",
+        "twin.record_engineering_entity",
+        "twin.record_document",
+        "twin.record_claim",
+        "twin.evaluate_metric",
+        "twin.query_cypher",
+    },
 }
 
 DEFAULT_PROFILE = "core"
@@ -454,7 +493,19 @@ def tools_for_profile(name: str) -> list[str]:
     try:
         return sorted(PROFILES[name])
     except KeyError:
-        raise UnknownProfileError(name, profile_names()) from None
+        raise UnknownProfileError(name, [*profile_names(), FULL_PROFILE]) from None
+
+
+def resolve_profile(name: str | None) -> str | None:
+    """The capped profile to serve for ``name``; ``None`` means every tool.
+
+    ``None``, empty and :data:`FULL_PROFILE` serve everything. Any other name
+    must be a real profile: an unknown one raises rather than widening.
+    """
+    if not name or name == FULL_PROFILE:
+        return None
+    tools_for_profile(name)  # raises UnknownProfileError
+    return name
 
 
 def unmapped_disciplines(disciplines: tuple[str, ...] | list[str]) -> list[str]:
