@@ -2626,6 +2626,24 @@ class TwinServer(McpToolServer):
                                 "a tool that never touched it (MET-693)."
                             ),
                         },
+                        "model_role": {
+                            "type": "string",
+                            "enum": ["design", "analysis"],
+                            "description": (
+                                "FORGE-596: 'design' (default) is product geometry. "
+                                "'analysis' is a model built only to analyse the design, "
+                                "e.g. an FEA idealisation of a part with simplified "
+                                "supports. Analysis models are left out of the gate's "
+                                "geometry and assembly checks, which judge the product."
+                            ),
+                        },
+                        "idealises": {
+                            "type": "string",
+                            "description": (
+                                "For model_role 'analysis': the design cad_model it "
+                                "stands in for (node id or item key), e.g. CAD-TABLETOP."
+                            ),
+                        },
                     },
                     "required": ["name"],
                 },
@@ -2895,6 +2913,18 @@ class TwinServer(McpToolServer):
                 assembly_info.get("parts") or assembly_info.get("joints")
             ):
                 extra_metadata["assembly"] = assembly_info
+        # FORGE-596: an analysis model (an FEA idealisation) is not product
+        # geometry; the gate's geometry and assembly checks skip it.
+        role = arguments.get("model_role")
+        if role not in (None, "", "design", "analysis"):
+            raise ValueError("twin.commit_geometry: 'model_role' must be 'design' or 'analysis'")
+        idealises = arguments.get("idealises")
+        if role == "analysis":
+            extra_metadata["model_role"] = "analysis"
+            if isinstance(idealises, str) and idealises.strip():
+                extra_metadata["idealises"] = idealises.strip()
+        elif idealises:
+            raise ValueError("twin.commit_geometry: 'idealises' applies to model_role 'analysis'")
         # FORGE-511: an assembly names the part cad_models it contains.
         assembly_parts: list[dict[str, Any]] = []
         raw_parts = arguments.get("parts")

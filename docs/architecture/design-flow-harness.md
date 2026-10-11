@@ -164,7 +164,16 @@ phase window (the same `since_ts` window the deliverable check uses) that
 committed more than one part `cad_model` and no assembly referencing them
 (superseded nodes, and parts from earlier phases, are ignored) (`multi-part design has no assembly`), and, when an assembly exists, fails
 part position boxes that overlap by more than 0.01 mm or an assembly bounding
-box that does not enclose its parts. Where a real analysis needs a
+box that does not enclose its parts.
+
+Coverage is met when any one assembly covers every part, so a sub-assembly
+committed after the top-level one no longer flips a covered design to "no
+assembly covering" (FORGE-596; it used to judge whichever assembly was listed
+last). A `cad_model` committed with `model_role: "analysis"` (and `idealises`,
+the design part it stands for), such as an FEA idealisation with simplified
+supports, is left out of both geometry checks: it is not product geometry, so
+it is neither a loose design part nor held to the product's size, stock or
+material limits. Where a real analysis needs a
 capability MetaForge doesn't have in Phase 1 (ERC/DRC on an authored schematic,
 Gerber export), the handler records the result **honestly as deferred** rather
 than asserting a compliance the tools never established.

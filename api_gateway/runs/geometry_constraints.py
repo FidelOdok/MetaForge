@@ -350,6 +350,11 @@ def assembly_parts(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in parts if isinstance(p, dict)]
 
 
+def is_analysis_model(metadata: dict[str, Any]) -> bool:
+    """FORGE-596: a cad_model committed with ``model_role='analysis'``."""
+    return str(metadata.get("model_role") or "") == "analysis"
+
+
 def check_assembly(models: Iterable[tuple[str, str, dict[str, Any]]]) -> GeometryCheck:
     """FORGE-511: a design with several parts needs an assembly that places them sanely.
 
@@ -370,16 +375,24 @@ def check_assembly(models: Iterable[tuple[str, str, dict[str, Any]]]) -> Geometr
         return result
     if not assemblies:
         return result
-    for _, aname, ameta in assemblies:
+    # FORGE-596: coverage is met when ANY assembly covers every part (the
+    # top-level one). It used to be judged on whichever assembly happened to
+    # be listed last, so adding a sub-assembly, or any other assembly, could
+    # flip a covered design to "not covered".
+    uncovered: list[list[str]] = []
+    for _, _, ameta in assemblies:
         refs = assembly_parts(ameta)
         ref_ids = {str(p.get("node_id")) for p in refs}
         ref_names = {str(p.get("name")) for p in refs}
-        missing = [n for i, n, _ in parts if i not in ref_ids and n not in ref_names]
-        result.evaluated += 1
-        if missing and len(parts) > 1 and aname == assemblies[-1][1]:
-            result.violations.append(
-                f"multi-part design has no assembly covering: {', '.join(sorted(missing))}"
-            )
+        uncovered.append([n for i, n, _ in parts if i not in ref_ids and n not in ref_names])
+    result.evaluated += 1
+    if len(parts) > 1 and all(uncovered):
+        closest = min(uncovered, key=len)
+        result.violations.append(
+            f"multi-part design has no assembly covering: {', '.join(sorted(closest))}"
+        )
+    for _, aname, ameta in assemblies:
+        refs = assembly_parts(ameta)
         boxes: list[tuple[str, Any]] = []
         for p in refs:
             b = _bounds(p.get("position_bbox_mm"))

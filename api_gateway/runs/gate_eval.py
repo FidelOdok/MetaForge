@@ -26,6 +26,7 @@ from api_gateway.runs.geometry_constraints import (
     GeometryCheck,
     check_assembly,
     check_geometry_constraints,
+    is_analysis_model,
 )
 from orchestrator.design_flow.executor import ConsistencyGateReport, ConstraintReport
 from twin_core.consistency import (
@@ -286,6 +287,10 @@ class TwinConstraintChecker:
             # FORGE-515: only this phase window's current parts (not every
             # cad_model name ever used in the project).
             window = await self._current_cad_entries(project_id, since_ts, drop_superseded=True)
+            # FORGE-596: an analysis model (an FEA idealisation) is not product
+            # geometry, so it is neither held to the design's limits nor
+            # counted as a loose design part.
+            window = [e for e in window if not is_analysis_model(e[2])]
             models = [(n, m) for _, n, m in window]
         except Exception as exc:  # noqa: BLE001 - geometry comparison is best-effort
             logger.warning(
