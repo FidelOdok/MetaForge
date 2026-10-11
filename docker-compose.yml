@@ -530,7 +530,10 @@ services:
     build:
       context: .
       dockerfile: tool_registry/tools/spice/Dockerfile
-    image: metaforge/spice-adapter:latest
+    # FORGE-587: built locally, never published. A single-segment name
+    # cannot resolve to a registry, so a missing build fails as "no such
+    # image" rather than 404ing against a public namespace.
+    image: metaforge-spice-adapter:latest
     ports:
       - "8104:8104"
     volumes:
@@ -560,7 +563,10 @@ services:
     build:
       context: .
       dockerfile: tool_registry/tools/kicad/Dockerfile
-    image: metaforge/kicad-adapter:latest
+    # FORGE-587: built locally, never published. A single-segment name
+    # cannot resolve to a registry, so a missing build fails as "no such
+    # image" rather than 404ing against a public namespace.
+    image: metaforge-kicad-adapter:latest
     ports:
       - "8103:8103"
     volumes:
@@ -590,7 +596,12 @@ services:
     build:
       context: .
       dockerfile: tool_registry/tools/calculix/Dockerfile
-    image: metaforge/calculix-adapter:latest
+    # FORGE-587: published by .github/workflows/adapter-images.yml.
+    # This used to name an image nothing published, so every host built
+    # it locally -- including fidel-dev, which is the load that workflow
+    # exists to move off the box. `build:` stays for contributors; Compose
+    # only builds when no local image matches the tag.
+    image: ghcr.io/fidelodok/metaforge-calculix-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
       - "${CALCULIX_PORT:-8200}:8200"
     volumes:
@@ -621,7 +632,10 @@ services:
     build:
       context: .
       dockerfile: tool_registry/tools/cadquery/Dockerfile
-    image: metaforge/cadquery-adapter:latest
+    # FORGE-587: built locally, never published. A single-segment name
+    # cannot resolve to a registry, so a missing build fails as "no such
+    # image" rather than 404ing against a public namespace.
+    image: metaforge-cadquery-adapter:latest
     stdin_open: true
     ports:
       - "8101:8101"
@@ -652,7 +666,12 @@ services:
     build:
       context: .
       dockerfile: tool_registry/tools/freecad/Dockerfile
-    image: metaforge/freecad-adapter:latest
+    # FORGE-587: published by .github/workflows/adapter-images.yml.
+    # This used to name an image nothing published, so every host built
+    # it locally -- including fidel-dev, which is the load that workflow
+    # exists to move off the box. `build:` stays for contributors; Compose
+    # only builds when no local image matches the tag.
+    image: ghcr.io/fidelodok/metaforge-freecad-adapter:${METAFORGE_ADAPTER_TAG:-latest}
     ports:
       - "8102:8102"
     volumes:
