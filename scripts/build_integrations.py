@@ -694,9 +694,14 @@ def build_codex(*, default_gateway_url: str) -> Path:
         # findable from here and from the bundled skill.
         "## Taking a product from intent to a verified design\n\n"
         "Follow the bundled `intent-to-verified-design` skill. In short:\n\n"
-        "- Ask the user for values you were not given (loads, materials, "
-        "manufacturing route, maturity). Unknown is a valid answer; a guess "
-        "is not.\n"
+        # FORGE-586: values come from a source, recorded with the value.
+        "- Never use an engineering value without a source. Find missing "
+        "values with the `source-engineering-values` skill (the user, project "
+        "documents, standards, past work, components and stock, analysis, "
+        "measurement) and record each as a `design_value` with its source; a "
+        "default only as a stated assumption for the person to review. Budget, "
+        "quantity, machines and look come only from the user. Unknown is a "
+        "valid answer; an unsourced guess is not.\n"
         "- Only create a project when the user asked for one. A flow can be "
         "proposed without one.\n"
         "- Propose a flow with `flow.propose`, passing `template` and "

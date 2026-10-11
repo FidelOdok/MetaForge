@@ -98,6 +98,16 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
         description="A stakeholder need.",
     ),
     TwinTypeSpec(
+        "design_value",
+        TwinTypeKind.DEFINITION,
+        "engineering_entity:design_value",
+        key_prefix="VAL",
+        description=(
+            "One engineering value and its source (FORGE-586); a changed value "
+            "or a better source is a new revision."
+        ),
+    ),
+    TwinTypeSpec(
         "objective",
         TwinTypeKind.DEFINITION,
         "engineering_entity:objective",

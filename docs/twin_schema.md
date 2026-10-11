@@ -1154,6 +1154,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `intent` | definition | `INT` | `EngineeringEntity` `intent` |
 | `stakeholder_need` | definition | `NEED` | `EngineeringEntity` `stakeholder_need` |
 | `objective` | definition | `OBJ` | `EngineeringEntity` `objective` |
+| `design_value` | definition | `VAL` | `EngineeringEntity` `design_value` (FORGE-586) |
 | `bom` | definition | `BOM` | `WorkProduct` `bom` (electronics BOM recorder) |
 | `component_selection` | definition | `CMP` | `BOMItem` (`twin.record_component_selection`), keyed by `role`, else manufacturer + MPN |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
@@ -1827,6 +1828,41 @@ The `regenerate_geometry`/`script_source` flow above (MET-630) is one real editi
 **Deliberately out of scope**: a true volumetric/mesh boolean diff visualization (a 3D "added/removed volume" highlight) -- no boolean-diff utility exists anywhere in this codebase (confirmed independently during FORGE-273/282/294's own scoping), the same class of gap as those tickets' deferred 3D-result visualizations; a numeric delta is shipped instead.
 
 ---
+
+### Engineering values and their sources (FORGE-586)
+
+A `design_value` `EngineeringEntity` is one engineering value (a table
+height, a tube section, a top thickness) together with where it came from.
+It is a definition (item key prefix `VAL`), so a changed value or a better
+source is a new revision of the same item.
+
+| `metadata` key | Meaning |
+|---|---|
+| `name` | The value's name, e.g. `table_height` (required) |
+| `value` | The number or text (required) |
+| `unit` | Optional; must be a unit `twin_core.models.quantity` recognises |
+| `source` | `{kind, ...}`, checked by `twin_core.provenance` (required) |
+| `source_summary` | One line written by the recorder, e.g. `standard: EN 12521:2015, clause 5.3` |
+| `needs_review` | `true` when the source kind is `assumption` |
+
+Source kinds, strongest first, and the fields each needs:
+
+| `kind` | Needs |
+|---|---|
+| `user` | nothing more (the record says who) |
+| `project_document` | `document` (plus `locator`) |
+| `standard` | `standard` (plus `clause`, `url`) |
+| `past_work` | `node_id`, or `project_id` + `ref` |
+| `component` | `mpn` or `stock` |
+| `analysis` | `evidence`, or `method` + `inputs` |
+| `measurement` | `artefact` |
+| `assumption` | `rationale` |
+
+The recorder refuses a `design_value` without `name`, `value` and a valid
+`source`, and checks the `source` of any other entity that carries one. A
+requirement's limit records its source the same way: each
+`twin.record_constraint_set` entry takes an optional `limit_source`, kept in
+the Constraint's `metadata.limit_source` with a `limit_source_summary`.
 
 ## 5. Constraint Engine
 

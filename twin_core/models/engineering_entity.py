@@ -64,6 +64,11 @@ EngineeringEntityType = Literal[
     # reads these back to compute a weighted score and record the selection
     # as a real Decision -- see that module's own docstring.
     "concept_option",
+    # FORGE-586: one engineering value (a height, a tube section, a top
+    # thickness) and where it came from. metadata carries name, value,
+    # optional unit, and a `source` checked by twin_core.provenance: a value
+    # with no identifiable source is refused at record time.
+    "design_value",
     # FORGE-299 (gap G-I3): a versioned snapshot bundling a project's
     # current hierarchy/BOM/evidence/decision node ids (never a deep copy of
     # their content) plus a simple count-delta diff against the previous

@@ -25,6 +25,7 @@ def test_definitions_are_the_versioned_types() -> None:
         "intent",
         "stakeholder_need",
         "objective",
+        "design_value",
         "bom",
         "component_selection",
         "prd",

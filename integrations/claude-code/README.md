@@ -27,7 +27,7 @@ Claude Code asks for your gateway URL on first enable. The default suits a gatew
 
 ## Skills
 
-32 skills are bundled: the engineering skills MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), `intent-to-verified-design` (the lifecycle procedure) and `workflow-lifecycle` (the reasoning contract).
+33 skills are bundled: the engineering skills MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), `intent-to-verified-design` (the lifecycle procedure) and `workflow-lifecycle` (the reasoning contract).
 
 ## Agents
 

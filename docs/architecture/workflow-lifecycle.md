@@ -189,6 +189,7 @@ repeats verbatim.
 | `flow.patch` | Propose (held) or apply (approved) a patch. Downstream-approved, like `flow.propose`. On `core`. |
 | `workflow-lifecycle` skill | The reasoning contract, with a MetaForge binding table and the runtime gaps to report. |
 | `intent-to-verified-design` skill | The procedure, using the tools above. |
+| `source-engineering-values` skill | How a missing value is found and recorded with its source: a `design_value` entity whose `source` the twin checks, and a `limit_source` on each requirement (FORGE-586). |
 | Hooks (Claude Code) | SessionStart gives the working rules; PostToolUse on `flow.propose`/`flow.patch` restates that the result is held for a person. Stdlib only; `METAFORGE_PLUGIN_HOOKS=off` disables. |
 | Agents (Claude Code) | `metaforge-flow-planner` (plans and stops at the approval), `metaforge-run-verifier` (reports the verdict honestly). |
 | `/metaforge:verify`, `/metaforge:replan` | New workflows; on Codex, every workflow ships as a `<name>-workflow` skill. |

@@ -39,6 +39,7 @@ from twin_core.consistency.budgets import (
 from twin_core.models.engineering_entity import EngineeringEntity
 from twin_core.models.enums import EdgeType
 from twin_core.models.quantity import is_valid_unit
+from twin_core.provenance import describe_source, source_errors
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("api_gateway.twin.engineering_entity_recorder")
@@ -62,6 +63,7 @@ _ENTITY_TYPES = frozenset(
         "waiver",
         "release_approval",
         "concept_option",
+        "design_value",
         "release_package",
         "bringup_checklist",
     }
@@ -156,6 +158,28 @@ def make_engineering_entity_recorder(twin: Any, project_backend: Any = None) -> 
                         f"budget had been set at all. If the limit is only in "
                         f"the title, put the number here too."
                     )
+
+            # FORGE-586: a design value must say where it came from, and any
+            # entity that carries a source must carry one a reviewer can find.
+            # Refused here, where the caller can still fix it, for the same
+            # reason as the unit and budget checks above.
+            if entity_type == "design_value":
+                missing = [key for key in ("name", "value") if metadata.get(key) in (None, "")]
+                if missing or "source" not in metadata:
+                    raise ValueError(
+                        "engineering entity recorder: a design_value needs "
+                        f"'name', 'value' and 'source' in `extra`; missing "
+                        f"{missing + ([] if 'source' in metadata else ['source'])}. "
+                        'e.g. extra={"name": "table_height", "value": 740, '
+                        '"unit": "mm", "source": {"kind": "standard", '
+                        '"standard": "EN 527-1", "clause": "table height"}}'
+                    )
+            if "source" in metadata:
+                errors = source_errors(metadata["source"])
+                if errors:
+                    raise ValueError(f"engineering entity recorder: {'; '.join(errors)}")
+                metadata["source_summary"] = describe_source(metadata["source"])
+                metadata["needs_review"] = metadata["source"].get("kind") == "assumption"
 
             # FORGE-523: intent / stakeholder_need / objective are
             # definitions (twin_core.items.registry); every other entity

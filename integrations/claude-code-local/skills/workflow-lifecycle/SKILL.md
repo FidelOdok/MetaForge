@@ -121,6 +121,7 @@ onto it.
 | Local repair, patch | A gate's rework (re-runs the target and its downstream), or `flow.patch` with `action: propose` then, once a person approves, `action: apply`. |
 | Approval | A person, in the dashboard or the client's inline prompt. No tool approves. |
 | Completion | `flow.verify_completion` (or `flow.lifecycle`'s `completion`): `COMPLETED_VERIFIED` only when every mandatory requirement passes with current evidence. |
+| Engineering values | Every number or material a phase uses is a `design_value` (`twin.record_engineering_entity`) with a checked `source`; requirement limits carry a `limit_source`. Find values with the `source-engineering-values` skill; an `assumption` source is flagged for the person at the gate. |
 | Evidence | `twin.record_document` (`simulation_result`, pinned to the geometry revision), and `twin.record_evidence` where served. |
 
 Runtime gaps on MetaForge today, to report rather than paper over:
