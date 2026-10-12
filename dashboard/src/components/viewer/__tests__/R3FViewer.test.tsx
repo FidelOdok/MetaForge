@@ -14,6 +14,9 @@ let capturedOnPointerMissed: (() => void) | undefined;
 // throws on the first fit attempt.
 const fakeCamera = {
   position: { x: 0, y: 0, z: 0, set: vi.fn() },
+  // FORGE-610: fitToModel restores the up vector before lookAt, because free
+  // tumbling leaves it wherever the drag ended.
+  up: { set: vi.fn() },
   lookAt: vi.fn(),
 };
 
@@ -39,7 +42,11 @@ let capturedFitToModel: (() => void) | undefined;
 let environmentShouldThrow = false;
 
 vi.mock('@react-three/drei', () => ({
-  OrbitControls: () => null,
+  // FORGE-610: the viewer renders an arcball, not an orbit. Both are mocked —
+  // the orbit one so a regression back to it is visible to the test below
+  // rather than silently rendering nothing.
+  ArcballControls: () => <div data-testid="arcball-controls" />,
+  OrbitControls: () => <div data-testid="orbit-controls" />,
   Environment: () => {
     if (environmentShouldThrow) {
       throw new Error(
@@ -190,6 +197,7 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
 describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
   beforeEach(() => {
     fakeCamera.position.set.mockClear();
+    fakeCamera.up.set.mockClear();
     fakeCamera.lookAt.mockClear();
     capturedFitToModel = undefined;
   });
@@ -241,6 +249,49 @@ describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
     expect(y).toBeCloseTo(5 + 0.4685 * dist, 1);
     expect(z).toBeCloseTo(-2 + 0.6247 * dist, 1);
     expect(fakeCamera.lookAt).toHaveBeenCalledWith(10, 5, -2);
+  });
+
+  // FORGE-610: the arcball leaves the up vector wherever the drag ended, and
+  // lookAt reads it. Without restoring it first, Reset View lands in the right
+  // place at an arbitrary roll, which reads as "reset is broken".
+  it('restores the up vector before looking at the model, so a reset is never rolled', () => {
+    mockViewerState({ center: [10, 5, -2], radius: 100, groundY: -3 });
+    render(<R3FViewer />);
+
+    expect(fakeCamera.up.set).toHaveBeenCalledWith(0, 1, 0);
+    // Defaults chosen so that a call which never happened fails the comparison
+    // rather than skipping it.
+    const upOrder = fakeCamera.up.set.mock.invocationCallOrder[0] ?? Infinity;
+    const lookAtOrder = fakeCamera.lookAt.mock.invocationCallOrder[0] ?? -Infinity;
+    expect(upOrder).toBeLessThan(lookAtOrder);
+  });
+});
+
+// FORGE-610: OrbitControls clamps the polar angle to [0, pi] about a fixed up
+// vector, so a model could not be tumbled past vertical and its underside was
+// unreachable. The arcball has no pole. Nothing else asserts the control type,
+// so without this a revert to OrbitControls would pass every other test.
+describe('R3FViewer — the camera control has no pole (FORGE-610)', () => {
+  it('renders an arcball control, not a polar-clamped orbit control', () => {
+    vi.mocked(useViewerStore).mockImplementation((selector) =>
+      selector({
+        glbUrl: 'blob:fake',
+        manifest: { parts: [] },
+        selectedMeshName: null,
+        hiddenMeshes: new Set(),
+        explodeFactor: 0,
+        resetCamera: vi.fn(),
+        registerCameraReset: vi.fn(),
+        modelBounds: null,
+        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+        registerOrbitControlsEnabledSetter: vi.fn(),
+      } as unknown as Parameters<typeof selector>[0]),
+    );
+
+    const { queryByTestId } = render(<R3FViewer />);
+
+    expect(queryByTestId('arcball-controls')).toBeTruthy();
+    expect(queryByTestId('orbit-controls')).toBeNull();
   });
 });
 
