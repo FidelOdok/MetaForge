@@ -45,7 +45,12 @@ from mcp_core.approval_hold import (
 )
 from mcp_core.auth import UNKNOWN_AUTH, AuthPosture
 from mcp_core.deeplinks import DeepLinkBuilder, links_for
-from mcp_core.elicitation import ELICITATION_PROTOCOL_VERSION, Elicitor, elicitation_gate
+from mcp_core.elicitation import (
+    ELICITATION_PROTOCOL_VERSION,
+    Elicitor,
+    declares_form_elicitation,
+    elicitation_gate,
+)
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
     ApprovalAsk,
@@ -79,6 +84,13 @@ from mcp_core.protocol import (
     METHOD_NOT_FOUND,
     RESOURCE_NOT_FOUND,
     TOOL_EXECUTION_ERROR,
+)
+from mcp_core.protocol_versions import (
+    LEGACY_PROTOCOL_VERSIONS,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    UNSUPPORTED_PROTOCOL_VERSION,
+    request_protocol_version,
+    unsupported_version_data,
 )
 from mcp_core.resources import ResourceUriError, parse_resource_uri
 from mcp_core.service_auth import (
@@ -666,7 +678,7 @@ class UnifiedMcpServer:
         if callable(available):
             return bool(available())
         return (
-            "elicitation" in self._client_capabilities
+            declares_form_elicitation(self._client_capabilities)
             and self._negotiated_protocol >= ELICITATION_PROTOCOL_VERSION
         )
 
@@ -712,8 +724,33 @@ class UnifiedMcpServer:
         if is_notification:
             return ""
 
+        # FORGE-599: a request that names its own revision in ``_meta`` (the
+        # handshake-free 2026-07-28 shape) is checked on its own. One we do
+        # not serve gets the spec's UnsupportedProtocolVersionError, which a
+        # dual-era client reads as "retry with one of these". ``initialize``
+        # is the legacy path and negotiates as it always has.
+        requested_version = request_protocol_version(params)
+        if (
+            method != "initialize"
+            and requested_version is not None
+            and requested_version not in SUPPORTED_PROTOCOL_VERSIONS
+        ):
+            logger.info(
+                "mcp_protocol_version_unsupported", method=method, requested=requested_version
+            )
+            return json.dumps(
+                make_error(
+                    request_id,
+                    UNSUPPORTED_PROTOCOL_VERSION,
+                    "Unsupported protocol version",
+                    unsupported_version_data(requested_version),
+                )
+            )
+
         with tracer.start_as_current_span("unified_mcp.handle_request") as span:
             span.set_attribute("rpc.method", method)
+            if requested_version is not None:
+                span.set_attribute("mcp.protocol_version", requested_version)
             try:
                 # Standard MCP protocol methods (what Claude Code speaks).
                 if method == "initialize":
@@ -993,7 +1030,12 @@ class UnifiedMcpServer:
     #: removes and we never had). Structured tool output stays optional in
     #: that revision, so not emitting ``outputSchema`` is conformant.
     #: Anything outside that list is a reason not to add a revision here.
-    _SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = ("2024-11-05", "2025-06-18")
+    #:
+    #: FORGE-599: these are the handshake (legacy) revisions only, from
+    #: ``mcp_core.protocol_versions``, which also says why 2025-11-25 is in and
+    #: 2026-07-28 is not yet. Handshake-free requests are checked per request
+    #: in ``handle_request``.
+    _SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = LEGACY_PROTOCOL_VERSIONS
 
     @classmethod
     def _negotiate_protocol(cls, requested: str | None) -> str:

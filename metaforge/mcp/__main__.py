@@ -53,6 +53,12 @@ from mcp_core.elicitation import (
 )
 from mcp_core.guardrails import Caller
 from mcp_core.protocol import AUTH_DENIED as AUTH_DENIED_CODE
+from mcp_core.protocol_versions import (
+    HEADER_MISMATCH,
+    PROTOCOL_VERSION_HEADER,
+    UNSUPPORTED_PROTOCOL_VERSION,
+    header_mismatch,
+)
 from mcp_core.service_auth import HEADER_SERVICE_KEY, ServiceRunVerifier
 from metaforge.mcp.http_elicitation import (
     ElicitationHub,
@@ -819,6 +825,24 @@ def build_http_app(
             # Accepted, and there is nothing to say back.
             return Response(status_code=202)
 
+        # FORGE-599: the version header must agree with the version the body
+        # names, or an intermediary routing on one and this server acting on
+        # the other disagree about what was asked.
+        if isinstance(inbound, dict) and "id" in inbound:
+            mismatch = header_mismatch(
+                request.headers.get(PROTOCOL_VERSION_HEADER), inbound.get("params")
+            )
+            if mismatch:
+                logger.info("mcp_protocol_header_mismatch", detail=mismatch)
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": inbound.get("id"),
+                        "error": {"code": HEADER_MISMATCH, "message": mismatch},
+                    },
+                    status_code=400,
+                )
+
         # FORGE-487: the design-flow worker's calls. After the answer-routing
         # above, which must not be delayed by a gateway lookup, and before the
         # context is used anywhere (including the SSE path below).
@@ -874,7 +898,17 @@ def build_http_app(
     def _json_reply(response: str, session_id: str | None) -> Response:
         if not response:
             return Response(status_code=204)
-        out = JSONResponse(json.loads(response))
+        payload = json.loads(response)
+        # FORGE-599: the Streamable HTTP binding answers an unsupported
+        # revision with 400 as well as the JSON-RPC error, so a dual-era
+        # client probing us sees a recognised modern error on a 400.
+        error = payload.get("error") if isinstance(payload, dict) else None
+        status = (
+            400
+            if isinstance(error, dict) and error.get("code") == UNSUPPORTED_PROTOCOL_VERSION
+            else 200
+        )
+        out = JSONResponse(payload, status_code=status)
         if session_id is not None:
             out.headers[MCP_SESSION_HEADER] = session_id
         return out

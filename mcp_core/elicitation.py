@@ -62,6 +62,7 @@ __all__ = [
     "approval_request",
     "cancelled_notification",
     "current_elicitor",
+    "declares_form_elicitation",
     "elicitation_gate",
     "inline_approver",
     "result_from_payload",
@@ -72,6 +73,23 @@ __all__ = [
 #: that declared the capability but negotiated an older revision is not
 #: expecting the request, so the server checks both.
 ELICITATION_PROTOCOL_VERSION = "2025-06-18"
+
+
+def declares_form_elicitation(capabilities: Any) -> bool:
+    """Whether a client's capabilities let us send it a form (FORGE-599).
+
+    2025-11-25 split elicitation into ``form`` and ``url`` modes. An empty
+    ``elicitation: {}`` still means form (the backwards-compatible reading
+    every earlier client relies on), but a client that names only ``url``
+    must not be sent a form, and every prompt we send is one.
+    """
+    if not isinstance(capabilities, dict):
+        return False
+    declared = capabilities.get("elicitation")
+    if not isinstance(declared, dict):
+        return False
+    return not declared or "form" in declared
+
 
 #: Argument names whose values never reach the reviewer's screen. Same list
 #: as ``metaforge.mcp.capture``, for the same reason and to the same effect.

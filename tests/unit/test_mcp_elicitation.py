@@ -245,7 +245,9 @@ def test_a_client_ahead_of_us_is_answered_with_our_newest_not_our_oldest() -> No
             )
         )
     )
-    assert json.loads(raw)["result"]["protocolVersion"] == ELICIT_VERSION
+    # Our newest (2025-11-25 since FORGE-599), which is at least elicitation's.
+    newest = max(UnifiedMcpServer._SUPPORTED_PROTOCOL_VERSIONS)
+    assert json.loads(raw)["result"]["protocolVersion"] == newest >= ELICIT_VERSION
     # Still skew -- we did not give them what they asked for, and the doctor
     # should keep saying so.
     client = asyncio.run(server._health_check())["client"]

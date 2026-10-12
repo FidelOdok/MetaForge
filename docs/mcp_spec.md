@@ -153,7 +153,7 @@ Streamable HTTP at `/mcp`:
 
 A `tools/call` that is held for approval can also be answered as
 `text/event-stream` on its own POST (FORGE-464). This happens only when
-the session declared `elicitation` at `initialize` on revision
+the session declared form `elicitation` at `initialize` on revision
 `2025-06-18` or later, has no `GET /mcp` stream open, and sent the call
 with `text/event-stream` in `Accept`. The stream carries the
 `elicitation/create` request, then the tool result, then closes. A call
@@ -161,6 +161,38 @@ that is not held keeps its JSON response, so clients that never open
 `GET /mcp` (Claude Code among them) can still be asked inline. Routing
 rules and outcomes are in
 [Over HTTP: which stream carries the question](capability-matrix.md#over-http-which-stream-carries-the-question).
+
+#### Protocol revisions (FORGE-599)
+
+The server speaks the handshake revisions `2024-11-05`, `2025-06-18` and
+`2025-11-25`. `initialize` echoes the revision a client asks for when it is
+one of these; a client ahead of us gets `2025-11-25`. The list lives in
+`mcp_core/protocol_versions.py`.
+
+Revision `2026-07-28` drops the handshake: each request names its revision
+in `params._meta["io.modelcontextprotocol/protocolVersion"]` and, over HTTP,
+in the `MCP-Protocol-Version` header. The server handles both shapes on the
+same endpoint:
+
+- `initialize` takes the handshake path, exactly as before.
+- A request whose `_meta` names a revision we speak is served as before.
+- A request whose `_meta` names any other revision is refused with the
+  spec's `UnsupportedProtocolVersionError` (`-32022`, and HTTP `400`), whose
+  `data.supported` lists our revisions newest first.
+- Over HTTP, a `MCP-Protocol-Version` header that disagrees with the
+  `_meta` revision is refused with `HeaderMismatch` (`-32020`, HTTP `400`).
+  A header with no `_meta` revision (a `2025-06-18` client) is not a
+  mismatch.
+
+`2026-07-28` itself is not served yet, so a client asking for it gets the
+error above. Serving it also needs `resultType` on every result and
+`server/discover` (FORGE-600), and questions returned inside results
+instead of sent as `elicitation/create` (FORGE-601).
+
+From `2025-11-25` a client can declare elicitation as `{"form": {}}`,
+`{"url": {}}` or both; an empty `{}` still means form. Every question this
+server asks is a form, so a client that declares only `url` is not asked
+inline and its held calls go to the dashboard.
 
 #### Held calls report themselves (FORGE-465)
 
