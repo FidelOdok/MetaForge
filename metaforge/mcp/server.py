@@ -25,6 +25,7 @@ import asyncio
 import difflib
 import inspect
 import json
+import os
 import re
 import time
 import uuid
@@ -69,6 +70,19 @@ from mcp_core.guardrails import (
     requires_human_authority,
     resolve_approval,
     strip_reserved_arguments,
+)
+from mcp_core.mrtr import (
+    MRTR_METHODS,
+    InputRequiredError,
+    InvalidRequestStateError,
+    MrtrContext,
+    StateSigner,
+    call_digest,
+    current_mrtr,
+    input_required_result,
+    mrtr_elicitor,
+    mrtr_gate,
+    with_mrtr,
 )
 from mcp_core.profiles import (
     FULL_PROFILE,
@@ -321,6 +335,10 @@ class UnifiedMcpServer:
         # has an approval id and an approver like a dashboard one. None keeps
         # the old behaviour: inline answers leave no ledger entry.
         self._approval_ledger = approval_ledger
+        # FORGE-601: signs the state a returned question carries. A fixed
+        # METAFORGE_MCP_STATE_KEY lets a question outlive a restart.
+        _state_key = os.environ.get("METAFORGE_MCP_STATE_KEY", "").strip()
+        self._mrtr_signer = StateSigner(_state_key.encode() if _state_key else None)
         # FORGE-417: call id -> how its approval ended, read once by the
         # MCP envelope and popped. Bounded by that pop; see _remember_hold.
         self._approval_records: dict[str, ApprovalRecord] = {}
@@ -670,8 +688,6 @@ class UnifiedMcpServer:
         ``elicitation/create`` exists. A client that declares the capability
         while negotiating an older revision is not listening for it.
         """
-        if self._elicitor is None:
-            return False
         # FORGE-423: an elicitor may serve many connections from one server
         # -- the HTTP one does -- so "is there an elicitor" is not the same
         # question as "can *this* connection be asked". When it can answer
@@ -683,11 +699,18 @@ class UnifiedMcpServer:
         # with no stream and then have nowhere to ask, which is worse than
         # never choosing it: a write would hang to its timeout and come back
         # TIMED_OUT instead of waiting in a queue somebody can see.
-        # FORGE-600: a handshake-free (2026-07-28) request is never sent a
-        # question. That revision forbids server-initiated requests; it asks
-        # inside the result instead (MRTR, FORGE-601). Until then such a
-        # client's held write waits in the dashboard.
+        # FORGE-600/601: a handshake-free (2026-07-28) request is never sent a
+        # question; that revision forbids server-initiated requests. It is
+        # asked inside the result instead (MRTR), when the request declared
+        # form elicitation and holds can be written to the ledger (the retry
+        # closes the same entry). Otherwise its held write waits in the
+        # dashboard.
         if current_modern_request() is not None:
+            mrtr = current_mrtr()
+            return bool(mrtr and mrtr.can_ask and self._approval_ledger is not None)
+        # A live question needs a channel back to the client; a returned one
+        # (above) does not.
+        if self._elicitor is None:
             return False
         available = getattr(self._elicitor, "available", None)
         if callable(available):
@@ -902,6 +925,15 @@ class UnifiedMcpServer:
                         },
                     )
                 )
+            except InvalidRequestStateError as exc:
+                # FORGE-601: a replayed or forged answer. Refused, never run.
+                self._mark_failed(span, exc)
+                logger.warning("mcp_mrtr_state_refused", method=method, reason=str(exc))
+                return json.dumps(make_error(request_id, INVALID_PARAMS, str(exc)))
+            except InputRequiredError:
+                # FORGE-601: the question is on the request's MrtrContext;
+                # ``_handle_modern`` turns it into the InputRequiredResult.
+                return json.dumps({"jsonrpc": "2.0", "id": request_id, "result": {}})
             except ApprovalLedgerUnavailableError as exc:
                 # FORGE-473: the approval could not be recorded, so the write
                 # was not run. Say why, in words the agent can relay.
@@ -1223,6 +1255,26 @@ class UnifiedMcpServer:
                         "id": request_id,
                         "result": self._discover(),
                     }
+                elif method in MRTR_METHODS:
+                    try:
+                        mrtr = self._mrtr_context(method, params, request)
+                    except InvalidRequestStateError as exc:
+                        logger.info("mcp_mrtr_state_refused", method=method, reason=str(exc))
+                        return json.dumps(make_error(request_id, INVALID_PARAMS, str(exc)))
+                    with with_mrtr(mrtr):
+                        response = json.loads(await self.handle_request(raw_message))
+                    if mrtr.pending:
+                        logger.info(
+                            "mcp_mrtr_input_required",
+                            method=method,
+                            questions=sorted(mrtr.pending),
+                            holds=sorted(mrtr.holds.values()),
+                        )
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "result": input_required_result(mrtr, self._mrtr_signer),
+                        }
                 else:
                     response = json.loads(await self.handle_request(raw_message))
         logger.info(
@@ -1233,6 +1285,42 @@ class UnifiedMcpServer:
             ok="result" in response,
         )
         return json.dumps(self._modernise(response, method))
+
+    def _mrtr_context(
+        self, method: str, params: dict[str, Any], request: ModernRequest
+    ) -> MrtrContext:
+        """The answers and earlier holds a retry brings, after checking them."""
+        from mcp_core.context import current_context
+
+        try:
+            principal = current_context().actor_id or "anonymous"
+        except Exception:  # noqa: BLE001 - no context: an unauthenticated caller
+            principal = "anonymous"
+        ctx = MrtrContext(
+            principal=principal,
+            method=method,
+            digest=call_digest(method, params),
+            can_ask=declares_form_elicitation(request.client_capabilities),
+        )
+        responses = params.get("inputResponses")
+        if responses is not None and not isinstance(responses, dict):
+            raise InvalidRequestStateError("inputResponses must be an object")
+        state = params.get("requestState")
+        if state is not None:
+            ctx.holds = self._mrtr_signer.verify(
+                str(state), principal=principal, method=method, digest=ctx.digest
+            )
+            ctx.responses = dict(responses or {})
+        elif responses:
+            raise InvalidRequestStateError("inputResponses were sent without requestState")
+        return ctx
+
+    def _adapter_elicitor(self) -> Any:
+        """What an adapter asks through: MRTR on a handshake-free request."""
+        if not self.can_elicit:
+            return None
+        mrtr = current_mrtr() if current_modern_request() is not None else None
+        return mrtr_elicitor(mrtr) if mrtr is not None else self._elicitor
 
     def _discover(self) -> dict[str, Any]:
         """``server/discover``: versions, capabilities and identity in one answer."""
@@ -1257,7 +1345,7 @@ class UnifiedMcpServer:
             meta[META_SERVER_INFO] = self._server_info()
             result["_meta"] = meta
             hints = CACHE_HINTS.get(method)
-            if hints is not None:
+            if hints is not None and result["resultType"] == "complete":
                 result["ttlMs"], result["cacheScope"] = hints
         error = response.get("error")
         if isinstance(error, dict) and error.get("code") == _RESOURCE_NOT_FOUND:
@@ -2061,11 +2149,16 @@ class UnifiedMcpServer:
         # window. Not a fallback chain -- once a client has been asked, going
         # on to the dashboard would put the same question to a second person
         # and discard the first answer.
-        gate = (
-            elicitation_gate(self._elicitor, self._approval_ledger)
-            if can_elicit and self._elicitor is not None
-            else self._approval_gate
-        )
+        mrtr = current_mrtr() if current_modern_request() is not None else None
+        if can_elicit and mrtr is not None and self._approval_ledger is not None:
+            # FORGE-601: the question goes back inside the result.
+            gate: Any = mrtr_gate(mrtr, self._mrtr_signer, self._approval_ledger)
+        else:
+            gate = (
+                elicitation_gate(self._elicitor, self._approval_ledger)
+                if can_elicit and self._elicitor is not None
+                else self._approval_gate
+            )
         if gate is None:
             # Configured to hold, with nothing to hold it with. Refusing is
             # the only honest option: running it would leave the guardrail
@@ -2370,7 +2463,7 @@ class UnifiedMcpServer:
         # connection can be asked.
         from mcp_core.elicitation import with_elicitor
 
-        with with_elicitor(self._elicitor if self.can_elicit else None):
+        with with_elicitor(self._adapter_elicitor()):
             sub_response_text = await adapter.handle_request(sub_request)
         sub_response: dict[str, Any] = json.loads(sub_response_text)
 

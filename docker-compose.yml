@@ -561,6 +561,10 @@ services:
       # FORGE-600: serve MCP revision 2026-07-28 (handshake-free) ahead of
       # in-chat approvals for it (FORGE-601). Off unless set to "on".
       - METAFORGE_MCP_MODERN_PREVIEW=${METAFORGE_MCP_MODERN_PREVIEW:-}
+      # FORGE-601: signs the state a question returned to a 2026-07-28
+      # client carries. Optional: unset, a random per-process key is used and
+      # a question outstanding across a restart is simply asked again.
+      - METAFORGE_MCP_STATE_KEY=${METAFORGE_MCP_STATE_KEY:-}
     volumes:
       # Read-write (MET-618 follow-up): twin.stage_work_product_file and
       # MET-612's boolean-cut staging both write into this shared workspace
