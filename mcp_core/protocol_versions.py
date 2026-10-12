@@ -28,19 +28,43 @@ Layer-1 module: stdlib only.
 
 from __future__ import annotations
 
+import base64
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = [
+    "CACHE_HINTS",
     "HEADER_MISMATCH",
+    "INVALID_PARAMS",
+    "META_CLIENT_CAPABILITIES",
+    "META_CLIENT_INFO",
+    "META_SERVER_INFO",
+    "MISSING_REQUIRED_CLIENT_CAPABILITY",
+    "MODERN_PREVIEW_ENV",
+    "MODERN_PREVIEW_VERSION",
     "LEGACY_PROTOCOL_VERSIONS",
     "META_PROTOCOL_VERSION",
     "MODERN_PROTOCOL_VERSIONS",
     "PROTOCOL_VERSION_HEADER",
     "SUPPORTED_PROTOCOL_VERSIONS",
     "UNSUPPORTED_PROTOCOL_VERSION",
+    "ModernRequest",
+    "current_modern_request",
+    "decode_header_value",
     "header_mismatch",
+    "modern_header_problem",
+    "modern_status",
+    "is_modern",
+    "modern_meta_problem",
+    "modern_versions",
+    "supported_versions",
     "request_protocol_version",
     "unsupported_version_data",
+    "with_modern_request",
 ]
 
 #: Revisions served through the ``initialize`` handshake, oldest first.
@@ -50,21 +74,67 @@ __all__ = [
 #: never sent a form (``mcp_core.elicitation.declares_form_elicitation``).
 LEGACY_PROTOCOL_VERSIONS: tuple[str, ...] = ("2024-11-05", "2025-06-18", "2025-11-25")
 
-#: Handshake-free revisions served per request. Empty until FORGE-600 and
-#: FORGE-601 land (see the module docstring); 2026-07-28 goes here then.
+#: Handshake-free revisions served per request by default. Empty until
+#: FORGE-601 lands (see the module docstring); 2026-07-28 goes here then.
 MODERN_PROTOCOL_VERSIONS: tuple[str, ...] = ()
 
+#: FORGE-600: everything a 2026-07-28 request needs is served except
+#: questions returned inside results (MRTR, FORGE-601), so it can be switched
+#: on ahead of that to try it. With it on, a held write from such a client
+#: waits in the dashboard rather than being asked in its chat.
+MODERN_PREVIEW_ENV = "METAFORGE_MCP_MODERN_PREVIEW"
+MODERN_PREVIEW_VERSION = "2026-07-28"
+
+#: The defaults, without the preview. ``supported_versions()`` is what a
+#: request is checked against.
 SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = LEGACY_PROTOCOL_VERSIONS + MODERN_PROTOCOL_VERSIONS
 
-#: The ``_meta`` key a modern request carries its revision in.
+
+def modern_versions() -> tuple[str, ...]:
+    """Handshake-free revisions served now, the preview included when on."""
+    preview = os.environ.get(MODERN_PREVIEW_ENV, "").strip().lower() in {"1", "on", "true", "yes"}
+    if preview and MODERN_PREVIEW_VERSION not in MODERN_PROTOCOL_VERSIONS:
+        return (*MODERN_PROTOCOL_VERSIONS, MODERN_PREVIEW_VERSION)
+    return MODERN_PROTOCOL_VERSIONS
+
+
+def supported_versions() -> tuple[str, ...]:
+    return LEGACY_PROTOCOL_VERSIONS + modern_versions()
+
+
+def is_modern(version: str | None) -> bool:
+    """Whether ``version`` is a handshake-free revision we serve."""
+    return version is not None and version in modern_versions()
+
+
+#: The ``_meta`` keys a modern request carries, and the one a result does.
 META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
+META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
+META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
+META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 
 #: The Streamable HTTP header that mirrors it.
 PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
 
 #: Error codes from the range the spec reserves for itself (-32020..-32099).
 HEADER_MISMATCH = -32020
+MISSING_REQUIRED_CLIENT_CAPABILITY = -32021
 UNSUPPORTED_PROTOCOL_VERSION = -32022
+INVALID_PARAMS = -32602
+
+#: Caching hints 2026-07-28 requires on these results (``ttlMs``,
+#: ``cacheScope``). The lists depend on the connection's profile and on who
+#: is calling, so none is ``public``; the tool set is fixed once the server
+#: is up, so lists stay fresh for five minutes. A resource read reflects the
+#: twin as it is now, so it is never fresh.
+CACHE_HINTS: dict[str, tuple[int, str]] = {
+    "server/discover": (300_000, "private"),
+    "tools/list": (300_000, "private"),
+    "prompts/list": (300_000, "private"),
+    "resources/list": (300_000, "private"),
+    "resources/templates/list": (300_000, "private"),
+    "resources/read": (0, "private"),
+}
 
 
 def request_protocol_version(params: Any) -> str | None:
@@ -80,7 +150,128 @@ def request_protocol_version(params: Any) -> str | None:
 
 def unsupported_version_data(requested: str) -> dict[str, Any]:
     """``error.data`` for ``UnsupportedProtocolVersionError``, newest first."""
-    return {"supported": sorted(SUPPORTED_PROTOCOL_VERSIONS, reverse=True), "requested": requested}
+    return {"supported": sorted(supported_versions(), reverse=True), "requested": requested}
+
+
+def modern_meta_problem(params: Any) -> str | None:
+    """What a handshake-free request's ``_meta`` is missing, or None.
+
+    The revision and the client's capabilities are required on every request;
+    a request without them is malformed (``-32602``). ``clientInfo`` is only a
+    SHOULD, so its absence is not an error.
+    """
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    if not isinstance(meta, dict):
+        return "params._meta is required"
+    if not isinstance(meta.get(META_CLIENT_CAPABILITIES), dict):
+        return f"params._meta['{META_CLIENT_CAPABILITIES}'] is required and must be an object"
+    return None
+
+
+@dataclass(frozen=True)
+class ModernRequest:
+    """The handshake-free request being served (FORGE-600).
+
+    Everything a 2026-07-28 request says about its client comes with the
+    request, never from an earlier one, so it is held for that request only.
+    """
+
+    version: str
+    client_capabilities: dict[str, Any] = field(default_factory=dict)
+
+
+_CURRENT: ContextVar[ModernRequest | None] = ContextVar("mcp_modern_request", default=None)
+
+
+def current_modern_request() -> ModernRequest | None:
+    """The handshake-free request in progress, or None on the handshake path."""
+    return _CURRENT.get()
+
+
+@contextmanager
+def with_modern_request(request: ModernRequest) -> Iterator[ModernRequest]:
+    token = _CURRENT.set(request)
+    try:
+        yield request
+    finally:
+        _CURRENT.reset(token)
+
+
+#: Methods whose target is mirrored in ``Mcp-Name``, and where it comes from.
+_NAME_SOURCES = {"tools/call": "name", "prompts/get": "name", "resources/read": "uri"}
+
+
+def modern_header_problem(headers: Any, message: Any) -> str | None:
+    """Why a handshake-free HTTP request's headers fail validation, or None.
+
+    2026-07-28 requires ``MCP-Protocol-Version`` and ``Mcp-Method`` on every
+    request, and ``Mcp-Name`` on ``tools/call``, ``prompts/get`` and
+    ``resources/read``; each must match the body. ``headers`` is any mapping
+    with case-insensitive ``get`` (a Starlette ``Headers``).
+    """
+    if not isinstance(message, dict):
+        return None
+    method = message.get("method")
+    if not headers.get(PROTOCOL_VERSION_HEADER):
+        return f"Header mismatch: required header {PROTOCOL_VERSION_HEADER} is missing"
+    header_method = headers.get("Mcp-Method")
+    if not header_method:
+        return "Header mismatch: required header Mcp-Method is missing"
+    if header_method != method:
+        return (
+            f"Header mismatch: Mcp-Method header value '{header_method}' "
+            f"does not match body value '{method}'"
+        )
+    source = _NAME_SOURCES.get(str(method))
+    if source is None:
+        return None
+    params = message.get("params")
+    body_name = params.get(source) if isinstance(params, dict) else None
+    raw = headers.get("Mcp-Name")
+    if not raw:
+        return "Header mismatch: required header Mcp-Name is missing"
+    decoded = decode_header_value(raw)
+    if decoded is None:
+        return "Header mismatch: Mcp-Name header value is not valid base64"
+    if decoded != body_name:
+        return (
+            f"Header mismatch: Mcp-Name header value '{decoded}' "
+            f"does not match body value '{body_name}'"
+        )
+    return None
+
+
+def modern_status(error_code: int | None) -> int:
+    """The HTTP status a handshake-free request's answer is sent with.
+
+    An unknown method is ``404`` (so a client can tell a modern server from a
+    legacy one that never hosted the endpoint); a malformed request, a
+    missing capability and an unserved revision are ``400``.
+    """
+    if error_code == -32601:
+        return 404
+    if error_code in (
+        INVALID_PARAMS,
+        HEADER_MISMATCH,
+        MISSING_REQUIRED_CLIENT_CAPABILITY,
+        UNSUPPORTED_PROTOCOL_VERSION,
+    ):
+        return 400
+    return 200
+
+
+def decode_header_value(value: str) -> str | None:
+    """A header value with the ``=?base64?...?=`` sentinel decoded.
+
+    None when the sentinel is present but not valid base64 UTF-8, which the
+    caller treats as a malformed header.
+    """
+    if value.startswith("=?base64?") and value.endswith("?="):
+        try:
+            return base64.b64decode(value[9:-2], validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None
+    return value
 
 
 def header_mismatch(header_value: str | None, params: Any) -> str | None:

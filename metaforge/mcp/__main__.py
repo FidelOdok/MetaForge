@@ -58,6 +58,10 @@ from mcp_core.protocol_versions import (
     PROTOCOL_VERSION_HEADER,
     UNSUPPORTED_PROTOCOL_VERSION,
     header_mismatch,
+    is_modern,
+    modern_header_problem,
+    modern_status,
+    request_protocol_version,
 )
 from mcp_core.service_auth import HEADER_SERVICE_KEY, ServiceRunVerifier
 from metaforge.mcp.http_elicitation import (
@@ -862,6 +866,11 @@ def build_http_app(
             mismatch = header_mismatch(
                 request.headers.get(PROTOCOL_VERSION_HEADER), inbound.get("params")
             )
+            # FORGE-600: a handshake-free request also has to carry the
+            # method (and, for a named call, its target) in headers that match.
+            modern = is_modern(request_protocol_version(inbound.get("params")))
+            if not mismatch and modern:
+                mismatch = modern_header_problem(request.headers, inbound)
             if mismatch:
                 logger.info("mcp_protocol_header_mismatch", detail=mismatch)
                 return JSONResponse(
@@ -923,9 +932,14 @@ def build_http_app(
         # its 204, so it looked fine from outside while the server logged an
         # ASGI traceback on every connection: `notifications/initialized` is
         # the first thing a spec-compliant client sends.
-        return _json_reply(response, issued_session)
+        return _json_reply(
+            response,
+            issued_session,
+            modern=isinstance(inbound, dict)
+            and is_modern(request_protocol_version(inbound.get("params"))),
+        )
 
-    def _json_reply(response: str, session_id: str | None) -> Response:
+    def _json_reply(response: str, session_id: str | None, *, modern: bool = False) -> Response:
         if not response:
             return Response(status_code=204)
         payload = json.loads(response)
@@ -933,11 +947,12 @@ def build_http_app(
         # revision with 400 as well as the JSON-RPC error, so a dual-era
         # client probing us sees a recognised modern error on a 400.
         error = payload.get("error") if isinstance(payload, dict) else None
-        status = (
-            400
-            if isinstance(error, dict) and error.get("code") == UNSUPPORTED_PROTOCOL_VERSION
-            else 200
-        )
+        code = error.get("code") if isinstance(error, dict) else None
+        if modern:
+            # FORGE-600: the 2026-07-28 binding's statuses (404, 400).
+            status = modern_status(code)
+        else:
+            status = 400 if code == UNSUPPORTED_PROTOCOL_VERSION else 200
         out = JSONResponse(payload, status_code=status)
         if session_id is not None:
             out.headers[MCP_SESSION_HEADER] = session_id

@@ -558,6 +558,9 @@ services:
       # allowed and requests without an Origin are unaffected; "*" turns the
       # check off.
       - METAFORGE_MCP_ALLOWED_ORIGINS=${METAFORGE_MCP_ALLOWED_ORIGINS:-}
+      # FORGE-600: serve MCP revision 2026-07-28 (handshake-free) ahead of
+      # in-chat approvals for it (FORGE-601). Off unless set to "on".
+      - METAFORGE_MCP_MODERN_PREVIEW=${METAFORGE_MCP_MODERN_PREVIEW:-}
     volumes:
       # Read-write (MET-618 follow-up): twin.stage_work_product_file and
       # MET-612's boolean-cut staging both write into this shared workspace

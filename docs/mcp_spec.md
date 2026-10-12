@@ -210,10 +210,36 @@ same endpoint:
   A header with no `_meta` revision (a `2025-06-18` client) is not a
   mismatch.
 
-`2026-07-28` itself is not served yet, so a client asking for it gets the
-error above. Serving it also needs `resultType` on every result and
-`server/discover` (FORGE-600), and questions returned inside results
-instead of sent as `elicitation/create` (FORGE-601).
+`2026-07-28` is served only when `METAFORGE_MCP_MODERN_PREVIEW=on` is set
+on the sidecar (FORGE-600); otherwise a client asking for it gets the error
+above. It becomes the default once questions can be returned inside results
+(MRTR, FORGE-601).
+
+With the preview on, a `2026-07-28` request is served on its own, without a
+session:
+
+- `params._meta` must carry `io.modelcontextprotocol/protocolVersion` and
+  `io.modelcontextprotocol/clientCapabilities`; a request without the
+  capabilities is refused with `-32602` (HTTP `400`). The client's revision
+  and capabilities hold for that request only and never replace what a
+  handshake client declared.
+- `server/discover` answers with `supportedVersions` (newest first),
+  `capabilities` and `instructions`.
+- Every result carries `resultType: "complete"` and
+  `_meta["io.modelcontextprotocol/serverInfo"]`. `server/discover`, the
+  `*/list` methods and `resources/read` also carry `ttlMs` and
+  `cacheScope` (`private`: lists depend on the connection's profile and
+  caller; reads are never fresh).
+- Resource not found is `-32602`; the handshake revisions keep `-32002`.
+- Over HTTP the request must carry `MCP-Protocol-Version` and `Mcp-Method`,
+  and `Mcp-Name` for `tools/call`, `prompts/get` and `resources/read`
+  (base64 values in the `=?base64?...?=` form are decoded), each matching
+  the body; otherwise `HeaderMismatch` (`-32020`, HTTP `400`). An unknown
+  method is HTTP `404` with `-32601`. No `Mcp-Session-Id` is issued.
+- The server never sends such a request a question: that revision forbids
+  server-initiated requests. A held write from a `2026-07-28` client waits
+  in the dashboard and `forge approvals` until FORGE-601 returns the
+  question inside the result.
 
 From `2025-11-25` a client can declare elicitation as `{"form": {}}`,
 `{"url": {}}` or both; an empty `{}` still means form. Every question this
