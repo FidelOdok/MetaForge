@@ -718,7 +718,9 @@ override via `METAFORGE_TOOL_APPROVALS_LEDGER_PATH`), wired in
 behind the same `METAFORGE_RUNS_LEDGER_DISABLE` flag.
 
 This deliberately does **not** mirror design-flow's `init_run_ledger()`,
-which rehydrates non-terminal runs as resumable: a design-flow run's phase
+which rehydrates non-terminal runs as resumable (and, since FORGE-605,
+finished runs as read-only history, so the runs list survives a restart;
+the reconcile loop and the reaper skip terminal runs): a design-flow run's phase
 executor can genuinely pick back up after a restart, but the chat turn that
 was polling a paused `HarnessRuntime._await_approval()` coroutine cannot —
 the coroutine (and the SSE stream feeding it) died with the process. So a
