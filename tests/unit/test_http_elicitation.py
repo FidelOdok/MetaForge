@@ -399,8 +399,8 @@ class TestTheHandshakeIsRecordedPerSession:
             },
         )
         session = init.headers["Mcp-Session-Id"]
-        # FORGE-416: asked for a revision ahead of ours, answered with ours.
-        assert init.json()["result"]["protocolVersion"] == ELICITATION_PROTOCOL_VERSION
+        # FORGE-599: 2025-11-25 is a revision we speak, so it is echoed.
+        assert init.json()["result"]["protocolVersion"] == "2025-11-25"
 
         health = client.post(
             "/mcp",

@@ -61,6 +61,7 @@ from mcp_core.elicitation import (
     ElicitAction,
     ElicitResult,
     cancelled_notification,
+    declares_form_elicitation,
     result_from_payload,
 )
 
@@ -185,9 +186,9 @@ class ElicitationHub:
         if not session_id:
             return
         channel = self._channels.setdefault(session_id, SessionChannel())
-        channel.declared_elicitation = isinstance(capabilities, dict) and (
-            "elicitation" in capabilities
-        )
+        # FORGE-599: a client that offers only URL-mode elicitation cannot
+        # be sent the form every question here is.
+        channel.declared_elicitation = declares_form_elicitation(capabilities)
         channel.protocol = negotiated_protocol
         logger.info(
             "mcp_elicitation_session_noted",

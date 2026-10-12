@@ -37,7 +37,9 @@ class TestTheCaseThatWasBroken:
         assert _negotiate("2025-11-25") == _NEWEST
 
     def test_any_revision_newer_than_ours_gets_our_newest(self) -> None:
-        for requested in ("2025-07-01", "2026-01-01", "2099-01-01"):
+        # FORGE-599: 2025-11-25 is ours now, so the examples start past it;
+        # 2026-07-28 asked for over the handshake is still "ahead of us".
+        for requested in ("2026-01-01", "2026-07-28", "2099-01-01"):
             assert _negotiate(requested) == _NEWEST, requested
 
     def test_it_is_not_our_oldest(self) -> None:
@@ -128,10 +130,10 @@ class TestOverTheRealHandshake:
         """Answering better than before is not the same as answering what was
         requested. The doctor should keep saying so."""
         server = UnifiedMcpServer(adapters=[])
-        _handshake(server, "2025-11-25")
+        _handshake(server, "2026-07-28")
         client = asyncio.run(server._health_check())["client"]
         assert client["protocol_skew"] is True
-        assert client["protocol_requested"] == "2025-11-25"
+        assert client["protocol_requested"] == "2026-07-28"
         assert client["protocol_negotiated"] == _NEWEST
 
     def test_an_echoed_revision_is_not_skew(self) -> None:
