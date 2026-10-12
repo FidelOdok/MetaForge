@@ -97,8 +97,10 @@ async def _initialize(client: httpx.AsyncClient, url: str) -> str:
             },
         },
     )
-    # FORGE-416: a client ahead of us is answered with our newest revision.
-    assert response.json()["result"]["protocolVersion"] == ELICITATION_PROTOCOL_VERSION
+    # FORGE-599: Claude Code's revision is one we speak, so it is echoed
+    # (it was answered with our newest, 2025-06-18, under FORGE-416).
+    negotiated = response.json()["result"]["protocolVersion"]
+    assert negotiated == "2025-11-25" >= ELICITATION_PROTOCOL_VERSION
     return str(response.headers["Mcp-Session-Id"])
 
 
