@@ -191,8 +191,9 @@ rebinding defeats: a page re-points its own name at this machine, and its
 #### Protocol revisions (FORGE-599)
 
 The server speaks the handshake revisions `2024-11-05`, `2025-06-18` and
-`2025-11-25`. `initialize` echoes the revision a client asks for when it is
-one of these; a client ahead of us gets `2025-11-25`. The list lives in
+`2025-11-25`, and the handshake-free revision `2026-07-28` (FORGE-592).
+`initialize` echoes the handshake revision a client asks for when it is one
+of these; a client ahead of us gets `2025-11-25`. The lists live in
 `mcp_core/protocol_versions.py`.
 
 Revision `2026-07-28` drops the handshake: each request names its revision
@@ -210,13 +211,13 @@ same endpoint:
   A header with no `_meta` revision (a `2025-06-18` client) is not a
   mismatch.
 
-`2026-07-28` is served only when `METAFORGE_MCP_MODERN_PREVIEW=on` is set
-on the sidecar (FORGE-600); otherwise a client asking for it gets the error
-above. It becomes the default once questions can be returned inside results
-(MRTR, FORGE-601).
+`2026-07-28` is served by default. `METAFORGE_MCP_MODERN=off` on the
+sidecar stops serving it (a rollback switch); a client asking for it then
+gets the error above and a dual-era client falls back to the handshake. The
+FORGE-600 preview switch, `METAFORGE_MCP_MODERN_PREVIEW`, no longer changes
+anything.
 
-With the preview on, a `2026-07-28` request is served on its own, without a
-session:
+A `2026-07-28` request is served on its own, without a session:
 
 - `params._meta` must carry `io.modelcontextprotocol/protocolVersion` and
   `io.modelcontextprotocol/clientCapabilities`; a request without the

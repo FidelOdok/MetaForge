@@ -1,7 +1,6 @@
 """Handshake-free (2026-07-28) requests: discover, resultType, headers (FORGE-600).
 
-Served only with the preview switched on (``METAFORGE_MCP_MODERN_PREVIEW``)
-until MRTR lands (FORGE-601); every test here turns it on.
+Served by default since FORGE-592; ``METAFORGE_MCP_MODERN=off`` turns it off.
 """
 
 from __future__ import annotations
@@ -61,10 +60,14 @@ class TestTheSwitch:
         assert is_modern(MODERN)
         assert MODERN in supported_versions()
 
-    def test_without_it_the_revision_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv(MODERN_PREVIEW_ENV)
+    def test_the_switch_turns_it_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("METAFORGE_MCP_MODERN", "off")
         response = _call(UnifiedMcpServer(adapters=[]), "tools/list", {"_meta": _meta()})
         assert response["error"]["code"] == -32022
+
+    def test_the_old_preview_switch_changes_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(MODERN_PREVIEW_ENV, raising=False)
+        assert is_modern(MODERN)
 
 
 class TestDiscover:

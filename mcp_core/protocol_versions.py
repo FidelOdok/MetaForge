@@ -15,13 +15,12 @@ This server is dual-era by design: an ``initialize`` request selects the
 legacy path exactly as before, and a request carrying a version in its
 ``_meta`` is checked against :data:`SUPPORTED_PROTOCOL_VERSIONS`.
 
-:data:`MODERN_PROTOCOL_VERSIONS` is empty on purpose. Serving 2026-07-28
-needs ``resultType`` on every result and ``server/discover`` (FORGE-600), and
-input requests in results instead of server-initiated ``elicitation/create``
-(FORGE-601). Listing the revision before those land would tell a modern
-client we follow rules we do not. Until then a modern request gets the
-spec's own error naming the versions that do work, which a dual-era client
-reads as "use one of these".
+2026-07-28 is served by default (FORGE-592): ``server/discover`` and
+``resultType`` (FORGE-600), questions returned inside results (FORGE-601),
+session handles (FORGE-602) and ``subscriptions/listen`` (FORGE-603) are all
+in place. ``METAFORGE_MCP_MODERN=off`` stops serving it, for a rollback; a
+modern request then gets the spec's own error naming the versions that do
+work, which a dual-era client reads as "use one of these".
 
 Layer-1 module: stdlib only.
 """
@@ -54,6 +53,7 @@ __all__ = [
     "subscription_ack",
     "subscription_problem",
     "MODERN_PREVIEW_VERSION",
+    "MODERN_SWITCH_ENV",
     "LEGACY_PROTOCOL_VERSIONS",
     "META_PROTOCOL_VERSION",
     "MODERN_PROTOCOL_VERSIONS",
@@ -82,27 +82,28 @@ __all__ = [
 #: never sent a form (``mcp_core.elicitation.declares_form_elicitation``).
 LEGACY_PROTOCOL_VERSIONS: tuple[str, ...] = ("2024-11-05", "2025-06-18", "2025-11-25")
 
-#: Handshake-free revisions served per request by default. Empty until
-#: FORGE-601 lands (see the module docstring); 2026-07-28 goes here then.
-MODERN_PROTOCOL_VERSIONS: tuple[str, ...] = ()
+#: Handshake-free revisions served per request.
+MODERN_PROTOCOL_VERSIONS: tuple[str, ...] = ("2026-07-28",)
 
-#: FORGE-600: everything a 2026-07-28 request needs is served except
-#: questions returned inside results (MRTR, FORGE-601), so it can be switched
-#: on ahead of that to try it. With it on, a held write from such a client
-#: waits in the dashboard rather than being asked in its chat.
+#: ``off`` stops serving the handshake-free revisions (a rollback switch).
+MODERN_SWITCH_ENV = "METAFORGE_MCP_MODERN"
+
+#: The FORGE-600 preview switch. 2026-07-28 is now on by default, so it no
+#: longer changes anything; kept so a deployment that still sets it is not
+#: an error.
 MODERN_PREVIEW_ENV = "METAFORGE_MCP_MODERN_PREVIEW"
 MODERN_PREVIEW_VERSION = "2026-07-28"
 
-#: The defaults, without the preview. ``supported_versions()`` is what a
-#: request is checked against.
+#: Every revision this server can serve. ``supported_versions()`` is what a
+#: request is checked against (it honours the switch).
 SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = LEGACY_PROTOCOL_VERSIONS + MODERN_PROTOCOL_VERSIONS
 
 
 def modern_versions() -> tuple[str, ...]:
-    """Handshake-free revisions served now, the preview included when on."""
-    preview = os.environ.get(MODERN_PREVIEW_ENV, "").strip().lower() in {"1", "on", "true", "yes"}
-    if preview and MODERN_PREVIEW_VERSION not in MODERN_PROTOCOL_VERSIONS:
-        return (*MODERN_PROTOCOL_VERSIONS, MODERN_PREVIEW_VERSION)
+    """Handshake-free revisions served now; none when switched off."""
+    switch = os.environ.get(MODERN_SWITCH_ENV, "").strip().lower()
+    if switch in {"0", "off", "false", "no"}:
+        return ()
     return MODERN_PROTOCOL_VERSIONS
 
 
