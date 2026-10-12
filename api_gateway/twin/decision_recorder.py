@@ -127,11 +127,22 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         supersedes: str | None = None,
         domain: str = "systems",
         depends_on: list[str] | None = None,
+        manufacturing_route: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
         from twin_core.models.enums import WorkProductType
         from twin_core.models.work_product import WorkProduct
 
+        route_decision = None
+        if manufacturing_route is not None:
+            # FORGE-608: what the route-selection gate reads. Checked here so a
+            # decision that names no route is refused, not stored and ignored.
+            from orchestrator.design_flow.context import parse_route_decision
+
+            try:
+                route_decision = parse_route_decision(manufacturing_route)
+            except ValueError as exc:
+                raise ValueError(f"twin.record_decision: {exc}") from exc
         try:
             relation_edge = EdgeType(relation)
         except ValueError as exc:
@@ -247,6 +258,8 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["parent_refs"] = [str(p) for p in resolved_parent_ids]
             if resolved_evidence_ids:
                 metadata["evidence_refs"] = [str(e) for e in resolved_evidence_ids]
+            if route_decision is not None:
+                metadata["manufacturing_route"] = route_decision.as_metadata()
             metadata.update(pin_metadata(pins))
             if pins:
                 # FORGE-528's list of refs, now every pin (one depends_on).

@@ -1220,6 +1220,23 @@ class TwinServer(McpToolServer):
                                 "marks this decision stale."
                             ),
                         },
+                        "manufacturing_route": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-608: on the manufacturing route decision, what was "
+                                "decided. Either route ('in_house' or 'vendor') with process "
+                                "and material_class, or deferred: true with a reason. The "
+                                "route-selection gate reads this; without it the gate is not "
+                                "ready."
+                            ),
+                            "properties": {
+                                "route": {"type": "string", "enum": ["in_house", "vendor"]},
+                                "process": {"type": "string"},
+                                "material_class": {"type": "string"},
+                                "deferred": {"type": "boolean"},
+                                "reason": {"type": "string"},
+                            },
+                        },
                         "project_id": {"type": "string", "description": "Project UUID to link."},
                         "session_id": {"type": "string", "description": "Originating session id."},
                         "supersedes": {
@@ -1282,6 +1299,11 @@ class TwinServer(McpToolServer):
         depends_on = _string_list(arguments.get("depends_on"), "twin.record_decision")
         if depends_on:
             kwargs["depends_on"] = depends_on
+        route = arguments.get("manufacturing_route")
+        if route is not None:
+            if not isinstance(route, dict):
+                raise ValueError("twin.record_decision: 'manufacturing_route' must be an object")
+            kwargs["manufacturing_route"] = route
         return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------

@@ -26,7 +26,9 @@ from typing import Protocol, runtime_checkable
 import structlog
 
 from observability.tracing import get_tracer
+from orchestrator.design_flow.context import route_decision_gap
 from orchestrator.design_flow.failures import classify_failure
+from orchestrator.design_flow.generator import ROUTE_SELECTION_PHASE_ID
 from orchestrator.design_flow.graph import (
     FlowGraph,
     build_graph,
@@ -827,6 +829,15 @@ class DesignFlowExecutor:
             logger.warning("design_flow_readiness_error", phase=phase.id, error=str(exc))
             return ReadinessReport(ready=True, checked=False)
         missing = sorted(required - present)
+        if phase.id == ROUTE_SELECTION_PHASE_ID and hasattr(self._evaluator, "route_decision"):
+            # FORGE-608: same rule as the Temporal engine's gate check.
+            try:
+                gap = route_decision_gap(await self._evaluator.route_decision(ctx.project_id))
+            except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+                logger.warning("design_flow_route_decision_error", error=str(exc))
+                gap = None
+            if gap is not None:
+                missing.append(gap)
         return ReadinessReport(
             ready=not missing,
             present=sorted(required & present),
