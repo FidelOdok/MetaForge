@@ -162,6 +162,32 @@ that is not held keeps its JSON response, so clients that never open
 rules and outcomes are in
 [Over HTTP: which stream carries the question](capability-matrix.md#over-http-which-stream-carries-the-question).
 
+#### Browser origins (FORGE-604)
+
+Every request to `/mcp` (POST, GET and DELETE) and `/mcp/sse` has its
+`Origin` header checked, as the Streamable HTTP transport requires. A
+request whose origin is not allowed gets `403` with a JSON-RPC error
+(`-32600`, "Origin not allowed", no `id`), a `mcp_origin_rejected` log line
+naming the origin, and a count on `metaforge_mcp_origin_rejected_total`,
+which the `McpOriginRejected` alert watches.
+
+Allowed:
+
+- requests with no `Origin` at all. Only browsers send one, so Claude Code,
+  Codex, the design-flow worker and other servers are unaffected;
+- loopback origins (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`), any
+  port;
+- `https://claude.ai` and `https://claude.com`, for the web connector;
+- this server's public origin, when `METAFORGE_OAUTH_ISSUER` names it;
+- anything listed in `METAFORGE_MCP_ALLOWED_ORIGINS` (comma separated, for
+  example `https://ui.example.com:8443`). `*` turns the check off and the
+  server logs that at start-up.
+
+The origin is not compared with the `Host` header. That is the check DNS
+rebinding defeats: a page re-points its own name at this machine, and its
+`Origin` and the request's `Host` then agree. `/health`, the OAuth pages and
+`/.well-known/*` are not checked.
+
 #### Protocol revisions (FORGE-599)
 
 The server speaks the handshake revisions `2024-11-05`, `2025-06-18` and

@@ -742,6 +742,14 @@ class MetricsRegistry:
     #: do about it. A spike in `approval_timed_out` needs a reviewer, in
     #: `adapter_unavailable` a container, in `tool_not_found` a client
     #: that is calling a tool this build does not have.
+    MCP_ORIGIN_REJECTED_TOTAL = MetricDefinition(
+        name="metaforge_mcp_origin_rejected_total",
+        type="counter",
+        description=(
+            "MCP HTTP requests refused because their Origin is not on the allow-list (FORGE-604)"
+        ),
+        labels=[],
+    )
     MCP_ERROR_TOTAL = MetricDefinition(
         name="metaforge_mcp_error_total",
         type="counter",
@@ -830,6 +838,7 @@ class MetricsRegistry:
             cls.MCP_ERROR_TOTAL,
             cls.MCP_ADAPTER_PROBE_TOTAL,
             cls.MCP_CODE_VERSION_CHECK_TOTAL,
+            cls.MCP_ORIGIN_REJECTED_TOTAL,
         ]
 
     @classmethod
@@ -1553,6 +1562,12 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.CLIENT_TASK_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"event": event})
+
+    def record_mcp_origin_rejected(self) -> None:
+        """One MCP HTTP request refused for its Origin (FORGE-604)."""
+        counter = self._instruments.get(MetricsRegistry.MCP_ORIGIN_REJECTED_TOTAL.name)
+        if counter is not None:
+            counter.add(1)
 
     def record_mcp_error(self, tool_id: str, error_class: str, client: str = "unknown") -> None:
         """Record one MCP error, classified."""

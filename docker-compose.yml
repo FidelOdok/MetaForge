@@ -553,6 +553,11 @@ services:
       # the public tunnel hostname (else derived from forwarded headers).
       - METAFORGE_OAUTH_LOGIN_SECRET=${METAFORGE_OAUTH_LOGIN_SECRET:-}
       - METAFORGE_OAUTH_ISSUER=${METAFORGE_OAUTH_ISSUER:-}
+      # FORGE-604: extra browser origins allowed to call /mcp, comma
+      # separated. Loopback, claude.ai/claude.com and the issuer are always
+      # allowed and requests without an Origin are unaffected; "*" turns the
+      # check off.
+      - METAFORGE_MCP_ALLOWED_ORIGINS=${METAFORGE_MCP_ALLOWED_ORIGINS:-}
     volumes:
       # Read-write (MET-618 follow-up): twin.stage_work_product_file and
       # MET-612's boolean-cut staging both write into this shared workspace

@@ -68,6 +68,7 @@ from metaforge.mcp.http_elicitation import (
     session_uuid,
 )
 from metaforge.mcp.oauth import OAuthError, OAuthProvider
+from metaforge.mcp.origin import OriginPolicy
 from metaforge.mcp.server import UnifiedMcpServer, build_unified_server
 from observability.metrics import collector_for
 
@@ -629,6 +630,35 @@ def build_http_app(
             "as server-sent events when ``--transport sse`` is enabled."
         ),
     )
+
+    # FORGE-604: refuse a browser request whose Origin is not ours, so a page
+    # that re-points its own name at this host (DNS rebinding) cannot drive
+    # the tools. Only the MCP routes: /health is probed by orchestrators and
+    # the OAuth pages are this server's own.
+    origin_policy = OriginPolicy.from_env(issuer=oauth.config.issuer if oauth else None)
+
+    @app.middleware("http")
+    async def _check_origin(request: Request, call_next: Any) -> Any:
+        if request.url.path == "/mcp" or request.url.path.startswith("/mcp/"):
+            origin = request.headers.get("origin")
+            if not origin_policy.allows(origin):
+                logger.warning(
+                    "mcp_origin_rejected",
+                    origin=(origin or "")[:200],
+                    path=request.url.path,
+                    method=request.method,
+                )
+                metrics = getattr(server, "_metrics", None)
+                if metrics is not None:
+                    metrics.record_mcp_origin_rejected()
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "error": {"code": -32600, "message": "Origin not allowed"},
+                    },
+                    status_code=403,
+                )
+        return await call_next(request)
 
     def _issuer_for(request: Request) -> str:
         """Public base URL of this server.
