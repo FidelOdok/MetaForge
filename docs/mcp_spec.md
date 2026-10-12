@@ -274,6 +274,24 @@ for is supported), then closes the subscription gracefully with a
 as one `text/event-stream` response; on stdio the acknowledgement is written
 first. A malformed filter is `-32602`.
 
+#### Error codes for `2026-07-28` (FORGE-607)
+
+`2026-07-28` marks `-32000` to `-32019` as legacy, and this server's own
+codes all sit there: tool execution `-32001`, unavailable `-32003`, read
+error `-32005`, timeout `-32006`, auth `-32007`. A `2026-07-28` caller never
+gets them:
+
+- A `tools/call` refused that way (a held write rejected or with no gate, a
+  tool that failed, the approval ledger down) is a normal result with
+  `isError: true`, as the spec recommends for a tool failure. The reason is
+  the result text, which is what a model reads, and the code and details
+  are in `_meta["com.metaforge/error"]` (`code`, `legacyCode`, `data`).
+- Any other method's code moves out of the reserved range by 1000
+  (`-32001` becomes `-31001`), with the original in `error.data.legacyCode`.
+- Resource not found is still `-32602`.
+
+Handshake clients keep the codes in the table above.
+
 #### Questions returned inside results (FORGE-601)
 
 For a `2026-07-28` `tools/call`, `prompts/get` or `resources/read` that
