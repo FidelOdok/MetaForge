@@ -35,8 +35,12 @@ __all__ = [
     "FlowContext",
     "ManufacturingContext",
     "ManufacturingRoute",
+    "ROUTE_DECISION_MISSING",
+    "RouteDecision",
     "TargetMaturity",
     "missing_inputs",
+    "parse_route_decision",
+    "route_decision_gap",
 ]
 
 #: The most product-specific questions a model may add to the required ones.
@@ -304,3 +308,76 @@ def missing_inputs(context: FlowContext) -> list[ClarifyingQuestion]:
     if questions:
         logger.info("flow_context_incomplete", missing=[q.id for q in questions])
     return questions
+
+
+# ── The route decision (FORGE-608) ────────────────────────────────────────
+#
+# An undecided route adds a route-selection phase (``generator``). Its gate
+# used to pass on any decision at all, so "route NOT SELECTED (deferred)" got
+# through and the design went ahead on assumed materials with nothing saying
+# so. The decision now carries a typed ``manufacturing_route``, and the gate
+# reads it: a chosen route, process and material class, or a deferral the
+# person accepts by approving the gate with its reason in front of them.
+
+#: What the gate lists as missing when no usable route decision is recorded.
+ROUTE_DECISION_MISSING = (
+    "manufacturing_route decision (record-decision with manufacturing_route: "
+    "route in_house or vendor, process and material_class; or deferred with a reason)"
+)
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    """A manufacturing route decision, as recorded on a design decision."""
+
+    route: str | None = None
+    process: str = ""
+    material_class: str = ""
+    deferred: bool = False
+    reason: str = ""
+
+    def as_metadata(self) -> dict[str, object]:
+        if self.deferred:
+            return {"deferred": True, "reason": self.reason}
+        return {"route": self.route, "process": self.process, "material_class": self.material_class}
+
+    def summary(self) -> str:
+        if self.deferred:
+            return f"route DEFERRED: {self.reason}"
+        return f"route {self.route}, process {self.process}, material {self.material_class}"
+
+
+def _text(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def parse_route_decision(value: object) -> RouteDecision:
+    """A ``manufacturing_route`` value checked; raises ``ValueError`` saying why.
+
+    Either a route (``in_house`` or ``vendor``, not ``undecided``: deciding is
+    the point) with a process and a material class, or ``deferred: true`` with
+    a reason. A deferral is a decision too, but only with its reason stated.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("manufacturing_route must be an object")
+    if value.get("deferred") is True:
+        reason = _text(value.get("reason"))
+        if not reason:
+            raise ValueError("a deferred manufacturing_route needs a reason")
+        return RouteDecision(deferred=True, reason=reason)
+    route = _text(value.get("route"))
+    if route not in (ManufacturingRoute.IN_HOUSE.value, ManufacturingRoute.VENDOR.value):
+        raise ValueError(
+            "manufacturing_route.route must be 'in_house' or 'vendor' "
+            "(or set deferred: true with a reason)"
+        )
+    process = _text(value.get("process"))
+    material = _text(value.get("material_class"))
+    if not process or not material:
+        raise ValueError("manufacturing_route needs process and material_class")
+    return RouteDecision(route=route, process=process, material_class=material)
+
+
+def route_decision_gap(decision: RouteDecision | None) -> str | None:
+    """What the route-selection gate is missing, or None when it may pass."""
+    return ROUTE_DECISION_MISSING if decision is None else None

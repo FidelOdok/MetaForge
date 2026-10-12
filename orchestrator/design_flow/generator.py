@@ -146,7 +146,11 @@ def _route_selection_phase() -> Phase:
             "and stock each route offers, lead time, cost at the stated quantity, and what "
             "each route constrains in the design. Record the selected route, the process "
             "and the material as a decision (record-decision tool) with the alternatives "
-            "considered, scoped to the project."
+            "considered, scoped to the project, and pass manufacturing_route with route "
+            "('in_house' or 'vendor'), process and material_class. If the person cannot "
+            "decide yet, pass manufacturing_route with deferred: true and their reason; "
+            "the gate shows the deferral and approving it accepts it. A decision without "
+            "manufacturing_route leaves the gate not ready."
         ),
         expected_artifacts=("design_decision",),
         required_deliverables=("design_decision",),

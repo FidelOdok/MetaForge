@@ -171,6 +171,49 @@ class ProjectGateEvaluator:
         )
         return present
 
+    async def route_decision(self, project_id: str | None) -> Any:
+        """The project's latest usable manufacturing route decision (FORGE-608).
+
+        The newest ``design_decision`` whose metadata carries a valid
+        ``manufacturing_route``, or ``None``. A decision without one (a
+        free-text "route NOT SELECTED") does not count: that is the case the
+        route-selection gate exists to stop.
+        """
+        from orchestrator.design_flow.context import parse_route_decision
+
+        getter = getattr(self._twin, "get_work_product", None)
+        if not project_id or getter is None:
+            return None
+        project = await self._backend.get_project(project_id)
+        if project is None:
+            return None
+        decisions = [
+            wp
+            for wp in project.work_products
+            if str(getattr(getattr(wp, "type", None), "value", getattr(wp, "type", None)))
+            == "design_decision"
+        ]
+        decisions.sort(key=lambda wp: _to_epoch(getattr(wp, "updated_at", None)) or 0.0)
+        for wp in reversed(decisions):
+            try:
+                node = await getter(UUID(str(getattr(wp, "id", ""))))
+            except Exception as exc:  # noqa: BLE001 - one unreadable node must not crash a gate
+                logger.warning("gate_eval_route_decision_read_failed", error=str(exc))
+                continue
+            route = dict(getattr(node, "metadata", None) or {}).get("manufacturing_route")
+            if route is None:
+                continue
+            try:
+                decision = parse_route_decision(route)
+            except ValueError:
+                continue
+            logger.info(
+                "gate_eval_route_decision", project_id=project_id, decision=decision.summary()
+            )
+            return decision
+        logger.info("gate_eval_route_decision_missing", project_id=project_id)
+        return None
+
 
 class TwinConstraintChecker:
     """`ConstraintChecker` backed by the twin's constraint engine (MET-583).

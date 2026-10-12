@@ -471,6 +471,26 @@ of the first geometry phase, rather than letting the generator pick a route.
 That operation (`add_route_selection`) is server-only: a model cannot add
 phases.
 
+**The route gate needs a decision, not a deferral by default (FORGE-608).**
+The phase's decision is recorded with `twin.record_decision` and a typed
+`manufacturing_route`: either `route` (`in_house` or `vendor`) with
+`process` and `material_class`, or `deferred: true` with a `reason`. The
+recorder refuses anything else, `route: undecided` included. The gate (both
+engines) reads the project's latest decision that carries one:
+
+- none at all, or only free-text decisions: the gate is not ready, and its
+  missing list names the `manufacturing_route` decision. Approve is not
+  offered;
+- a chosen route: ready, and the gate summary names the route, process and
+  material;
+- a deferral: ready, and the gate summary says `route DEFERRED: <reason>
+  (approving accepts the deferral)`, so accepting it is the person's explicit
+  choice.
+
+This closed the gap the Table run showed: its route phase recorded "route
+NOT SELECTED (deferred)" as prose, the gate passed, and the design went ahead
+on assumed materials without the gate saying so.
+
 A successful proposal (`201`, `status: "proposed"`) keeps every existing
 field and adds `requirementsPending` (true when no requirements were sent),
 `assumptions` (including an explicit "requirements pending" line) and

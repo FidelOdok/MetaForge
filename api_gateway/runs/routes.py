@@ -531,6 +531,10 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
     return HybridBrain(handlers=handlers, fallback=react, run_id=run_id)
 
 
+from orchestrator.design_flow.context import route_decision_gap  # noqa: E402
+from orchestrator.design_flow.generator import ROUTE_SELECTION_PHASE_ID  # noqa: E402
+
+
 class _GateCheckers:
     """The three gate evaluations, in one place for both engines."""
 
@@ -552,8 +556,10 @@ class _GateCheckers:
         # (FORGE-484). Read both shapes.
         if isinstance(phase, dict):
             required = list(phase.get("required_deliverables") or [])
+            phase_id = str(phase.get("id") or "")
         else:
             required = list(getattr(phase, "required_deliverables", []) or [])
+            phase_id = str(getattr(phase, "id", "") or "")
         # ``since_ts=0`` asks "what has this project ever recorded", which is
         # the right question for a durable engine: the phase that produced the
         # deliverable may have run in a different process, hours earlier and
@@ -561,6 +567,18 @@ class _GateCheckers:
         # would miss it.
         present = await self._evaluator.present_types(project_id, 0.0)
         missing = [d for d in required if d not in present]
+        route_note = ""
+        if phase_id == ROUTE_SELECTION_PHASE_ID and hasattr(self._evaluator, "route_decision"):
+            # FORGE-608: the route gate needs a route, or a deferral the
+            # person accepts by approving with its reason in front of them.
+            decision = await self._evaluator.route_decision(project_id)
+            gap = route_decision_gap(decision)
+            if gap is not None:
+                missing.append(gap)
+            elif decision is not None and decision.deferred:
+                route_note = f"; {decision.summary()} (approving accepts the deferral)"
+            else:
+                route_note = f"; {decision.summary()}"
 
         constraints = await self._constraints.check(project_id)
         return GateCheck(
@@ -575,6 +593,7 @@ class _GateCheckers:
                 f"{len(present)} deliverable type(s) recorded; "
                 f"{len(constraints.violations)} constraint violation(s)"
                 + ("" if constraints.checked else " (constraints not evaluated)")
+                + route_note
                 # FORGE-524: listed for the reviewer, never a reason to block.
                 + (
                     f"; {len(constraints.undeclared_items)} undeclared item(s): "
