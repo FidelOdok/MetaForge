@@ -856,6 +856,14 @@ The Projects API surface (`/v1/projects`). `list` prints a table of id / name /
 status / work-product count (`--status` filters, e.g. to find `draft` projects to
 clean up); `delete` asks for confirmation unless `--yes` is passed.
 
+A project's status (FORGE-606):
+
+| Status | Meaning | Set by |
+|---|---|---|
+| `draft` | Created, no run started on it yet | creation |
+| `active` | Work has started | the first design-flow run started on it; at gateway start-up any `draft` project that already has a run is moved here once |
+| `archived` | Shelved | a person only (`PATCH /v1/projects/{id}`); a later run does not revive it |
+
 ### `runs` — drive harness runs directly
 
 ```

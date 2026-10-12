@@ -168,28 +168,27 @@ def init_run_store(store: InMemoryRunStore) -> None:
     _store = store
 
 
-_RESUMABLE_STATUSES = {
-    RunStatus.QUEUED.value,
-    RunStatus.RUNNING.value,
-    RunStatus.AWAITING_APPROVAL.value,
-}
-
-
 def init_run_ledger(ledger: SqliteRunLedger | None) -> None:
     """Wire a durable ledger so run transitions survive a process restart,
-    and rehydrate any non-terminal runs it already has on record.
+    and rehydrate every run it already has on record.
 
     ``None`` (the default) keeps every existing test's process-local-only
     behavior unchanged. A restored run's ``history`` is a single-element
     placeholder (the ledger persists run state, not the event trace) — an
     accepted degradation, since resume/gate logic keys off ``status``.
+
+    FORGE-605: finished runs (completed, failed, rejected) are restored too.
+    Only the resumable ones used to be, so every restart emptied the runs list
+    of finished work although the ledger still held it. A finished run is
+    history: the reconcile loop and the reaper both skip terminal runs, so
+    restoring one starts nothing.
     """
     global _ledger
     _ledger = ledger
     if ledger is None:
         return
     restored = 0
-    for row in ledger.list_runs(statuses=_RESUMABLE_STATUSES):
+    for row in ledger.list_runs():
         status = RunStatus(row["status"])
         _store.restore(
             Run(
@@ -205,6 +204,58 @@ def init_run_ledger(ledger: SqliteRunLedger | None) -> None:
         )
         restored += 1
     logger.info("run_ledger_wired", restored=restored)
+
+
+async def _activate_run_project(run: Run) -> None:
+    """Mark a run's project active when it is still a draft (FORGE-606).
+
+    A project was created ``draft`` and nothing ever moved it on, so every
+    project showed DRAFT however much work it held. Starting a run on it is
+    the point at which a project is being worked on. An ``archived`` project
+    is left alone: archiving is a person's decision. Best effort: a project
+    store that cannot be reached must not fail the run.
+    """
+    project_id = str(run.request.get("project_id") or "")
+    if not project_id:
+        return
+    try:
+        from api_gateway.projects.routes import get_project_backend
+
+        backend = get_project_backend()
+        project = await backend.get_project(project_id)
+        if project is None or project.status != "draft":
+            return
+        await backend.update_project(project_id, status="active")
+        logger.info("project_activated", project_id=project_id, run_id=run.id)
+    except Exception as exc:  # noqa: BLE001 - status is a label; the run goes on
+        logger.warning("project_activate_failed", project_id=project_id, error=str(exc))
+
+
+async def activate_projects_with_runs() -> int:
+    """Activate every draft project that already has a run (FORGE-606 backfill).
+
+    Projects that had runs before this existed are still ``draft``; one pass at
+    start-up puts them right. Returns how many it activated.
+    """
+    seen: set[str] = set()
+    activated = 0
+    for run in list(_store.list()):
+        project_id = str(run.request.get("project_id") or "")
+        if not project_id or project_id in seen:
+            continue
+        seen.add(project_id)
+        try:
+            from api_gateway.projects.routes import get_project_backend
+
+            project = await get_project_backend().get_project(project_id)
+        except Exception as exc:  # noqa: BLE001 - a backfill must not stop start-up
+            logger.warning("project_backfill_read_failed", project_id=project_id, error=str(exc))
+            continue
+        if project is not None and project.status == "draft":
+            await _activate_run_project(run)
+            activated += 1
+    logger.info("project_activation_backfill", activated=activated, projects=len(seen))
+    return activated
 
 
 #: How long a read waits for the workflow to answer a state query. A query is
@@ -891,6 +942,7 @@ async def create_run(body: CreateRunRequest) -> RunResponse:
             except KeyError as exc:
                 _store.delete(run.id)
                 raise HTTPException(status_code=400, detail=str(exc.args[0])) from exc
+        await _activate_run_project(run)
         logger.info(
             "run_api_created",
             run_id=run.id,

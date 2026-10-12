@@ -1913,6 +1913,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     reconcile_task = asyncio.create_task(run_reconcile_loop())
     app.state.run_reconcile_task = reconcile_task
+    # FORGE-606: projects that had runs before "active" was ever set.
+    from api_gateway.runs.routes import activate_projects_with_runs
+
+    app.state.project_backfill_task = asyncio.create_task(activate_projects_with_runs())
     # FORGE-594: create the KB bucket with versioning on. In the background,
     # retried, and alarmed on failure; it never holds up start-up.
     from api_gateway.knowledge.storage_init import ensure_kb_storage
