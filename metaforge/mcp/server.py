@@ -86,11 +86,20 @@ from mcp_core.protocol import (
     TOOL_EXECUTION_ERROR,
 )
 from mcp_core.protocol_versions import (
+    CACHE_HINTS,
     LEGACY_PROTOCOL_VERSIONS,
-    SUPPORTED_PROTOCOL_VERSIONS,
+    META_CLIENT_CAPABILITIES,
+    META_CLIENT_INFO,
+    META_SERVER_INFO,
     UNSUPPORTED_PROTOCOL_VERSION,
+    ModernRequest,
+    current_modern_request,
+    is_modern,
+    modern_meta_problem,
     request_protocol_version,
+    supported_versions,
     unsupported_version_data,
+    with_modern_request,
 )
 from mcp_core.resources import ResourceUriError, parse_resource_uri
 from mcp_core.service_auth import (
@@ -674,6 +683,12 @@ class UnifiedMcpServer:
         # with no stream and then have nowhere to ask, which is worse than
         # never choosing it: a write would hang to its timeout and come back
         # TIMED_OUT instead of waiting in a queue somebody can see.
+        # FORGE-600: a handshake-free (2026-07-28) request is never sent a
+        # question. That revision forbids server-initiated requests; it asks
+        # inside the result instead (MRTR, FORGE-601). Until then such a
+        # client's held write waits in the dashboard.
+        if current_modern_request() is not None:
+            return False
         available = getattr(self._elicitor, "available", None)
         if callable(available):
             return bool(available())
@@ -733,19 +748,24 @@ class UnifiedMcpServer:
         if (
             method != "initialize"
             and requested_version is not None
-            and requested_version not in SUPPORTED_PROTOCOL_VERSIONS
+            and current_modern_request() is None
         ):
-            logger.info(
-                "mcp_protocol_version_unsupported", method=method, requested=requested_version
-            )
-            return json.dumps(
-                make_error(
-                    request_id,
-                    UNSUPPORTED_PROTOCOL_VERSION,
-                    "Unsupported protocol version",
-                    unsupported_version_data(requested_version),
+            if requested_version not in supported_versions():
+                logger.info(
+                    "mcp_protocol_version_unsupported", method=method, requested=requested_version
                 )
-            )
+                return json.dumps(
+                    make_error(
+                        request_id,
+                        UNSUPPORTED_PROTOCOL_VERSION,
+                        "Unsupported protocol version",
+                        unsupported_version_data(requested_version),
+                    )
+                )
+            if is_modern(requested_version):
+                return await self._handle_modern(
+                    raw_message, request_id, method, params, requested_version
+                )
 
         with tracer.start_as_current_span("unified_mcp.handle_request") as span:
             span.set_attribute("rpc.method", method)
@@ -1134,29 +1154,115 @@ class UnifiedMcpServer:
         )
         return {
             "protocolVersion": self._negotiated_protocol,
-            "capabilities": {
-                # ``listChanged`` would let us push notifications when
-                # the tool set mutates at runtime. Our adapters are
-                # static after bootstrap, so we don't advertise it.
-                "tools": {},
-                # FORGE-355: adapters have been registering resources since
-                # MET-384 (the knowledge adapter publishes several), but the
-                # unified server never routed resources/* and never said it
-                # could — so a spec-compliant client had no way to reach
-                # them, and no way to find out they existed.
-                "resources": {},
-                # FORGE-340: the curated workflows, available to every
-                # spec-compliant client rather than only to harnesses with
-                # their own command surface.
-                "prompts": {},
-            },
-            "serverInfo": {
-                "name": "metaforge-mcp",
-                "version": self._version,
-            },
+            "capabilities": self._server_capabilities(),
+            "serverInfo": self._server_info(),
             # MET-503: usage guidance every client receives on connect.
             "instructions": _SERVER_INSTRUCTIONS,
         }
+
+    def _server_info(self) -> dict[str, Any]:
+        return {"name": "metaforge-mcp", "version": self._version}
+
+    @staticmethod
+    def _server_capabilities() -> dict[str, Any]:
+        """What this server offers, the same on both eras (FORGE-600)."""
+        return {
+            # ``listChanged`` would let us push notifications when
+            # the tool set mutates at runtime. Our adapters are
+            # static after bootstrap, so we don't advertise it.
+            "tools": {},
+            # FORGE-355: adapters have been registering resources since
+            # MET-384 (the knowledge adapter publishes several), but the
+            # unified server never routed resources/* and never said it
+            # could — so a spec-compliant client had no way to reach
+            # them, and no way to find out they existed.
+            "resources": {},
+            # FORGE-340: the curated workflows, available to every
+            # spec-compliant client rather than only to harnesses with
+            # their own command surface.
+            "prompts": {},
+        }
+
+    # ------------------------------------------------------------------
+    # Handshake-free requests (2026-07-28, FORGE-600)
+    # ------------------------------------------------------------------
+
+    async def _handle_modern(
+        self,
+        raw_message: str,
+        request_id: Any,
+        method: str,
+        params: dict[str, Any],
+        version: str,
+    ) -> str:
+        """Serve one handshake-free request.
+
+        Everything about the client comes with this request: its revision and
+        capabilities are held for this request only (``with_modern_request``),
+        never written to the server's copy, which belongs to whichever
+        handshake client connected last. The method runs through the same
+        dispatch as a handshake request; the answer is then put in the shape
+        2026-07-28 requires (``_modernise``).
+        """
+        problem = modern_meta_problem(params)
+        if problem is not None:
+            logger.info("mcp_modern_request_malformed", method=method, problem=problem)
+            return json.dumps(make_error(request_id, INVALID_PARAMS, problem))
+        meta = params["_meta"]
+        request = ModernRequest(
+            version=version, client_capabilities=dict(meta[META_CLIENT_CAPABILITIES])
+        )
+        client = meta.get(META_CLIENT_INFO)
+        with tracer.start_as_current_span("unified_mcp.modern_request") as span:
+            span.set_attribute("rpc.method", method)
+            span.set_attribute("mcp.protocol_version", version)
+            with with_modern_request(request):
+                if method == "server/discover":
+                    response: dict[str, Any] = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": self._discover(),
+                    }
+                else:
+                    response = json.loads(await self.handle_request(raw_message))
+        logger.info(
+            "mcp_modern_request",
+            method=method,
+            version=version,
+            client=(client or {}).get("name") if isinstance(client, dict) else None,
+            ok="result" in response,
+        )
+        return json.dumps(self._modernise(response, method))
+
+    def _discover(self) -> dict[str, Any]:
+        """``server/discover``: versions, capabilities and identity in one answer."""
+        return {
+            "supportedVersions": sorted(supported_versions(), reverse=True),
+            "capabilities": self._server_capabilities(),
+            "instructions": _SERVER_INSTRUCTIONS,
+        }
+
+    def _modernise(self, response: dict[str, Any], method: str) -> dict[str, Any]:
+        """Put an answer in the shape 2026-07-28 requires.
+
+        Every result carries ``resultType`` and the server's identity in its
+        ``_meta``; list and read results carry caching hints. The revision
+        retired the resource-not-found code ``-32002`` for ``-32602``.
+        """
+        result = response.get("result")
+        if isinstance(result, dict):
+            result.setdefault("resultType", "complete")
+            meta = result.get("_meta")
+            meta = dict(meta) if isinstance(meta, dict) else {}
+            meta[META_SERVER_INFO] = self._server_info()
+            result["_meta"] = meta
+            hints = CACHE_HINTS.get(method)
+            if hints is not None:
+                result["ttlMs"], result["cacheScope"] = hints
+        error = response.get("error")
+        if isinstance(error, dict) and error.get("code") == _RESOURCE_NOT_FOUND:
+            error["code"] = INVALID_PARAMS
+        return response
 
     async def _mcp_tools_list(self, params: dict[str, Any]) -> dict[str, Any]:
         """Standard MCP ``tools/list`` — wraps the legacy aggregate.
