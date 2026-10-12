@@ -59,9 +59,11 @@ from mcp_core.protocol_versions import (
     UNSUPPORTED_PROTOCOL_VERSION,
     header_mismatch,
     is_modern,
+    is_subscription_listen,
     modern_header_problem,
     modern_status,
     request_protocol_version,
+    subscription_ack,
 )
 from mcp_core.service_auth import HEADER_SERVICE_KEY, ServiceRunVerifier
 from metaforge.mcp.http_elicitation import (
@@ -444,6 +446,13 @@ async def run_stdio(server: UnifiedMcpServer) -> None:
 
     async def dispatch(raw: str) -> None:
         response = await server.handle_request(raw)
+        # FORGE-603: a subscription is acknowledged before it is closed.
+        try:
+            message = json.loads(raw)
+        except ValueError:
+            message = None
+        if is_subscription_listen(message) and '"result"' in response:
+            await write_line(json.dumps(subscription_ack(message["id"])))
         # JSON-RPC notifications return an empty body — writing a
         # blank line breaks the client's JSON line framing.
         if response:
@@ -905,6 +914,27 @@ def build_http_app(
             and (hub.call_stream_allowed(issued_session) or _has_progress_token(inbound))
         ):
             return await _call_with_stream(raw_body.decode("utf-8"), ctx, issued_session)
+
+        if is_subscription_listen(inbound):
+            # FORGE-603: the acknowledgement, then the graceful close, on the
+            # request's own stream (2026-07-28 has no GET stream).
+            with with_context(ctx):
+                closing = await server.handle_request(raw_body.decode("utf-8"))
+            if '"result"' in closing:
+                assert isinstance(inbound, dict)
+                ack = json.dumps(subscription_ack(inbound["id"]))
+
+                async def subscription_events() -> AsyncIterator[bytes]:
+                    yield f"event: message\ndata: {ack}\n\n".encode()
+                    yield f"event: message\ndata: {json.dumps(json.loads(closing))}\n\n".encode()
+
+                logger.info("mcp_subscription_closed", subscription_id=inbound["id"])
+                return StreamingResponse(
+                    subscription_events(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            return _json_reply(closing, None, modern=True)
 
         with with_context(ctx):
             response = await server.handle_request(raw_body.decode("utf-8"))
