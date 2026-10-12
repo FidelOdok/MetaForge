@@ -44,7 +44,15 @@ __all__ = [
     "META_CLIENT_INFO",
     "META_SERVER_INFO",
     "MISSING_REQUIRED_CLIENT_CAPABILITY",
+    "MINTING_TOOLS",
     "MODERN_PREVIEW_ENV",
+    "SESSION_ARGUMENT",
+    "SESSION_ARGUMENT_SCHEMA",
+    "META_SESSION_HANDLE",
+    "META_SUBSCRIPTION_ID",
+    "is_subscription_listen",
+    "subscription_ack",
+    "subscription_problem",
     "MODERN_PREVIEW_VERSION",
     "LEGACY_PROTOCOL_VERSIONS",
     "META_PROTOCOL_VERSION",
@@ -196,6 +204,74 @@ def with_modern_request(request: ModernRequest) -> Iterator[ModernRequest]:
     finally:
         _CURRENT.reset(token)
 
+
+#: FORGE-602: 2026-07-28 removed protocol sessions (``Mcp-Session-Id``).
+#: Cross-call state a client wants kept (the project ``project.open`` scopes
+#: later calls to, the record ``session.start`` opens) is referenced instead by
+#: a server-minted handle the client passes back as an ordinary tool argument.
+#: These tools mint one when the caller has none.
+MINTING_TOOLS = frozenset({"project.open", "session.start"})
+
+#: The tool argument a handshake-free caller passes its handle in. Every tool
+#: lists it, optional, for those callers only.
+SESSION_ARGUMENT = "metaforge_session"
+SESSION_ARGUMENT_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "description": (
+        "Session handle returned by project.open or session.start. Pass it on "
+        "every later call so they keep that project's scope and session record."
+    ),
+}
+
+#: FORGE-603: ``subscriptions/listen`` replaced the GET stream and
+#: ``resources/subscribe``. This server's tools, prompts and resource lists
+#: are fixed once it is up and it offers no per-resource updates, so it
+#: honours none of the notification types: the acknowledgement lists none, and
+#: the subscription is then closed gracefully (a completion result), so a
+#: client knows it ended on purpose rather than dropped.
+META_SUBSCRIPTION_ID = "io.modelcontextprotocol/subscriptionId"
+_FILTER_FIELDS = {
+    "toolsListChanged": bool,
+    "promptsListChanged": bool,
+    "resourcesListChanged": bool,
+    "resourceSubscriptions": list,
+}
+
+
+def is_subscription_listen(message: Any) -> bool:
+    """Whether ``message`` is a handshake-free ``subscriptions/listen`` we serve."""
+    return (
+        isinstance(message, dict)
+        and message.get("method") == "subscriptions/listen"
+        and "id" in message
+        and is_modern(request_protocol_version(message.get("params")))
+    )
+
+
+def subscription_problem(params: Any) -> str | None:
+    """What is wrong with a ``subscriptions/listen`` filter, or None."""
+    filters = params.get("notifications") if isinstance(params, dict) else None
+    if filters is None:
+        return None
+    if not isinstance(filters, dict):
+        return "notifications must be an object"
+    for name, kind in _FILTER_FIELDS.items():
+        if name in filters and not isinstance(filters[name], kind):
+            return f"notifications.{name} must be a {kind.__name__}"
+    return None
+
+
+def subscription_ack(request_id: Any) -> dict[str, Any]:
+    """The acknowledgement: none of the requested types is honoured here."""
+    return {
+        "jsonrpc": "2.0",
+        "method": "notifications/subscriptions/acknowledged",
+        "params": {"_meta": {META_SUBSCRIPTION_ID: request_id}, "notifications": {}},
+    }
+
+
+#: Where a minted handle is also reported in the result's ``_meta``.
+META_SESSION_HANDLE = "com.metaforge/sessionHandle"
 
 #: Methods whose target is mirrored in ``Mcp-Name``, and where it comes from.
 _NAME_SOURCES = {"tools/call": "name", "prompts/get": "name", "resources/read": "uri"}

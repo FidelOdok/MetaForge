@@ -240,6 +240,39 @@ session:
   revision forbids server-initiated requests. The question comes back inside
   the result instead (below).
 
+#### Session handles instead of `Mcp-Session-Id` (FORGE-602)
+
+`2026-07-28` has no protocol session, so nothing ties one call to the next.
+Two things used to ride on the session: the project `project.open` scopes
+later calls to, and the record `session.start` opens. For a `2026-07-28`
+caller they ride on a handle instead:
+
+- `project.open` and `session.start` mint a handle when the caller passes
+  none, report it in the result's
+  `_meta["com.metaforge/sessionHandle"]`, and add a line to the result text
+  saying to pass it on.
+- Every tool lists an optional `metaforge_session` argument for these
+  callers. A call that passes the handle runs as that session: its project
+  scope and session record apply. The argument is taken out before the tool
+  sees it. A value that is not a handle is refused with `-32602`.
+- A handle is a session id, not a credential: it carries scope, never
+  authority, exactly as `X-MetaForge-Session` does. That header still works
+  for any client that sends it, and handshake clients keep `Mcp-Session-Id`.
+
+#### `subscriptions/listen` (FORGE-603)
+
+`2026-07-28` replaced the `GET /mcp` stream and `resources/subscribe` with
+`subscriptions/listen`. Nothing this server offers changes while it is up:
+the tool, prompt and resource lists are fixed once it starts, and it does
+not report per-resource updates. So it honours none of the notification
+types. It answers with `notifications/subscriptions/acknowledged` carrying
+an empty `notifications` filter (which tells the client nothing it asked
+for is supported), then closes the subscription gracefully with a
+`resultType: "complete"` result. Both carry
+`_meta["io.modelcontextprotocol/subscriptionId"]`. Over HTTP the two arrive
+as one `text/event-stream` response; on stdio the acknowledgement is written
+first. A malformed filter is `-32602`.
+
 #### Questions returned inside results (FORGE-601)
 
 For a `2026-07-28` `tools/call`, `prompts/get` or `resources/read` that

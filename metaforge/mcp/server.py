@@ -32,7 +32,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -105,12 +105,18 @@ from mcp_core.protocol_versions import (
     META_CLIENT_CAPABILITIES,
     META_CLIENT_INFO,
     META_SERVER_INFO,
+    META_SESSION_HANDLE,
+    META_SUBSCRIPTION_ID,
+    MINTING_TOOLS,
+    SESSION_ARGUMENT,
+    SESSION_ARGUMENT_SCHEMA,
     UNSUPPORTED_PROTOCOL_VERSION,
     ModernRequest,
     current_modern_request,
     is_modern,
     modern_meta_problem,
     request_protocol_version,
+    subscription_problem,
     supported_versions,
     unsupported_version_data,
     with_modern_request,
@@ -1255,6 +1261,21 @@ class UnifiedMcpServer:
                         "id": request_id,
                         "result": self._discover(),
                     }
+                elif method == "subscriptions/listen":
+                    # FORGE-603: nothing here changes while the server is up,
+                    # so the transport sends an acknowledgement honouring no
+                    # types and this graceful close follows it.
+                    problem = subscription_problem(params)
+                    if problem is not None:
+                        return json.dumps(make_error(request_id, INVALID_PARAMS, problem))
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "resultType": "complete",
+                            "_meta": {META_SUBSCRIPTION_ID: request_id},
+                        },
+                    }
                 elif method in MRTR_METHODS:
                     try:
                         mrtr = self._mrtr_context(method, params, request)
@@ -1262,7 +1283,7 @@ class UnifiedMcpServer:
                         logger.info("mcp_mrtr_state_refused", method=method, reason=str(exc))
                         return json.dumps(make_error(request_id, INVALID_PARAMS, str(exc)))
                     with with_mrtr(mrtr):
-                        response = json.loads(await self.handle_request(raw_message))
+                        response = await self._call_with_handle(raw_message, method, params)
                     if mrtr.pending:
                         logger.info(
                             "mcp_mrtr_input_required",
@@ -1314,6 +1335,69 @@ class UnifiedMcpServer:
         elif responses:
             raise InvalidRequestStateError("inputResponses were sent without requestState")
         return ctx
+
+    async def _call_with_handle(
+        self, raw_message: str, method: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Run a handshake-free call under the session its handle names (FORGE-602).
+
+        2026-07-28 has no protocol session, so a later call finds the
+        project ``project.open`` scoped it to only through the handle the
+        caller passes back in ``metaforge_session``. The argument is taken out
+        before the tool sees it. ``project.open`` and ``session.start`` mint a
+        handle when the caller has none and report it in the result.
+        """
+        from mcp_core.context import current_context, with_context
+
+        if method != "tools/call":
+            return dict(json.loads(await self.handle_request(raw_message)))
+        arguments = params.get("arguments")
+        arguments = dict(arguments) if isinstance(arguments, dict) else {}
+        supplied = arguments.pop(SESSION_ARGUMENT, None)
+        ctx = current_context()
+        minted: str | None = None
+        handle: UUID | None = None
+        if supplied is not None:
+            try:
+                handle = UUID(str(supplied))
+            except ValueError:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": json.loads(raw_message).get("id"),
+                    "error": {
+                        "code": INVALID_PARAMS,
+                        "message": f"{SESSION_ARGUMENT} is not a session handle",
+                    },
+                }
+        elif params.get("name") in MINTING_TOOLS and not ctx.session_is_stable:
+            handle = uuid4()
+            minted = str(handle)
+        if handle is None:
+            return dict(json.loads(await self.handle_request(raw_message)))
+        message = json.loads(raw_message)
+        message["params"] = {**params, "arguments": arguments}
+        with with_context(ctx.model_copy(update={"session_id": handle})):
+            response = dict(json.loads(await self.handle_request(json.dumps(message))))
+        if minted is not None and isinstance(response.get("result"), dict):
+            result = response["result"]
+            meta = result.get("_meta")
+            result["_meta"] = {
+                **(meta if isinstance(meta, dict) else {}),
+                META_SESSION_HANDLE: minted,
+            }
+            content = result.get("content")
+            if isinstance(content, list):
+                content.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"session_handle: {minted}. Pass it as the {SESSION_ARGUMENT} "
+                            "argument on every later call so they keep this scope."
+                        ),
+                    }
+                )
+            logger.info("mcp_session_handle_minted", tool=params.get("name"), handle=minted)
+        return response
 
     def _adapter_elicitor(self) -> Any:
         """What an adapter asks through: MRTR on a handshake-free request."""
@@ -1373,6 +1457,12 @@ class UnifiedMcpServer:
                 "description": entry.get("description", ""),
             }
             schema = entry.get("input_schema") or entry.get("inputSchema")
+            if current_modern_request() is not None:
+                # FORGE-602: the session handle, for callers without sessions.
+                schema = dict(schema or {"type": "object"})
+                props = dict(schema.get("properties") or {})
+                props.setdefault(SESSION_ARGUMENT, SESSION_ARGUMENT_SCHEMA)
+                schema["properties"] = props
             if schema:
                 mcp_tool["inputSchema"] = schema
             # FORGE-343: hints the client uses to decide whether a call needs
