@@ -66,7 +66,10 @@ __all__ = [
     "header_mismatch",
     "modern_header_problem",
     "modern_status",
+    "META_ERROR",
+    "is_legacy_error_code",
     "is_modern",
+    "modern_error_code",
     "modern_meta_problem",
     "modern_versions",
     "supported_versions",
@@ -269,6 +272,32 @@ def subscription_ack(request_id: Any) -> dict[str, Any]:
         "method": "notifications/subscriptions/acknowledged",
         "params": {"_meta": {META_SUBSCRIPTION_ID: request_id}, "notifications": {}},
     }
+
+
+#: Error codes 2026-07-28 calls legacy: allocated by implementations before
+#: the spec claimed -32020..-32099 for itself. New implementations SHOULD NOT
+#: use them, and the spec says new application codes go outside the whole
+#: JSON-RPC server range (-32768..-32000). This server's own codes
+#: (``mcp_core.protocol``: tool execution -32001, unavailable -32003, read
+#: error -32005, timeout -32006, auth -32007) all sit in the legacy block.
+_LEGACY_ERROR_RANGE = range(-32019, -31999)
+
+#: Where a handshake-free ``tools/call`` refusal keeps its code and details.
+META_ERROR = "com.metaforge/error"
+
+
+def is_legacy_error_code(code: Any) -> bool:
+    return isinstance(code, int) and code in _LEGACY_ERROR_RANGE
+
+
+def modern_error_code(code: int) -> int:
+    """The application code a legacy one becomes for a 2026-07-28 caller.
+
+    Moved out of the reserved block by 1000, so ``-32001`` (tool execution)
+    is ``-31001``: the number still lines up with the code handshake clients
+    see and with the docs, and it is outside every reserved range.
+    """
+    return code + 1000 if is_legacy_error_code(code) else code
 
 
 #: Where a minted handle is also reported in the result's ``_meta``.

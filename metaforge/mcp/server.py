@@ -104,6 +104,7 @@ from mcp_core.protocol_versions import (
     LEGACY_PROTOCOL_VERSIONS,
     META_CLIENT_CAPABILITIES,
     META_CLIENT_INFO,
+    META_ERROR,
     META_SERVER_INFO,
     META_SESSION_HANDLE,
     META_SUBSCRIPTION_ID,
@@ -113,7 +114,9 @@ from mcp_core.protocol_versions import (
     UNSUPPORTED_PROTOCOL_VERSION,
     ModernRequest,
     current_modern_request,
+    is_legacy_error_code,
     is_modern,
+    modern_error_code,
     modern_meta_problem,
     request_protocol_version,
     subscription_problem,
@@ -1420,7 +1423,44 @@ class UnifiedMcpServer:
         Every result carries ``resultType`` and the server's identity in its
         ``_meta``; list and read results carry caching hints. The revision
         retired the resource-not-found code ``-32002`` for ``-32602``.
+
+        It also marks the block -32000..-32019, where every code of our own
+        sits, as legacy (FORGE-607). A ``tools/call`` refused that
+        way (a held write rejected, a tool that failed, the ledger down)
+        becomes what the spec recommends for a tool failure: a result with
+        ``isError`` whose text is the reason, the code and details kept under
+        ``_meta["com.metaforge/error"]``. Any other method's code moves out of
+        the reserved range (``modern_error_code``). Handshake clients keep the
+        codes they have always had.
         """
+        error = response.get("error")
+        if isinstance(error, dict) and error.get("code") == _RESOURCE_NOT_FOUND:
+            error["code"] = INVALID_PARAMS
+        if isinstance(error, dict) and is_legacy_error_code(error.get("code")):
+            code = int(error["code"])
+            if method == "tools/call":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": response.get("id"),
+                    "result": {
+                        "content": [{"type": "text", "text": str(error.get("message") or "")}],
+                        "isError": True,
+                        "_meta": {
+                            META_ERROR: {
+                                "code": modern_error_code(code),
+                                "legacyCode": code,
+                                "data": error.get("data"),
+                            }
+                        },
+                    },
+                }
+            else:
+                data = error.get("data")
+                error["data"] = {
+                    **(data if isinstance(data, dict) else {"detail": data} if data else {}),
+                    "legacyCode": code,
+                }
+                error["code"] = modern_error_code(code)
         result = response.get("result")
         if isinstance(result, dict):
             result.setdefault("resultType", "complete")
@@ -1431,9 +1471,6 @@ class UnifiedMcpServer:
             hints = CACHE_HINTS.get(method)
             if hints is not None and result["resultType"] == "complete":
                 result["ttlMs"], result["cacheScope"] = hints
-        error = response.get("error")
-        if isinstance(error, dict) and error.get("code") == _RESOURCE_NOT_FOUND:
-            error["code"] = INVALID_PARAMS
         return response
 
     async def _mcp_tools_list(self, params: dict[str, Any]) -> dict[str, Any]:
