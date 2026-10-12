@@ -112,6 +112,17 @@ surface was sent. A refused decision leaves no entry behind. A gate that was
 retried or reworked shows its decision only once the next gate resolves, since
 the item is pending again at that point.
 
+## Questions returned inside the result (MCP 2026-07-28)
+
+A client on MCP revision `2026-07-28` cannot be sent a question mid-call:
+that revision forbids it. Its held writes and gates are asked the other way
+round (FORGE-601). The call returns the question with
+`resultType: "input_required"`; the client shows it, then repeats the call
+with the answer. The approval entry, the approver record and the "dashboard
+answer wins" rule are the same as for an inline prompt. An answer can be
+used once. Details are in
+[the MCP protocol notes](mcp_spec.md#questions-returned-inside-results-forge-601).
+
 ## Gates in the client chat
 
 A design-flow gate can be put to the person in the MCP client's own chat

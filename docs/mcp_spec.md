@@ -236,10 +236,44 @@ session:
   (base64 values in the `=?base64?...?=` form are decoded), each matching
   the body; otherwise `HeaderMismatch` (`-32020`, HTTP `400`). An unknown
   method is HTTP `404` with `-32601`. No `Mcp-Session-Id` is issued.
-- The server never sends such a request a question: that revision forbids
-  server-initiated requests. A held write from a `2026-07-28` client waits
-  in the dashboard and `forge approvals` until FORGE-601 returns the
-  question inside the result.
+- The server never sends such a request a question of its own; that
+  revision forbids server-initiated requests. The question comes back inside
+  the result instead (below).
+
+#### Questions returned inside results (FORGE-601)
+
+For a `2026-07-28` `tools/call`, `prompts/get` or `resources/read` that
+needs a person, the call returns early with `resultType: "input_required"`:
+
+```json
+{"resultType": "input_required",
+ "inputRequests": {"q1": {"method": "elicitation/create",
+   "params": {"mode": "form", "message": "...", "requestedSchema": {...}}}},
+ "requestState": "<opaque>"}
+```
+
+The client asks the person and retries the same call (a new JSON-RPC id)
+with their answers in `params.inputResponses` (keyed `q1`, `q2`, ... in the
+order asked) and `params.requestState` echoed unchanged. The retry runs the
+call again from the start; each question finds its answer.
+
+- **Held writes.** The approval entry is opened on the first pass, before
+  the question, as for any inline approval (FORGE-473). The retry closes the
+  same entry with the person's answer and an approver, then runs or refuses
+  the write. A decision made in the dashboard in between wins. A retry
+  without the answer asks again on the same entry.
+- **Design-flow gates.** `flow.await_gate` asks through the same mechanism,
+  so a `2026-07-28` client decides a gate in its chat as a handshake client
+  does.
+- **`requestState`** is HMAC-signed and bound to the caller, the method, a
+  digest of the call's own parameters and a 15 minute expiry. A forged,
+  expired or mismatched state, `inputResponses` without a state, or an
+  approval used a second time is refused with `-32602`, and nothing runs.
+  Set `METAFORGE_MCP_STATE_KEY` to keep outstanding questions answerable
+  across a restart; without it a random per-process key is used.
+- A client that does not declare form elicitation in the request's
+  `clientCapabilities`, or a sidecar with no approval ledger, gets no
+  question: the held write waits in the dashboard and `forge approvals`.
 
 From `2025-11-25` a client can declare elicitation as `{"form": {}}`,
 `{"url": {}}` or both; an empty `{}` still means form. Every question this
