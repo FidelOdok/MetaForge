@@ -53,20 +53,21 @@ class TestTheSupportedSets:
         result = _call(server, "initialize", {"protocolVersion": "2025-11-25", "capabilities": {}})
         assert result["result"]["protocolVersion"] == "2025-11-25"
 
-    def test_the_modern_revision_is_not_claimed_before_it_is_served(self) -> None:
-        # resultType/server-discover (FORGE-600) and MRTR (FORGE-601) first.
-        assert "2026-07-28" not in MODERN_PROTOCOL_VERSIONS
-        assert "2026-07-28" not in SUPPORTED_PROTOCOL_VERSIONS
+    def test_the_modern_revision_is_served_by_default(self) -> None:
+        # FORGE-592: once discover/resultType, MRTR, handles and
+        # subscriptions/listen all landed.
+        assert "2026-07-28" in MODERN_PROTOCOL_VERSIONS
+        assert "2026-07-28" in SUPPORTED_PROTOCOL_VERSIONS
 
 
 class TestAHandshakeFreeRequest:
     def test_an_unserved_revision_gets_the_specs_error(self) -> None:
         response = _call(
-            UnifiedMcpServer(adapters=[]), "tools/list", {"_meta": _meta("2026-07-28")}
+            UnifiedMcpServer(adapters=[]), "tools/list", {"_meta": _meta("2099-01-01")}
         )
         error = response["error"]
         assert error["code"] == UNSUPPORTED_PROTOCOL_VERSION == -32022
-        assert error["data"]["requested"] == "2026-07-28"
+        assert error["data"]["requested"] == "2099-01-01"
         # Newest first, so a client can take the head of the list.
         assert error["data"]["supported"] == sorted(SUPPORTED_PROTOCOL_VERSIONS, reverse=True)
         assert response["id"] == 7
@@ -146,12 +147,12 @@ class TestOverHttp:
     def test_an_unserved_revision_is_a_400_with_the_error_body(self) -> None:
         response = self._client().post(
             "/mcp",
-            headers={"MCP-Protocol-Version": "2026-07-28"},
+            headers={"MCP-Protocol-Version": "2099-01-01"},
             json={
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "tools/list",
-                "params": {"_meta": _meta("2026-07-28")},
+                "params": {"_meta": _meta("2099-01-01")},
             },
         )
         assert response.status_code == 400

@@ -558,9 +558,10 @@ services:
       # allowed and requests without an Origin are unaffected; "*" turns the
       # check off.
       - METAFORGE_MCP_ALLOWED_ORIGINS=${METAFORGE_MCP_ALLOWED_ORIGINS:-}
-      # FORGE-600: serve MCP revision 2026-07-28 (handshake-free) ahead of
-      # in-chat approvals for it (FORGE-601). Off unless set to "on".
-      - METAFORGE_MCP_MODERN_PREVIEW=${METAFORGE_MCP_MODERN_PREVIEW:-}
+      # FORGE-592: MCP revision 2026-07-28 (handshake-free) is served by
+      # default; "off" stops serving it (rollback). Handshake clients are
+      # unaffected either way.
+      - METAFORGE_MCP_MODERN=${METAFORGE_MCP_MODERN:-}
       # FORGE-601: signs the state a question returned to a 2026-07-28
       # client carries. Optional: unset, a random per-process key is used and
       # a question outstanding across a restart is simply asked again.
