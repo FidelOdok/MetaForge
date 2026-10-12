@@ -304,6 +304,15 @@ with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
+The Model tab's camera is an arcball (FORGE-610), so a model tumbles
+freely in any direction: drag up or down past vertical and it keeps
+going, and the underside is reachable. It replaced a turntable orbit
+that stopped dead at the top and bottom of the object. Left-drag
+rotates, right-drag (or Ctrl and drag) pans, the wheel zooms, and Shift
+with the wheel changes the field of view. The view cube in the corner
+jumps to a face, and **Reset View** re-frames the model upright — which
+is also how to recover a known orientation after tumbling.
+
 A node that is a revision of an item (FORGE-526) shows a **revision
 picker** (`KEY @n`) in the inspector Overview: picking another revision
 selects that revision's node, and the Model tab reloads it. The *History*

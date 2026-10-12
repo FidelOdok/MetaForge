@@ -1,8 +1,8 @@
 import { VIEWER_COLOR_MANAGEMENT } from './viewerColor';
 import { Suspense, lazy, useCallback, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import { ArcballControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import type { ArcballControls as ArcballControlsImpl } from 'three-stdlib';
 import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import { useThemeStore } from '../../store/theme-store';
@@ -137,18 +137,20 @@ function GroundShadowCatcher() {
  * grid rotating rather than the camera orbiting the object. */
 function CameraController() {
   const { camera } = useThree();
-  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const controlsRef = useRef<ArcballControlsImpl | null>(null);
   const registerCameraReset = useViewerStore((s) => s.registerCameraReset);
   const modelBounds = useViewerStore((s) => s.modelBounds);
   const registerOrbitControlsEnabledSetter = useViewerStore(
     (s) => s.registerOrbitControlsEnabledSetter,
   );
 
-  // FORGE-250: lets drag-to-pose flip OrbitControls.enabled imperatively the
-  // instant a joint drag starts/ends, same registration pattern as
-  // registerCameraReset above -- see viewer-store's
+  // FORGE-250: lets drag-to-pose flip the camera controls' `enabled` flag
+  // imperatively the instant a joint drag starts/ends, same registration
+  // pattern as registerCameraReset above -- see viewer-store's
   // `_orbitControlsEnabledSetterFn` docstring for why this can't just be a
-  // React prop bound to store state (one frame too slow).
+  // React prop bound to store state (one frame too slow). The store name still
+  // says "orbit"; since FORGE-610 the control is an arcball, which carries the
+  // same `enabled` flag, so the mechanism is unchanged.
   useEffect(() => {
     registerOrbitControlsEnabledSetter((enabled) => {
       if (controlsRef.current) controlsRef.current.enabled = enabled;
@@ -164,9 +166,15 @@ function CameraController() {
       center[1] + VIEW_DIR.y * dist,
       center[2] + VIEW_DIR.z * dist,
     );
+    // Free tumbling (FORGE-610) leaves the camera's up vector wherever the
+    // drag ended, and lookAt reads it -- without restoring it first, Reset
+    // View returns to the right spot at an arbitrary roll.
+    camera.up.set(0, 1, 0);
     camera.lookAt(center[0], center[1], center[2]);
     if (controlsRef.current) {
-      controlsRef.current.target.set(center[0], center[1], center[2]);
+      // The arcball keeps its pivot in internal gizmo state, so mutating
+      // `target` alone would move nothing: setTarget is the real API.
+      controlsRef.current.setTarget(center[0], center[1], center[2]);
       controlsRef.current.update();
     }
   }, [camera, modelBounds]);
@@ -185,12 +193,26 @@ function CameraController() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelBounds]);
 
+  // The arcball draws its own circles and axis lines over the scene. This
+  // viewer already has a view cube for orientation, so keep them hidden --
+  // `activateGizmos`, which the controls call on every interaction, only
+  // changes their opacity, so hiding them once holds.
+  useEffect(() => {
+    controlsRef.current?.setGizmosVisible(false);
+  }, []);
+
+  // FORGE-610: an arcball, not an orbit. OrbitControls clamps the polar angle
+  // to [0, pi] around a fixed up vector, so dragging up or down stopped dead
+  // at the poles and the underside of a model was unreachable. The arcball has
+  // no pole: it tumbles freely in any direction. `enableAnimations` and
+  // `dampingFactor` are the arcball's equivalent of enableDamping -- both are
+  // already the library defaults, set here so the intent survives an upgrade.
   return (
-    <OrbitControls
+    <ArcballControls
       ref={controlsRef}
       makeDefault
-      enableDamping
-      dampingFactor={0.1}
+      enableAnimations
+      dampingFactor={25}
     />
   );
 }
