@@ -657,6 +657,22 @@ groups:
             An exception type outside the known taxonomy. Either a new
             failure mode, or one that should have had a class and does not.
 
+      # FORGE-604: browser requests refused for their Origin. Either a page
+      # trying to reach the server through DNS rebinding, or a legitimate
+      # front end missing from METAFORGE_MCP_ALLOWED_ORIGINS.
+      - alert: McpOriginRejected
+        expr: increase(metaforge_mcp_origin_rejected_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP refused browser requests from an origin not on its allow-list"
+          description: >-
+            Look for mcp_origin_rejected in the mcp-http logs, which name the
+            origin. A web page you do not recognise is the DNS-rebinding case
+            the check exists for. A front end of your own needs adding to
+            METAFORGE_MCP_ALLOWED_ORIGINS.
+
       # ── Design-flow engine (FORGE-401) ───────────────────────────────
       - alert: DesignFlowEngineUnavailable
         expr: rate(metaforge_design_flow_engine_unavailable_total[5m]) > 0

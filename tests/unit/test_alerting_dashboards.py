@@ -113,7 +113,8 @@ class TestAlertingRules:
         # + 1 client-mode phase tasks nobody submits (FORGE-581).
         # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
         # + 1 KB storage set-up failed at gateway start (FORGE-594).
-        assert len(rules) == 51
+        # + 1 browser requests refused for their Origin (FORGE-604).
+        assert len(rules) == 52
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -170,7 +171,8 @@ class TestAlertingRules:
         # + 1 client-mode phase tasks nobody submits (FORGE-581).
         # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
         # + 1 KB storage set-up failed at gateway start (FORGE-594).
-        assert len(warnings) == 38
+        # + 1 browser requests refused for their Origin (FORGE-604).
+        assert len(warnings) == 39
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -232,6 +234,8 @@ class TestAlertingRules:
                 # answers every request correctly -- for code nobody reads.
                 "McpRunningStaleCode",
                 "McpUnexpectedErrors",
+                # FORGE-604: browser requests refused for their Origin.
+                "McpOriginRejected",
                 "DeviceOffline",
                 "ErrorBudgetBurnRate",
                 "HarnessProviderFallbackSustained",
