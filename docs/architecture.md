@@ -574,6 +574,19 @@ registers nothing. The controller's key stays on the gateway in an
 environment variable whose name must start `METAFORGE_MACHINE_`, so no
 other gateway secret can be sent to a machine URL.
 
+Jobs (FORGE-427/440, first slice). `library.dispatch_job` sends a G-code
+work product to an idle in-house OctoPrint or Moonraker printer and starts
+it. It is the only physical action in MetaForge, so it is annotated
+destructive and held for a person on every call. The part's revision is
+pinned when the job is sent. `library.job_status` reads the job back from
+the machine. `library.record_job_result` records the ended job as
+`demonstration` evidence against the pinned revision, reading the outcome
+from the machine so a caller cannot assert it; a stopped or failed print is
+recorded as not made. Jobs live in the library store (`machine_jobs`).
+MetaForge has no slicer, so the G-code is made elsewhere and recorded as a
+work product first. PrusaLink machines can be discovered but not yet sent
+jobs.
+
 A successful proposal (`201`, `status: "proposed"`) keeps every existing
 field and adds `requirementsPending` (true when no requirements were sent),
 `assumptions` (including an explicit "requirements pending" line) and

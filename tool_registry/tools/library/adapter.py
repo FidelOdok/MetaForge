@@ -56,6 +56,14 @@ class MachineLibraryService(Protocol):
 
     async def discover_machine(self, connection: dict[str, Any], name: str) -> dict[str, Any]: ...
 
+    async def dispatch_job(
+        self, machine_id: str, work_product_id: str, by: str
+    ) -> dict[str, Any]: ...
+
+    async def job_status(self, job_id: str) -> dict[str, Any]: ...
+
+    async def record_job_result(self, job_id: str, by: str) -> dict[str, Any]: ...
+
 
 _CAPABILITY_HELP = (
     "capabilities is an object keyed by name, each {value, unit, source_kind, source_ref}. "
@@ -282,6 +290,83 @@ class LibraryServer(McpToolServer):
             ),
             handler=self.discover_machine,
         )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="library.dispatch_job",
+                adapter_id="library",
+                name="Dispatch Job",
+                description=(
+                    "Send a G-code work product to an idle in-house printer (OctoPrint or "
+                    "Moonraker connection) and start the print. A physical action: held for "
+                    "the person on every call; never retry a refused or timed-out one without "
+                    "asking. The part's current revision is pinned. MetaForge has no slicer, "
+                    "so the work product must already be G-code."
+                ),
+                capability="machine_jobs",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "machine_id": {"type": "string"},
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "The G-code work product's id.",
+                        },
+                    },
+                    "required": ["machine_id", "work_product_id"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=512, max_cpu_seconds=30, max_disk_mb=1
+                ),
+            ),
+            handler=self.dispatch_job,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="library.job_status",
+                adapter_id="library",
+                name="Job Status",
+                description=(
+                    "A dispatched job as its machine reports it now: printing, paused, "
+                    "complete, cancelled, failed, with progress. job_state 'unknown' means "
+                    "another file is on the machine, so this job's end was not seen. Reads only."
+                ),
+                capability="machine_jobs",
+                input_schema={
+                    "type": "object",
+                    "properties": {"job_id": {"type": "string"}},
+                    "required": ["job_id"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=_limits(),
+            ),
+            handler=self.job_status,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="library.record_job_result",
+                adapter_id="library",
+                name="Record Job Result",
+                description=(
+                    "Once a job has ended, record it as demonstration evidence against the "
+                    "part revision it was sent for. The outcome is read from the machine, "
+                    "not given by you. A failed or cancelled print is recorded too: it says "
+                    "the part was not made. Held for approval."
+                ),
+                capability="machine_jobs",
+                input_schema={
+                    "type": "object",
+                    "properties": {"job_id": {"type": "string"}},
+                    "required": ["job_id"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=_limits(),
+            ),
+            handler=self.record_job_result,
+        )
 
     async def discover_machine(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("library.discover_machine"):
@@ -291,6 +376,20 @@ class LibraryServer(McpToolServer):
             return await self._library.discover_machine(
                 connection, str(arguments.get("name") or "")
             )
+
+    async def dispatch_job(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("library.dispatch_job"):
+            return await self._library.dispatch_job(
+                str(arguments["machine_id"]), str(arguments["work_product_id"]), "mcp"
+            )
+
+    async def job_status(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("library.job_status"):
+            return await self._library.job_status(str(arguments["job_id"]))
+
+    async def record_job_result(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("library.record_job_result"):
+            return await self._library.record_job_result(str(arguments["job_id"]), "mcp")
 
     async def list_machines(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("library.list_machines"):

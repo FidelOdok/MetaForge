@@ -115,6 +115,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "library.machine_limits",
         # FORGE-451 step 3: reads the printer's controller; registers nothing.
         "library.discover_machine",
+        # FORGE-451 step 4: asks the machine about a job; writes nothing.
+        "library.job_status",
         # Twin reads
         "constraint.validate",
         "project.get",
@@ -311,6 +313,8 @@ ADDITIVE: frozenset[str] = frozenset(
         # kept in its history. Held like any write.
         "library.register_machine",
         "library.update_machine",
+        # Records one evidence entity from the machine's own report.
+        "library.record_job_result",
     }
 )
 
@@ -348,6 +352,9 @@ PRODUCING: frozenset[str] = frozenset(
 # does that is the correct amount of friction.
 DESTRUCTIVE: frozenset[str] = frozenset(
     {
+        # FORGE-451 step 4: starts a print on a real machine. Physical and
+        # not undoable from here; held for the person on every call.
+        "library.dispatch_job",
         "cadquery.boolean_operation",
         "cadquery.execute_script",
         "cadquery.export_geometry",
@@ -410,8 +417,11 @@ DESTRUCTIVE: frozenset[str] = frozenset(
 # the tools for which it stays true; everything else is closed-world.
 OPEN_WORLD: frozenset[str] = frozenset(
     {
-        # FORGE-451: reads a printer controller on the person's network.
+        # FORGE-451: reach a machine controller on the person's network.
         "library.discover_machine",
+        "library.dispatch_job",
+        "library.job_status",
+        "library.record_job_result",
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",

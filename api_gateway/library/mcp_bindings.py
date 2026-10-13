@@ -54,6 +54,30 @@ class LocalMachineLibrary:
         except DiscoveryError as exc:
             raise ValueError(str(exc)) from exc
 
+    async def dispatch_job(self, machine_id: str, work_product_id: str, by: str) -> dict[str, Any]:
+        from api_gateway.library.jobs import JobError, dispatch_job
+
+        try:
+            return await dispatch_job(machine_id, work_product_id, by=by)
+        except JobError as exc:
+            raise ValueError(str(exc)) from exc
+
+    async def job_status(self, job_id: str) -> dict[str, Any]:
+        from api_gateway.library.jobs import JobError, job_status
+
+        try:
+            return await job_status(job_id)
+        except JobError as exc:
+            raise ValueError(str(exc)) from exc
+
+    async def record_job_result(self, job_id: str, by: str) -> dict[str, Any]:
+        from api_gateway.library.jobs import JobError, record_job_result
+
+        try:
+            return await record_job_result(job_id, by=by)
+        except JobError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 def make_machine_library() -> LocalMachineLibrary:
     return LocalMachineLibrary()

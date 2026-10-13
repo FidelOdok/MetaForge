@@ -72,3 +72,23 @@ class RemoteMachineLibrary:
             "POST", "/v1/library/discover", json={"connection": connection, "name": name}
         )
         return result
+
+    async def dispatch_job(self, machine_id: str, work_product_id: str, by: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST",
+            "/v1/library/jobs",
+            json={"machine_id": machine_id, "work_product_id": work_product_id, "by": by},
+        )
+        return result
+
+    async def job_status(self, job_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "GET", f"/v1/library/jobs/{quote(job_id, safe='')}/status"
+        )
+        return result
+
+    async def record_job_result(self, job_id: str, by: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST", f"/v1/library/jobs/{quote(job_id, safe='')}/result", json={"by": by}
+        )
+        return result

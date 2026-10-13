@@ -232,10 +232,16 @@ class TestMcp:
             "library.get_machine",
             "library.machine_limits",
             "library.discover_machine",
+            "library.job_status",
         }
-        writes = {"library.register_machine", "library.update_machine"}
+        writes = {
+            "library.register_machine",
+            "library.update_machine",
+            "library.record_job_result",
+            "library.dispatch_job",
+        }
         assert reads <= READ_ONLY
-        assert writes <= ADDITIVE
+        assert writes - {"library.dispatch_job"} <= ADDITIVE
         assert not writes & READ_ONLY
         assert set(LibraryServer(LocalMachineLibrary()).tool_ids) == reads | writes
 

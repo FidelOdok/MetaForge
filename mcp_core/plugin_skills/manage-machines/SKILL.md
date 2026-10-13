@@ -1,6 +1,6 @@
 ---
 name: manage-machines
-description: Record and read the machines a person can make parts on (3D printers, CNC mills and routers, laser cutters, press brakes, vendor machines) in the MetaForge machine library, with a source for every capability, and turn a machine into limits for process ranking and DFM. Use when the user mentions a machine they own or use ("I have a CR-10", "our shop has a 3-axis mill"), asks what they can make in-house, or when a manufacturing phase needs real machine limits. Do not use to start or control a print or cut.
+description: Record and read the machines a person can make parts on (3D printers, CNC mills and routers, laser cutters, press brakes, vendor machines) in the MetaForge machine library, with a source for every capability, and turn a machine into limits for process ranking and DFM. Use when the user mentions a machine they own or use ("I have a CR-10", "our shop has a 3-axis mill"), asks what they can make in-house, or when a manufacturing phase needs real machine limits. Also sends a G-code print to an in-house OctoPrint or Moonraker printer when the person asks, and records how it went as evidence.
 ---
 
 # Manage machines
@@ -93,7 +93,24 @@ In a design flow, the run's manufacturing context lists the machines; in the
 route phase rank only processes those machines (or a vendor) can run, and in
 the DFM phase check the design against the chosen machine's limits.
 
-## Checklist
+## Sending a print, and recording how it went
+
+Only when the person asks for the part to be made, on an in-house printer
+with an OctoPrint or Moonraker connection:
+
+1. The part must already be G-code, recorded as a work product. MetaForge has
+   no slicer; if there is no G-code, say so and stop.
+2. `library.dispatch_job` with the machine and the G-code work product. This
+   starts a real print. It is held for the person every time; never retry a
+   refused or timed-out one without asking. It refuses a machine that is not
+   idle, not available in the library, or at a vendor.
+3. `library.job_status` to follow it. `job_state: unknown` means another file
+   is on the machine now, so this job's end was not seen; say so.
+4. When it has ended, `library.record_job_result`. The outcome is read from
+   the machine, not given by you, and becomes `demonstration` evidence pinned
+   to the part revision that was sent. A failed or cancelled print is
+   recorded too: it says the part was not made on that revision.
+
 
 - [ ] looked for an existing model before adding one
 - [ ] every capability sourced, or left out
