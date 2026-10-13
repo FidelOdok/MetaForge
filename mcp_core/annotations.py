@@ -120,6 +120,8 @@ READ_ONLY: frozenset[str] = frozenset(
         # FORGE-427: which vendors exist and where an order is.
         "vendor.list_connectors",
         "vendor.order_status",
+        # FORGE-614: catalogue lookup over the twin; calls no vendor.
+        "vendor.handoffs",
         # Twin reads
         "constraint.validate",
         "project.get",

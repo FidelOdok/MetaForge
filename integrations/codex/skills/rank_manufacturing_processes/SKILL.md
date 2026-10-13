@@ -52,6 +52,8 @@ which is honest and visible at the gate. Never fill one in from memory.
 | Step | Tool |
 |---|---|
 | a library machine's capabilities, as a candidate | `library.list_machines`, `library.machine_limits` |
+| a vendor's real price (connected vendors) | `vendor.list_connectors`, `vendor.quote` |
+| where to send it when a vendor has no API | `vendor.handoffs` |
 | look up capabilities, prices, lead times | `web.search`, `web.fetch`, `knowledge.search` |
 | record each sourced value | `twin.record_engineering_entity` (entity_type `design_value`) |
 | record the decision | `twin.record_decision` with `manufacturing_route` and `process_ranking` |

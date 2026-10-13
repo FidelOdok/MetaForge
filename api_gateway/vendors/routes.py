@@ -84,3 +84,16 @@ async def get_order_status(order_id: str) -> dict[str, Any]:
         raise _vendor_error(exc) from exc
     except service.VendorServiceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class HandoffRequest(BaseModel):
+    service: str
+    work_product_ids: list[str] = Field(default_factory=list)
+
+
+@router.post("/handoffs")
+async def list_handoffs(body: HandoffRequest) -> dict[str, Any]:
+    """Vendors with no API that take this service, and which files each accepts. Reads only."""
+    from api_gateway.vendors.handoffs import handoffs_for
+
+    return await handoffs_for(body.service, body.work_product_ids)

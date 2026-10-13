@@ -291,6 +291,8 @@ PROFILES: dict[str, frozenset[str]] = {
         # recorded, so the call is held; ordering is not in any capped set).
         "vendor.list_connectors",
         "vendor.quote",
+        # FORGE-614: where to send it when a vendor has no API.
+        "vendor.handoffs",
     },
     "client_run": _BASE
     | {

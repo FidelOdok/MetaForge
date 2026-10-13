@@ -50,3 +50,11 @@ class RemoteVendorService:
             "GET", f"/v1/vendors/orders/{urlquote(order_id, safe='')}/status"
         )
         return result
+
+    async def handoffs(self, service_name: str, work_product_ids: list[str]) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST",
+            "/v1/vendors/handoffs",
+            json={"service": service_name, "work_product_ids": work_product_ids},
+        )
+        return result

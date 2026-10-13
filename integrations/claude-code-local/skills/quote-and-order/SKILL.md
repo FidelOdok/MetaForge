@@ -46,6 +46,24 @@ date. An order is a purchase and always waits for the person.
    changed since; quote again then.
 5. `vendor.order_status` to follow it.
 
+## Vendors with no API
+
+Many services cannot be quoted or ordered by API (AISLER for PCBs,
+Craftcloud for printing, Xometry for CNC, sheet metal and moulding,
+SendCutSend for laser-cut and bent parts). For those:
+
+1. `vendor.handoffs` with the `service` and the `work_product_ids` of the
+   files you would send. It returns each vendor that takes the service, its
+   upload page, the formats it accepts, which of the files fit, and a
+   `download_path` on the gateway for each file.
+2. A vendor with no usable file needs one exported first (for example a STEP
+   from the CAD model, or a DXF of a flat part). Say which.
+3. Give the person the page and the files. Nothing is sent by MetaForge.
+   Tell them to confirm the accepted formats on upload: the catalogue is
+   MetaForge's own, not read live from the vendor.
+4. A price they get there is a real quote from that vendor; record it with
+   the vendor and date if they share it.
+
 ## Checklist
 
 - [ ] connector's auth is ok and its mode is stated
