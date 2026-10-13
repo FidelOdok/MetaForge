@@ -534,6 +534,24 @@ the envelope, volume and mass (`twin.get_node`, `freecad.measure`) and the
 3D-printing overhang (`twin.evaluate_overhang_metric`). The `hardware_v1`
 `manufacturing` phase (electronics, G8) is unchanged.
 
+**The machine library (FORGE-451).** Process ranking and DFM need a
+machine's real limits, so machines are recorded once, outside any project,
+in the gateway's SQLite store (`METAFORGE_MACHINE_LIBRARY_PATH`, default
+`~/.metaforge/machine_library.db`, code in `twin_core/library/machines.py`).
+A **model** is a machine type with its spec-sheet capabilities; an
+**instance** is one machine (in-house or at a vendor) that points at a
+model and overrides what differs. Every capability has a fixed unit and a
+source (`manufacturer_spec`, `measurement`, `user` or `assumption`, the
+last flagged for review); nothing is defaulted, and every change keeps the
+previous version. A connection records only the name of the environment
+variable that holds a credential.
+
+`/v1/library/machines` serves it to the dashboard and the sidecar, and the
+`library.*` MCP tools to agents: the reads are read-only, the two writes are
+held for a person. `library.machine_limits` turns an instance into a ranking
+candidate and DFM limits with their sources. The `manage-machines` plugin
+skill tells a client how to record a machine and use its limits.
+
 A successful proposal (`201`, `status: "proposed"`) keeps every existing
 field and adds `requirementsPending` (true when no requirements were sent),
 `assumptions` (including an explicit "requirements pending" line) and

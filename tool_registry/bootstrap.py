@@ -141,6 +141,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"web"}
     # FORGE-544: in-process, no container, no credentials.
     | {"power"}
+    # FORGE-451: the machine library, injected by the gateway or the sidecar.
+    | {"library"}
 )
 
 
@@ -323,6 +325,8 @@ async def bootstrap_tool_registry(
     firmware_scaffold_creator: Any = None,
     harness_estimate_getter: Any = None,
     item_history_reader: Any = None,
+    # FORGE-451: the machine library (models, instances, limits).
+    machine_library: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -1128,6 +1132,24 @@ async def bootstrap_tool_registry(
                     else "disabled via config"
                 ),
             )
+
+        # ----- Machine library MCP adapter (FORGE-451) -----
+        # The library is the gateway's store; the sidecar reaches it over
+        # HTTP. Registered whenever a binding is supplied.
+        if machine_library is not None and _is_adapter_enabled("library"):
+            try:
+                from tool_registry.tools.library.adapter import LibraryServer
+
+                library_server = LibraryServer(machine_library)
+                await registry.register_adapter(library_server)
+                registered.append("library")
+                logger.info("library_mcp_adapter_registered", tools=sorted(library_server.tool_ids))
+            except Exception as exc:
+                logger.error("library_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("library")
+        else:
+            skipped.append("library")
 
         span.set_attribute("adapters.registered", len(registered))
         span.set_attribute("adapters.skipped", len(skipped))

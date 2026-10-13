@@ -283,6 +283,10 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.record_constraint_set",
         "twin.record_claim",
         "twin.record_document",
+        # FORGE-451: which machines exist and what each can do.
+        "library.list_machines",
+        "library.get_machine",
+        "library.machine_limits",
     },
     "client_run": _BASE
     | {
@@ -308,6 +312,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.record_claim",
         "twin.evaluate_metric",
         "twin.query_cypher",
+        "library.list_machines",
+        "library.machine_limits",
     },
 }
 
