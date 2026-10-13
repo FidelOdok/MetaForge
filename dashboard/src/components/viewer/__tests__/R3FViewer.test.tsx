@@ -1,9 +1,27 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent } from '@testing-library/react';
 import { render } from '../../../test/test-utils';
-import { R3FViewer } from '../R3FViewer';
+import { R3FViewer, createWorkplaneTexture } from '../R3FViewer';
+import * as THREE from 'three';
 import { useTransientTransform } from '../../../store/transient-transform-store';
 import { useViewerStore } from '../../../store/viewer-store';
+
+// FORGE-616: the workplane is a canvas-drawn texture, and jsdom has no 2D
+// context, so without this the viewer draws no floor and the grid tests below
+// would pass for the wrong reason. The stub only has to satisfy the drawing
+// calls; nothing asserts on the pixels.
+beforeAll(() => {
+  HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+    clearRect: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    stroke: vi.fn(),
+    strokeRect: vi.fn(),
+    strokeStyle: '',
+    lineWidth: 1,
+  })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+});
 
 // Captured so tests can invoke the real onPointerMissed handler the mocked
 // Canvas would otherwise swallow — it needs WebGL, which jsdom doesn't have.
@@ -14,6 +32,9 @@ let capturedOnPointerMissed: (() => void) | undefined;
 // throws on the first fit attempt.
 const fakeCamera = {
   position: { x: 0, y: 0, z: 0, set: vi.fn() },
+  // FORGE-616: fitToModel restores the up vector before lookAt, so a reset is
+  // never rolled after a free-orbit tumble.
+  up: { set: vi.fn() },
   lookAt: vi.fn(),
 };
 
@@ -256,13 +277,13 @@ describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
   // asserting is the rotation range -- see the describe below.
 });
 
-// FORGE-612: a turntable on purpose. An arcball (FORGE-610) tumbles with no
-// pole, but it abandons the fixed up vector that makes the workplane read as a
-// plane. Nothing else asserts the control type or its range, so without this a
-// silent swap back, or a stray polar clamp, would pass every other test.
-describe('R3FViewer — turntable rotation over a workplane (FORGE-612)', () => {
-  beforeEach(() => {
-    capturedOrbitProps = undefined;
+// FORGE-616: both camera modes ship, because which one is right is taste. The
+// turntable keeps the floor level but stops short of straight up/down (three's
+// own Spherical.makeSafe clamps it, whatever the props say); free orbit has no
+// pole but lets the view roll. Nothing else asserts the control type, so
+// without these a silent swap would pass every other test.
+describe('R3FViewer — camera modes and the workplane (FORGE-616)', () => {
+  function mockState(over: Record<string, unknown> = {}) {
     vi.mocked(useViewerStore).mockImplementation((selector) =>
       selector({
         glbUrl: 'blob:fake',
@@ -275,59 +296,106 @@ describe('R3FViewer — turntable rotation over a workplane (FORGE-612)', () => 
         modelBounds: { center: [10, 5, -2], radius: 100, groundY: -3 },
         booleanCut: { cutterGlbUrl: null, cutterManifest: null },
         registerOrbitControlsEnabledSetter: vi.fn(),
+        cameraMode: 'turntable',
+        setCameraMode: vi.fn(),
+        ...over,
       } as unknown as Parameters<typeof selector>[0]),
     );
+  }
+
+  beforeEach(() => {
+    capturedOrbitProps = undefined;
+    mockState();
   });
 
-  it('renders a turntable control, not a free-tumbling arcball', () => {
+  it('defaults to the turntable, not a free-tumbling arcball', () => {
     const { queryByTestId } = render(<R3FViewer />);
 
     expect(queryByTestId('orbit-controls')).toBeTruthy();
     expect(queryByTestId('arcball-controls')).toBeNull();
   });
 
-  it('leaves the full overhead-to-underneath sweep open, and the azimuth unbounded', () => {
+  it('switches to the arcball when the camera mode is free', () => {
+    mockState({ cameraMode: 'free' });
+
+    const { queryByTestId } = render(<R3FViewer />);
+
+    expect(queryByTestId('arcball-controls')).toBeTruthy();
+    expect(queryByTestId('orbit-controls')).toBeNull();
+  });
+
+  it('asks the turntable for the full sweep and an unbounded azimuth', () => {
     render(<R3FViewer />);
 
-    // Straight down to straight up: every face of a model is reachable, the
-    // underside by continuing past the horizon.
+    // The props do not win -- Spherical.makeSafe() still stops the drag just
+    // short of the poles -- but asking for less would narrow it further.
     expect(capturedOrbitProps?.minPolarAngle).toBe(0);
     expect(capturedOrbitProps?.maxPolarAngle).toBeCloseTo(Math.PI, 6);
-    // No azimuth bound at all -- horizontal rotation goes round and round.
     expect(capturedOrbitProps?.minAzimuthAngle).toBeUndefined();
     expect(capturedOrbitProps?.maxAzimuthAngle).toBeUndefined();
+  });
+
+  it('offers the mode toggle, labelled for where it will take you', () => {
+    const setCameraMode = vi.fn();
+    mockState({ setCameraMode });
+
+    const { getByLabelText } = render(<R3FViewer />);
+    fireEvent.click(getByLabelText('Switch to free orbit'));
+
+    expect(setCameraMode).toHaveBeenCalledWith('free');
   });
 
   it('draws the workplane the model stands on', () => {
     const { container } = render(<R3FViewer />);
 
-    // Two helpers: the minor cells and the major sections over them. Without a
-    // visible ground there is no reference for the motion, and an orbit reads
-    // as the object wobbling in a void (FORGE-34 hid it; this restores it).
-    expect(container.querySelectorAll('gridHelper').length).toBe(2);
+    // One textured plane, not line geometry: a mipmapped texture averages the
+    // cells down with distance instead of aliasing into a shimmer, which is
+    // what sank both earlier attempts (FORGE-34, FORGE-612).
+    expect(container.querySelector('mesh[name="ground-grid"]')).toBeTruthy();
   });
 
   it('draws no workplane when the model has no bounds, rather than guessing a height', () => {
     // The robot-description path never computes modelBounds. A floor placed
     // from a guess would cut through the robot, so there simply isn't one.
-    vi.mocked(useViewerStore).mockImplementation((selector) =>
-      selector({
-        glbUrl: 'blob:fake',
-        manifest: { parts: [] },
-        selectedMeshName: null,
-        hiddenMeshes: new Set(),
-        explodeFactor: 0,
-        resetCamera: vi.fn(),
-        registerCameraReset: vi.fn(),
-        modelBounds: null,
-        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
-        registerOrbitControlsEnabledSetter: vi.fn(),
-      } as unknown as Parameters<typeof selector>[0]),
-    );
+    mockState({ modelBounds: null });
 
     const { container } = render(<R3FViewer />);
 
-    expect(container.querySelectorAll('gridHelper').length).toBe(0);
+    expect(container.querySelector('mesh[name="ground-grid"]')).toBeNull();
+  });
+});
+
+// The whole reason the workplane is a texture and not line geometry. Both
+// earlier attempts shimmered during an orbit: drei's Grid evaluated its lines
+// per fragment with screen-space derivatives (FORGE-34), and GridHelper's
+// LineBasicMaterial has no anti-aliasing at all (FORGE-612). A mipmapped,
+// anisotropically-filtered texture is what makes a receding floor hold still.
+describe('workplane texture filtering (FORGE-616)', () => {
+  it('mipmaps and anisotropically filters, which is what stops the shimmer', () => {
+    const texture = createWorkplaneTexture('#3a3a3a', '#5a5a5a', 8);
+
+    expect(texture).not.toBeNull();
+    expect(texture?.generateMipmaps).toBe(true);
+    expect(texture?.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+    expect(texture?.anisotropy).toBe(8);
+  });
+
+  it('repeats in both directions, so one tile can tile the whole floor', () => {
+    const texture = createWorkplaneTexture('#3a3a3a', '#5a5a5a', 1);
+
+    expect(texture?.wrapS).toBe(THREE.RepeatWrapping);
+    expect(texture?.wrapT).toBe(THREE.RepeatWrapping);
+  });
+
+  it('draws nothing at all when there is no 2D context, rather than a blank plane', () => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = vi.fn(
+      () => null,
+    ) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    expect(createWorkplaneTexture('#3a3a3a', '#5a5a5a', 1)).toBeNull();
+
+    HTMLCanvasElement.prototype.getContext = getContext;
   });
 });
 
