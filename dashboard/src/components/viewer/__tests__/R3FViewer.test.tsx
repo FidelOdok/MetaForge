@@ -14,9 +14,6 @@ let capturedOnPointerMissed: (() => void) | undefined;
 // throws on the first fit attempt.
 const fakeCamera = {
   position: { x: 0, y: 0, z: 0, set: vi.fn() },
-  // FORGE-610: fitToModel restores the up vector before lookAt, because free
-  // tumbling leaves it wherever the drag ended.
-  up: { set: vi.fn() },
   lookAt: vi.fn(),
 };
 
@@ -37,16 +34,20 @@ vi.mock('@react-three/fiber', () => ({
 }));
 
 let capturedFitToModel: (() => void) | undefined;
+let capturedOrbitProps: Record<string, unknown> | undefined;
 // Toggled by the MET-622 test to simulate the HDR CDN fetch failing —
 // Environment throwing must stay contained by its local ErrorBoundary.
 let environmentShouldThrow = false;
 
 vi.mock('@react-three/drei', () => ({
-  // FORGE-610: the viewer renders an arcball, not an orbit. Both are mocked —
-  // the orbit one so a regression back to it is visible to the test below
-  // rather than silently rendering nothing.
+  // FORGE-612: the viewer is a turntable again. Its props are captured so the
+  // test below can assert the rotation range, and the arcball is mocked too so
+  // a regression back to it is visible rather than silently rendering nothing.
+  OrbitControls: (props: Record<string, unknown>) => {
+    capturedOrbitProps = props;
+    return <div data-testid="orbit-controls" />;
+  },
   ArcballControls: () => <div data-testid="arcball-controls" />,
-  OrbitControls: () => <div data-testid="orbit-controls" />,
   Environment: () => {
     if (environmentShouldThrow) {
       throw new Error(
@@ -197,7 +198,6 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
 describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
   beforeEach(() => {
     fakeCamera.position.set.mockClear();
-    fakeCamera.up.set.mockClear();
     fakeCamera.lookAt.mockClear();
     capturedFitToModel = undefined;
   });
@@ -251,28 +251,65 @@ describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
     expect(fakeCamera.lookAt).toHaveBeenCalledWith(10, 5, -2);
   });
 
-  // FORGE-610: the arcball leaves the up vector wherever the drag ended, and
-  // lookAt reads it. Without restoring it first, Reset View lands in the right
-  // place at an arbitrary roll, which reads as "reset is broken".
-  it('restores the up vector before looking at the model, so a reset is never rolled', () => {
-    mockViewerState({ center: [10, 5, -2], radius: 100, groundY: -3 });
-    render(<R3FViewer />);
-
-    expect(fakeCamera.up.set).toHaveBeenCalledWith(0, 1, 0);
-    // Defaults chosen so that a call which never happened fails the comparison
-    // rather than skipping it.
-    const upOrder = fakeCamera.up.set.mock.invocationCallOrder[0] ?? Infinity;
-    const lookAtOrder = fakeCamera.lookAt.mock.invocationCallOrder[0] ?? -Infinity;
-    expect(upOrder).toBeLessThan(lookAtOrder);
-  });
+  // FORGE-612: the turntable keeps a fixed up vector, so a reset is never
+  // rolled by construction and nothing needs restoring. What does need
+  // asserting is the rotation range -- see the describe below.
 });
 
-// FORGE-610: OrbitControls clamps the polar angle to [0, pi] about a fixed up
-// vector, so a model could not be tumbled past vertical and its underside was
-// unreachable. The arcball has no pole. Nothing else asserts the control type,
-// so without this a revert to OrbitControls would pass every other test.
-describe('R3FViewer — the camera control has no pole (FORGE-610)', () => {
-  it('renders an arcball control, not a polar-clamped orbit control', () => {
+// FORGE-612: a turntable on purpose. An arcball (FORGE-610) tumbles with no
+// pole, but it abandons the fixed up vector that makes the workplane read as a
+// plane. Nothing else asserts the control type or its range, so without this a
+// silent swap back, or a stray polar clamp, would pass every other test.
+describe('R3FViewer — turntable rotation over a workplane (FORGE-612)', () => {
+  beforeEach(() => {
+    capturedOrbitProps = undefined;
+    vi.mocked(useViewerStore).mockImplementation((selector) =>
+      selector({
+        glbUrl: 'blob:fake',
+        manifest: { parts: [] },
+        selectedMeshName: null,
+        hiddenMeshes: new Set(),
+        explodeFactor: 0,
+        resetCamera: vi.fn(),
+        registerCameraReset: vi.fn(),
+        modelBounds: { center: [10, 5, -2], radius: 100, groundY: -3 },
+        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+        registerOrbitControlsEnabledSetter: vi.fn(),
+      } as unknown as Parameters<typeof selector>[0]),
+    );
+  });
+
+  it('renders a turntable control, not a free-tumbling arcball', () => {
+    const { queryByTestId } = render(<R3FViewer />);
+
+    expect(queryByTestId('orbit-controls')).toBeTruthy();
+    expect(queryByTestId('arcball-controls')).toBeNull();
+  });
+
+  it('leaves the full overhead-to-underneath sweep open, and the azimuth unbounded', () => {
+    render(<R3FViewer />);
+
+    // Straight down to straight up: every face of a model is reachable, the
+    // underside by continuing past the horizon.
+    expect(capturedOrbitProps?.minPolarAngle).toBe(0);
+    expect(capturedOrbitProps?.maxPolarAngle).toBeCloseTo(Math.PI, 6);
+    // No azimuth bound at all -- horizontal rotation goes round and round.
+    expect(capturedOrbitProps?.minAzimuthAngle).toBeUndefined();
+    expect(capturedOrbitProps?.maxAzimuthAngle).toBeUndefined();
+  });
+
+  it('draws the workplane the model stands on', () => {
+    const { container } = render(<R3FViewer />);
+
+    // Two helpers: the minor cells and the major sections over them. Without a
+    // visible ground there is no reference for the motion, and an orbit reads
+    // as the object wobbling in a void (FORGE-34 hid it; this restores it).
+    expect(container.querySelectorAll('gridHelper').length).toBe(2);
+  });
+
+  it('draws no workplane when the model has no bounds, rather than guessing a height', () => {
+    // The robot-description path never computes modelBounds. A floor placed
+    // from a guess would cut through the robot, so there simply isn't one.
     vi.mocked(useViewerStore).mockImplementation((selector) =>
       selector({
         glbUrl: 'blob:fake',
@@ -288,10 +325,9 @@ describe('R3FViewer — the camera control has no pole (FORGE-610)', () => {
       } as unknown as Parameters<typeof selector>[0]),
     );
 
-    const { queryByTestId } = render(<R3FViewer />);
+    const { container } = render(<R3FViewer />);
 
-    expect(queryByTestId('arcball-controls')).toBeTruthy();
-    expect(queryByTestId('orbit-controls')).toBeNull();
+    expect(container.querySelectorAll('gridHelper').length).toBe(0);
   });
 });
 

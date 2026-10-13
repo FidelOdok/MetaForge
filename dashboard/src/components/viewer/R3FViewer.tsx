@@ -1,8 +1,8 @@
 import { VIEWER_COLOR_MANAGEMENT } from './viewerColor';
 import { Suspense, lazy, useCallback, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { ArcballControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
-import type { ArcballControls as ArcballControlsImpl } from 'three-stdlib';
+import { OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import { useThemeStore } from '../../store/theme-store';
@@ -130,6 +130,75 @@ function GroundShadowCatcher() {
   );
 }
 
+/**
+ * The visible workplane the model sits on (FORGE-612), restored after
+ * FORGE-34/MET-623 hid it.
+ *
+ * Why it matters beyond decoration: with nothing under the model there is no
+ * reference for the motion, so an orbit reads as the object wobbling in a void
+ * rather than the view moving around a thing standing on a floor. The grid is
+ * what makes a turntable feel like a turntable.
+ *
+ * Why it no longer shimmers: drei's `Grid` draws its lines procedurally in a
+ * fragment shader, anti-aliasing them with screen-space derivatives (`fwidth`).
+ * That is what flickered on its own during an orbit, and it got worse at the
+ * larger cell sizes and camera distances MET-620 introduced. These are plain
+ * `GridHelper` line segments with a `LineBasicMaterial` -- real geometry, no
+ * derivatives, nothing to shimmer.
+ *
+ * Two helpers rather than one give the minor/major cell reading the old Grid
+ * had (`cellSize`/`sectionSize`). The major grid sits a hair above the minor
+ * one so their coincident lines cannot z-fight.
+ */
+function GroundGrid({ isDark }: { isDark: boolean }) {
+  const modelBounds = useViewerStore((s) => s.modelBounds);
+
+  // Only the GLB path computes bounds. The robot-description path has none,
+  // and a floor placed from a guess would cut straight through the robot, so
+  // it keeps the no-grid behaviour it has always had rather than get a plane
+  // at an invented height. (GroundShadowCatcher can guess safely: an
+  // invisible plane at the wrong height costs a misplaced shadow, not a slab
+  // through the model.)
+  if (!modelBounds) return null;
+
+  const { center, radius, groundY: modelGroundY } = modelBounds;
+  // Just below the shadow catcher, so a cast shadow reads on top of the grid
+  // rather than fighting it -- the same 0.5 offset the original grid used.
+  const groundY = (modelGroundY ?? 0) - 0.5;
+
+  // Size and spacing scale with the model, exactly as before: a fixed 200-unit
+  // grid sat nowhere near a small or off-center model, which is what made an
+  // orbit look like the grid was the thing rotating (MET-620). The division
+  // counts work out near-constant (~43 minor, ~9 major) for any model big
+  // enough to set `size` from its radius; the cap only bites on a very small
+  // one, where the 20-unit floor would otherwise ask for thousands of lines.
+  const size = Math.max(20, radius * 6);
+  const scale = radius / 36;
+  const minorDivisions = Math.min(200, Math.max(1, Math.round(size / (5 * scale))));
+  const majorDivisions = Math.min(40, Math.max(1, Math.round(size / (25 * scale))));
+
+  const minorColor = isDark ? '#333333' : '#dddddd';
+  const majorColor = isDark ? '#555555' : '#bbbbbb';
+
+  return (
+    <group position={[center[0], groundY, center[2]]}>
+      <gridHelper
+        args={[size, minorDivisions, minorColor, minorColor]}
+        material-transparent
+        material-opacity={0.75}
+        material-depthWrite={false}
+      />
+      <gridHelper
+        args={[size, majorDivisions, majorColor, majorColor]}
+        position={[0, 0.01 * Math.max(scale, 1), 0]}
+        material-transparent
+        material-opacity={0.9}
+        material-depthWrite={false}
+      />
+    </group>
+  );
+}
+
 /** Registers a camera-reset callback in the store so the button outside Canvas
  * can trigger it, and fits the camera to the loaded model's actual size and
  * position — a fixed generic framing regardless of what's loaded (MET-620)
@@ -137,20 +206,18 @@ function GroundShadowCatcher() {
  * grid rotating rather than the camera orbiting the object. */
 function CameraController() {
   const { camera } = useThree();
-  const controlsRef = useRef<ArcballControlsImpl | null>(null);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const registerCameraReset = useViewerStore((s) => s.registerCameraReset);
   const modelBounds = useViewerStore((s) => s.modelBounds);
   const registerOrbitControlsEnabledSetter = useViewerStore(
     (s) => s.registerOrbitControlsEnabledSetter,
   );
 
-  // FORGE-250: lets drag-to-pose flip the camera controls' `enabled` flag
-  // imperatively the instant a joint drag starts/ends, same registration
-  // pattern as registerCameraReset above -- see viewer-store's
+  // FORGE-250: lets drag-to-pose flip OrbitControls.enabled imperatively the
+  // instant a joint drag starts/ends, same registration pattern as
+  // registerCameraReset above -- see viewer-store's
   // `_orbitControlsEnabledSetterFn` docstring for why this can't just be a
-  // React prop bound to store state (one frame too slow). The store name still
-  // says "orbit"; since FORGE-610 the control is an arcball, which carries the
-  // same `enabled` flag, so the mechanism is unchanged.
+  // React prop bound to store state (one frame too slow).
   useEffect(() => {
     registerOrbitControlsEnabledSetter((enabled) => {
       if (controlsRef.current) controlsRef.current.enabled = enabled;
@@ -166,15 +233,9 @@ function CameraController() {
       center[1] + VIEW_DIR.y * dist,
       center[2] + VIEW_DIR.z * dist,
     );
-    // Free tumbling (FORGE-610) leaves the camera's up vector wherever the
-    // drag ended, and lookAt reads it -- without restoring it first, Reset
-    // View returns to the right spot at an arbitrary roll.
-    camera.up.set(0, 1, 0);
     camera.lookAt(center[0], center[1], center[2]);
     if (controlsRef.current) {
-      // The arcball keeps its pivot in internal gizmo state, so mutating
-      // `target` alone would move nothing: setTarget is the real API.
-      controlsRef.current.setTarget(center[0], center[1], center[2]);
+      controlsRef.current.target.set(center[0], center[1], center[2]);
       controlsRef.current.update();
     }
   }, [camera, modelBounds]);
@@ -193,26 +254,27 @@ function CameraController() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelBounds]);
 
-  // The arcball draws its own circles and axis lines over the scene. This
-  // viewer already has a view cube for orientation, so keep them hidden --
-  // `activateGizmos`, which the controls call on every interaction, only
-  // changes their opacity, so hiding them once holds.
-  useEffect(() => {
-    controlsRef.current?.setGizmosVisible(false);
-  }, []);
-
-  // FORGE-610: an arcball, not an orbit. OrbitControls clamps the polar angle
-  // to [0, pi] around a fixed up vector, so dragging up or down stopped dead
-  // at the poles and the underside of a model was unreachable. The arcball has
-  // no pole: it tumbles freely in any direction. `enableAnimations` and
-  // `dampingFactor` are the arcball's equivalent of enableDamping -- both are
-  // already the library defaults, set here so the intent survives an upgrade.
+  // FORGE-612: a turntable, deliberately -- this reverts the arcball of
+  // FORGE-610. An arcball tumbles with no pole, but it gives up the fixed up
+  // vector, and that vector is what makes the workplane below read as a
+  // *plane* rather than a sheet pitching about underneath the model. The
+  // Tinkercad feel we want is a scene on a turntable: the ground stays the
+  // ground, and the model never ends up rolled.
+  //
+  // Nothing is clamped here beyond what a turntable implies. The azimuth is
+  // unbounded, so horizontal rotation goes round and round; the polar range
+  // is the full [0, pi], from directly overhead to directly underneath, so
+  // every face of a model is reachable -- the underside by continuing down
+  // past the horizon rather than by rolling over the top. Both values are
+  // OrbitControls' own defaults, written out because they are the point.
   return (
-    <ArcballControls
+    <OrbitControls
       ref={controlsRef}
       makeDefault
-      enableAnimations
-      dampingFactor={25}
+      enableDamping
+      dampingFactor={0.1}
+      minPolarAngle={0}
+      maxPolarAngle={Math.PI}
     />
   );
 }
@@ -458,12 +520,13 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
             <Environment preset="studio" />
           </Suspense>
         </ErrorBoundary>
-        {/* Ground grid temporarily hidden — drei's Grid draws lines via a
-            derivative-based shader that shimmers/flickers on its own,
-            independent of the z-fighting MET-621 fixed. Restoring it needs a
-            plain-material (baked-texture) plane instead (MET-623). The
-            invisible shadow-only catcher below (MET-747) is unaffected by
-            that bug -- a shadowMaterial has no lines to shimmer. */}
+        {/* The workplane the model stands on, restored in FORGE-612 after
+            FORGE-34/MET-623 hid it: these are real GridHelper line segments,
+            not drei Grid's derivative-shaded procedural lines, so the shimmer
+            that forced the hiding cannot occur. The shadow-only catcher
+            (MET-747) sits just above it and was never affected either -- a
+            shadowMaterial has no lines to shimmer. */}
+        <GroundGrid isDark={isDark} />
         <GroundShadowCatcher />
 
         <ambientLight intensity={0.4} />
