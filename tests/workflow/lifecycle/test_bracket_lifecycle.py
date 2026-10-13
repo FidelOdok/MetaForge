@@ -106,7 +106,15 @@ def test_a_load_change_reruns_affected_work_and_keeps_the_rest(
         completed=list(ALL_DONE),
     )
     assert plan.valid
-    assert plan.rerun == ("requirements", "feasibility", "design", "simulation")
+    # FORGE-611: the process choice and the DFM review depend on the loads too.
+    assert plan.rerun == (
+        "requirements",
+        "feasibility",
+        "route_selection",
+        "design",
+        "dfm_review",
+        "simulation",
+    )
     assert plan.preserved == ("intent", "needs")
 
 
@@ -204,7 +212,8 @@ def test_a_blocking_gap_makes_the_affected_node_blocked(
 
 def test_a_returning_capability_releases_the_work(accepted_bracket: bracket.Accepted) -> None:
     assert not _report(accepted_bracket, bracket.all_tools()).gaps
-    run = Run(accepted_bracket).succeed_through("design")
+    # FORGE-611: simulation follows the DFM review, which follows the design.
+    run = Run(accepted_bracket).succeed_through("dfm_review")
     assert run.view().node("simulation").eligibility is Eligibility.ELIGIBLE
 
 
@@ -294,7 +303,7 @@ async def test_reused_phases_are_skipped_by_the_real_engine() -> None:
         await asyncio.sleep(0.005)
     await asyncio.wait_for(task, timeout=5.0)
 
-    assert ran == ["feasibility", "design", "simulation"]
+    assert ran == ["feasibility", "route_selection", "design", "dfm_review", "simulation"]
     view = lifecycle_view(accepted.definition.phases, _in_process_state(store.get(run.id)))
     for reused in ("intent", "needs", "requirements"):
         assert view.node(reused).execution_status is ExecutionStatus.SKIPPED

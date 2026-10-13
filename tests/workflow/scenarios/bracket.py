@@ -127,8 +127,20 @@ TAILORING: list[dict[str, Any]] = [
     },
     {
         "op": "set_outcome",
+        "phase": "route_selection",
+        "value": "machining from Al 6061-T6 plate chosen from what is available",
+        "rationale": "outcomes come before tasks",
+    },
+    {
+        "op": "set_outcome",
         "phase": "design",
         "value": "bracket geometry within the envelope committed",
+        "rationale": "outcomes come before tasks",
+    },
+    {
+        "op": "set_outcome",
+        "phase": "dfm_review",
+        "value": "bracket shown machinable within the chosen process's limits",
         "rationale": "outcomes come before tasks",
     },
     {

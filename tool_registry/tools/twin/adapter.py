@@ -1220,6 +1220,26 @@ class TwinServer(McpToolServer):
                                 "marks this decision stale."
                             ),
                         },
+                        "process_ranking": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-611: on the route decision, the candidate processes "
+                                "compared (rank_manufacturing_processes output): candidates "
+                                "[{process, route, verdict, cost_at_quantity, reasons}] and "
+                                "recommended. The route gate needs it unless the route is "
+                                "deferred."
+                            ),
+                        },
+                        "dfm_review": {
+                            "type": "object",
+                            "description": (
+                                "FORGE-611: on the DFM review decision: process, verdict "
+                                "(manufacturable | not_manufacturable | incomplete), findings "
+                                "{pass, fail, unknown}, unknowns, and plan {stock, operations, "
+                                "quantity, unit_cost_estimate, cost_source}. The DFM gate "
+                                "reads it."
+                            ),
+                        },
                         "manufacturing_route": {
                             "type": "object",
                             "description": (
@@ -1304,6 +1324,16 @@ class TwinServer(McpToolServer):
             if not isinstance(route, dict):
                 raise ValueError("twin.record_decision: 'manufacturing_route' must be an object")
             kwargs["manufacturing_route"] = route
+        ranking = arguments.get("process_ranking")
+        if ranking is not None:
+            if not isinstance(ranking, dict | list):
+                raise ValueError("twin.record_decision: 'process_ranking' must be an object")
+            kwargs["process_ranking"] = ranking
+        review = arguments.get("dfm_review")
+        if review is not None:
+            if not isinstance(review, dict):
+                raise ValueError("twin.record_decision: 'dfm_review' must be an object")
+            kwargs["dfm_review"] = review
         return await self._decision_recorder(**kwargs)
 
     # ------------------------------------------------------------------

@@ -124,6 +124,7 @@ class TestProfileDefinitions:
             "client_run",
             "core",
             "electronics",
+            "manufacturing",  # FORGE-611
             "mechanical",
             "mechanical_product",
             "robotics",

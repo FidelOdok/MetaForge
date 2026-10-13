@@ -491,6 +491,49 @@ This closed the gap the Table run showed: its route phase recorded "route
 NOT SELECTED (deferred)" as prose, the gate passed, and the design went ahead
 on assumed materials without the gate saying so.
 
+**Process before design, DFM after it (FORGE-611).** `mech_v1` (template
+1.2.0) now has two manufacturing phases on every run, both with the
+`manufacturing` discipline (its own tool profile and skill cards):
+
+| Phase | Where | Skill | Gate reads |
+|---|---|---|---|
+| `route_selection` (Manufacturing Route & Process Selection) | before `design` | `rank_manufacturing_processes` | `manufacturing_route` plus `process_ranking` |
+| `dfm_review` (DFM Review & Manufacturing Plan) | after `design`, before `simulation` | `check_manufacturability` | `dfm_review` |
+
+The process is chosen first, from what is available, because it constrains
+the design (stock sections, sheet sizes, cutter radii, weld access). The
+agent ranks 2 to 4 candidates on fit, availability on the route and cost at
+quantity, using only sourced capability values (`design_value` entries); a
+value it could not source makes that criterion `unknown`. The person picks:
+approving the route gate accepts the recommendation, a retry naming another
+process records that one. The chosen process's limits go into a constraint
+set, and the design phase is told to design to them.
+
+The route gate now also needs the ranking: a chosen route without
+`process_ranking` is not ready. A process the person stated up front is a
+one-candidate ranking. A deferral needs no ranking.
+
+After the design, `dfm_review` checks each feature (wall thickness, holes,
+inside corner and bend radii, draft, overhang, envelope) against the chosen
+process's limits and writes the manufacturing plan (stock, operations,
+quantity, a unit cost only when sourced). `twin.record_decision` takes the
+result as a typed `dfm_review` (`process`, `verdict`, `findings`,
+`unknowns`, `plan`). The gate, in both engines:
+
+- none recorded: not ready;
+- `not_manufacturable`: not ready, naming the failing features, so the
+  design is reworked before simulation is spent on it;
+- `incomplete`: ready, with what could not be checked in the summary;
+  approving accepts it;
+- `manufacturable`: ready, with the process named.
+
+MetaForge cannot yet measure a wall thickness, hole, radius, bend or draft
+off the geometry, so those values are declared (the part's authoring
+parameters) or stated, and every finding says which. Measured values are
+the envelope, volume and mass (`twin.get_node`, `freecad.measure`) and the
+3D-printing overhang (`twin.evaluate_overhang_metric`). The `hardware_v1`
+`manufacturing` phase (electronics, G8) is unchanged.
+
 A successful proposal (`201`, `status: "proposed"`) keeps every existing
 field and adds `requirementsPending` (true when no requirements were sent),
 `assumptions` (including an explicit "requirements pending" line) and

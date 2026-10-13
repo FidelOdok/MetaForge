@@ -87,6 +87,11 @@ def twin() -> InMemoryTwinAPI:
     return InMemoryTwinAPI.create()
 
 
+def _by_id(flow: object, phase_id: str) -> object:
+    """A phase by id: positions shift when a template gains phases (FORGE-611)."""
+    return next(p for p in flow.phases if p.id == phase_id)  # type: ignore[attr-defined]
+
+
 class _Counter:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -190,7 +195,7 @@ class TestSlotsInTheFlow:
     def test_slots_are_frozen_into_the_hash_and_round_trip(self) -> None:
         bound = bind_slots(_tailored_with_brackets())
         frozen = freeze_flow(bound)
-        assert [s.item_key for s in frozen.phases[4].slots] == [LEFT[2], RIGHT[2]]
+        assert [s.item_key for s in _by_id(frozen, "design").slots] == [LEFT[2], RIGHT[2]]
         assert freeze_flow(definition_from_frozen(frozen)).content_hash == frozen.content_hash
         renamed = freeze_flow(
             FlowDefinition(
@@ -369,7 +374,7 @@ class TestContextCarriesSlots:
         from api_gateway.runs.flow_worker import _slots_of
 
         frozen = freeze_flow(bind_slots(_tailored_with_brackets()))
-        assert [s.item_key for s in _slots_of(frozen.phases[4])] == [LEFT[2], RIGHT[2]]
+        assert [s.item_key for s in _slots_of(_by_id(frozen, "design"))] == [LEFT[2], RIGHT[2]]
         as_dict = {"slots": [{"item_type": "cad_model", "name": "x", "item_key": "CAD-X"}]}
         assert _slots_of(SimpleNamespace(**as_dict))[0].item_key == "CAD-X"
 

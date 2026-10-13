@@ -9,6 +9,7 @@ assumed materials with nothing saying so. A decision now carries a typed
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
@@ -17,13 +18,25 @@ import pytest
 
 from api_gateway.twin.decision_recorder import make_decision_recorder
 from orchestrator.design_flow.context import (
+    PROCESS_RANKING_MISSING,
     ROUTE_DECISION_MISSING,
+    ProcessRanking,
+    RankedCandidate,
     RouteDecision,
     parse_route_decision,
     route_decision_gap,
 )
 from orchestrator.design_flow.generator import ROUTE_SELECTION_PHASE_ID
 from twin_core.api import InMemoryTwinAPI
+
+_RANKING = ProcessRanking(
+    candidates=(
+        RankedCandidate(
+            process="laser cut + weld", reasons=("fits; cost 460 at 4",), verdict="fits"
+        ),
+    ),
+    recommended="laser cut + weld",
+)
 
 
 class TestTheRule:
@@ -34,7 +47,10 @@ class TestTheRule:
         assert decision == RouteDecision(
             route="vendor", process="laser cut + weld", material_class="steel"
         )
-        assert route_decision_gap(decision) is None
+        # FORGE-611: a chosen route also needs the ranking it was chosen from.
+        assert route_decision_gap(decision) == PROCESS_RANKING_MISSING
+        ranked = replace(decision, ranking=_RANKING)
+        assert route_decision_gap(ranked) is None
 
     def test_a_deferral_with_a_reason(self) -> None:
         decision = parse_route_decision({"deferred": True, "reason": "quantity unknown"})
@@ -129,10 +145,18 @@ class TestTheTemporalGate:
 
     def test_a_chosen_route_is_ready_and_named(self) -> None:
         check = _temporal_check(
-            RouteDecision(route="vendor", process="weld", material_class="steel")
+            RouteDecision(route="vendor", process="weld", material_class="steel", ranking=_RANKING)
         )
         assert check.ready
         assert "route vendor" in check.reason
+        assert "ranking: 1. laser cut + weld" in check.reason
+
+    def test_a_chosen_route_without_its_ranking_is_not_ready(self) -> None:
+        check = _temporal_check(
+            RouteDecision(route="vendor", process="weld", material_class="steel")
+        )
+        assert not check.ready
+        assert PROCESS_RANKING_MISSING in check.missing
 
     def test_a_deferral_is_ready_and_says_approving_accepts_it(self) -> None:
         check = _temporal_check(RouteDecision(deferred=True, reason="quantity unknown"))

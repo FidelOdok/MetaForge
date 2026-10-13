@@ -26,7 +26,11 @@ from typing import Protocol, runtime_checkable
 import structlog
 
 from observability.tracing import get_tracer
-from orchestrator.design_flow.context import route_decision_gap
+from orchestrator.design_flow.context import (
+    DFM_REVIEW_PHASE_ID,
+    dfm_review_gap,
+    route_decision_gap,
+)
 from orchestrator.design_flow.failures import classify_failure
 from orchestrator.design_flow.generator import ROUTE_SELECTION_PHASE_ID
 from orchestrator.design_flow.graph import (
@@ -835,6 +839,15 @@ class DesignFlowExecutor:
                 gap = route_decision_gap(await self._evaluator.route_decision(ctx.project_id))
             except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
                 logger.warning("design_flow_route_decision_error", error=str(exc))
+                gap = None
+            if gap is not None:
+                missing.append(gap)
+        if phase.id == DFM_REVIEW_PHASE_ID and hasattr(self._evaluator, "dfm_review"):
+            # FORGE-611: same DFM rule as the Temporal engine's gate check.
+            try:
+                gap = dfm_review_gap(await self._evaluator.dfm_review(ctx.project_id))
+            except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+                logger.warning("design_flow_dfm_review_error", error=str(exc))
                 gap = None
             if gap is not None:
                 missing.append(gap)

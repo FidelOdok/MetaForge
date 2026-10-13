@@ -261,6 +261,29 @@ PROFILES: dict[str, frozenset[str]] = {
     # chat, and source engineering values (FORGE-586) and record them. CAD
     # authoring and solvers do not fit beside these; a run whose phases need
     # them belongs on a client that can take the full set (`all`).
+    # FORGE-611: choosing the process before design and checking the design
+    # against it after. Sourcing (web, knowledge), the geometry reads a DFM
+    # check can stand on, component search, and the records both phases
+    # write. No CAD authoring: these phases read the design, not change it.
+    "manufacturing": _BASE
+    | {
+        "web.search",
+        "web.fetch",
+        "knowledge.extract",
+        "memory.retrieve_similar_experience",
+        "component.search_intent",
+        "component.search_parametric",
+        "freecad.measure",
+        "freecad.describe_model",
+        "freecad.describe_session",
+        "freecad.list_named_faces",
+        "twin.evaluate_overhang_metric",
+        "twin.query_cypher",
+        "twin.record_engineering_entity",
+        "twin.record_constraint_set",
+        "twin.record_claim",
+        "twin.record_document",
+    },
     "client_run": _BASE
     | {
         "flow.list",
@@ -311,6 +334,7 @@ DISCIPLINE_PROFILES: dict[str, str] = {
     "electronics": "electronics",
     "supply_chain": "electronics",
     "robotics": "robotics",
+    "manufacturing": "manufacturing",
 }
 
 #: Slots a phase turn keeps back for the harness's own native tools
