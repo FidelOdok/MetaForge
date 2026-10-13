@@ -566,6 +566,14 @@ machine's `library.machine_limits` candidate to `rank_manufacturing_processes`,
 and the DFM phase checks the design against the chosen machine's limits. A
 context with no library machines renders exactly as before.
 
+A networked printer can be read instead of typed in:
+`library.discover_machine` reads an OctoPrint, Moonraker (Klipper) or
+PrusaLink controller from the gateway and returns a proposed instance whose
+figures are `machine_report` values citing the endpoint and time read. It
+registers nothing. The controller's key stays on the gateway in an
+environment variable whose name must start `METAFORGE_MACHINE_`, so no
+other gateway secret can be sent to a machine URL.
+
 A successful proposal (`201`, `status: "proposed"`) keeps every existing
 field and adds `requirementsPending` (true when no requirements were sent),
 `assumptions` (including an explicit "requirements pending" line) and

@@ -66,3 +66,9 @@ class RemoteMachineLibrary:
             "GET", f"/v1/library/machines/{quote(machine_id, safe='')}/limits"
         )
         return result
+
+    async def discover_machine(self, connection: dict[str, Any], name: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST", "/v1/library/discover", json={"connection": connection, "name": name}
+        )
+        return result

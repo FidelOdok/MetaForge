@@ -54,11 +54,15 @@ class MachineLibraryService(Protocol):
 
     async def machine_limits(self, machine_id: str) -> dict[str, Any]: ...
 
+    async def discover_machine(self, connection: dict[str, Any], name: str) -> dict[str, Any]: ...
+
 
 _CAPABILITY_HELP = (
     "capabilities is an object keyed by name, each {value, unit, source_kind, source_ref}. "
     "source_kind is measurement or manufacturer_spec (both need source_ref: the spec sheet "
-    "URL or the measurement note), user (the person said so) or assumption (flagged for "
+    "URL or the measurement note), machine_report (read from the machine's controller by "
+    "library.discover_machine, with the endpoint and time), user (the person said so) "
+    "or assumption (flagged for "
     "review). Names: build_volume_mm and travel_mm ([x, y, z] in mm); nozzle_mm, "
     "layer_height_min_mm, min_feature_mm, min_wall_mm, tolerance_mm, min_bend_radius_mm, "
     "min_tool_diameter_mm, max_sheet_thickness_mm (mm); max_overhang_deg (deg); "
@@ -75,7 +79,13 @@ _CAPABILITIES_SCHEMA: dict[str, Any] = {
             "unit": {"type": "string"},
             "source_kind": {
                 "type": "string",
-                "enum": ["measurement", "manufacturer_spec", "user", "assumption"],
+                "enum": [
+                    "measurement",
+                    "manufacturer_spec",
+                    "machine_report",
+                    "user",
+                    "assumption",
+                ],
             },
             "source_ref": {"type": "string"},
         },
@@ -240,6 +250,47 @@ class LibraryServer(McpToolServer):
             ),
             handler=self.update_machine,
         )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="library.discover_machine",
+                adapter_id="library",
+                name="Discover Machine",
+                description=(
+                    "Read a 3D printer's own controller (OctoPrint, Moonraker for Klipper, "
+                    "or PrusaLink) and return a proposed machine instance: build volume or "
+                    "axis travel, nozzle and current state, each recorded as machine_report "
+                    "with the endpoint and time read. Registers nothing: show the person the "
+                    "entry and its missing figures, then call library.register_machine "
+                    "(held). connection is {protocol, url, credential_env}; the key is read "
+                    "on the gateway from credential_env, which must start METAFORGE_MACHINE_."
+                ),
+                capability="machine_library",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "connection": _CONNECTION_SCHEMA,
+                        "name": {
+                            "type": "string",
+                            "description": "What the person calls it; else the hostname.",
+                        },
+                    },
+                    "required": ["connection"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=_limits(),
+            ),
+            handler=self.discover_machine,
+        )
+
+    async def discover_machine(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("library.discover_machine"):
+            connection = arguments.get("connection")
+            if not isinstance(connection, dict):
+                raise ValueError("connection must be an object")
+            return await self._library.discover_machine(
+                connection, str(arguments.get("name") or "")
+            )
 
     async def list_machines(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("library.list_machines"):

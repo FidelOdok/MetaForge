@@ -50,6 +50,11 @@ def init_machine_library(library: SqliteMachineLibrary | None) -> None:
     _library = library
 
 
+class DiscoverMachineRequest(BaseModel):
+    connection: dict[str, Any]
+    name: str = ""
+
+
 class UpdateMachineRequest(BaseModel):
     changes: dict[str, Any] = Field(default_factory=dict)
     by: str = ""
@@ -124,3 +129,15 @@ async def update_machine(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     logger.info("machine_updated", machine_id=machine_id, version=machine.version, by=by)
     return {"machine": machine.as_dict()}
+
+
+@router.post("/discover")
+async def discover_machine(body: DiscoverMachineRequest) -> dict[str, Any]:
+    """Read a printer's controller into a proposed instance. Registers nothing."""
+    from api_gateway.library.discovery import DiscoveryError
+    from api_gateway.library.discovery import discover_machine as discover
+
+    try:
+        return await discover(body.connection, name=body.name)
+    except DiscoveryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

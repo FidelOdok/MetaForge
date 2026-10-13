@@ -20,8 +20,8 @@ Two layers:
 
 ## Rules
 
-1. **Every capability has a source.** `manufacturer_spec` and `measurement`
-   need a reference (the spec sheet URL, the calibration print and date).
+1. **Every capability has a source.** `manufacturer_spec`, `measurement` and
+   `machine_report` (read from the controller) need a reference (the spec sheet URL, the calibration print and date).
    `user` means the person told you. `assumption` is allowed only when the
    person accepts it, and it is flagged for review in every limit that uses
    it. Never fill a figure from memory: leave it out, and the DFM check reads
@@ -36,6 +36,27 @@ Two layers:
    holds the key. Never put an API key or password in the library.
 4. **Look before adding.** Call `library.list_machines` first. Reuse an
    existing model rather than adding a second CR-10.
+
+## Discovering a networked printer
+
+If the printer runs OctoPrint, Klipper with Moonraker, or PrusaLink, read it
+instead of typing it in:
+
+1. Ask the person for the controller's URL. If it needs an API key, ask them
+   to set it on the gateway in an environment variable starting
+   `METAFORGE_MACHINE_` (for example `METAFORGE_MACHINE_CR10_KEY`). Never ask
+   them to paste the key to you.
+2. `library.discover_machine` with `connection: {protocol, url,
+   credential_env}`. It returns a proposed instance (build volume or axis
+   travel, nozzle, current state, each recorded as `machine_report` with
+   where and when it was read), what the controller reported, and the
+   figures it could not report (minimum wall and feature, tolerance,
+   overhang, materials).
+3. Show the person the entry and the missing figures. Add any they can
+   source; leave the rest out.
+4. `library.register_machine` with the entry (held for their approval).
+
+Discovery reads only; it registers nothing and changes nothing on the printer.
 
 ## Recording a machine
 
