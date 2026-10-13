@@ -99,6 +99,7 @@ vi.mock('../../../store/viewer-store', () => ({
       modelBounds: null,
       booleanCut: { cutterGlbUrl: null, cutterManifest: null },
       registerOrbitControlsEnabledSetter: vi.fn(),
+      registerFocusPart: vi.fn(),
     };
     return selector(state);
   }),
@@ -154,6 +155,7 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
       selectPart: selectPartMock,
       booleanCut: { cutterGlbUrl: null, cutterManifest: null },
       registerOrbitControlsEnabledSetter: vi.fn(),
+      registerFocusPart: vi.fn(),
     };
     vi.mocked(useViewerStore).mockImplementation((selector) =>
       selector(fakeState as unknown as Parameters<typeof selector>[0]),
@@ -238,6 +240,7 @@ describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
         modelBounds,
         booleanCut: { cutterGlbUrl: null, cutterManifest: null },
       registerOrbitControlsEnabledSetter: vi.fn(),
+      registerFocusPart: vi.fn(),
       } as unknown as Parameters<typeof selector>[0]),
     );
   }
@@ -298,6 +301,8 @@ describe('R3FViewer — camera modes and the workplane (FORGE-616)', () => {
         registerOrbitControlsEnabledSetter: vi.fn(),
         cameraMode: 'turntable',
         setCameraMode: vi.fn(),
+        focusPart: vi.fn(),
+        registerFocusPart: vi.fn(),
         ...over,
       } as unknown as Parameters<typeof selector>[0]),
     );
@@ -365,6 +370,41 @@ describe('R3FViewer — camera modes and the workplane (FORGE-616)', () => {
     // Clicking the already-selected mode asks for that same mode, not the other.
     fireEvent.click(getByRole('button', { name: 'Turntable' }));
     expect(setCameraMode).toHaveBeenLastCalledWith('turntable');
+  });
+
+  it('zooms toward the cursor rather than the pivot', () => {
+    render(<R3FViewer />);
+
+    // Zooming at the pivot pushes whatever you aimed at off the edge and
+    // costs a pan to get back -- the "too many drags" complaint (FORGE-618).
+    expect(capturedOrbitProps?.zoomToCursor).toBe(true);
+  });
+
+  it('frames the selected part on F, and leaves the key alone while typing', () => {
+    const focusPart = vi.fn();
+    mockState({ selectedMeshName: 'leg_front_left', focusPart });
+    render(<R3FViewer />);
+
+    fireEvent.keyDown(window, { key: 'f' });
+    expect(focusPart).toHaveBeenCalledWith('leg_front_left');
+
+    // The twin page has a search box and an agent chat on the same screen.
+    focusPart.mockClear();
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: 'f' });
+    expect(focusPart).not.toHaveBeenCalled();
+    input.remove();
+  });
+
+  it('does nothing on F when no part is selected', () => {
+    const focusPart = vi.fn();
+    mockState({ selectedMeshName: null, focusPart });
+    render(<R3FViewer />);
+
+    fireEvent.keyDown(window, { key: 'f' });
+
+    expect(focusPart).not.toHaveBeenCalled();
   });
 
   it('draws the workplane the model stands on', () => {
@@ -439,6 +479,7 @@ describe('R3FViewer — a failed Environment HDR load is contained (MET-622)', (
         modelBounds: null,
         booleanCut: { cutterGlbUrl: null, cutterManifest: null },
       registerOrbitControlsEnabledSetter: vi.fn(),
+      registerFocusPart: vi.fn(),
       } as unknown as Parameters<typeof selector>[0]),
     );
   });

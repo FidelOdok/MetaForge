@@ -299,10 +299,11 @@ function GroundGrid({ isDark }: { isDark: boolean }) {
  * could put the orbit pivot nowhere near the model, which reads as the ground
  * grid rotating rather than the camera orbiting the object. */
 function CameraController() {
-  const { camera } = useThree();
+  const { camera, scene } = useThree();
   const controlsRef = useRef<OrbitControlsImpl | ArcballControlsImpl | null>(null);
   const cameraMode = useViewerStore((s) => s.cameraMode);
   const registerCameraReset = useViewerStore((s) => s.registerCameraReset);
+  const registerFocusPart = useViewerStore((s) => s.registerFocusPart);
   const modelBounds = useViewerStore((s) => s.modelBounds);
   const registerOrbitControlsEnabledSetter = useViewerStore(
     (s) => s.registerOrbitControlsEnabledSetter,
@@ -320,31 +321,65 @@ function CameraController() {
     return () => registerOrbitControlsEnabledSetter(null);
   }, [registerOrbitControlsEnabledSetter]);
 
+  /** Point the camera at `center` from the standard three-quarter direction,
+   * far enough back for something of `radius`. Shared by the whole-model fit
+   * and the focus-one-part path so both frame the same way. */
+  const frame = useCallback(
+    (center: [number, number, number], radius: number) => {
+      const dist = radius * FIT_DISTANCE_FACTOR;
+      camera.position.set(
+        center[0] + VIEW_DIR.x * dist,
+        center[1] + VIEW_DIR.y * dist,
+        center[2] + VIEW_DIR.z * dist,
+      );
+      // Free orbit leaves the up vector wherever the drag ended and lookAt
+      // reads it, so a reset would otherwise land in the right place at an
+      // arbitrary roll. Harmless on the turntable, where it never moves.
+      camera.up.set(0, 1, 0);
+      camera.lookAt(center[0], center[1], center[2]);
+      const controls = controlsRef.current;
+      if (controls) {
+        // The arcball keeps its pivot in internal gizmo state, so assigning
+        // `target` alone would move nothing; the turntable has no setTarget.
+        if ('setTarget' in controls) {
+          controls.setTarget(center[0], center[1], center[2]);
+        } else {
+          controls.target.set(center[0], center[1], center[2]);
+        }
+        controls.update();
+      }
+    },
+    [camera],
+  );
+
   const fitToModel = useCallback(() => {
     const { center, radius } = modelBounds ?? DEFAULT_BOUNDS;
-    const dist = radius * FIT_DISTANCE_FACTOR;
-    camera.position.set(
-      center[0] + VIEW_DIR.x * dist,
-      center[1] + VIEW_DIR.y * dist,
-      center[2] + VIEW_DIR.z * dist,
-    );
-    // Free orbit leaves the up vector wherever the drag ended and lookAt reads
-    // it, so a reset would otherwise land in the right place at an arbitrary
-    // roll. Harmless on the turntable, where it never moves in the first place.
-    camera.up.set(0, 1, 0);
-    camera.lookAt(center[0], center[1], center[2]);
-    const controls = controlsRef.current;
-    if (controls) {
-      // The arcball keeps its pivot in internal gizmo state, so assigning
-      // `target` alone would move nothing; the turntable has no setTarget.
-      if ('setTarget' in controls) {
-        controls.setTarget(center[0], center[1], center[2]);
-      } else {
-        controls.target.set(center[0], center[1], center[2]);
-      }
-      controls.update();
-    }
-  }, [camera, modelBounds]);
+    frame(center, radius);
+  }, [frame, modelBounds]);
+
+  /** Frame one part, pivot included (FORGE-618). Without this the pivot is
+   * always the whole assembly's centre, so a part off to one side swings
+   * through a wide arc and can never be settled on -- the "too many drags"
+   * complaint. Reset view puts the pivot back on the whole model. */
+  const focusPart = useCallback(
+    (meshName: string) => {
+      const object = scene.getObjectByName(meshName);
+      if (!object) return;
+      const box = new THREE.Box3().setFromObject(object);
+      if (box.isEmpty()) return;
+      const center = new THREE.Vector3();
+      const size = new THREE.Vector3();
+      box.getCenter(center);
+      box.getSize(size);
+      frame([center.x, center.y, center.z], Math.max(size.length() / 2, 1));
+    },
+    [frame, scene],
+  );
+
+  useEffect(() => {
+    registerFocusPart(focusPart);
+    return () => registerFocusPart(null);
+  }, [registerFocusPart, focusPart]);
 
   useEffect(() => {
     registerCameraReset(fitToModel);
@@ -388,6 +423,10 @@ function CameraController() {
         makeDefault
         enableAnimations
         dampingFactor={25}
+        // FORGE-618: zoom toward the cursor, not the pivot. Zooming at the
+        // pivot pushes whatever you aimed at off the edge and costs a pan to
+        // get back.
+        cursorZoom
       />
     );
   }
@@ -400,6 +439,9 @@ function CameraController() {
       dampingFactor={0.1}
       minPolarAngle={0}
       maxPolarAngle={Math.PI}
+      // FORGE-618: zoom toward the cursor, not the pivot -- see the arcball's
+      // cursorZoom above for why.
+      zoomToCursor
     />
   );
 }
@@ -546,11 +588,32 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   const resetCamera = useViewerStore((s) => s.resetCamera);
   const cameraMode = useViewerStore((s) => s.cameraMode);
   const setCameraMode = useViewerStore((s) => s.setCameraMode);
+  const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
+  const focusPart = useViewerStore((s) => s.focusPart);
   const booleanCut = useViewerStore((s) => s.booleanCut);
   const selectPart = useViewerStore((s) => s.selectPart);
   const robotDescription = useViewerStore((s) => s.robotDescription);
   const themeMode = useThemeStore((s) => s.mode);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
+
+  // F frames the selected part and puts the orbit pivot on it (FORGE-618),
+  // the same key Tinkercad and most CAD tools use for fit-to-selection.
+  // Double-clicking a part in the scene does the same thing.
+  useEffect(() => {
+    if (!selectedMeshName) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'f' && e.key !== 'F') return;
+      // Never steal the key from someone typing -- the twin page has a search
+      // box and an agent chat on the same screen.
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      focusPart(selectedMeshName);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedMeshName, focusPart]);
 
   const isDark =
     themeMode === 'dark' ||
@@ -692,7 +755,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
           tall, spans 40-72px), which this overlay's old bottom-14 (56-84px)
           overlapped (MET-624). */}
       <div className="absolute bottom-20 left-3 z-10 rounded-md bg-black/50 px-3 py-1.5 text-xs text-white/80 select-none pointer-events-none">
-        Left drag: rotate · Scroll: zoom · Right drag: pan · Click a part to move it
+        Left drag: rotate · Scroll: zoom at cursor · Right drag: pan · Double-click or F: focus a part
       </div>
 
       {/* Camera reset button — bottom-right (bottom-20 clears the twin status

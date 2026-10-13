@@ -83,6 +83,7 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
   );
   const selectedGroup = useTransientTransform((s) => s.selectedGroup);
   const selectGroup = useTransientTransform((s) => s.selectGroup);
+  const focusPart = useViewerStore((s) => s.focusPart);
   const gizmoMode = useTransientTransform((s) => s.mode);
   const setDelta = useTransientTransform((s) => s.setDelta);
   const setRotationDelta = useTransientTransform((s) => s.setRotationDelta);
@@ -282,6 +283,16 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
     }
   });
 
+  /** Double-click frames the part and moves the orbit pivot onto it
+   * (FORGE-618) -- the pivot is otherwise the whole assembly's centre, which
+   * swings a single part through a wide arc. */
+  const handleDoubleClick = (e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    const mesh = e.object as THREE.Mesh;
+    const meshName = mesh.name || mesh.parent?.name || '';
+    if (meshName) focusPart(meshName);
+  };
+
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     const mesh = e.object as THREE.Mesh;
@@ -302,7 +313,11 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
 
   return (
     <group ref={groupRef}>
-      <primitive object={scene} onClick={overlayTint ? undefined : handleClick} />
+      <primitive
+        object={scene}
+        onClick={overlayTint ? undefined : handleClick}
+        onDoubleClick={overlayTint ? undefined : handleDoubleClick}
+      />
       {gizmoCentroid && (
         <TransformGizmo centroid={gizmoCentroid} mode={gizmoMode} onChange={handleGizmoChange} />
       )}

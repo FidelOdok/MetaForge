@@ -322,7 +322,14 @@ rotating it, with the active one picked out in the accent colour
   view** puts it back upright.
 
 The choice is remembered in the browser. Left-drag rotates, right-drag
-pans, the wheel zooms, and the view cube in the corner jumps to a face.
+pans, and the wheel zooms **toward the cursor** rather than toward the
+pivot, so what you aim at stays where you aimed (FORGE-618).
+
+The pivot is the whole model's centre, which means a single part of a
+large assembly swings through a wide arc. **Double-click a part, or
+press F with one selected, to frame it and put the pivot on it** —
+the fit-to-selection key CAD tools use. **Reset view** puts the pivot
+back on the whole model. The view cube in the corner jumps to a face.
 
 The workplane is a single mipmapped texture rather than drawn lines,
 which is what keeps it still while the camera moves: a receding patch of

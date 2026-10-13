@@ -79,6 +79,8 @@ interface ViewerState {
   viewMode: '3d' | 'graph';
   /** Callback registered by the R3F canvas to reset the camera. */
   _cameraResetFn: (() => void) | null;
+  /** See `registerFocusPart`. */
+  _focusPartFn: ((meshName: string) => void) | null;
   /** Set by SceneContents once the primary model's GLB scene has loaded. */
   modelBounds: ModelBounds | null;
   setModelBounds: (bounds: ModelBounds | null) => void;
@@ -157,6 +159,15 @@ interface ViewerState {
   registerCameraReset: (fn: () => void) => void;
   /** Trigger the camera reset (called from outside the Canvas). */
   resetCamera: () => void;
+
+  /** Register the focus-a-part callback from inside the R3F Canvas
+   * (FORGE-618). Same registration shape as the camera reset above: the
+   * framing maths needs the scene graph, which only exists in there. */
+  registerFocusPart: (fn: ((meshName: string) => void) | null) => void;
+  /** Frame one part and move the orbit pivot onto it. The pivot is otherwise
+   * the whole assembly's centre, which swings a single part through a wide
+   * arc and gives no way to settle on it. */
+  focusPart: (meshName: string) => void;
 
   /** How the camera rotates (FORGE-616).
    *
@@ -364,6 +375,10 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     }),
 
   registerCameraReset: (fn) => set({ _cameraResetFn: fn }),
+
+  _focusPartFn: null,
+  registerFocusPart: (fn) => set({ _focusPartFn: fn }),
+  focusPart: (meshName) => get()._focusPartFn?.(meshName),
 
   resetCamera: () => {
     const fn = get()._cameraResetFn;
