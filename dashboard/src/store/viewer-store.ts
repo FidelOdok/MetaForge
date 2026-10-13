@@ -6,6 +6,22 @@ import type { JointLoadChainPayload } from '../lib/robot-statics';
  * sibling node) → 'ready' (cutter loaded, Hole/Group enabled). */
 export type BooleanCutMode = 'idle' | 'picking-cutter' | 'ready';
 
+/** How the camera rotates (FORGE-613). See `cameraMode` below. */
+export type CameraMode = 'turntable' | 'free';
+
+const CAMERA_MODE_KEY = 'metaforge.viewer.cameraMode';
+
+/** The remembered camera mode, defaulting to the turntable. Reads can throw or
+ * return nothing at all (private window, cleared site data, SSR), so anything
+ * other than a value we recognise means "use the default". */
+function readStoredCameraMode(): CameraMode {
+  try {
+    return window.localStorage.getItem(CAMERA_MODE_KEY) === 'free' ? 'free' : 'turntable';
+  } catch {
+    return 'turntable';
+  }
+}
+
 interface BooleanCutState {
   mode: BooleanCutMode;
   targetNodeId: string | null;
@@ -142,6 +158,20 @@ interface ViewerState {
   /** Trigger the camera reset (called from outside the Canvas). */
   resetCamera: () => void;
 
+  /** How the camera rotates (FORGE-613).
+   *
+   * `turntable` keeps the up vector fixed, so the ground stays the ground and
+   * the model is never left rolled -- but three's OrbitControls calls
+   * `Spherical.makeSafe()`, which clamps the polar angle to [EPS, PI - EPS]
+   * whatever min/maxPolarAngle say, so a drag stops just short of straight up
+   * and straight down. `free` is an arcball: no pole, tumbles in any
+   * direction, at the cost of the fixed up vector.
+   *
+   * Which one a given person prefers is a matter of taste that argument
+   * cannot settle, so the viewer offers both. */
+  cameraMode: CameraMode;
+  setCameraMode: (mode: CameraMode) => void;
+
   /** Additive boolean-cut slice (MET-612) — never touches the primary
    * glbUrl/manifest/selectedMeshName state above. */
   booleanCut: BooleanCutState;
@@ -172,6 +202,19 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   _cameraResetFn: null,
   modelBounds: null,
   setModelBounds: (bounds) => set({ modelBounds: bounds }),
+
+  cameraMode: readStoredCameraMode(),
+  setCameraMode: (mode) => {
+    // Remembered per browser so a comparison survives a reload. Storage can
+    // throw (private mode, blocked site data), and a camera preference is
+    // never worth failing a render over.
+    try {
+      window.localStorage.setItem(CAMERA_MODE_KEY, mode);
+    } catch {
+      /* preference simply isn't remembered */
+    }
+    set({ cameraMode: mode });
+  },
 
   robotDescription: null,
   robotJoints: null,

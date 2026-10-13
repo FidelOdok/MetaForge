@@ -1,9 +1,13 @@
 import { VIEWER_COLOR_MANAGEMENT } from './viewerColor';
-import { Suspense, lazy, useCallback, useEffect, useRef } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { RotateCcw } from 'lucide-react';
+import * as THREE from 'three';
+import { ArcballControls, OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import type {
+  ArcballControls as ArcballControlsImpl,
+  OrbitControls as OrbitControlsImpl,
+} from 'three-stdlib';
+import { RotateCcw, Orbit, RotateCw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import { useThemeStore } from '../../store/theme-store';
 import { useTransientTransform } from '../../store/transient-transform-store';
@@ -27,6 +31,11 @@ const RobotControlsOverlay = lazy(() =>
 );
 
 const RAD_TO_DEG = 180 / Math.PI;
+
+/** Pixels per workplane texture tile. One tile spans one major section. */
+const GRID_TEXTURE_PX = 256;
+/** Minor cells within a tile, i.e. cells per section (the old 25/5 ratio). */
+const GRID_CELLS_PER_TILE = 5;
 
 // Tinkercad's translucent-red hole preview (MET-612).
 const CUTTER_OVERLAY_TINT = { color: '#ff3b30', opacity: 0.35 };
@@ -130,28 +139,96 @@ function GroundShadowCatcher() {
   );
 }
 
+/** One tile of the workplane, drawn once into a canvas and reused as a
+ * repeating texture.
+ *
+ * The anti-aliasing is the entire point (FORGE-613). A mipmapped texture
+ * averages the cell lines down as they recede, so a distant patch of floor
+ * converges to a flat tint instead of a moire of half-hit lines crawling
+ * about as the camera moves. The two approaches tried before had no such
+ * averaging: drei's `Grid` evaluated its lines per fragment and anti-aliased
+ * them with screen-space derivatives (FORGE-34), and bare `GridHelper`
+ * segments are a `LineBasicMaterial` with no anti-aliasing at all
+ * (FORGE-612). Both shimmered, for different reasons.
+ *
+ * Returns null where there is no 2D canvas context -- jsdom, mainly. The
+ * caller then draws no floor, which is visibly wrong rather than quietly
+ * wrong.
+ */
+export function createWorkplaneTexture(
+  minorColor: string,
+  majorColor: string,
+  maxAnisotropy: number,
+): THREE.Texture | null {
+  const canvas = document.createElement('canvas');
+  canvas.width = GRID_TEXTURE_PX;
+  canvas.height = GRID_TEXTURE_PX;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const cells = GRID_CELLS_PER_TILE;
+  const step = GRID_TEXTURE_PX / cells;
+
+  ctx.clearRect(0, 0, GRID_TEXTURE_PX, GRID_TEXTURE_PX);
+  ctx.strokeStyle = minorColor;
+  ctx.lineWidth = 1;
+  for (let i = 1; i < cells; i += 1) {
+    const at = Math.round(i * step) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(at, 0);
+    ctx.lineTo(at, GRID_TEXTURE_PX);
+    ctx.moveTo(0, at);
+    ctx.lineTo(GRID_TEXTURE_PX, at);
+    ctx.stroke();
+  }
+
+  // The tile edges are the major lines: every tile boundary is one, so the
+  // section grid falls out of the repeat instead of needing a second plane.
+  ctx.strokeStyle = majorColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, GRID_TEXTURE_PX, GRID_TEXTURE_PX);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  // These three lines are the fix. Mipmaps let a receding patch of floor
+  // average its cells into a flat tint instead of aliasing into a crawling
+  // moire, and anisotropy keeps that from smearing to mush at the grazing
+  // angles a workplane is mostly seen from.
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = maxAnisotropy;
+  return texture;
+}
+
+function useGridTexture(minorColor: string, majorColor: string): THREE.Texture | null {
+  const { gl } = useThree();
+  const maxAnisotropy = gl?.capabilities?.getMaxAnisotropy?.() ?? 1;
+
+  return useMemo(
+    () => createWorkplaneTexture(minorColor, majorColor, maxAnisotropy),
+    [minorColor, majorColor, maxAnisotropy],
+  );
+}
+
 /**
- * The visible workplane the model sits on (FORGE-612), restored after
- * FORGE-34/MET-623 hid it.
+ * The visible workplane the model sits on, restored after FORGE-34/MET-623
+ * hid it and re-done in FORGE-613 so it stops shimmering.
  *
  * Why it matters beyond decoration: with nothing under the model there is no
  * reference for the motion, so an orbit reads as the object wobbling in a void
- * rather than the view moving around a thing standing on a floor. The grid is
- * what makes a turntable feel like a turntable.
+ * rather than the view moving around a thing standing on a floor.
  *
- * Why it no longer shimmers: drei's `Grid` draws its lines procedurally in a
- * fragment shader, anti-aliasing them with screen-space derivatives (`fwidth`).
- * That is what flickered on its own during an orbit, and it got worse at the
- * larger cell sizes and camera distances MET-620 introduced. These are plain
- * `GridHelper` line segments with a `LineBasicMaterial` -- real geometry, no
- * derivatives, nothing to shimmer.
- *
- * Two helpers rather than one give the minor/major cell reading the old Grid
- * had (`cellSize`/`sectionSize`). The major grid sits a hair above the minor
- * one so their coincident lines cannot z-fight.
+ * It is one textured plane, not line geometry -- see `useGridTexture` for why
+ * that is what makes it hold still.
  */
 function GroundGrid({ isDark }: { isDark: boolean }) {
   const modelBounds = useViewerStore((s) => s.modelBounds);
+  const texture = useGridTexture(
+    isDark ? '#3a3a3a' : '#d8d8d8',
+    isDark ? '#5a5a5a' : '#b4b4b4',
+  );
 
   // Only the GLB path computes bounds. The robot-description path has none,
   // and a floor placed from a guess would cut straight through the robot, so
@@ -159,43 +236,38 @@ function GroundGrid({ isDark }: { isDark: boolean }) {
   // at an invented height. (GroundShadowCatcher can guess safely: an
   // invisible plane at the wrong height costs a misplaced shadow, not a slab
   // through the model.)
-  if (!modelBounds) return null;
+  if (!modelBounds || !texture) return null;
 
   const { center, radius, groundY: modelGroundY } = modelBounds;
   // Just below the shadow catcher, so a cast shadow reads on top of the grid
   // rather than fighting it -- the same 0.5 offset the original grid used.
   const groundY = (modelGroundY ?? 0) - 0.5;
 
-  // Size and spacing scale with the model, exactly as before: a fixed 200-unit
-  // grid sat nowhere near a small or off-center model, which is what made an
-  // orbit look like the grid was the thing rotating (MET-620). The division
-  // counts work out near-constant (~43 minor, ~9 major) for any model big
-  // enough to set `size` from its radius; the cap only bites on a very small
-  // one, where the 20-unit floor would otherwise ask for thousands of lines.
+  // Size scales with the model: a fixed 200-unit grid sat nowhere near a small
+  // or off-center model, which is what made an orbit look like the grid was
+  // the thing rotating (MET-620). One texture tile spans a section, so the
+  // repeat count is how many sections fit across the plane.
   const size = Math.max(20, radius * 6);
   const scale = radius / 36;
-  const minorDivisions = Math.min(200, Math.max(1, Math.round(size / (5 * scale))));
-  const majorDivisions = Math.min(40, Math.max(1, Math.round(size / (25 * scale))));
-
-  const minorColor = isDark ? '#333333' : '#dddddd';
-  const majorColor = isDark ? '#555555' : '#bbbbbb';
+  const tiles = Math.min(64, Math.max(2, Math.round(size / (25 * scale))));
+  texture.repeat.set(tiles, tiles);
+  texture.needsUpdate = true;
 
   return (
-    <group position={[center[0], groundY, center[2]]}>
-      <gridHelper
-        args={[size, minorDivisions, minorColor, minorColor]}
-        material-transparent
-        material-opacity={0.75}
-        material-depthWrite={false}
+    <mesh
+      name="ground-grid"
+      position={[center[0], groundY, center[2]]}
+      rotation={[-Math.PI / 2, 0, 0]}
+    >
+      <planeGeometry args={[size, size]} />
+      <meshBasicMaterial
+        map={texture}
+        transparent
+        opacity={0.9}
+        depthWrite={false}
+        side={THREE.DoubleSide}
       />
-      <gridHelper
-        args={[size, majorDivisions, majorColor, majorColor]}
-        position={[0, 0.01 * Math.max(scale, 1), 0]}
-        material-transparent
-        material-opacity={0.9}
-        material-depthWrite={false}
-      />
-    </group>
+    </mesh>
   );
 }
 
@@ -206,7 +278,8 @@ function GroundGrid({ isDark }: { isDark: boolean }) {
  * grid rotating rather than the camera orbiting the object. */
 function CameraController() {
   const { camera } = useThree();
-  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const controlsRef = useRef<OrbitControlsImpl | ArcballControlsImpl | null>(null);
+  const cameraMode = useViewerStore((s) => s.cameraMode);
   const registerCameraReset = useViewerStore((s) => s.registerCameraReset);
   const modelBounds = useViewerStore((s) => s.modelBounds);
   const registerOrbitControlsEnabledSetter = useViewerStore(
@@ -233,10 +306,21 @@ function CameraController() {
       center[1] + VIEW_DIR.y * dist,
       center[2] + VIEW_DIR.z * dist,
     );
+    // Free orbit leaves the up vector wherever the drag ended and lookAt reads
+    // it, so a reset would otherwise land in the right place at an arbitrary
+    // roll. Harmless on the turntable, where it never moves in the first place.
+    camera.up.set(0, 1, 0);
     camera.lookAt(center[0], center[1], center[2]);
-    if (controlsRef.current) {
-      controlsRef.current.target.set(center[0], center[1], center[2]);
-      controlsRef.current.update();
+    const controls = controlsRef.current;
+    if (controls) {
+      // The arcball keeps its pivot in internal gizmo state, so assigning
+      // `target` alone would move nothing; the turntable has no setTarget.
+      if ('setTarget' in controls) {
+        controls.setTarget(center[0], center[1], center[2]);
+      } else {
+        controls.target.set(center[0], center[1], center[2]);
+      }
+      controls.update();
     }
   }, [camera, modelBounds]);
 
@@ -254,22 +338,41 @@ function CameraController() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelBounds]);
 
-  // FORGE-612: a turntable, deliberately -- this reverts the arcball of
-  // FORGE-610. An arcball tumbles with no pole, but it gives up the fixed up
-  // vector, and that vector is what makes the workplane below read as a
-  // *plane* rather than a sheet pitching about underneath the model. The
-  // Tinkercad feel we want is a scene on a turntable: the ground stays the
-  // ground, and the model never ends up rolled.
+  // The arcball draws its own circles over the scene; this viewer has a view
+  // cube already, so they stay hidden. `activateGizmos`, which the controls
+  // call on every interaction, only changes their opacity, so hiding once holds.
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (controls && 'setGizmosVisible' in controls) controls.setGizmosVisible(false);
+  }, [cameraMode]);
+
+  // Both, chosen by the viewer's toggle (FORGE-613), because which one is
+  // right is a matter of taste.
   //
-  // Nothing is clamped here beyond what a turntable implies. The azimuth is
-  // unbounded, so horizontal rotation goes round and round; the polar range
-  // is the full [0, pi], from directly overhead to directly underneath, so
-  // every face of a model is reachable -- the underside by continuing down
-  // past the horizon rather than by rolling over the top. Both values are
-  // OrbitControls' own defaults, written out because they are the point.
+  // `turntable` holds the up vector fixed, so the workplane below reads as a
+  // floor and the model is never left rolled -- the Tinkercad feel. Its
+  // ceiling is not these props but three's own `Spherical.makeSafe()`, which
+  // clamps the polar angle to [EPS, PI - EPS] no matter what min/max say: a
+  // drag stops just short of straight up and straight down. Every face is
+  // still reachable, the underside by carrying on down past the horizon.
+  //
+  // `free` is an arcball: no pole, tumbles in any direction, at the cost of
+  // the fixed up vector -- the floor tilts with the view and the model can end
+  // up rolled. Reset view puts it back upright.
+  if (cameraMode === 'free') {
+    return (
+      <ArcballControls
+        ref={controlsRef as React.RefObject<ArcballControlsImpl>}
+        makeDefault
+        enableAnimations
+        dampingFactor={25}
+      />
+    );
+  }
+
   return (
     <OrbitControls
-      ref={controlsRef}
+      ref={controlsRef as React.RefObject<OrbitControlsImpl>}
       makeDefault
       enableDamping
       dampingFactor={0.1}
@@ -419,6 +522,8 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   const modelFormat = useViewerStore((s) => s.modelFormat);
   const manifest = useViewerStore((s) => s.manifest);
   const resetCamera = useViewerStore((s) => s.resetCamera);
+  const cameraMode = useViewerStore((s) => s.cameraMode);
+  const setCameraMode = useViewerStore((s) => s.setCameraMode);
   const booleanCut = useViewerStore((s) => s.booleanCut);
   const selectPart = useViewerStore((s) => s.selectPart);
   const robotDescription = useViewerStore((s) => s.robotDescription);
@@ -571,16 +676,39 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
       {/* Camera reset button — bottom-right (bottom-20 clears the twin status
           bar and matches the controls-hint overlay's height, MET-624) so it
           doesn't sit on top of the ViewCube anchored top-right. */}
-      <button
-        type="button"
-        onClick={resetCamera}
-        className="absolute right-3 bottom-20 z-30 flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
-        title="Reset camera to default view"
-        aria-label="Reset camera"
-      >
-        <RotateCcw size={12} />
-        Reset view
-      </button>
+      <div className="absolute right-3 bottom-20 z-30 flex items-center gap-2">
+        {/* FORGE-613: turntable or free orbit. A turntable keeps the floor a
+            floor but stops just short of straight up/down (three clamps the
+            polar angle itself); free orbit has no pole but lets the view roll.
+            Which is better is taste, so both are here. */}
+        <button
+          type="button"
+          onClick={() => setCameraMode(cameraMode === 'turntable' ? 'free' : 'turntable')}
+          className="flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+          title={
+            cameraMode === 'turntable'
+              ? 'Turntable: the floor stays level, and rotation stops at straight up/down. Switch to free orbit.'
+              : 'Free orbit: tumbles in any direction with no limit, and the view can roll. Switch to turntable.'
+          }
+          aria-label={
+            cameraMode === 'turntable' ? 'Switch to free orbit' : 'Switch to turntable'
+          }
+        >
+          {cameraMode === 'turntable' ? <RotateCw size={12} /> : <Orbit size={12} />}
+          {cameraMode === 'turntable' ? 'Turntable' : 'Free orbit'}
+        </button>
+
+        <button
+          type="button"
+          onClick={resetCamera}
+          className="flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+          title="Reset camera to default view"
+          aria-label="Reset camera"
+        >
+          <RotateCcw size={12} />
+          Reset view
+        </button>
+      </div>
     </div>
   );
 }
