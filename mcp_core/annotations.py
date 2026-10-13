@@ -117,6 +117,9 @@ READ_ONLY: frozenset[str] = frozenset(
         "library.discover_machine",
         # FORGE-451 step 4: asks the machine about a job; writes nothing.
         "library.job_status",
+        # FORGE-427: which vendors exist and where an order is.
+        "vendor.list_connectors",
+        "vendor.order_status",
         # Twin reads
         "constraint.validate",
         "project.get",
@@ -315,6 +318,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "library.update_machine",
         # Records one evidence entity from the machine's own report.
         "library.record_job_result",
+        # FORGE-427: a quote is recorded in the twin; nothing is bought.
+        "vendor.quote",
     }
 )
 
@@ -355,6 +360,8 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # FORGE-451 step 4: starts a print on a real machine. Physical and
         # not undoable from here; held for the person on every call.
         "library.dispatch_job",
+        # FORGE-427: an order can spend money. Held on every call.
+        "vendor.place_order",
         "cadquery.boolean_operation",
         "cadquery.execute_script",
         "cadquery.export_geometry",
@@ -422,6 +429,11 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "library.dispatch_job",
         "library.job_status",
         "library.record_job_result",
+        # FORGE-427: every vendor call leaves the building.
+        "vendor.list_connectors",
+        "vendor.quote",
+        "vendor.place_order",
+        "vendor.order_status",
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",

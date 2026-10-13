@@ -2768,6 +2768,34 @@ class UnifiedMcpServer:
         }
 
     @staticmethod
+    async def _vendor_connectors_report() -> dict[str, Any]:
+        """Vendor connectors and their auth state (FORGE-427). Never raises."""
+        import os
+
+        gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+        try:
+            if gateway_url:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=10.0) as http:
+                    response = await http.get(f"{gateway_url.rstrip('/')}/v1/vendors/connectors")
+                response.raise_for_status()
+                connectors = response.json().get("connectors", [])
+            else:
+                from api_gateway.vendors.service import connector_report
+
+                connectors = await connector_report()
+        except Exception as exc:  # noqa: BLE001 - health must never fail on the probe
+            return {"available": False, "status": "unknown", "reason": str(exc)}
+        problems = [c["connector"] for c in connectors if c.get("auth") != "ok"]
+        return {
+            "available": True,
+            "status": "none_configured" if not connectors else "degraded" if problems else "ok",
+            "connectors": connectors,
+            **({"problems": problems} if problems else {}),
+        }
+
+    @staticmethod
     def _model_routing_report() -> dict[str, Any]:
         from orchestrator.harness.providers.routing import effective_routing
 
@@ -2899,6 +2927,9 @@ class UnifiedMcpServer:
             # FORGE-475: whether anything polls the design-flow queue. Runs
             # are refused without one, and this is where an operator sees why.
             "design_flow_worker": await self._design_flow_worker_report(),
+            # FORGE-427: each vendor connector's mode and whether its
+            # credential works now, so a refused key is seen before an order.
+            "vendors": await self._vendor_connectors_report(),
         }
         if unreachable:
             # Named at the top level as well as per-adapter: a caller that

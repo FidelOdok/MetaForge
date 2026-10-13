@@ -8473,6 +8473,24 @@
         "title": "OpenTaskRequest",
         "type": "object"
       },
+      "OrderRequest": {
+        "properties": {
+          "by": {
+            "default": "",
+            "title": "By",
+            "type": "string"
+          },
+          "quote_id": {
+            "title": "Quote Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "quote_id"
+        ],
+        "title": "OrderRequest",
+        "type": "object"
+      },
       "OtherRow": {
         "properties": {
           "name": {
@@ -9540,6 +9558,70 @@
           "answerType"
         ],
         "title": "QuestionView",
+        "type": "object"
+      },
+      "QuoteRequest": {
+        "properties": {
+          "by": {
+            "default": "",
+            "title": "By",
+            "type": "string"
+          },
+          "connector_id": {
+            "title": "Connector Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "ship_to_country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship To Country"
+          }
+        },
+        "required": [
+          "connector_id",
+          "service"
+        ],
+        "title": "QuoteRequest",
         "type": "object"
       },
       "RealizeHierarchyNodeRequest": {
@@ -23565,6 +23647,160 @@
         "summary": "Get Run Changes",
         "tags": [
           "twin"
+        ]
+      }
+    },
+    "/v1/vendors/connectors": {
+      "get": {
+        "description": "Every connector with its services, mode and live auth state.",
+        "operationId": "list_connectors_v1_vendors_connectors_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Connectors V1 Vendors Connectors Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Connectors",
+        "tags": [
+          "vendors"
+        ]
+      }
+    },
+    "/v1/vendors/orders": {
+      "post": {
+        "operationId": "create_order_v1_vendors_orders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Order V1 Vendors Orders Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Order",
+        "tags": [
+          "vendors"
+        ]
+      }
+    },
+    "/v1/vendors/orders/{order_id}/status": {
+      "get": {
+        "operationId": "get_order_status_v1_vendors_orders__order_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Order Status V1 Vendors Orders  Order Id  Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Order Status",
+        "tags": [
+          "vendors"
+        ]
+      }
+    },
+    "/v1/vendors/quotes": {
+      "post": {
+        "operationId": "create_quote_v1_vendors_quotes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Quote V1 Vendors Quotes Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Quote",
+        "tags": [
+          "vendors"
         ]
       }
     },

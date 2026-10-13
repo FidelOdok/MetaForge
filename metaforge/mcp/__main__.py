@@ -1837,6 +1837,8 @@ async def _bootstrap(
         **flow_bindings,
         # FORGE-451: the machine library lives in the gateway.
         machine_library=_build_machine_library(),
+        # FORGE-427: vendor connectors live in the gateway.
+        vendor_service=_build_vendor_service(),
         **evidence_bindings,
         engineering_entity_recorder=entity_recorder,
         engineering_entity_approver=make_engineering_entity_approver(twin),
@@ -2090,6 +2092,22 @@ def _build_machine_library() -> Any:
         logger.error("mcp_library_binding_missing", error=str(exc))
         return None
     return make_machine_library()
+
+
+def _build_vendor_service() -> Any:
+    """The ``vendor.*`` binding (FORGE-427): the gateway's connectors over HTTP."""
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_vendors import RemoteVendorService
+
+        logger.info("mcp_vendor_binding_remote", gateway=gateway_url)
+        return RemoteVendorService(gateway_url)
+    try:
+        from api_gateway.vendors.mcp_bindings import make_vendor_service
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_vendor_binding_missing", error=str(exc))
+        return None
+    return make_vendor_service()
 
 
 def _client_task_verifier_from_env() -> Any:
