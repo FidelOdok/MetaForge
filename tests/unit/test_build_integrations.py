@@ -736,3 +736,15 @@ class TestClaudeAiConnectorIsDocumented:
         worse than sending none -- the same reasoning the codex config.toml
         already applies to an empty bearer."""
         assert "Bearer ${user_config.api_token}" in self._readme()
+
+
+def test_the_profile_setting_names_every_profile() -> None:
+    """A profile the setting does not mention is one nobody knows to pick."""
+    from mcp_core.profiles import PROFILES
+
+    plugin = json.loads(
+        (REPO / "integrations" / "claude-code" / ".claude-plugin" / "plugin.json").read_text()
+    )
+    text = plugin["userConfig"]["tool_profile"]["description"]
+    for name in [*PROFILES, "all"]:
+        assert re.search(rf"\b{name}\b", text), f"profile {name} missing from the description"
