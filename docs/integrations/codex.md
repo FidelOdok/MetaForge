@@ -228,9 +228,13 @@ rules live in `AGENTS.md` (FORGE-539).
 The plugin's `.mcp.json` points at `http://localhost:8765/mcp?profile=core`.
 Codex has no install-time settings, so to work in another discipline edit the
 `profile` in that URL: `mechanical` or `mechanical_product` for CAD,
-`simulation` for FEA, `electronics` for KiCad and sourcing, `client_run` to
-drive a client-mode run (phase tasks, gates in the chat, value sourcing;
-FORGE-588), or `all` for every tool if your Codex build handles a long list.
+`simulation` for FEA, `electronics` for KiCad and sourcing, `manufacturing`
+for process selection and the DFM review (it reads the machine library),
+`client_run` to drive a client-mode run (phase tasks, gates in the chat, value
+sourcing; FORGE-588), or `all` for every tool if your Codex build handles a
+long list. Registering, discovering or sending a job to a machine
+(`library.register_machine`, `library.discover_machine`,
+`library.dispatch_job`) is only in `all`.
 
 ## Keeping the tool list a size Codex can use
 

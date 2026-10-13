@@ -148,10 +148,13 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                     "value-sourcing tools together, which no capped set holds. "
                     "On a harness with a hard tool limit pick a capped set "
                     "instead: core (project, twin reads, decisions, flows), "
-                    "client_run (drive a client-mode run and source values), "
-                    "mechanical (stateless CAD), mechanical_product (CAD "
-                    "authored in a FreeCAD session), simulation, electronics or "
-                    "robotics, each 25-40 tools. Every set includes "
+                    "client_run (drive a client-mode run and source values; "
+                    "reads the machine library), mechanical (stateless CAD), "
+                    "mechanical_product (CAD authored in a FreeCAD session), "
+                    "manufacturing (process selection and DFM review; reads the "
+                    "machine library), simulation, electronics or robotics, "
+                    "each 25-40 tools. Registering, discovering or sending a "
+                    "job to a machine needs all. Every set includes "
                     "health.check so /metaforge:doctor always works."
                 ),
                 # FORGE-588: was core, which carried none of phase.*,
