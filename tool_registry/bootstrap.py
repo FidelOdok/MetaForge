@@ -145,6 +145,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"library"}
     # FORGE-427: vendor connectors, injected by the gateway or the sidecar.
     | {"vendor"}
+    # FORGE-615: in-process arithmetic, no container, no credentials.
+    | {"cost"}
 )
 
 
@@ -1154,6 +1156,22 @@ async def bootstrap_tool_registry(
                 failed.append("library")
         else:
             skipped.append("library")
+
+        # ----- Manufacturing cost estimate MCP adapter (FORGE-615) -----
+        # Pure arithmetic like power: registers wherever it is asked for.
+        if _is_adapter_enabled("cost") and (not adapter_ids or "cost" in adapter_ids):
+            try:
+                from tool_registry.tools.cost.adapter import CostServer
+
+                await registry.register_adapter(CostServer())
+                registered.append("cost")
+                logger.info("cost_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("cost_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("cost")
+        else:
+            skipped.append("cost")
 
         # ----- Vendor connector MCP adapter (FORGE-427) -----
         if vendor_service is not None and _is_adapter_enabled("vendor"):

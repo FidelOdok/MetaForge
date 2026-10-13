@@ -54,10 +54,23 @@ which is honest and visible at the gate. Never fill one in from memory.
 | a library machine's capabilities, as a candidate | `library.list_machines`, `library.machine_limits` |
 | a vendor's real price (connected vendors) | `vendor.list_connectors`, `vendor.quote` |
 | where to send it when a vendor has no API | `vendor.handoffs` |
+| a rough cost before any quote exists (CNC, sheet metal) | `cost.estimate_manufacturing` |
 | look up capabilities, prices, lead times | `web.search`, `web.fetch`, `knowledge.search` |
 | record each sourced value | `twin.record_engineering_entity` (entity_type `design_value`) |
 | record the decision | `twin.record_decision` with `manufacturing_route` and `process_ranking` |
 | hold the design to the chosen process | `twin.record_constraint_set` |
+
+## A cost before any quote
+
+For CNC milling or sheet metal with no vendor quote yet, run
+`cost.estimate_manufacturing` with the shop rate, setup hours, material
+density and price, and the part's figures (stock size and part volume from
+`freecad.measure` for CNC; thickness, blank area, cut length and bends for
+sheet), each with its source. Pass its `for_ranking` as the candidate's
+`setup_cost` and `unit_cost`. It is an estimate, and the ranking reasons and
+the gate summary must say so; a figure you cannot source stays out, and the
+cost then reads unknown. Replace it with a real quote before the person
+decides on cost.
 
 ## Recording the decision
 

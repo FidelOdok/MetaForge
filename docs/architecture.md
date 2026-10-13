@@ -556,6 +556,13 @@ products, returns each vendor's upload page, accepted formats, the files
 that fit and their gateway download paths. It sends nothing; the person
 uploads.
 
+Before any quote exists, `cost.estimate_manufacturing` (FORGE-615) gives the
+route phase a rough cost for CNC milling or sheet metal from figures the
+caller supplies with their sources (shop rate, setup hours, material density
+and price, stock or blank size, removal or cut rate). It is in-process
+arithmetic, always labelled an estimate and never a price, and a missing
+figure leaves what needs it unknown.
+
 **The machine library (FORGE-451).** Process ranking and DFM need a
 machine's real limits, so machines are recorded once, outside any project,
 in the gateway's SQLite store (`METAFORGE_MACHINE_LIBRARY_PATH`, default
