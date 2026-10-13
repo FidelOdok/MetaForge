@@ -1,0 +1,54 @@
+"""The in-process ``library.*`` binding (FORGE-451).
+
+Same shapes as the ``/v1/library/machines`` routes, so a tool answers the same
+whether the gateway hosts it or the sidecar reaches it over HTTP
+(``metaforge.mcp.remote_library``).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from api_gateway.library.routes import get_machine_library
+from twin_core.library.machines import MachineLibraryError, MachineNotFoundError
+
+
+class LocalMachineLibrary:
+    """``library.*`` against this process's store."""
+
+    async def list_machines(self, layer: str | None, kind: str | None) -> dict[str, Any]:
+        machines = get_machine_library().list(layer=layer, kind=kind)
+        return {"machines": [m.as_dict() for m in machines]}
+
+    async def get_machine(self, machine_id: str) -> dict[str, Any]:
+        library = get_machine_library()
+        try:
+            machine = library.get(machine_id)
+        except MachineNotFoundError as exc:
+            raise ValueError(f"machine '{machine_id}' not found") from exc
+        return {"machine": machine.as_dict(), "history": library.history(machine_id)}
+
+    async def register_machine(self, data: dict[str, Any], by: str) -> dict[str, Any]:
+        return {"machine": get_machine_library().register(data, by=by).as_dict()}
+
+    async def update_machine(
+        self, machine_id: str, changes: dict[str, Any], by: str
+    ) -> dict[str, Any]:
+        try:
+            machine = get_machine_library().update(machine_id, changes, by=by)
+        except MachineNotFoundError as exc:
+            raise ValueError(f"machine '{machine_id}' not found") from exc
+        return {"machine": machine.as_dict()}
+
+    async def machine_limits(self, machine_id: str) -> dict[str, Any]:
+        try:
+            return get_machine_library().limits(machine_id)
+        except MachineNotFoundError as exc:
+            raise ValueError(f"machine '{machine_id}' not found") from exc
+
+
+def make_machine_library() -> LocalMachineLibrary:
+    return LocalMachineLibrary()
+
+
+__all__ = ["LocalMachineLibrary", "MachineLibraryError", "make_machine_library"]

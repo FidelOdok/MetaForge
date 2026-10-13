@@ -59,6 +59,7 @@ from api_gateway.firmware.routes import router as firmware_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
+from api_gateway.library.routes import router as library_router
 from api_gateway.manufacture.routes import router as manufacture_router
 from api_gateway.memory import router as memory_router
 from api_gateway.projects.routes import router as projects_router
@@ -800,6 +801,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.assistant.apply import make_apply_executor
     from api_gateway.assistant.proposal_recorder import make_proposal_recorder
     from api_gateway.assistant.routes import workflow as approval_workflow
+    from api_gateway.library.mcp_bindings import make_machine_library
     from api_gateway.requirement_intelligence.promotion import attempt_promotion
     from api_gateway.runs.launcher import make_run_launcher
     from api_gateway.twin.baseline import make_baseline_creator
@@ -1309,6 +1311,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         harness_estimate_getter=harness_estimate_getter_fn,
         # FORGE-523: revision history of one item (twin.item_history).
         item_history_reader=make_item_history_reader(twin),
+        # FORGE-451: the machine library over MCP; writes are held.
+        machine_library=make_machine_library(),
     )
     app.state.tool_registry = tool_registry
     # FORGE-539: the capability report reads the live registry and its health.
@@ -1559,6 +1563,15 @@ async def _init_orchestrator(app: FastAPI) -> None:
         )
 
         init_client_task_store(SqliteClientTaskStore(str(default_client_tasks_path())))
+        # FORGE-451: the machine library is cross-project data and must
+        # survive a restart like the task queue.
+        from api_gateway.library.routes import init_machine_library
+        from twin_core.library.machines import (
+            SqliteMachineLibrary,
+            default_machine_library_path,
+        )
+
+        init_machine_library(SqliteMachineLibrary(str(default_machine_library_path())))
     # FORGE-482: flow versions (proposed, approved, rejected) were process
     # memory, so a routine reload lost every human approval while the
     # Temporal run using it survived. Same disable flag as the ledgers.
@@ -2120,6 +2133,7 @@ def create_app(
     app.include_router(tool_approvals_router)
     app.include_router(approvals_router)
     app.include_router(client_tasks_router)
+    app.include_router(library_router)
     app.include_router(cad_router)
     app.include_router(cad_export_router)
     app.include_router(robot_loads_router)

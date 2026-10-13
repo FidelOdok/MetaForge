@@ -1835,6 +1835,8 @@ async def _bootstrap(
 
     server = await build_unified_server(
         **flow_bindings,
+        # FORGE-451: the machine library lives in the gateway.
+        machine_library=_build_machine_library(),
         **evidence_bindings,
         engineering_entity_recorder=entity_recorder,
         engineering_entity_approver=make_engineering_entity_approver(twin),
@@ -2068,6 +2070,26 @@ def _build_flow_bindings() -> dict[str, Any]:
         "design_flow_client_tasks": make_client_task_service(),
         "run_launcher": make_run_launcher(),
     }
+
+
+def _build_machine_library() -> Any:
+    """The ``library.*`` binding (FORGE-451), chosen like the flow bindings.
+
+    With ``METAFORGE_GATEWAY_URL`` the sidecar reads and writes the gateway's
+    library; without it, this process's store (correct only in the gateway).
+    """
+    gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
+    if gateway_url:
+        from metaforge.mcp.remote_library import RemoteMachineLibrary
+
+        logger.info("mcp_library_binding_remote", gateway=gateway_url)
+        return RemoteMachineLibrary(gateway_url)
+    try:
+        from api_gateway.library.mcp_bindings import make_machine_library
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.error("mcp_library_binding_missing", error=str(exc))
+        return None
+    return make_machine_library()
 
 
 def _client_task_verifier_from_env() -> Any:

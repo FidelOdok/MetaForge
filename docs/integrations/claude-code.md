@@ -228,8 +228,10 @@ Two more sources feed the package's skills (FORGE-533):
   gate, and `source-engineering-values`, which finds a missing value (from
   the user, project documents, standards, past work, components and stock,
   analysis or measurement, then a stated assumption) and records it as a
-  `design_value` with its source (FORGE-586). These carry their own
-  frontmatter and ship verbatim.
+  `design_value` with its source (FORGE-586), and `manage-machines`, which
+  records the person's machines in the machine library with a source for
+  every capability and turns one into limits for ranking and DFM
+  (FORGE-451). These carry their own frontmatter and ship verbatim.
 
 A test checks that every tool a shipped skill names is one the repo
 registers, so a skill cannot send a client to a tool that does not exist.

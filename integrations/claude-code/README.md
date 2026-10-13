@@ -43,7 +43,7 @@ There is no URL this package could carry instead. Every user runs their own gate
 
 ## Skills
 
-35 skills are bundled: the engineering skills MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), `intent-to-verified-design` (the lifecycle procedure) and `workflow-lifecycle` (the reasoning contract).
+36 skills are bundled: the engineering skills MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), `intent-to-verified-design` (the lifecycle procedure) and `workflow-lifecycle` (the reasoning contract).
 
 ## Agents
 

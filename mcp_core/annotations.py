@@ -109,6 +109,10 @@ READ_ONLY: frozenset[str] = frozenset(
         "web.search",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
+        # FORGE-451: machine library reads.
+        "library.list_machines",
+        "library.get_machine",
+        "library.machine_limits",
         # Twin reads
         "constraint.validate",
         "project.get",
@@ -301,6 +305,10 @@ ADDITIVE: frozenset[str] = frozenset(
         # above) plus one GENERATED_FROM edge -- pure append, nothing
         # existing is overwritten or removed.
         "twin.select_component",
+        # FORGE-451: a machine is added, or changed with its old version
+        # kept in its history. Held like any write.
+        "library.register_machine",
+        "library.update_machine",
     }
 )
 
