@@ -304,23 +304,35 @@ with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
-The Model tab is a turntable over a visible workplane (FORGE-612): the
-model stands on a ground grid, horizontal rotation goes round and round
-without limit, and the vertical sweep runs the whole way from directly
-overhead to directly underneath, so every face is reachable — the
-underside by carrying on down past the horizon rather than by rolling
-over the top. The camera's up vector never changes, which is what keeps
-the workplane reading as a floor and the model from ever ending up
-rolled. Left-drag rotates, right-drag pans, the wheel zooms, the view
-cube in the corner jumps to a face, and **Reset View** re-frames the
-model.
+The Model tab shows the model standing on a visible workplane, and a
+button beside **Reset view** switches between two ways of rotating it
+(FORGE-616):
 
-The grid itself is drawn from plain line segments, not from a
-procedural shader: the shader version anti-aliased its lines with
-screen-space derivatives and shimmered during an orbit, which is why
-the grid was hidden for a while (FORGE-34). It is sized and placed from
-the model's own bounds, so it sits under whatever is loaded instead of
-at a fixed spot the model may be nowhere near.
+- **Turntable** (the default) keeps the camera's up vector fixed, so the
+  workplane stays a floor and the model is never left rolled. Horizontal
+  rotation goes round and round; vertical rotation stops just short of
+  straight up and straight down, which is three.js's own limit on this
+  kind of control rather than a setting. Every face is still reachable —
+  the underside by carrying on down past the horizon rather than by
+  rolling over the top.
+- **Free orbit** is an arcball: no stopping point in any direction, so a
+  drag tumbles the model continuously. The cost is the fixed up vector —
+  the floor tilts with the view and the model can end up rolled. **Reset
+  view** puts it back upright.
+
+The choice is remembered in the browser. Left-drag rotates, right-drag
+pans, the wheel zooms, and the view cube in the corner jumps to a face.
+
+The workplane is a single mipmapped texture rather than drawn lines,
+which is what keeps it still while the camera moves: a receding patch of
+floor averages its cells into a flat tint instead of aliasing into a
+crawling shimmer. Two earlier attempts shimmered for that reason — a
+procedural shader anti-aliasing its lines with screen-space derivatives
+(FORGE-34), then plain line segments with no anti-aliasing at all
+(FORGE-612). It is sized and placed from the model's own bounds, so it
+sits under whatever is loaded instead of at a fixed spot the model may
+be nowhere near. A robot description carries no bounds, so it gets no
+workplane rather than one at a guessed height.
 
 A node that is a revision of an item (FORGE-526) shows a **revision
 picker** (`KEY @n`) in the inspector Overview: picking another revision
