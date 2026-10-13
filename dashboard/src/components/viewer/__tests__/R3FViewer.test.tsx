@@ -335,14 +335,36 @@ describe('R3FViewer — camera modes and the workplane (FORGE-616)', () => {
     expect(capturedOrbitProps?.maxAzimuthAngle).toBeUndefined();
   });
 
-  it('offers the mode toggle, labelled for where it will take you', () => {
+  // FORGE-617: a single button labelled with the current mode reads exactly
+  // like one labelled with the mode it switches to, so both are shown and the
+  // selected one is marked.
+  it('shows both modes and marks which one is selected', () => {
+    const { getByRole } = render(<R3FViewer />);
+
+    expect(getByRole('button', { name: 'Turntable' })).toHaveAttribute('aria-pressed', 'true');
+    expect(getByRole('button', { name: 'Free orbit' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('moves the selected mark when the mode changes', () => {
+    mockState({ cameraMode: 'free' });
+
+    const { getByRole } = render(<R3FViewer />);
+
+    expect(getByRole('button', { name: 'Free orbit' })).toHaveAttribute('aria-pressed', 'true');
+    expect(getByRole('button', { name: 'Turntable' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('picks the mode that was clicked, rather than just flipping', () => {
     const setCameraMode = vi.fn();
     mockState({ setCameraMode });
 
-    const { getByLabelText } = render(<R3FViewer />);
-    fireEvent.click(getByLabelText('Switch to free orbit'));
-
+    const { getByRole } = render(<R3FViewer />);
+    fireEvent.click(getByRole('button', { name: 'Free orbit' }));
     expect(setCameraMode).toHaveBeenCalledWith('free');
+
+    // Clicking the already-selected mode asks for that same mode, not the other.
+    fireEvent.click(getByRole('button', { name: 'Turntable' }));
+    expect(setCameraMode).toHaveBeenLastCalledWith('turntable');
   });
 
   it('draws the workplane the model stands on', () => {

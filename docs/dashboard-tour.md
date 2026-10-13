@@ -305,8 +305,9 @@ inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
 The Model tab shows the model standing on a visible workplane, and a
-button beside **Reset view** switches between two ways of rotating it
-(FORGE-616):
+pair of buttons beside **Reset view** chooses between two ways of
+rotating it, with the active one picked out in the accent colour
+(FORGE-616, FORGE-617):
 
 - **Turntable** (the default) keeps the camera's up vector fixed, so the
   workplane stays a floor and the model is never left rolled. Horizontal

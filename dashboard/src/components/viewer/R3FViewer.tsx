@@ -32,6 +32,28 @@ const RobotControlsOverlay = lazy(() =>
 
 const RAD_TO_DEG = 180 / Math.PI;
 
+/** Selected-state colours for the camera toggle -- the dashboard's accent
+ * orange on its usual translucent wash (FORGE-617). */
+const CAMERA_MODE_ACCENT = '#e67e22';
+const CAMERA_MODE_ACCENT_BG = 'rgba(230,126,34,0.15)';
+
+/** The camera modes, in the order they appear in the toggle. The hints say
+ * what each one costs, since neither is strictly better. */
+const CAMERA_MODE_OPTIONS = [
+  {
+    mode: 'turntable' as const,
+    label: 'Turntable',
+    Icon: RotateCw,
+    hint: 'Turntable: the floor stays level and the model is never rolled, but rotation stops just short of straight up and straight down.',
+  },
+  {
+    mode: 'free' as const,
+    label: 'Free orbit',
+    Icon: Orbit,
+    hint: 'Free orbit: tumbles in any direction with no limit, but the floor tilts with the view and the model can end up rolled.',
+  },
+];
+
 /** Pixels per workplane texture tile. One tile spans one major section. */
 const GRID_TEXTURE_PX = 256;
 /** Minor cells within a tile, i.e. cells per section (the old 25/5 ratio). */
@@ -677,26 +699,40 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
           bar and matches the controls-hint overlay's height, MET-624) so it
           doesn't sit on top of the ViewCube anchored top-right. */}
       <div className="absolute right-3 bottom-20 z-30 flex items-center gap-2">
-        {/* FORGE-616: turntable or free orbit. A turntable keeps the floor a
-            floor but stops just short of straight up/down (three clamps the
-            polar angle itself); free orbit has no pole but lets the view roll.
-            Which is better is taste, so both are here. */}
-        <button
-          type="button"
-          onClick={() => setCameraMode(cameraMode === 'turntable' ? 'free' : 'turntable')}
-          className="flex items-center gap-1.5 rounded-md bg-black/50 px-2.5 py-1.5 text-xs text-white/80 transition-colors hover:bg-black/70 hover:text-white"
-          title={
-            cameraMode === 'turntable'
-              ? 'Turntable: the floor stays level, and rotation stops at straight up/down. Switch to free orbit.'
-              : 'Free orbit: tumbles in any direction with no limit, and the view can roll. Switch to turntable.'
-          }
-          aria-label={
-            cameraMode === 'turntable' ? 'Switch to free orbit' : 'Switch to turntable'
-          }
+        {/* FORGE-617: both modes are shown, with the selected one marked,
+            because a single button labelled with the current mode reads
+            exactly like one labelled with the mode it would switch to. Accent
+            + aria-pressed is the selected-state pattern the rest of the
+            dashboard uses. FORGE-616 has the why of the two modes: a
+            turntable keeps the floor a floor but stops just short of straight
+            up/down (three clamps the polar angle itself), while free orbit has
+            no pole but lets the view roll. */}
+        <div
+          role="group"
+          aria-label="Camera rotation"
+          className="flex items-center overflow-hidden rounded-md bg-black/50 text-xs"
         >
-          {cameraMode === 'turntable' ? <RotateCw size={12} /> : <Orbit size={12} />}
-          {cameraMode === 'turntable' ? 'Turntable' : 'Free orbit'}
-        </button>
+          {CAMERA_MODE_OPTIONS.map(({ mode, label, Icon, hint }) => {
+            const selected = cameraMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setCameraMode(mode)}
+                title={hint}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 transition-colors"
+                style={{
+                  color: selected ? CAMERA_MODE_ACCENT : 'rgba(255,255,255,0.65)',
+                  background: selected ? CAMERA_MODE_ACCENT_BG : 'transparent',
+                }}
+              >
+                <Icon size={12} />
+                {label}
+              </button>
+            );
+          })}
+        </div>
 
         <button
           type="button"
