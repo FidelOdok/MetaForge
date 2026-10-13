@@ -121,6 +121,11 @@ services:
       - MOUSER_API_KEY=${MOUSER_API_KEY:-}
       - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
       - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
+      - FARNELL_API_KEY=${FARNELL_API_KEY:-}
+      - FARNELL_STORE=${FARNELL_STORE:-uk.farnell.com}
+      - ARROW_LOGIN=${ARROW_LOGIN:-}
+      - ARROW_API_KEY=${ARROW_API_KEY:-}
+      - MOUSER_DAILY_LIMIT=${MOUSER_DAILY_LIMIT:-1000}
       # Web search (MET-7). Same skip-when-unset contract as the distributor
       # keys above: without this, web.search / web.fetch are not registered
       # at all rather than registered-but-always-empty.
@@ -474,7 +479,7 @@ services:
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
-      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost
       --allow-twin-mutations
       --capture-sessions
     ports:
@@ -517,6 +522,11 @@ services:
       - MOUSER_API_KEY=${MOUSER_API_KEY:-}
       - NEXAR_CLIENT_ID=${NEXAR_CLIENT_ID:-}
       - NEXAR_CLIENT_SECRET=${NEXAR_CLIENT_SECRET:-}
+      - FARNELL_API_KEY=${FARNELL_API_KEY:-}
+      - FARNELL_STORE=${FARNELL_STORE:-uk.farnell.com}
+      - ARROW_LOGIN=${ARROW_LOGIN:-}
+      - ARROW_API_KEY=${ARROW_API_KEY:-}
+      - MOUSER_DAILY_LIMIT=${MOUSER_DAILY_LIMIT:-1000}
       # MET-7: same gap as the distributor creds above -- web.search/
       # web.fetch need this to register with a live key; the gateway
       # service (docker-compose.yml) already had this passthrough, this

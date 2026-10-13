@@ -137,6 +137,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     # read as unknown there.
     | {"design_flow"}
     | {"digikey", "mouser", "nexar"}
+    # FORGE-613: two more distributors, same skip-when-unset contract.
+    | {"farnell", "arrow"}
     | {"component", "offer_resolver"}
     | {"web"}
     # FORGE-544: in-process, no container, no credentials.
@@ -991,10 +993,27 @@ async def bootstrap_tool_registry(
 
             return NexarAdapter()
 
+        def _make_farnell() -> DistributorAdapter | None:
+            if not os.environ.get("FARNELL_API_KEY"):
+                return None
+            from tool_registry.tools.farnell.adapter import FarnellAdapter
+
+            return FarnellAdapter()
+
+        def _make_arrow() -> DistributorAdapter | None:
+            if not (os.environ.get("ARROW_LOGIN") and os.environ.get("ARROW_API_KEY")):
+                return None
+            from tool_registry.tools.arrow.adapter import ArrowAdapter
+
+            return ArrowAdapter()
+
         _DISTRIBUTOR_FACTORIES = (
             ("digikey", _make_digikey, "DIGIKEY_CLIENT_ID + DIGIKEY_CLIENT_SECRET"),
             ("mouser", _make_mouser, "MOUSER_API_KEY"),
             ("nexar", _make_nexar, "NEXAR_CLIENT_ID + NEXAR_CLIENT_SECRET"),
+            # FORGE-613
+            ("farnell", _make_farnell, "FARNELL_API_KEY"),
+            ("arrow", _make_arrow, "ARROW_LOGIN + ARROW_API_KEY"),
         )
 
         # Populated as each distributor adapter constructs successfully,

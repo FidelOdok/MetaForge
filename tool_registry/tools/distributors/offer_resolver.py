@@ -479,7 +479,7 @@ class OfferResolverServer(McpToolServer):
                 name="Resolve Distributor Offers",
                 description=(
                     "For each requested MPN, fan out to every configured "
-                    "distributor (Digi-Key/Mouser/Nexar) and return ranked "
+                    "distributor (Digi-Key/Mouser/Nexar/Farnell/Arrow) and return ranked "
                     "purchasing offers accounting for required quantity, "
                     "stock sufficiency, MOQ-forced overbuy, and an optional "
                     "delivery deadline. A part absent from every configured "

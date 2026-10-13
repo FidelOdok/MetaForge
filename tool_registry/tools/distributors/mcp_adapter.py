@@ -50,7 +50,7 @@ DISTRIBUTOR_TOOL_SUFFIXES: tuple[str, ...] = (
     "get_pricing",
     "get_availability",
 )
-KNOWN_DISTRIBUTOR_IDS: tuple[str, ...] = ("digikey", "mouser", "nexar")
+KNOWN_DISTRIBUTOR_IDS: tuple[str, ...] = ("digikey", "mouser", "nexar", "farnell", "arrow")
 
 
 def distributor_tool_ids() -> set[str]:
