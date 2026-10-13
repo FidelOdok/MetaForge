@@ -552,6 +552,20 @@ held for a person. `library.machine_limits` turns an instance into a ranking
 candidate and DFM limits with their sources. The `manage-machines` plugin
 skill tells a client how to record a machine and use its limits.
 
+A flow is told about the machines when it is proposed:
+`manufacturingContext.machineIds` (`machine_ids` over MCP) names the
+library instances the product will be made on, and an id the library does
+not hold is refused (422) rather than dropped. Each machine becomes one line
+in the flow context (name, id, kind, processes, route, availability, and its
+limits: envelope, minimum wall and feature, overhang, bend and corner radii,
+tolerance, materials, and any assumptions needing review). With none chosen,
+every available instance is listed instead. The lines are resolved once and
+frozen with the flow version, so the generator, every phase brain and the
+client-mode briefs see the same machines. The route phase passes each
+machine's `library.machine_limits` candidate to `rank_manufacturing_processes`,
+and the DFM phase checks the design against the chosen machine's limits. A
+context with no library machines renders exactly as before.
+
 A successful proposal (`201`, `status: "proposed"`) keeps every existing
 field and adds `requirementsPending` (true when no requirements were sent),
 `assumptions` (including an explicit "requirements pending" line) and

@@ -7476,6 +7476,13 @@
       "ManufacturingContextBody": {
         "description": "What the project can actually be made with (FORGE-463).",
         "properties": {
+          "machineIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Machineids",
+            "type": "array"
+          },
           "machines": {
             "items": {
               "type": "string"

@@ -41,7 +41,12 @@ feature with no sourced limit is `unknown`, never a pass.
 
 ## Steps
 
-1. Read the route decision: the chosen process and its constraint set.
+1. Read the route decision: the chosen process and its constraint set. When
+   the part is made on a machine from the machine library (the flow context
+   lists them), call `library.machine_limits` with its id and use its
+   `limits` as they are: each already cites its source, and a limit the
+   machine has no figure for is absent, so that check reads unknown. Name its
+   `needs_review` figures in the summary.
 2. Collect the features and their values, each with its basis (table above).
 3. Run the check: every feature against every limit of its kind.
 4. Record each failing or unknown finding with `twin.record_evidence` against

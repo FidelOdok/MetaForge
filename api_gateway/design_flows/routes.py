@@ -251,6 +251,56 @@ class ManufacturingContextBody(BaseModel):
         ge=1,
         validation_alias=_alias("productionQuantity", "production_quantity"),
     )
+    #: FORGE-451: machine-library instance ids chosen for this project.
+    machineIds: list[str] = Field(  # noqa: N815
+        default_factory=list, validation_alias=_alias("machineIds", "machine_ids")
+    )
+
+
+def _chosen_machine_ids(m: ManufacturingContextBody) -> list[str]:
+    return list(dict.fromkeys(x.strip() for x in m.machineIds if x.strip()))
+
+
+def _library_machine_lines(m: ManufacturingContextBody) -> tuple[str, ...]:
+    """The library machines a flow is told about (FORGE-451).
+
+    The chosen ones, each of which must be a machine instance in the library
+    (an unknown id is refused rather than dropped, so a typo cannot quietly
+    leave a run without its machine). With none chosen, every available
+    instance, so the generator and the phases know what exists.
+    """
+    from api_gateway.library.routes import get_machine_library
+    from twin_core.library.machines import (
+        MachineInstance,
+        MachineLibraryError,
+        MachineNotFoundError,
+        summarize_limits,
+    )
+
+    library = get_machine_library()
+    chosen = _chosen_machine_ids(m)
+    if chosen:
+        lines = []
+        for machine_id in chosen:
+            try:
+                lines.append(summarize_limits(library.limits(machine_id)))
+            except MachineNotFoundError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"manufacturingContext.machineIds: no machine '{machine_id}' "
+                    "in the machine library (library.list_machines lists them)",
+                ) from exc
+            except MachineLibraryError as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"manufacturingContext.machineIds: {exc}"
+                ) from exc
+        return tuple(lines)
+    available = [
+        inst
+        for inst in library.list(layer="instance")
+        if isinstance(inst, MachineInstance) and inst.status == "available"
+    ]
+    return tuple(summarize_limits(library.limits(inst.id)) for inst in available)
 
 
 class CallerOperation(BaseModel):
@@ -316,6 +366,8 @@ class ProposeFlowRequest(BaseModel):
                     machines=tuple(x.strip() for x in m.machines if x.strip()),
                     stock_materials=tuple(x.strip() for x in m.stockMaterials if x.strip()),
                     production_quantity=m.productionQuantity,
+                    machine_ids=tuple(_chosen_machine_ids(m)),
+                    library_machines=_library_machine_lines(m),
                 )
             ),
             target_maturity=self.targetMaturity,
