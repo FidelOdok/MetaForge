@@ -39,6 +39,7 @@ from typing import Any
 
 import structlog
 
+from orchestrator.design_flow.context import DFM_REVIEW_PHASE_ID as _DFM_REVIEW_PHASE_ID
 from orchestrator.design_flow.context import ClarifyingQuestion, FlowContext, ManufacturingRoute
 from orchestrator.design_flow.invariants import ValidationResult, validate_flow
 from orchestrator.design_flow.spec import DeliverableSlot, FlowDefinition, Gate, Phase
@@ -46,6 +47,7 @@ from orchestrator.design_flow.spec import DeliverableSlot, FlowDefinition, Gate,
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "DFM_REVIEW_PHASE_ID",
     "MODEL_OPERATIONS",
     "ROUTE_SELECTION_PHASE_ID",
     "CallerProvenance",
@@ -100,6 +102,9 @@ MODEL_OPERATIONS: frozenset[OperationKind] = frozenset(
 
 ROUTE_SELECTION_PHASE_ID = "route_selection"
 
+#: FORGE-611: re-exported so callers find both manufacturing phase ids here.
+DFM_REVIEW_PHASE_ID = _DFM_REVIEW_PHASE_ID
+
 #: Template disciplines a deliverable depends on (FORGE-497). ``set_disciplines``
 #: names the disciplines a phase fans out into; it must widen or retarget the
 #: phase, never strip the one its own deliverables need (a simulation phase
@@ -137,29 +142,71 @@ def merge_disciplines(phase: Phase, assigned: list[str]) -> tuple[str, ...]:
 def _route_selection_phase() -> Phase:
     # The gate name deliberately avoids the release markers ("sign-off" etc.):
     # this decision must not be what satisfies release-gate-exists.
+    #
+    # FORGE-611: also the phase in the mech_v1 template, so every mechanical
+    # run chooses its process before the design rather than after. The same
+    # id means the generator never adds a second copy.
     return Phase(
         id=ROUTE_SELECTION_PHASE_ID,
-        title="Manufacturing Route Selection",
+        title="Manufacturing Route & Process Selection",
         objective=(
-            "The manufacturing route is undecided. Before any detailed design, compare "
-            "making it in-house against having a vendor make it: what processes, machines "
-            "and stock each route offers, lead time, cost at the stated quantity, and what "
-            "each route constrains in the design. Record the selected route, the process "
-            "and the material as a decision (record-decision tool) with the alternatives "
-            "considered, scoped to the project, and pass manufacturing_route with route "
-            "('in_house' or 'vendor'), process and material_class. If the person cannot "
-            "decide yet, pass manufacturing_route with deferred: true and their reason; "
-            "the gate shows the deferral and approving it accepts it. A decision without "
-            "manufacturing_route leaves the gate not ready."
+            "Before any detailed design, choose how the part will be made, from what is "
+            "available. Read the manufacturing context in this brief (route, machines, "
+            "stock, quantity, budget); ask the person for anything missing rather than "
+            "assume it. Pick 2 to 4 candidate processes the route allows, source each one's "
+            "capability limits and costs as design values with their sources, and rank them "
+            "with the rank_manufacturing_processes skill. Record a decision (record-decision "
+            "tool) scoped to the project with manufacturing_route (the recommended route "
+            "'in_house' or 'vendor', process and material_class) and process_ranking (the "
+            "candidates with their reasons); a process the person already stated is a "
+            "one-candidate ranking. Record the chosen process's limits as a constraint set so "
+            "the design is held to them. If the person cannot decide yet, pass "
+            "manufacturing_route with deferred: true and their reason. The gate shows the "
+            "ranking: approving accepts the recommendation; a retry naming another process "
+            "records that one instead. A decision without manufacturing_route, or a chosen "
+            "route without process_ranking, leaves the gate not ready."
+        ),
+        expected_artifacts=("design_decision", "constraint_set"),
+        required_deliverables=("design_decision",),
+        disciplines=("manufacturing",),
+        gate=Gate(
+            name="Manufacturing route and process decision",
+            criteria=(
+                "Candidate processes compared on fit, availability and cost at quantity",
+                "Capability values sourced, not assumed",
+                "Chosen process and material recorded, with its limits as constraints",
+            ),
+        ),
+    )
+
+
+def _dfm_review_phase() -> Phase:
+    """FORGE-611: the design checked against the process chosen before it."""
+    return Phase(
+        id=DFM_REVIEW_PHASE_ID,
+        title="DFM Review & Manufacturing Plan",
+        objective=(
+            "Check the committed design against the process chosen at the route gate, with "
+            "the check_manufacturability skill: each feature (wall thickness, holes, inside "
+            "corner and bend radii, draft, overhang, envelope) against that process's sourced "
+            "limits, pass, fail or unknown, saying for each value whether it was measured, "
+            "declared when the part was authored, or stated. Record failing and unknown "
+            "findings as evidence against the cad_model. Write the manufacturing plan: stock "
+            "to buy, operations in order, quantity, and a unit cost only if every input is "
+            "sourced. Record a decision (record-decision tool) scoped to the project with "
+            "dfm_review (process, verdict, findings, unknowns, plan). A not_manufacturable "
+            "verdict leaves the gate not ready: rework the design. An incomplete verdict "
+            "passes with what could not be checked named; approving accepts it."
         ),
         expected_artifacts=("design_decision",),
         required_deliverables=("design_decision",),
+        disciplines=("manufacturing",),
         gate=Gate(
-            name="Manufacturing route decision",
+            name="DFM review (manufacturability)",
             criteria=(
-                "In-house and vendor routes compared",
-                "Selected process and material follow from the chosen route's capabilities",
-                "Alternatives and rationale recorded",
+                "Design checked feature by feature against the chosen process",
+                "Each value's basis stated (measured, declared or stated)",
+                "Manufacturing plan with stock and operations in order",
             ),
         ),
     )

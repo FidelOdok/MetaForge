@@ -278,10 +278,26 @@ class TestFullContextIsUsed:
         )
         assert "table saw" in proposal.diff()[0]
 
-    def test_an_undecided_route_becomes_a_gated_decision(self) -> None:
+    def test_mech_v1_already_carries_the_route_phase_once(self) -> None:
+        """FORGE-611: mech_v1 chooses its process before design on every run, so
+        an undecided route adds no second copy."""
         context = _context(manufacturing=ManufacturingContext(route=ManufacturingRoute.UNDECIDED))
         proposal = build_proposal(
             get_flow("mech_v1"), base_version=_version("mech_v1"), operations=[], context=context
+        )
+        ids = [p.id for p in proposal.definition.phases]
+        assert ids.count(ROUTE_SELECTION_PHASE_ID) == 1
+        assert ids.index(ROUTE_SELECTION_PHASE_ID) == ids.index("design") - 1
+        assert all(op.kind is not OperationKind.ADD_ROUTE_SELECTION for op in proposal.operations)
+
+    def test_an_undecided_route_becomes_a_gated_decision(self) -> None:
+        # design_v1 has no route phase of its own, so the generator adds it.
+        context = _context(manufacturing=ManufacturingContext(route=ManufacturingRoute.UNDECIDED))
+        proposal = build_proposal(
+            get_flow("design_v1"),
+            base_version=_version("design_v1"),
+            operations=[],
+            context=context,
         )
         ids = [p.id for p in proposal.definition.phases]
         assert ROUTE_SELECTION_PHASE_ID in ids

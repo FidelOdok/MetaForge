@@ -43,6 +43,7 @@ capability does not exist.
 | `electronics` | 29 | Schematic and board checks, component search, sourcing, the per-rail power budget (`power.check_budget`, FORGE-544) and circuit simulation (`spice.run_simulation`, FORGE-542) |
 | `robotics` | 32 | Assemblies, URDF/SDF/USD export, simulators |
 | `mechanical_product` | 36 | A mechanical product end to end (FORGE-479): the FreeCAD session tools (open, sketch, pad/pocket, assembly, export, close), geometry commit, component selection. No promotion tool: promotion is a human authority |
+| `manufacturing` | 30 | Choosing a process before design and the DFM review after it (FORGE-611): web and knowledge sourcing, component search, the geometry reads a DFM check can use (`freecad.measure`, `freecad.describe_model`, `freecad.describe_session`, `freecad.list_named_faces`, `twin.evaluate_overhang_metric`) and the records. No CAD authoring |
 | `client_run` | 36 | Driving a client-mode run on a harness with a hard tool cap (FORGE-588): start and watch the run, `phase.list_tasks`/`claim`/`submit`, `flow.await_gate`, and value sourcing (`knowledge.extract`, web, component search, the records). No CAD authoring or solvers: they do not fit beside these |
 
 `all` is not a capped set: it asks for every tool by name (FORGE-588). It is

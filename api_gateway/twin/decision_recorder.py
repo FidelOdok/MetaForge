@@ -128,11 +128,26 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
         domain: str = "systems",
         depends_on: list[str] | None = None,
         manufacturing_route: dict[str, Any] | None = None,
+        process_ranking: Any = None,
+        dfm_review: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from api_gateway.twin.record_pins import link_record, pin_metadata, resolve_record_pins
         from twin_core.models.enums import WorkProductType
         from twin_core.models.work_product import WorkProduct
 
+        # FORGE-611: the processes compared at the route gate, and the DFM
+        # verdict after design. Checked here so a malformed one is refused.
+        ranking = None
+        review = None
+        try:
+            from orchestrator.design_flow.context import parse_dfm_review, parse_process_ranking
+
+            if process_ranking is not None:
+                ranking = parse_process_ranking(process_ranking)
+            if dfm_review is not None:
+                review = parse_dfm_review(dfm_review)
+        except ValueError as exc:
+            raise ValueError(f"twin.record_decision: {exc}") from exc
         route_decision = None
         if manufacturing_route is not None:
             # FORGE-608: what the route-selection gate reads. Checked here so a
@@ -260,6 +275,10 @@ def make_decision_recorder(twin: Any, project_backend: Any = None) -> Any:
                 metadata["evidence_refs"] = [str(e) for e in resolved_evidence_ids]
             if route_decision is not None:
                 metadata["manufacturing_route"] = route_decision.as_metadata()
+            if ranking is not None:
+                metadata["process_ranking"] = ranking.as_metadata()
+            if review is not None:
+                metadata["dfm_review"] = review.as_metadata()
             metadata.update(pin_metadata(pins))
             if pins:
                 # FORGE-528's list of refs, now every pin (one depends_on).

@@ -29,6 +29,12 @@ from domain_agents.base_agent import (
     get_llm_model,
     is_llm_available,
 )
+from domain_agents.mechanical.skills.check_manufacturability.handler import (
+    CheckManufacturabilityHandler,
+)
+from domain_agents.mechanical.skills.check_manufacturability.schema import (
+    CheckManufacturabilityInput,
+)
 from domain_agents.mechanical.skills.check_tolerance.handler import (
     CheckToleranceHandler,
 )
@@ -60,6 +66,12 @@ from domain_agents.mechanical.skills.generate_mesh.handler import (
 )
 from domain_agents.mechanical.skills.generate_mesh.schema import (
     GenerateMeshInput,
+)
+from domain_agents.mechanical.skills.rank_manufacturing_processes.handler import (
+    RankManufacturingProcessesHandler,
+)
+from domain_agents.mechanical.skills.rank_manufacturing_processes.schema import (
+    RankManufacturingProcessesInput,
 )
 from domain_agents.mechanical.workflows import (
     DesignWorkflowParams,
@@ -552,6 +564,9 @@ class MechanicalAgent:
     SUPPORTED_TASKS = {
         "validate_stress",
         "check_tolerances",
+        # FORGE-611: choose the process before design, check the design after.
+        "rank_manufacturing_processes",
+        "check_manufacturability",
         "generate_mesh",
         "generate_cad",
         "generate_cad_script",
@@ -773,6 +788,8 @@ class MechanicalAgent:
         handlers: dict[str, Callable[[TaskRequest], Coroutine[Any, Any, TaskResult]]] = {
             "validate_stress": self._run_validate_stress,
             "check_tolerances": self._run_check_tolerances,
+            "rank_manufacturing_processes": self._run_rank_manufacturing_processes,
+            "check_manufacturability": self._run_check_manufacturability,
             "generate_mesh": self._run_generate_mesh,
             "generate_cad": self._run_generate_cad,
             "generate_cad_script": self._run_generate_cad_script,
@@ -954,6 +971,61 @@ class MechanicalAgent:
             skill_results=[skill_result_dict],
             warnings=([output.summary] if output.overall_status == "marginal" else []),
         )
+
+    async def _run_pure_skill(
+        self, request: TaskRequest, skill: str, handler_cls: Any, input_data: Any
+    ) -> TaskResult:
+        """Run a computation-only skill and report its output (FORGE-611)."""
+        result = await handler_cls(self._create_skill_context(request.branch)).run(input_data)
+        if not result.success:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=result.errors,
+            )
+        return TaskResult(
+            task_type=request.task_type,
+            work_product_id=request.work_product_id,
+            success=True,
+            skill_results=[{"skill": skill, **result.data.model_dump(mode="json")}],
+        )
+
+    async def _run_rank_manufacturing_processes(self, request: TaskRequest) -> TaskResult:
+        """Rank candidate processes for a part before it is designed (FORGE-611)."""
+        try:
+            data = RankManufacturingProcessesInput.model_validate(request.parameters)
+        except Exception as exc:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=[f"Invalid rank_manufacturing_processes input: {exc}"],
+            )
+        return await self._run_pure_skill(
+            request, "rank_manufacturing_processes", RankManufacturingProcessesHandler, data
+        )
+
+    async def _run_check_manufacturability(self, request: TaskRequest) -> TaskResult:
+        """DFM review of a design against its chosen process (FORGE-611)."""
+        try:
+            data = CheckManufacturabilityInput.model_validate(
+                {"work_product_id": request.work_product_id, **request.parameters}
+            )
+        except Exception as exc:
+            return TaskResult(
+                task_type=request.task_type,
+                work_product_id=request.work_product_id,
+                success=False,
+                errors=[f"Invalid check_manufacturability input: {exc}"],
+            )
+        outcome = await self._run_pure_skill(
+            request, "check_manufacturability", CheckManufacturabilityHandler, data
+        )
+        if outcome.success and outcome.skill_results:
+            # A design that cannot be made by its process is not a success.
+            outcome.success = outcome.skill_results[0].get("verdict") != "not_manufacturable"
+        return outcome
 
     async def _run_generate_mesh(self, request: TaskRequest) -> TaskResult:
         """Run mesh generation using the generate_mesh skill."""

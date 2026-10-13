@@ -171,16 +171,12 @@ class ProjectGateEvaluator:
         )
         return present
 
-    async def route_decision(self, project_id: str | None) -> Any:
-        """The project's latest usable manufacturing route decision (FORGE-608).
+    async def _latest_decision(self, project_id: str | None, key: str, parse: Any) -> Any:
+        """The newest ``design_decision`` whose ``metadata[key]`` parses, with its metadata.
 
-        The newest ``design_decision`` whose metadata carries a valid
-        ``manufacturing_route``, or ``None``. A decision without one (a
-        free-text "route NOT SELECTED") does not count: that is the case the
-        route-selection gate exists to stop.
+        Returns ``(parsed, metadata)`` or ``None``. A decision whose value does
+        not parse is skipped: a malformed record is not a decision.
         """
-        from orchestrator.design_flow.context import parse_route_decision
-
         getter = getattr(self._twin, "get_work_product", None)
         if not project_id or getter is None:
             return None
@@ -198,21 +194,56 @@ class ProjectGateEvaluator:
             try:
                 node = await getter(UUID(str(getattr(wp, "id", ""))))
             except Exception as exc:  # noqa: BLE001 - one unreadable node must not crash a gate
-                logger.warning("gate_eval_route_decision_read_failed", error=str(exc))
+                logger.warning("gate_eval_decision_read_failed", key=key, error=str(exc))
                 continue
-            route = dict(getattr(node, "metadata", None) or {}).get("manufacturing_route")
-            if route is None:
+            metadata = dict(getattr(node, "metadata", None) or {})
+            if metadata.get(key) is None:
                 continue
             try:
-                decision = parse_route_decision(route)
+                return parse(metadata[key]), metadata
             except ValueError:
                 continue
-            logger.info(
-                "gate_eval_route_decision", project_id=project_id, decision=decision.summary()
-            )
-            return decision
-        logger.info("gate_eval_route_decision_missing", project_id=project_id)
         return None
+
+    async def route_decision(self, project_id: str | None) -> Any:
+        """The project's latest usable manufacturing route decision (FORGE-608).
+
+        The newest ``design_decision`` whose metadata carries a valid
+        ``manufacturing_route``, or ``None``. A decision without one (a
+        free-text "route NOT SELECTED") does not count: that is the case the
+        route-selection gate exists to stop. FORGE-611: the process ranking
+        recorded on the same decision comes with it.
+        """
+        from dataclasses import replace
+
+        from orchestrator.design_flow.context import parse_process_ranking, parse_route_decision
+
+        found = await self._latest_decision(project_id, "manufacturing_route", parse_route_decision)
+        if found is None:
+            logger.info("gate_eval_route_decision_missing", project_id=project_id)
+            return None
+        decision, metadata = found
+        if metadata.get("process_ranking") is not None:
+            try:
+                decision = replace(
+                    decision, ranking=parse_process_ranking(metadata["process_ranking"])
+                )
+            except ValueError:
+                pass
+        logger.info("gate_eval_route_decision", project_id=project_id, decision=decision.summary())
+        return decision
+
+    async def dfm_review(self, project_id: str | None) -> Any:
+        """The project's latest DFM review (FORGE-611), or ``None``."""
+        from orchestrator.design_flow.context import parse_dfm_review
+
+        found = await self._latest_decision(project_id, "dfm_review", parse_dfm_review)
+        if found is None:
+            logger.info("gate_eval_dfm_review_missing", project_id=project_id)
+            return None
+        review = found[0]
+        logger.info("gate_eval_dfm_review", project_id=project_id, review=review.summary())
+        return review
 
 
 class TwinConstraintChecker:

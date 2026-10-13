@@ -216,4 +216,5 @@ false` means the part exists but is not on the project; say so.
   but only STEP can be committed. Keep the .step extension.
 - The sandbox has no file access, so a script cannot load an existing part.
 - MetaForge checks that the script runs and measures the result. It does not
-  check manufacturability, tolerances or strength; those are other skills.
+  check manufacturability, tolerances or strength; those are other skills
+  (`check_manufacturability`, `check_tolerance`, `run_fea`).

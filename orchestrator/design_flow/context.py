@@ -35,7 +35,16 @@ __all__ = [
     "FlowContext",
     "ManufacturingContext",
     "ManufacturingRoute",
+    "DFM_REVIEW_MISSING",
+    "DFM_REVIEW_PHASE_ID",
+    "PROCESS_RANKING_MISSING",
     "ROUTE_DECISION_MISSING",
+    "DfmReview",
+    "ProcessRanking",
+    "RankedCandidate",
+    "dfm_review_gap",
+    "parse_dfm_review",
+    "parse_process_ranking",
     "RouteDecision",
     "TargetMaturity",
     "missing_inputs",
@@ -335,6 +344,8 @@ class RouteDecision:
     material_class: str = ""
     deferred: bool = False
     reason: str = ""
+    #: FORGE-611: the processes compared, read from the same decision.
+    ranking: ProcessRanking | None = None
 
     def as_metadata(self) -> dict[str, object]:
         if self.deferred:
@@ -344,7 +355,8 @@ class RouteDecision:
     def summary(self) -> str:
         if self.deferred:
             return f"route DEFERRED: {self.reason}"
-        return f"route {self.route}, process {self.process}, material {self.material_class}"
+        chosen = f"route {self.route}, process {self.process}, material {self.material_class}"
+        return f"{chosen}; {self.ranking.summary()}" if self.ranking else chosen
 
 
 def _text(value: object) -> str:
@@ -379,5 +391,213 @@ def parse_route_decision(value: object) -> RouteDecision:
 
 
 def route_decision_gap(decision: RouteDecision | None) -> str | None:
-    """What the route-selection gate is missing, or None when it may pass."""
-    return ROUTE_DECISION_MISSING if decision is None else None
+    """What the route-selection gate is missing, or None when it may pass.
+
+    FORGE-611: a chosen route also needs the ranking it was chosen from, so
+    the person picks between compared processes rather than approving one
+    that appeared from nowhere. A deferral needs no ranking.
+    """
+    if decision is None:
+        return ROUTE_DECISION_MISSING
+    if not decision.deferred and decision.ranking is None:
+        return PROCESS_RANKING_MISSING
+    return None
+
+
+# ── Process ranking and DFM review (FORGE-611) ─────────────────────────────
+#
+# The process is chosen before the design, from what is available
+# (``rank_manufacturing_processes``), and the person picks at the route gate.
+# After the design, ``check_manufacturability`` checks it against that
+# process, and the DFM gate reads the verdict.
+
+#: The phase that reviews the design against its process. Distinct from
+#: hardware_v1's ``manufacturing`` phase, which this rule must not touch.
+DFM_REVIEW_PHASE_ID = "dfm_review"
+
+PROCESS_RANKING_MISSING = (
+    "process_ranking on the route decision (record-decision with process_ranking: "
+    "the candidate processes compared, each with its reasons; a process the person "
+    "stated up front is a one-candidate ranking)"
+)
+
+DFM_REVIEW_MISSING = (
+    "dfm_review decision (record-decision with dfm_review: process, verdict, findings "
+    "and the manufacturing plan)"
+)
+
+_DFM_VERDICTS = ("manufacturable", "not_manufacturable", "incomplete")
+
+
+@dataclass(frozen=True)
+class RankedCandidate:
+    process: str
+    reasons: tuple[str, ...]
+    route: str | None = None
+    verdict: str = ""
+    cost_at_quantity: float | None = None
+
+
+@dataclass(frozen=True)
+class ProcessRanking:
+    candidates: tuple[RankedCandidate, ...]
+    recommended: str | None = None
+
+    def summary(self) -> str:
+        rows = []
+        for i, c in enumerate(self.candidates, 1):
+            cost = f", cost {c.cost_at_quantity:g}" if c.cost_at_quantity is not None else ""
+            rows.append(f"{i}. {c.process}" + (f" ({c.verdict}{cost})" if c.verdict else cost))
+        head = f"recommended {self.recommended}; " if self.recommended else ""
+        return head + "ranking: " + "; ".join(rows)
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "recommended": self.recommended,
+            "candidates": [
+                {
+                    "process": c.process,
+                    "route": c.route,
+                    "verdict": c.verdict,
+                    "cost_at_quantity": c.cost_at_quantity,
+                    "reasons": list(c.reasons),
+                }
+                for c in self.candidates
+            ],
+        }
+
+
+def parse_process_ranking(value: object) -> ProcessRanking:
+    """A ``process_ranking`` value checked; raises ``ValueError`` saying why."""
+    if isinstance(value, list):
+        value = {"candidates": value}
+    if not isinstance(value, dict):
+        raise ValueError("process_ranking must be an object with candidates")
+    raw = value.get("candidates")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("process_ranking needs at least one candidate")
+    candidates: list[RankedCandidate] = []
+    for item in raw:
+        if not isinstance(item, dict) or not _text(item.get("process")):
+            raise ValueError("every process_ranking candidate needs a process")
+        reasons = item.get("reasons")
+        if not isinstance(reasons, list) or not [r for r in reasons if _text(r)]:
+            raise ValueError(f"candidate '{item.get('process')}' needs its reasons")
+        cost = item.get("cost_at_quantity")
+        candidates.append(
+            RankedCandidate(
+                process=_text(item.get("process")),
+                reasons=tuple(_text(r) for r in reasons if _text(r)),
+                route=_text(item.get("route")) or None,
+                verdict=_text(item.get("verdict")),
+                cost_at_quantity=float(cost) if isinstance(cost, int | float) else None,
+            )
+        )
+    return ProcessRanking(
+        candidates=tuple(candidates), recommended=_text(value.get("recommended")) or None
+    )
+
+
+@dataclass(frozen=True)
+class DfmReview:
+    process: str
+    verdict: str
+    passed: int = 0
+    failed: int = 0
+    unknown: int = 0
+    unknowns: tuple[str, ...] = ()
+    stock: tuple[str, ...] = ()
+    operations: tuple[str, ...] = ()
+    quantity: int | None = None
+    unit_cost_estimate: float | None = None
+    cost_source: str = ""
+
+    def summary(self) -> str:
+        counts = f"{self.passed} pass, {self.failed} fail, {self.unknown} unknown"
+        if self.verdict == "incomplete":
+            missing = "; ".join(self.unknowns[:5]) or "see the findings"
+            return f"DFM incomplete for {self.process} ({counts}): {missing}"
+        return f"DFM {self.verdict.replace('_', ' ')} for {self.process} ({counts})"
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "process": self.process,
+            "verdict": self.verdict,
+            "findings": {"pass": self.passed, "fail": self.failed, "unknown": self.unknown},
+            "unknowns": list(self.unknowns),
+            "plan": {
+                "stock": list(self.stock),
+                "operations": list(self.operations),
+                "quantity": self.quantity,
+                "unit_cost_estimate": self.unit_cost_estimate,
+                "cost_source": self.cost_source,
+            },
+        }
+
+
+def _count(value: object, name: str) -> int:
+    if value is None:
+        return 0
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"dfm_review.findings.{name} must be a whole number")
+    return value
+
+
+def _texts(value: object) -> tuple[str, ...]:
+    return tuple(_text(v) for v in value if _text(v)) if isinstance(value, list) else ()
+
+
+def parse_dfm_review(value: object) -> DfmReview:
+    """A ``dfm_review`` value checked; raises ``ValueError`` saying why."""
+    if not isinstance(value, dict):
+        raise ValueError("dfm_review must be an object")
+    process = _text(value.get("process"))
+    if not process:
+        raise ValueError("dfm_review needs the process it was checked against")
+    verdict = _text(value.get("verdict"))
+    if verdict not in _DFM_VERDICTS:
+        raise ValueError(f"dfm_review.verdict must be one of {', '.join(_DFM_VERDICTS)}")
+    findings = value.get("findings") or {}
+    if not isinstance(findings, dict):
+        raise ValueError("dfm_review.findings must be an object of counts")
+    plan = value.get("plan") or {}
+    if not isinstance(plan, dict):
+        raise ValueError("dfm_review.plan must be an object")
+    operations = _texts(plan.get("operations"))
+    if verdict != "not_manufacturable" and not operations:
+        raise ValueError("dfm_review.plan needs the operations, in order")
+    cost = plan.get("unit_cost_estimate")
+    cost_value = float(cost) if isinstance(cost, int | float) else None
+    cost_source = _text(plan.get("cost_source"))
+    if cost_value is not None and not cost_source:
+        raise ValueError("a unit_cost_estimate needs its cost_source")
+    quantity = plan.get("quantity")
+    return DfmReview(
+        process=process,
+        verdict=verdict,
+        passed=_count(findings.get("pass"), "pass"),
+        failed=_count(findings.get("fail"), "fail"),
+        unknown=_count(findings.get("unknown"), "unknown"),
+        unknowns=_texts(value.get("unknowns")),
+        stock=_texts(plan.get("stock")),
+        operations=operations,
+        quantity=quantity if isinstance(quantity, int) and quantity > 0 else None,
+        unit_cost_estimate=cost_value,
+        cost_source=cost_source,
+    )
+
+
+def dfm_review_gap(review: DfmReview | None) -> str | None:
+    """What the DFM gate is missing, or None when it may pass.
+
+    ``incomplete`` passes: the summary lists what could not be checked and
+    approving accepts it, as with a route deferral.
+    """
+    if review is None:
+        return DFM_REVIEW_MISSING
+    if review.verdict == "not_manufacturable":
+        return (
+            f"a manufacturable design: the DFM review against {review.process} found "
+            f"{review.failed} failing feature(s); rework the design or reopen the process"
+        )
+    return None

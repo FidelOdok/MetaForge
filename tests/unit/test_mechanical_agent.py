@@ -69,6 +69,9 @@ class TestMechanicalAgent:
         assert MechanicalAgent.SUPPORTED_TASKS == {
             "validate_stress",
             "check_tolerances",
+            # FORGE-611
+            "rank_manufacturing_processes",
+            "check_manufacturability",
             "generate_mesh",
             "generate_cad",
             "generate_cad_script",
@@ -489,3 +492,43 @@ class TestLlmRouting:
                 result = await agent.run_task(request)
                 mock_llm.assert_called_once()
                 assert result.success is True
+
+
+# --- Process ranking and DFM (FORGE-611) ---
+
+
+class TestManufacturingSkills:
+    async def test_ranking_runs_through_the_agent(self, agent):  # noqa: ANN001
+        from uuid import uuid4
+
+        result = await agent.run_task(
+            TaskRequest(
+                task_type="rank_manufacturing_processes",
+                work_product_id=uuid4(),
+                parameters={
+                    "quantity": 4,
+                    "candidates": [{"process": "laser cut + weld", "available": True}],
+                },
+            )
+        )
+        assert result.success
+        assert result.skill_results[0]["recommended"] == "laser cut + weld"
+
+    async def test_a_failing_dfm_review_is_not_a_success(self, agent):  # noqa: ANN001
+        from uuid import uuid4
+
+        result = await agent.run_task(
+            TaskRequest(
+                task_type="check_manufacturability",
+                work_product_id=uuid4(),
+                parameters={
+                    "process": "router",
+                    "features": [{"name": "corner", "kind": "inside_corner_radius", "value": 1}],
+                    "limits": [
+                        {"kind": "inside_corner_radius", "min": 3, "source_ref": "6 mm cutter"}
+                    ],
+                },
+            )
+        )
+        assert result.success is False
+        assert result.skill_results[0]["verdict"] == "not_manufacturable"

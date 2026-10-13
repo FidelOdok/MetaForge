@@ -531,7 +531,11 @@ async def build_phase_brain(run_id: str = "worker", flow_id: str | None = None) 
     return HybridBrain(handlers=handlers, fallback=react, run_id=run_id)
 
 
-from orchestrator.design_flow.context import route_decision_gap  # noqa: E402
+from orchestrator.design_flow.context import (  # noqa: E402
+    DFM_REVIEW_PHASE_ID,
+    dfm_review_gap,
+    route_decision_gap,
+)
 from orchestrator.design_flow.generator import ROUTE_SELECTION_PHASE_ID  # noqa: E402
 
 
@@ -579,6 +583,16 @@ class _GateCheckers:
                 route_note = f"; {decision.summary()} (approving accepts the deferral)"
             else:
                 route_note = f"; {decision.summary()}"
+        if phase_id == DFM_REVIEW_PHASE_ID and hasattr(self._evaluator, "dfm_review"):
+            # FORGE-611: the DFM gate reads the verdict. ``incomplete`` passes
+            # with what could not be checked named; approving accepts it.
+            review = await self._evaluator.dfm_review(project_id)
+            gap = dfm_review_gap(review)
+            if gap is not None:
+                missing.append(gap)
+            elif review is not None:
+                accepts = " (approving accepts it)" if review.verdict == "incomplete" else ""
+                route_note = f"; {review.summary()}{accepts}"
 
         constraints = await self._constraints.check(project_id)
         return GateCheck(

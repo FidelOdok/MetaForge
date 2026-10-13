@@ -9,7 +9,7 @@
 # when the phases or gates change, so a completed run can still say what
 # it actually ran.
 id: mech_v1
-version: 1.1.0
+version: 1.2.0
 name: Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven
 label: Mechanical design
 description: A focused flow for a load-bearing part or mechanical subsystem.
@@ -96,12 +96,42 @@ phases:
     - Key technologies confirmed available
     - Major risks identified, each with an owner and mitigation
     gate_id: G3
+- id: route_selection
+  title: Manufacturing Route & Process Selection
+  objective: >-
+    Before any detailed design, choose how the part will be made, from what is available. Read
+    the manufacturing context in this brief (route, machines, stock, quantity, budget); ask the
+    person for anything missing rather than assume it. Pick 2 to 4 candidate processes the route
+    allows, source each one's capability limits and costs as design values with their sources,
+    and rank them with the rank_manufacturing_processes skill. Record a decision
+    (record-decision tool) scoped to the project with manufacturing_route (the recommended route
+    'in_house' or 'vendor', process and material_class) and process_ranking (the candidates with
+    their reasons); a process the person already stated is a one-candidate ranking. Record the
+    chosen process's limits as a constraint set so the design is held to them. If the person
+    cannot decide yet, pass manufacturing_route with deferred: true and their reason. The gate
+    shows the ranking: approving accepts the recommendation; a retry naming another process
+    records that one instead. A decision without manufacturing_route, or a chosen route without
+    process_ranking, leaves the gate not ready.
+  expected_artifacts:
+  - design_decision
+  - constraint_set
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - manufacturing
+  gate:
+    name: Manufacturing route and process decision
+    criteria:
+    - Candidate processes compared on fit, availability and cost at quantity
+    - Capability values sourced, not assumed
+    - Chosen process and material recorded, with its limits as constraints
 - id: design
   title: Mechanical Design
   objective: >-
     Design the part THE GOAL DESCRIBES — not a generic or example part. Author its geometry
     with the FreeCAD tools, sized to the requirements; name the part after what it actually
-    is; choose the material; then PERSIST it with the commit-geometry tool so it becomes a
+    is; use the process and material chosen at the route gate and design to that process's
+    limits (the constraint set recorded there); then PERSIST it with the commit-geometry tool so it becomes a
     viewable cad_model (a described-but-uncommitted model does NOT count). Record the design
     rationale: the dimensions, the material, and how the section carries the load. If sizing
     this part derives a specific numeric spec (e.g. a section dimension driven by the load
@@ -122,6 +152,31 @@ phases:
     - Committed as a viewable cad_model
     enforce_constraints: true
     gate_id: G6
+- id: dfm_review
+  title: DFM Review & Manufacturing Plan
+  objective: >-
+    Check the committed design against the process chosen at the route gate, with the
+    check_manufacturability skill: each feature (wall thickness, holes, inside corner and bend
+    radii, draft, overhang, envelope) against that process's sourced limits, pass, fail or
+    unknown, saying for each value whether it was measured, declared when the part was authored,
+    or stated. Record failing and unknown findings as evidence against the cad_model. Write the
+    manufacturing plan: stock to buy, operations in order, quantity, and a unit cost only if
+    every input is sourced. Record a decision (record-decision tool) scoped to the project with
+    dfm_review (process, verdict, findings, unknowns, plan). A not_manufacturable verdict leaves
+    the gate not ready: rework the design. An incomplete verdict passes with what could not be
+    checked named; approving accepts it.
+  expected_artifacts:
+  - design_decision
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - manufacturing
+  gate:
+    name: DFM review (manufacturability)
+    criteria:
+    - Design checked feature by feature against the chosen process
+    - Each value's basis stated (measured, declared or stated)
+    - Manufacturing plan with stock and operations in order
 - id: simulation
   title: Simulation & V&V
   objective: >-
