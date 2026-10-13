@@ -56,6 +56,7 @@ __all__ = [
     "machine_limits",
     "parse_capabilities",
     "parse_connection",
+    "summarize_limits",
 ]
 
 #: What kind of machine it is. ``other`` is allowed; its processes say more.
@@ -390,6 +391,38 @@ def machine_limits(instance: MachineInstance, model: MachineModel | None) -> dic
         "limits": limits,
         "needs_review": needs_review,
     }
+
+
+def summarize_limits(limits: dict[str, Any]) -> str:
+    """One line for a flow's context: who the machine is and its key limits.
+
+    Built from :func:`machine_limits` output so the line and the tool agree.
+    Only limits with a figure appear; assumptions are named for review.
+    """
+    cand = limits.get("candidate") or {}
+    head = (
+        f"{limits.get('machine')} [{limits.get('machine_id')}] {limits.get('kind')}, "
+        f"{', '.join(limits.get('processes') or []) or 'no process stated'}, "
+        f"{cand.get('route')}, {'available' if cand.get('available') else 'not available'}"
+    )
+    parts: list[str] = []
+    for lim in limits.get("limits") or []:
+        kind = lim.get("kind")
+        if kind == "envelope":
+            dims = "x".join(f"{float(v):g}" for v in lim.get("max_dims_mm") or [])
+            parts.append(f"envelope {dims} mm")
+        elif "min" in lim:
+            parts.append(f"{kind} >= {float(lim['min']):g}")
+        elif "max" in lim:
+            parts.append(f"{kind} <= {float(lim['max']):g}")
+    if cand.get("achievable_tolerance_mm") is not None:
+        parts.append(f"tolerance {float(cand['achievable_tolerance_mm']):g} mm")
+    if cand.get("materials"):
+        parts.append(f"materials {', '.join(cand['materials'])}")
+    review = limits.get("needs_review") or []
+    if review:
+        parts.append(f"assumed, needs review: {', '.join(review)}")
+    return f"{head}: {'; '.join(parts) or 'no limits recorded'}"
 
 
 def default_machine_library_path() -> Path:

@@ -11,7 +11,7 @@ Design-for-manufacture (DFM) review of a finished design against the chosen proc
 
 ## Tools Required
 
-None -- pure computation. Feature values come from the geometry (freecad.measure, the overhang metric) or from what the part was authored with.
+None -- pure computation. Feature values come from the geometry (freecad.measure, the overhang metric) or from what the part was authored with. A library machine's limits come from library.machine_limits.
 
 ## Input
 

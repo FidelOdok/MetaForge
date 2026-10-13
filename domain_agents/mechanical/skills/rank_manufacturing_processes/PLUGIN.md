@@ -32,6 +32,14 @@ Not for:
 | part envelope, minimum feature, tightest tolerance | requirements and the intent; a rough envelope is enough at this stage |
 | each candidate's capabilities and costs | **sourced values**: a machine's spec sheet, a vendor's published limits, a standard. Record each as a `design_value` with its source (see the `source-engineering-values` skill) and pass the ids in `source_refs` |
 
+Start from the machine library. The flow context lists the machines chosen
+for the project (or, if none were chosen, the available ones); for each that
+can run a process you are considering, `library.machine_limits` returns a
+ready `candidate` (envelope, minimum feature, tolerance, materials,
+availability, `source_refs`). Pass it on unchanged and add the costs you
+sourced. A machine the person mentions that is not in the library is
+recorded first with the `manage-machines` skill (held for their approval).
+
 Pick 2 to 4 candidates that the route allows (the person's own machines for
 `in_house`; supplier processes for `vendor`; both when undecided). A value
 you could not source stays empty: the criterion it feeds reads `unknown`,
@@ -41,6 +49,7 @@ which is honest and visible at the gate. Never fill one in from memory.
 
 | Step | Tool |
 |---|---|
+| a library machine's capabilities, as a candidate | `library.list_machines`, `library.machine_limits` |
 | look up capabilities, prices, lead times | `web.search`, `web.fetch`, `knowledge.search` |
 | record each sourced value | `twin.record_engineering_entity` (entity_type `design_value`) |
 | record the decision | `twin.record_decision` with `manufacturing_route` and `process_ranking` |

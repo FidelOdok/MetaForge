@@ -204,6 +204,15 @@ class DesignFlowServer(McpToolServer):
                                     "items": {"type": "string"},
                                 },
                                 "production_quantity": {"type": "integer", "minimum": 1},
+                                "machine_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Machine-library instance ids (library.list_machines) "
+                                        "this product will be made on. Their limits, with "
+                                        "sources, go into every phase's context."
+                                    ),
+                                },
                             },
                         },
                         "target_maturity": {

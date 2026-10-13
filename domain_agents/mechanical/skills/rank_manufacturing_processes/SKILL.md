@@ -12,7 +12,7 @@ Ranks candidate manufacturing processes for a part before it is designed, so the
 
 ## Tools Required
 
-None -- pure computation. Capability values must be sourced first (source-engineering-values).
+None -- pure computation. Capability values must be sourced first (source-engineering-values). For a machine in the machine library, library.machine_limits returns a ready candidate with its sources.
 
 ## Input
 

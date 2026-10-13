@@ -88,10 +88,20 @@ class ManufacturingContext:
     machines: tuple[str, ...] = ()
     stock_materials: tuple[str, ...] = ()
     production_quantity: int | None = None
+    #: FORGE-451: machine-library instances the person chose for this
+    #: project. Empty means none chosen.
+    machine_ids: tuple[str, ...] = ()
+    #: One line per library machine with its key limits, resolved when the
+    #: flow is proposed and frozen with it: the chosen machines, or, when
+    #: none were chosen, every available one so the generator and the phases
+    #: know what exists.
+    library_machines: tuple[str, ...] = ()
 
     @property
     def has_capabilities(self) -> bool:
-        return bool(self.processes or self.machines or self.stock_materials)
+        return bool(
+            self.processes or self.machines or self.stock_materials or self.library_machines
+        )
 
 
 #: Definition items whose current revision a new flow can reuse instead of
@@ -172,6 +182,8 @@ class FlowContext:
             parts.append(f"processes: {', '.join(m.processes)}")
         if m.machines:
             parts.append(f"machines: {'; '.join(m.machines)}")
+        if m.machine_ids:
+            parts.append(f"library machines: {', '.join(m.machine_ids)}")
         if m.stock_materials:
             parts.append(f"stock: {', '.join(m.stock_materials)}")
         if m.production_quantity is not None:
@@ -216,6 +228,19 @@ class FlowContext:
             + (loads if self.loads_known else f"UNKNOWN ({loads or 'not stated'})"),
             f"Budget: {(self.budget or '').strip() or '(not stated)'}",
         ]
+        if m.library_machines:
+            # Only when there are some, so a flow with no library machines
+            # renders exactly as before and keeps its hash.
+            heading = (
+                "Machines chosen from the machine library"
+                if m.machine_ids
+                else "Machines in the machine library (available; none chosen for this project)"
+            )
+            lines.append(
+                f"{heading}. Rank and check against these, never from memory; "
+                "library.machine_limits gives each one's limits with their sources:"
+            )
+            lines.extend(f"  - {line}" for line in m.library_machines)
         return "\n".join(lines)
 
 
