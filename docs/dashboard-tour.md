@@ -304,14 +304,23 @@ with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
-The Model tab's camera is an arcball (FORGE-610), so a model tumbles
-freely in any direction: drag up or down past vertical and it keeps
-going, and the underside is reachable. It replaced a turntable orbit
-that stopped dead at the top and bottom of the object. Left-drag
-rotates, right-drag (or Ctrl and drag) pans, the wheel zooms, and Shift
-with the wheel changes the field of view. The view cube in the corner
-jumps to a face, and **Reset View** re-frames the model upright — which
-is also how to recover a known orientation after tumbling.
+The Model tab is a turntable over a visible workplane (FORGE-612): the
+model stands on a ground grid, horizontal rotation goes round and round
+without limit, and the vertical sweep runs the whole way from directly
+overhead to directly underneath, so every face is reachable — the
+underside by carrying on down past the horizon rather than by rolling
+over the top. The camera's up vector never changes, which is what keeps
+the workplane reading as a floor and the model from ever ending up
+rolled. Left-drag rotates, right-drag pans, the wheel zooms, the view
+cube in the corner jumps to a face, and **Reset View** re-frames the
+model.
+
+The grid itself is drawn from plain line segments, not from a
+procedural shader: the shader version anti-aliased its lines with
+screen-space derivatives and shimmered during an orbit, which is why
+the grid was hidden for a while (FORGE-34). It is sized and placed from
+the model's own bounds, so it sits under whatever is loaded instead of
+at a fixed spot the model may be nowhere near.
 
 A node that is a revision of an item (FORGE-526) shows a **revision
 picker** (`KEY @n`) in the inspector Overview: picking another revision
