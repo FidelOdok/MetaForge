@@ -460,6 +460,10 @@ class SqliteMachineLibrary:
                 changed_at REAL NOT NULL, changed_by TEXT NOT NULL,
                 PRIMARY KEY (id, version)
             );
+            CREATE TABLE IF NOT EXISTS machine_jobs (
+                id TEXT PRIMARY KEY, machine_id TEXT NOT NULL, body TEXT NOT NULL,
+                created_at REAL NOT NULL, updated_at REAL NOT NULL
+            );
             """
         )
         self._conn.commit()
@@ -514,6 +518,54 @@ class SqliteMachineLibrary:
             found = self.get(machine.model_id)
             model = found if isinstance(found, MachineModel) else None
         return machine_limits(machine, model)
+
+    # ── jobs (FORGE-451 step 4) ──────────────────────────────────────────
+
+    def create_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        """Record a job sent to a machine. ``job`` carries its own fields."""
+        now = self._clock()
+        record = {
+            **job,
+            "id": f"job_{uuid.uuid4().hex[:12]}",
+            "created_at": now,
+            "updated_at": now,
+        }
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO machine_jobs (id, machine_id, body, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (record["id"], record["machine_id"], json.dumps(record), now, now),
+            )
+            self._conn.commit()
+        return record
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT body FROM machine_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        if row is None:
+            raise MachineNotFoundError(job_id)
+        body: dict[str, Any] = json.loads(row[0])
+        return body
+
+    def list_jobs(self, machine_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT body FROM machine_jobs ORDER BY created_at"
+            ).fetchall()
+        jobs = [json.loads(r[0]) for r in rows]
+        return [j for j in jobs if machine_id is None or j.get("machine_id") == machine_id]
+
+    def update_job(self, job_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        job = {**self.get_job(job_id), **changes, "updated_at": self._clock()}
+        with self._lock:
+            self._conn.execute(
+                "UPDATE machine_jobs SET body = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(job), job["updated_at"], job_id),
+            )
+            self._conn.commit()
+        return job
 
     # ── writes ───────────────────────────────────────────────────────────
 

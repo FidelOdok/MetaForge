@@ -3601,6 +3601,29 @@
         "title": "DiscoverMachineRequest",
         "type": "object"
       },
+      "DispatchJobRequest": {
+        "properties": {
+          "by": {
+            "default": "",
+            "title": "By",
+            "type": "string"
+          },
+          "machine_id": {
+            "title": "Machine Id",
+            "type": "string"
+          },
+          "work_product_id": {
+            "title": "Work Product Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine_id",
+          "work_product_id"
+        ],
+        "title": "DispatchJobRequest",
+        "type": "object"
+      },
       "EditFlowRequest": {
         "description": "A whole edited flow, plus the template it descends from.\n\nThe editor sends the full flow rather than a patch. A patch would need the\nclient and server to agree on how to apply it, and a disagreement there is\na flow that is not what the person on the canvas was looking at when they\npressed save.",
         "properties": {
@@ -9658,6 +9681,17 @@
           "reason"
         ],
         "title": "RecordAction",
+        "type": "object"
+      },
+      "RecordJobRequest": {
+        "properties": {
+          "by": {
+            "default": "",
+            "title": "By",
+            "type": "string"
+          }
+        },
+        "title": "RecordJobRequest",
         "type": "object"
       },
       "RecordPinResponse": {
@@ -18844,6 +18878,199 @@
           }
         },
         "summary": "Discover Machine",
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/v1/library/jobs": {
+      "get": {
+        "operationId": "list_jobs_v1_library_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "machine_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Machine Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Jobs V1 Library Jobs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Jobs",
+        "tags": [
+          "library"
+        ]
+      },
+      "post": {
+        "description": "Send a G-code work product to an idle in-house machine and start it.",
+        "operationId": "dispatch_job_v1_library_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Dispatch Job V1 Library Jobs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dispatch Job",
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/v1/library/jobs/{job_id}/result": {
+      "post": {
+        "description": "Record an ended job as evidence against the part revision it was sent for.",
+        "operationId": "record_job_result_v1_library_jobs__job_id__result_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Record Job Result V1 Library Jobs  Job Id  Result Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Job Result",
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/v1/library/jobs/{job_id}/status": {
+      "get": {
+        "description": "The job as the machine reports it now. Writes nothing.",
+        "operationId": "job_status_v1_library_jobs__job_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Job Status V1 Library Jobs  Job Id  Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Status",
         "tags": [
           "library"
         ]

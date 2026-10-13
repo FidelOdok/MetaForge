@@ -141,3 +141,56 @@ async def discover_machine(body: DiscoverMachineRequest) -> dict[str, Any]:
         return await discover(body.connection, name=body.name)
     except DiscoveryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+class DispatchJobRequest(BaseModel):
+    machine_id: str
+    work_product_id: str
+    by: str = ""
+
+
+class RecordJobRequest(BaseModel):
+    by: str = ""
+
+
+@router.post("/jobs", status_code=201)
+async def dispatch_job(body: DispatchJobRequest, request: Request) -> dict[str, Any]:
+    """Send a G-code work product to an idle in-house machine and start it."""
+    from api_gateway.library.jobs import JobError
+    from api_gateway.library.jobs import dispatch_job as dispatch
+
+    try:
+        return await dispatch(body.machine_id, body.work_product_id, by=_by(request, body.by))
+    except JobError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/jobs")
+async def list_jobs(machine_id: str | None = None) -> dict[str, Any]:
+    return {"jobs": get_machine_library().list_jobs(machine_id)}
+
+
+@router.get("/jobs/{job_id}/status")
+async def job_status(job_id: str) -> dict[str, Any]:
+    """The job as the machine reports it now. Writes nothing."""
+    from api_gateway.library.jobs import JobError
+    from api_gateway.library.jobs import job_status as status
+
+    try:
+        return await status(job_id)
+    except JobError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/jobs/{job_id}/result")
+async def record_job_result(
+    job_id: str, body: RecordJobRequest, request: Request
+) -> dict[str, Any]:
+    """Record an ended job as evidence against the part revision it was sent for."""
+    from api_gateway.library.jobs import JobError
+    from api_gateway.library.jobs import record_job_result as record
+
+    try:
+        return await record(job_id, by=_by(request, body.by))
+    except JobError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
