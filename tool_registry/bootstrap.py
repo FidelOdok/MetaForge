@@ -143,6 +143,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"power"}
     # FORGE-451: the machine library, injected by the gateway or the sidecar.
     | {"library"}
+    # FORGE-427: vendor connectors, injected by the gateway or the sidecar.
+    | {"vendor"}
 )
 
 
@@ -327,6 +329,8 @@ async def bootstrap_tool_registry(
     item_history_reader: Any = None,
     # FORGE-451: the machine library (models, instances, limits).
     machine_library: Any = None,
+    # FORGE-427: vendor connectors (quotes, held orders, order status).
+    vendor_service: Any = None,
 ) -> ToolRegistry:
     """Bootstrap all enabled tool adapters into a ToolRegistry.
 
@@ -1150,6 +1154,22 @@ async def bootstrap_tool_registry(
                 failed.append("library")
         else:
             skipped.append("library")
+
+        # ----- Vendor connector MCP adapter (FORGE-427) -----
+        if vendor_service is not None and _is_adapter_enabled("vendor"):
+            try:
+                from tool_registry.tools.vendor.adapter import VendorServer
+
+                vendor_server = VendorServer(vendor_service)
+                await registry.register_adapter(vendor_server)
+                registered.append("vendor")
+                logger.info("vendor_mcp_adapter_registered", tools=sorted(vendor_server.tool_ids))
+            except Exception as exc:
+                logger.error("vendor_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("vendor")
+        else:
+            skipped.append("vendor")
 
         span.set_attribute("adapters.registered", len(registered))
         span.set_attribute("adapters.skipped", len(skipped))

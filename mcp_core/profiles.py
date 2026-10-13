@@ -287,6 +287,10 @@ PROFILES: dict[str, frozenset[str]] = {
         "library.list_machines",
         "library.get_machine",
         "library.machine_limits",
+        # FORGE-427: a vendor's real price as a ranking input (the quote is
+        # recorded, so the call is held; ordering is not in any capped set).
+        "vendor.list_connectors",
+        "vendor.quote",
     },
     "client_run": _BASE
     | {

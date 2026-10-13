@@ -231,7 +231,9 @@ Two more sources feed the package's skills (FORGE-533):
   `design_value` with its source (FORGE-586), and `manage-machines`, which
   records the person's machines in the machine library with a source for
   every capability and turns one into limits for ranking and DFM
-  (FORGE-451). These carry their own frontmatter and ship verbatim.
+  (FORGE-451), and `quote-and-order`, which gets vendor quotes recorded in
+  the twin and places an order only with the person's approval
+  (FORGE-427). These carry their own frontmatter and ship verbatim.
 
 A test checks that every tool a shipped skill names is one the repo
 registers, so a skill cannot send a client to a tool that does not exist.

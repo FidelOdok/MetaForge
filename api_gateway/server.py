@@ -82,6 +82,7 @@ from api_gateway.twin.item_routes import router as twin_items_router
 from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
+from api_gateway.vendors.routes import router as vendors_router
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from observability.bootstrap import init_observability, shutdown_observability
@@ -874,6 +875,7 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.twin.test_plan import make_test_plan_generator, make_test_plan_lister
     from api_gateway.twin.thermal_evidence import make_thermal_evidence_recorder
     from api_gateway.twin.trade_study import make_trade_study_selector
+    from api_gateway.vendors.mcp_bindings import make_vendor_service
 
     decision_recorder = make_decision_recorder(twin, project_backend)
     git_registry = GitRepoRegistry.from_env(twin.graph)
@@ -1313,6 +1315,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         item_history_reader=make_item_history_reader(twin),
         # FORGE-451: the machine library over MCP; writes are held.
         machine_library=make_machine_library(),
+        # FORGE-427: vendor quotes and held orders.
+        vendor_service=make_vendor_service(),
     )
     app.state.tool_registry = tool_registry
     # FORGE-539: the capability report reads the live registry and its health.
@@ -1572,6 +1576,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
         )
 
         init_machine_library(SqliteMachineLibrary(str(default_machine_library_path())))
+        # FORGE-427: quotes and orders must outlive a restart.
+        from api_gateway.vendors.service import (
+            SqliteVendorStore,
+            default_vendor_store_path,
+            init_vendor_store,
+        )
+
+        init_vendor_store(SqliteVendorStore(str(default_vendor_store_path())))
     # FORGE-482: flow versions (proposed, approved, rejected) were process
     # memory, so a routine reload lost every human approval while the
     # Temporal run using it survived. Same disable flag as the ledgers.
@@ -2134,6 +2146,7 @@ def create_app(
     app.include_router(approvals_router)
     app.include_router(client_tasks_router)
     app.include_router(library_router)
+    app.include_router(vendors_router)
     app.include_router(cad_router)
     app.include_router(cad_export_router)
     app.include_router(robot_loads_router)

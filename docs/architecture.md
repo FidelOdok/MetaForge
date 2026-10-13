@@ -534,6 +534,21 @@ the envelope, volume and mass (`twin.get_node`, `freecad.measure`) and the
 3D-printing overhang (`twin.evaluate_overhang_metric`). The `hardware_v1`
 `manufacturing` phase (electronics, G8) is unchanged.
 
+**Vendor connectors (FORGE-427).** Quotes and orders from outside vendors
+go through connectors on the gateway (`api_gateway/vendors/`). Every
+connector is built on one base that guarantees typed failures (never an
+empty success), a credential named by a `METAFORGE_VENDOR_*` environment
+variable, an explicit `sandbox` or `production` mode that is reported on
+every quote and order, and a rate limit. A quote is stored and recorded in
+the twin as a `procurement_record`; an order is refused unless its quote is
+still valid, unordered and made in the connector's current mode, and is
+recorded linked to its quote. `vendor.place_order` is destructive and held
+for a person on every call. `health.check` lists each connector's auth
+state under `vendors`. A contract suite (`tests/unit/test_vendor_connectors.py`)
+runs against every connector; only a fake, sandbox-only vendor is wired so
+far (`METAFORGE_VENDOR_FAKE=on`), and real vendors (JLC, then PCBWay) join
+it once their API access is approved.
+
 **The machine library (FORGE-451).** Process ranking and DFM need a
 machine's real limits, so machines are recorded once, outside any project,
 in the gateway's SQLite store (`METAFORGE_MACHINE_LIBRARY_PATH`, default
