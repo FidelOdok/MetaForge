@@ -139,14 +139,16 @@ async def test_bracket_from_intent_to_a_verified_completion() -> None:
             store.submit_approval(run.id, ApprovalDecision.APPROVE)
     await asyncio.wait_for(task, timeout=5.0)
 
-    # 5. The repair was local: earlier phases ran once, design and V&V twice.
+    # 5. The repair was local: earlier phases ran once; design, its DFM review
+    # (FORGE-611) and V&V twice.
     ran = [c[0] for c in brain.calls]
     assert ran == [
-        "intent", "needs", "requirements", "feasibility", "design", "simulation",
-        "design", "simulation",
+        "intent", "needs", "requirements", "feasibility", "route_selection",
+        "design", "dfm_review", "simulation",
+        "design", "dfm_review", "simulation",
     ]  # fmt: skip
     assert ("simulation", "rework") in decisions
-    rework_feedback = next(f for p, f in brain.calls[6:] if p == "design")
+    rework_feedback = next(f for p, f in brain.calls[8:] if p == "design")
     assert "REQ-FOS" in rework_feedback and "thicken the arm" in rework_feedback
     assert brain.safety_factor == 2.4
 
