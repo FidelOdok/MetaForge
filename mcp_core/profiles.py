@@ -293,6 +293,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "vendor.quote",
         # FORGE-614: where to send it when a vendor has no API.
         "vendor.handoffs",
+        # FORGE-615: a rough cost before any quote exists.
+        "cost.estimate_manufacturing",
     },
     "client_run": _BASE
     | {
