@@ -113,6 +113,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "library.list_machines",
         "library.get_machine",
         "library.machine_limits",
+        # FORGE-451 step 3: reads the printer's controller; registers nothing.
+        "library.discover_machine",
         # Twin reads
         "constraint.validate",
         "project.get",
@@ -408,6 +410,8 @@ DESTRUCTIVE: frozenset[str] = frozenset(
 # the tools for which it stays true; everything else is closed-world.
 OPEN_WORLD: frozenset[str] = frozenset(
     {
+        # FORGE-451: reads a printer controller on the person's network.
+        "library.discover_machine",
         "component.search_intent",
         "component.search_parametric",
         "distributors.resolve_offers",

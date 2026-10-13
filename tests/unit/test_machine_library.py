@@ -227,7 +227,12 @@ class TestRoutes:
 
 class TestMcp:
     def test_reads_run_freely_and_writes_are_held(self) -> None:
-        reads = {"library.list_machines", "library.get_machine", "library.machine_limits"}
+        reads = {
+            "library.list_machines",
+            "library.get_machine",
+            "library.machine_limits",
+            "library.discover_machine",
+        }
         writes = {"library.register_machine", "library.update_machine"}
         assert reads <= READ_ONLY
         assert writes <= ADDITIVE

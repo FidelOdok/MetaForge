@@ -46,6 +46,14 @@ class LocalMachineLibrary:
         except MachineNotFoundError as exc:
             raise ValueError(f"machine '{machine_id}' not found") from exc
 
+    async def discover_machine(self, connection: dict[str, Any], name: str) -> dict[str, Any]:
+        from api_gateway.library.discovery import DiscoveryError, discover_machine
+
+        try:
+            return await discover_machine(connection, name=name)
+        except DiscoveryError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 def make_machine_library() -> LocalMachineLibrary:
     return LocalMachineLibrary()
