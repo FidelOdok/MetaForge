@@ -5234,6 +5234,26 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HandoffRequest": {
+        "properties": {
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "work_product_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Work Product Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "title": "HandoffRequest",
+        "type": "object"
+      },
       "HarnessEstimateResponse": {
         "properties": {
           "joints": {
@@ -23669,6 +23689,50 @@
           }
         },
         "summary": "List Connectors",
+        "tags": [
+          "vendors"
+        ]
+      }
+    },
+    "/v1/vendors/handoffs": {
+      "post": {
+        "description": "Vendors with no API that take this service, and which files each accepts. Reads only.",
+        "operationId": "list_handoffs_v1_vendors_handoffs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandoffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Handoffs V1 Vendors Handoffs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Handoffs",
         "tags": [
           "vendors"
         ]

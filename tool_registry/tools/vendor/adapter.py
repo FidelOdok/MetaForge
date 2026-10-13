@@ -44,6 +44,8 @@ class VendorService(Protocol):
 
     async def order_status(self, order_id: str) -> dict[str, Any]: ...
 
+    async def handoffs(self, service_name: str, work_product_ids: list[str]) -> dict[str, Any]: ...
+
 
 def _limits() -> ResourceLimits:
     return ResourceLimits(max_memory_mb=256, max_cpu_seconds=120, max_disk_mb=1)
@@ -154,6 +156,34 @@ class VendorServer(McpToolServer):
             ),
             handler=self.order_status,
         )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="vendor.handoffs",
+                adapter_id="vendor",
+                name="Vendor Handoffs",
+                description=(
+                    "For vendors with no ordering API (AISLER, Craftcloud, Xometry, "
+                    "SendCutSend): which ones take this service, their upload page, the "
+                    "file formats they accept, which of the given work products fit, and "
+                    "where to download each file from the gateway. Sends nothing and calls "
+                    "no vendor; the person uploads. The formats come from MetaForge's "
+                    "catalogue, so tell them to confirm on upload."
+                ),
+                capability="vendor",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "service": {"type": "string", "enum": SERVICES},
+                        "work_product_ids": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["service"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=_limits(),
+            ),
+            handler=self.handoffs,
+        )
 
     async def list_connectors(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("vendor.list_connectors"):
@@ -168,6 +198,11 @@ class VendorServer(McpToolServer):
     async def place_order(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("vendor.place_order"):
             return await self._vendors.place_order(str(arguments["quote_id"]), "mcp")
+
+    async def handoffs(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        with tracer.start_as_current_span("vendor.handoffs"):
+            ids = [str(i) for i in arguments.get("work_product_ids") or []]
+            return await self._vendors.handoffs(str(arguments["service"]), ids)
 
     async def order_status(self, arguments: dict[str, Any]) -> dict[str, Any]:
         with tracer.start_as_current_span("vendor.order_status"):

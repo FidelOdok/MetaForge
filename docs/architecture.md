@@ -549,6 +549,13 @@ runs against every connector; only a fake, sandbox-only vendor is wired so
 far (`METAFORGE_VENDOR_FAKE=on`), and real vendors (JLC, then PCBWay) join
 it once their API access is approved.
 
+Vendors with no ordering API are handed off instead (FORGE-614):
+`vendor.handoffs` reads a small catalogue (`api_gateway/vendors/handoffs.py`:
+AISLER, Craftcloud, Xometry, SendCutSend) and, for a service and some work
+products, returns each vendor's upload page, accepted formats, the files
+that fit and their gateway download paths. It sends nothing; the person
+uploads.
+
 **The machine library (FORGE-451).** Process ranking and DFM need a
 machine's real limits, so machines are recorded once, outside any project,
 in the gateway's SQLite store (`METAFORGE_MACHINE_LIBRARY_PATH`, default
