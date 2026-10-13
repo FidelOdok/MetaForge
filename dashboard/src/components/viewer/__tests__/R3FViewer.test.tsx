@@ -313,14 +313,14 @@ describe('R3FViewer — camera modes and the workplane (FORGE-616)', () => {
     mockState();
   });
 
-  it('defaults to the turntable, not a free-tumbling arcball', () => {
+  it('renders the turntable when that mode is chosen', () => {
     const { queryByTestId } = render(<R3FViewer />);
 
     expect(queryByTestId('orbit-controls')).toBeTruthy();
     expect(queryByTestId('arcball-controls')).toBeNull();
   });
 
-  it('switches to the arcball when the camera mode is free', () => {
+  it('renders the arcball for free orbit, which is the default mode', () => {
     mockState({ cameraMode: 'free' });
 
     const { queryByTestId } = render(<R3FViewer />);

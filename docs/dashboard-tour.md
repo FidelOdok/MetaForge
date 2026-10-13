@@ -309,14 +309,14 @@ pair of buttons beside **Reset view** chooses between two ways of
 rotating it, with the active one picked out in the accent colour
 (FORGE-616, FORGE-617):
 
-- **Turntable** (the default) keeps the camera's up vector fixed, so the
+- **Turntable** keeps the camera's up vector fixed, so the
   workplane stays a floor and the model is never left rolled. Horizontal
   rotation goes round and round; vertical rotation stops just short of
   straight up and straight down, which is three.js's own limit on this
   kind of control rather than a setting. Every face is still reachable —
   the underside by carrying on down past the horizon rather than by
   rolling over the top.
-- **Free orbit** is an arcball: no stopping point in any direction, so a
+- **Free orbit** (the default) is an arcball: no stopping point in any direction, so a
   drag tumbles the model continuously. The cost is the fixed up vector —
   the floor tilts with the view and the model can end up rolled. **Reset
   view** puts it back upright.

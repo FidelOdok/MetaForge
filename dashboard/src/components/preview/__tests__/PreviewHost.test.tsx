@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '../../../test/test-utils';
 import type { TwinNode } from '../../../types/twin';
 
@@ -20,9 +20,24 @@ import { fetchDerivedPrd, fetchNodeFileText } from '../../../api/endpoints/twin'
 import { PreviewHost, hasInlinePreview } from '../PreviewHost';
 import { clearNodeFileTextCache } from '../useNodeFileText';
 
-// Preview engines load lazily (FORGE-531). Under the full suite's load the
-// first render of an engine can take longer than Testing Library's 1 s
-// default, which made these tests fail only when run with everything else.
+// Preview engines load lazily (FORGE-531), and under the full suite's load
+// that first import -- transform, evaluate, instantiate -- can take longer
+// than Testing Library's 1 s default. That made these tests fail only when
+// run with everything else, and fail on a different test each time, since
+// whichever engine imported first paid the cost.
+//
+// Resolving every engine module up front removes the race rather than hiding
+// it: by the time a test renders, React.lazy finds the module already in the
+// registry and resolves on the next tick. The generous timeout below stays as
+// a backstop for a slow machine, but nothing should now depend on it.
+beforeAll(async () => {
+  await Promise.all([
+    import('../engines/DocumentEngines'),
+    import('../engines/DataEngines'),
+    import('../engines/VectorEngines'),
+  ]);
+});
+
 const LAZY_ENGINE = { timeout: 5000 };
 
 const mockFetch = vi.mocked(fetchNodeFileText);
@@ -53,7 +68,7 @@ describe('PreviewHost: markdown', () => {
   it('renders a PRD as formatted Markdown, never as raw HTML', async () => {
     mockFetch.mockResolvedValue('# Drone PRD\n\nFly for **20 min**.\n\n- GPS\n- Lidar\n\n<script>alert(1)</script>');
     const { container } = render(<PreviewHost node={node({ wp_type: 'prd', format: 'md' })} mode="modal" />);
-    expect(await screen.findByRole('heading', { level: 1, name: 'Drone PRD' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Drone PRD' }, LAZY_ENGINE)).toBeInTheDocument();
     expect(screen.getByText('20 min').tagName).toBe('STRONG');
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
     // The tag is text, not an element.
@@ -90,7 +105,7 @@ describe('PreviewHost: derived prd (FORGE-528)', () => {
     mockPrd.mockRejectedValue(new Error('down'));
     render(<PreviewHost node={node({ wp_type: 'prd', format: 'md', item_key: 'PRD-W', item_revision: 2 })} mode="modal" />);
     const view = await screen.findByTestId('preview-prd', {}, LAZY_ENGINE);
-    await screen.findByText('Stored prose only.');
+    await screen.findByText('Stored prose only.', {}, LAZY_ENGINE);
     expect(view).toHaveAttribute('data-derived', 'false');
   });
 });
@@ -99,7 +114,7 @@ describe('PreviewHost: tables', () => {
   it('renders a CSV as a table with a row count', async () => {
     mockFetch.mockResolvedValue('name,value\nalpha,1\nbeta,2\n');
     render(<PreviewHost node={node({ wp_type: 'test_result', format: 'csv' })} mode="modal" />);
-    const table = await screen.findByRole('table');
+    const table = await screen.findByRole('table', {}, LAZY_ENGINE);
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['name', 'value']);
     expect(within(table).getAllByRole('row')).toHaveLength(3);
     expect(screen.getByText(/2 rows · 2 columns/)).toBeInTheDocument();
@@ -108,7 +123,7 @@ describe('PreviewHost: tables', () => {
   it('caps long tables and expands on demand', async () => {
     mockFetch.mockResolvedValue(['n', ...Array.from({ length: 30 }, (_, i) => String(i))].join('\n'));
     render(<PreviewHost node={node({ format: 'csv' })} mode="panel" />);
-    await screen.findByRole('table');
+    await screen.findByRole('table', {}, LAZY_ENGINE);
     expect(screen.getAllByRole('row')).toHaveLength(26);
     fireEvent.click(screen.getByRole('button', { name: 'Show all 30' }));
     expect(screen.getAllByRole('row')).toHaveLength(31);
