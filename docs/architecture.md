@@ -563,6 +563,31 @@ and price, stock or blank size, removal or cut rate). It is in-process
 arithmetic, always labelled an estimate and never a price, and a missing
 figure leaves what needs it unknown.
 
+**Processes and materials (FORGE-451, FORGE-446).** Beside the machines,
+the library holds manufacturing techniques and materials
+(`twin_core/library/catalog.py`, the same store file). A *process* has a
+family, the machine kinds that run it, the material families it makes, and
+rules in the vocabulary `check_manufacturability` reads (wall thickness,
+hole diameter, inside corner and bend radius, feature size, draft, overhang,
+envelope) plus achievable tolerance; a rule may apply to one material family
+only. A *material* has a family, a designation, forms, the processes it
+suits, and typed properties (density, stiffness, strengths, elongation,
+thermal figures, cost per kg with its currency, and the across-the-grain
+pair for woods). The same rules as the machines hold: fixed units, a source
+on every value, assumptions flagged for review, nothing defaulted, every
+change versioned. Nothing ships built in; entries are recorded with their
+sources. `library.process_limits` turns a process, for a material, into DFM
+limits and a ranking candidate.
+
+A flow is told about them at proposal, like the machines:
+`manufacturingContext.processIds` and `materialIds` (ids or names) put each
+entry's rules or properties into the frozen flow context, and an unknown
+entry is refused. With none chosen, the context lists the entries that match
+what was stated (processes by the stated processes and the library machines'
+processes, materials by the stated stock names), or failing that the
+library's entries up to fifteen, and says which of the three it did. A
+library with no entries leaves the context text as it was.
+
 **The machine library (FORGE-451).** Process ranking and DFM need a
 machine's real limits, so machines are recorded once, outside any project,
 in the gateway's SQLite store (`METAFORGE_MACHINE_LIBRARY_PATH`, default

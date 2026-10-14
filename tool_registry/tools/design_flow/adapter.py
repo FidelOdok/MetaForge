@@ -213,6 +213,24 @@ class DesignFlowServer(McpToolServer):
                                         "sources, go into every phase's context."
                                     ),
                                 },
+                                "process_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Process library entries (library.list_processes, id "
+                                        "or name) chosen for this product. Their rules go "
+                                        "into every phase's context."
+                                    ),
+                                },
+                                "material_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Material library entries (library.list_materials, id "
+                                        "or name). Their properties go into every phase's "
+                                        "context."
+                                    ),
+                                },
                             },
                         },
                         "target_maturity": {

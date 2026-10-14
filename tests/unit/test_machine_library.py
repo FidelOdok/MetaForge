@@ -243,7 +243,11 @@ class TestMcp:
         assert reads <= READ_ONLY
         assert writes - {"library.dispatch_job"} <= ADDITIVE
         assert not writes & READ_ONLY
-        assert set(LibraryServer(LocalMachineLibrary()).tool_ids) == reads | writes
+        from tool_registry.tools.library.catalog_tools import catalog_tool_ids
+
+        assert set(LibraryServer(LocalMachineLibrary()).tool_ids) == (
+            reads | writes | catalog_tool_ids()
+        )
 
     def test_the_manufacturing_profile_reads_the_library(self) -> None:
         assert {"library.list_machines", "library.machine_limits"} <= PROFILES["manufacturing"]

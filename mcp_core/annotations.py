@@ -123,6 +123,12 @@ READ_ONLY: frozenset[str] = frozenset(
         "library.list_machines",
         "library.get_machine",
         "library.machine_limits",
+        # FORGE-451 / FORGE-446: process and material reads.
+        "library.list_processes",
+        "library.get_process",
+        "library.process_limits",
+        "library.list_materials",
+        "library.get_material",
         # FORGE-451 step 3: reads the printer's controller; registers nothing.
         "library.discover_machine",
         # FORGE-451 step 4: asks the machine about a job; writes nothing.
@@ -328,6 +334,10 @@ ADDITIVE: frozenset[str] = frozenset(
         # kept in its history. Held like any write.
         "library.register_machine",
         "library.update_machine",
+        "library.register_process",
+        "library.update_process",
+        "library.register_material",
+        "library.update_material",
         # Records one evidence entity from the machine's own report.
         "library.record_job_result",
         # FORGE-427: a quote is recorded in the twin; nothing is bought.

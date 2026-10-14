@@ -59,6 +59,7 @@ from api_gateway.firmware.routes import router as firmware_router
 from api_gateway.harness import router as harness_router
 from api_gateway.health import health_router, reset_health_checker, set_reported_auth_mode
 from api_gateway.knowledge.routes import router as knowledge_router
+from api_gateway.library.catalog_routes import router as library_catalog_router
 from api_gateway.library.routes import router as library_router
 from api_gateway.manufacture.routes import router as manufacture_router
 from api_gateway.memory import router as memory_router
@@ -1576,6 +1577,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         )
 
         init_machine_library(SqliteMachineLibrary(str(default_machine_library_path())))
+        # Processes and materials share the machine library's file.
+        from api_gateway.library.catalog_routes import init_catalog
+        from twin_core.library.catalog import SqliteCatalog
+
+        init_catalog(SqliteCatalog(str(default_machine_library_path())))
         # FORGE-427: quotes and orders must outlive a restart.
         from api_gateway.vendors.service import (
             SqliteVendorStore,
@@ -2146,6 +2152,7 @@ def create_app(
     app.include_router(approvals_router)
     app.include_router(client_tasks_router)
     app.include_router(library_router)
+    app.include_router(library_catalog_router)
     app.include_router(vendors_router)
     app.include_router(cad_router)
     app.include_router(cad_export_router)

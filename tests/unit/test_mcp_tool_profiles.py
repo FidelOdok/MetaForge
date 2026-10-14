@@ -44,6 +44,10 @@ def declared_tool_ids() -> set[str]:
     # as f"freecad.{name}", so the literal scan above cannot see them.
     freecad = (REPO / "tool_registry/tools/freecad/adapter.py").read_text(encoding="utf-8")
     ids |= {f"freecad.{n}" for n in re.findall(r'\n {12}\(\n {16}"([a-z_]+)",\n', freecad)}
+    # FORGE-451 / FORGE-446: the process and material tools are assembled per kind.
+    from tool_registry.tools.library.catalog_tools import catalog_tool_ids
+
+    ids |= catalog_tool_ids()
     return ids
 
 

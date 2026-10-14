@@ -207,6 +207,9 @@ def _registered_tool_ids() -> set[str]:
                 )
             )
     ids |= distributor_tool_ids()
+    from tool_registry.tools.library.catalog_tools import catalog_tool_ids
+
+    ids |= catalog_tool_ids()
     ids |= {m.tool_id for m in asyncio.run(bootstrap_tool_registry()).list_tools()}
     return ids
 

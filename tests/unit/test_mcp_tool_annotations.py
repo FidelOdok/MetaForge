@@ -56,6 +56,9 @@ def declared_tool_ids() -> set[str]:
     from tool_registry.tools.distributors.mcp_adapter import distributor_tool_ids
 
     ids |= distributor_tool_ids()
+    from tool_registry.tools.library.catalog_tools import catalog_tool_ids
+
+    ids |= catalog_tool_ids()
     # FORGE-492: and ids registered through a loop (`f"freecad.{name}"`), which
     # no source scan can see. The registry is the only honest list of them.
     ids |= set(registered_tool_ids())

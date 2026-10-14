@@ -233,7 +233,10 @@ Two more sources feed the package's skills (FORGE-533):
   every capability and turns one into limits for ranking and DFM
   (FORGE-451), and `quote-and-order`, which gets vendor quotes recorded in
   the twin and places an order only with the person's approval
-  (FORGE-427). These carry their own frontmatter and ship verbatim.
+  (FORGE-427), and `manage-processes-and-materials`, which records
+  manufacturing processes with their rules and materials with their
+  properties, each sourced, and uses them in a flow (FORGE-451, FORGE-446).
+  These carry their own frontmatter and ship verbatim.
 
 A test checks that every tool a shipped skill names is one the repo
 registers, so a skill cannot send a client to a tool that does not exist.

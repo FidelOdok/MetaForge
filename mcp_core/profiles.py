@@ -287,6 +287,11 @@ PROFILES: dict[str, frozenset[str]] = {
         "library.list_machines",
         "library.get_machine",
         "library.machine_limits",
+        # FORGE-451 / FORGE-446: the flow context already lists the chosen
+        # processes' rules and materials' properties; this turns a process
+        # (for a material) into DFM limits. The list tools stay in `all`:
+        # adding them put the phase over PHASE_MCP_BUDGET, which drops web.*.
+        "library.process_limits",
         # FORGE-427: a vendor's real price as a ranking input (the quote is
         # recorded, so the call is held; ordering is not in any capped set).
         "vendor.list_connectors",
