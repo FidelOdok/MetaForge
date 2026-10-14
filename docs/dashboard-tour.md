@@ -326,6 +326,12 @@ and moves the pivot onto it. **Reset view** returns to the home
 three-quarter view and frames the whole model. The view cube in the
 corner jumps to a face.
 
+CAD geometry is authored Z-up and the STEP converter keeps it that way,
+so the viewer turns a loaded model a quarter turn onto its feet before
+measuring it (FORGE-621) — the same correction the robot path has always
+applied. Without it the workplane cut through the model and the camera
+turned it about an axis that wasn't its up.
+
 The workplane itself is a single mipmapped texture rather than drawn
 lines, which is what keeps it still while the camera moves: a receding
 patch of floor averages its cells into a flat tint instead of aliasing
