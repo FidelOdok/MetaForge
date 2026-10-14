@@ -498,13 +498,13 @@ class TestRunThermal:
     async def test_run_thermal_material_without_name_or_explicit_conductivity_raises(
         self, server_with_mocks: CalculixServer
     ) -> None:
-        with pytest.raises(ValueError, match="provide either"):
+        with pytest.raises(ValueError, match="name a library material"):
             await server_with_mocks.run_thermal({**self._VALID_ARGS, "material": {}})
 
     async def test_run_thermal_unrecognized_material_name_raises(
         self, server_with_mocks: CalculixServer
     ) -> None:
-        with pytest.raises(ValueError, match="unknown material"):
+        with pytest.raises(ValueError, match="not resolved against the material library"):
             await server_with_mocks.run_thermal(
                 {**self._VALID_ARGS, "material": {"name": "unobtainium"}}
             )

@@ -1,86 +1,82 @@
-"""Material density lookup for physical (mass/inertia) properties.
+"""Material properties for the call in progress, from the library (FORGE-446).
 
-``material`` has been accepted as a free-text string on ``create_parametric``/
-``generate_cad_script`` since Phase 1, but nothing anywhere converted it to a
-density -- geometry-only volume/inertia (unit-density, per
-``Solid.MatrixOfInertia()``) was the only mass-adjacent data MetaForge ever
-computed. URDF's ``<inertial>`` block needs real mass and mass-moments, so a
-density table is the missing piece, not a nice-to-have.
+There used to be four hard-coded tables here (density, elastic, yield,
+thermal conductivity: sixteen generic names, no sources), and an unknown
+material silently got the density of water (FORGE-457). They are gone.
 
-Values are room-temperature nominal densities (kg/m^3) for common engineering
-materials, not a certified materials database -- callers needing precision
-for a specific alloy/temper should pass ``density_kg_m3`` explicitly rather
-than rely on the name lookup.
+Material properties live in the library (``twin_core.library.catalog``,
+on the gateway). The dispatcher resolves every material a tool call names
+against it and passes the figures with the call
+(``tool_registry.material_context``); these functions read them. So:
+
+* an explicit figure passed by the caller always wins;
+* otherwise the library's figure for that material, with its source;
+* otherwise :class:`MaterialNotResolvedError`, naming the material and the
+  property. Never a default, never a guess: a wrong density is a wrong
+  mass and inertia, and a wrong modulus, yield or conductivity is a wrong
+  number an engineer may trust.
+
+A material the library does not hold, or holds without the property asked
+for, is refused, and the message says how to fix it (record the property
+with ``library.update_material``, or pass the figure explicitly).
 """
 
 from __future__ import annotations
 
-MATERIAL_DENSITY_KG_M3: dict[str, float] = {
-    "aluminum_6061": 2700.0,
-    "aluminum": 2700.0,
-    "steel": 7850.0,
-    "stainless_steel": 8000.0,
-    "titanium": 4500.0,
-    "brass": 8500.0,
-    "copper": 8960.0,
-    "abs": 1040.0,
-    "pla": 1250.0,
-    "petg": 1270.0,
-    "nylon": 1150.0,
-    "polycarbonate": 1200.0,
-    "acrylic": 1180.0,
-    "wood": 600.0,
-    "carbon_fiber": 1600.0,
-    "rubber": 1200.0,
-}
+from tool_registry.material_context import lookup
 
-DEFAULT_DENSITY_KG_M3 = 1000.0  # water -- a neutral fallback, never silently zero/undefined
+__all__ = [
+    "MaterialNotResolvedError",
+    "material_source",
+    "resolve_density_kg_m3",
+    "resolve_elastic_properties",
+    "resolve_thermal_conductivity_w_mk",
+    "resolve_yield_mpa",
+]
+
+
+class MaterialNotResolvedError(ValueError):
+    """A material, or one of its properties, is not available from the library."""
+
+
+def _figure(func: str, material: str | None, prop: str, explicit_name: str) -> float:
+    if not material:
+        raise MaterialNotResolvedError(
+            f"{func}: name a library material, or pass {explicit_name} explicitly"
+        )
+    block = lookup(material)
+    if block is None:
+        raise MaterialNotResolvedError(
+            f"{func}: material {material!r} was not resolved against the material library "
+            "for this call. Name a library material (library.list_materials), or pass "
+            f"{explicit_name} explicitly."
+        )
+    figure = (block.get("properties") or {}).get(prop)
+    if not isinstance(figure, dict) or figure.get("value") is None:
+        raise MaterialNotResolvedError(
+            f"{func}: the library entry {block.get('name', material)!r} has no {prop}. "
+            f"Record it with its source (library.update_material), or pass {explicit_name} "
+            "explicitly."
+        )
+    return float(figure["value"])
+
+
+def material_source(material: str | None, prop: str) -> str | None:
+    """Where the library's figure for ``prop`` came from, for a result to cite."""
+    block = lookup(material)
+    figure = ((block or {}).get("properties") or {}).get(prop)
+    if isinstance(figure, dict):
+        ref = figure.get("source_ref") or figure.get("source_kind")
+        name = (block or {}).get("name", material)
+        return f"library {name}: {ref}" if ref else f"library {name}"
+    return None
 
 
 def resolve_density_kg_m3(material: str, density_kg_m3: float | None = None) -> float:
-    """Resolve a material name (or explicit override) to a density.
-
-    An explicit ``density_kg_m3`` always wins. Otherwise looks up
-    ``material`` case-insensitively with underscores/spaces/hyphens
-    normalized (``"Aluminum 6061"`` and ``"aluminum-6061"`` both match
-    ``"aluminum_6061"``); an unrecognized or empty name falls back to
-    :data:`DEFAULT_DENSITY_KG_M3` rather than raising, since a URDF export
-    should never hard-fail just because the material string was informal.
-    """
+    """Density (kg/m^3): explicit, else the library's, else refused."""
     if density_kg_m3 is not None:
         return density_kg_m3
-    key = material.strip().lower().replace(" ", "_").replace("-", "_")
-    return MATERIAL_DENSITY_KG_M3.get(key, DEFAULT_DENSITY_KG_M3)
-
-
-# FORGE-234: linear-elastic properties for CalculiX static stress analysis.
-# (Young's modulus in MPa == N/mm^2, Poisson's ratio, dimensionless) --
-# MPa, not Pa, because every FreeCAD/gmsh-generated mesh's node coordinates
-# are in millimeters, and a consistent CalculiX unit system needs
-# Length=mm + Force=N + Stress=MPa together. Mixing E in Pa with mm-scale
-# geometry would silently understate stiffness by 1e6 -- displacement and
-# stress wrong by six orders of magnitude, not a rounding error. Room-
-# temperature nominal values, not a certified materials database -- same
-# caveat as MATERIAL_DENSITY_KG_M3 above. carbon_fiber is an isotropic
-# approximation (real carbon fiber is strongly anisotropic); good enough
-# for an order-of-magnitude structural check, not a composite layup design.
-MATERIAL_ELASTIC_MPA: dict[str, tuple[float, float]] = {
-    "aluminum_6061": (68900.0, 0.33),
-    "aluminum": (69000.0, 0.33),
-    "steel": (200000.0, 0.30),
-    "stainless_steel": (193000.0, 0.29),
-    "titanium": (114000.0, 0.34),
-    "brass": (100000.0, 0.34),
-    "copper": (110000.0, 0.34),
-    "abs": (2300.0, 0.35),
-    "pla": (3500.0, 0.36),
-    "petg": (2100.0, 0.40),
-    "nylon": (2500.0, 0.39),
-    "polycarbonate": (2400.0, 0.37),
-    "acrylic": (3200.0, 0.37),
-    "carbon_fiber": (135000.0, 0.30),
-    "rubber": (5.0, 0.49),
-}
+    return _figure("resolve_density_kg_m3", material, "density_kg_m3", "density_kg_m3")
 
 
 def resolve_elastic_properties(
@@ -88,140 +84,46 @@ def resolve_elastic_properties(
     youngs_modulus_mpa: float | None = None,
     poissons_ratio: float | None = None,
 ) -> tuple[float, float]:
-    """Resolve ``(youngs_modulus_mpa, poissons_ratio)`` for a static FEA solve.
+    """``(youngs_modulus_mpa, poissons_ratio)`` for a static FEA solve.
 
-    An explicit ``(youngs_modulus_mpa, poissons_ratio)`` pair always wins.
-    Otherwise looks up ``material`` (same name normalization as
-    :func:`resolve_density_kg_m3`). Unlike density, an unrecognized or
-    missing material RAISES rather than silently defaulting: a wrong
-    elastic modulus feeds directly into a stress/displacement number an
-    engineer might trust as real, so guessing "steel" for an unrecognized
-    plastic would be a silent, potentially unsafe wrong answer -- not a
-    harmless inertial estimate the way an approximate mass is.
+    An explicit pair always wins; otherwise both come from the library.
+    MPa because the meshes are in mm (Length=mm, Force=N, Stress=MPa).
     """
     if youngs_modulus_mpa is not None and poissons_ratio is not None:
         return youngs_modulus_mpa, poissons_ratio
-    if not material:
-        raise ValueError(
-            "resolve_elastic_properties: provide either a recognized material name, "
-            "or both youngs_modulus_mpa and poissons_ratio explicitly."
-        )
-    key = material.strip().lower().replace(" ", "_").replace("-", "_")
-    if key not in MATERIAL_ELASTIC_MPA:
-        raise ValueError(
-            f"resolve_elastic_properties: unknown material {material!r} -- accepted: "
-            f"{sorted(MATERIAL_ELASTIC_MPA)}, or pass youngs_modulus_mpa + "
-            "poissons_ratio explicitly."
-        )
-    return MATERIAL_ELASTIC_MPA[key]
-
-
-# FORGE-320: yield strength (MPa), for a real safety-factor (yield / max
-# stress) check -- the same material set as MATERIAL_ELASTIC_MPA (a stress
-# check always needs both E and yield together). Room-temperature nominal
-# values for a common temper/grade, not a certified materials database --
-# same caveat as the tables above. carbon_fiber is the same isotropic
-# approximation MATERIAL_ELASTIC_MPA already uses.
-MATERIAL_YIELD_MPA: dict[str, float] = {
-    "aluminum_6061": 276.0,  # T6 temper
-    "aluminum": 95.0,  # annealed, unspecified alloy
-    "steel": 250.0,  # mild/structural steel
-    "stainless_steel": 215.0,  # 304, annealed
-    "titanium": 275.0,  # CP grade 2
-    "brass": 124.0,
-    "copper": 70.0,  # annealed
-    "abs": 40.0,
-    "pla": 50.0,
-    "petg": 50.0,
-    "nylon": 45.0,
-    "polycarbonate": 62.0,
-    "acrylic": 72.0,
-    "carbon_fiber": 600.0,  # isotropic approximation
-    "rubber": 15.0,
-}
+    explicit = "youngs_modulus_mpa and poissons_ratio"
+    e = (
+        youngs_modulus_mpa
+        if youngs_modulus_mpa is not None
+        else _figure("resolve_elastic_properties", material, "youngs_modulus_mpa", explicit)
+    )
+    nu = (
+        poissons_ratio
+        if poissons_ratio is not None
+        else _figure("resolve_elastic_properties", material, "poisson_ratio", explicit)
+    )
+    return e, nu
 
 
 def resolve_yield_mpa(material: str | None = None, yield_mpa: float | None = None) -> float:
-    """Resolve a yield strength (MPa) for a safety-factor check.
-
-    An explicit ``yield_mpa`` always wins. Otherwise looks up ``material``
-    (same name normalization as :func:`resolve_density_kg_m3`). Same
-    discipline as :func:`resolve_elastic_properties`: an unrecognized or
-    missing material RAISES rather than silently defaulting -- a wrong
-    yield strength feeds directly into a safety-factor number an engineer
-    might trust as real.
-    """
+    """Yield strength (MPa) for a safety-factor check: explicit, else the library's."""
     if yield_mpa is not None:
         return yield_mpa
-    if not material:
-        raise ValueError(
-            "resolve_yield_mpa: provide either a recognized material name, or yield_mpa explicitly."
-        )
-    key = material.strip().lower().replace(" ", "_").replace("-", "_")
-    if key not in MATERIAL_YIELD_MPA:
-        raise ValueError(
-            f"resolve_yield_mpa: unknown material {material!r} -- accepted: "
-            f"{sorted(MATERIAL_YIELD_MPA)}, or pass yield_mpa explicitly."
-        )
-    return MATERIAL_YIELD_MPA[key]
-
-
-# FORGE-282: thermal conductivity (W/(m*K), standard SI reference values --
-# NOT the mm-consistent W/(mm*K) build_thermal_deck's *CONDUCTIVITY card
-# needs; callers must multiply by 1e-3 at the call site, same
-# convert-once-at-the-call-site discipline as MATERIAL_DENSITY_KG_M3's own
-# 1e-12 kg/m^3 -> tonne/mm^3 conversion for build_modal_deck -- see that
-# function's docstring). Room-temperature nominal values for a common
-# temper/grade (same references as MATERIAL_ELASTIC_MPA/MATERIAL_YIELD_MPA:
-# Incropera/Engineering Toolbox order-of-magnitude figures), not a
-# certified materials database. carbon_fiber is the same isotropic
-# approximation the other tables use, but conductivity is far MORE
-# anisotropic in real CFRP than stiffness or yield (along-fiber can be
-# 10x+ the transverse value) -- this uses a conservative transverse-ish
-# figure, not a fiber-direction one.
-MATERIAL_THERMAL_CONDUCTIVITY_W_MK: dict[str, float] = {
-    "aluminum_6061": 167.0,
-    "aluminum": 235.0,  # pure/annealed, unspecified alloy
-    "steel": 50.0,  # mild/structural steel
-    "stainless_steel": 16.2,  # 304, annealed
-    "titanium": 17.0,  # CP grade 2
-    "brass": 120.0,
-    "copper": 401.0,  # annealed
-    "abs": 0.17,
-    "pla": 0.13,
-    "petg": 0.20,
-    "nylon": 0.25,
-    "polycarbonate": 0.20,
-    "acrylic": 0.20,
-    "carbon_fiber": 5.0,  # conservative transverse-ish isotropic approximation
-    "rubber": 0.15,
-}
+    return _figure("resolve_yield_mpa", material, "yield_strength_mpa", "yield_mpa")
 
 
 def resolve_thermal_conductivity_w_mk(
     material: str | None = None, thermal_conductivity_w_mk: float | None = None
 ) -> float:
-    """Resolve a thermal conductivity (W/(m*K)) for a steady-state thermal FEA solve.
+    """Thermal conductivity in W/(m*K), SI.
 
-    An explicit ``thermal_conductivity_w_mk`` always wins. Otherwise looks up
-    ``material`` (same name normalization as :func:`resolve_density_kg_m3`).
-    Same discipline as :func:`resolve_elastic_properties`/
-    :func:`resolve_yield_mpa`: an unrecognized or missing material RAISES
-    rather than silently defaulting -- a wrong conductivity feeds directly
-    into a peak-temperature number an engineer might trust as real.
+    Callers building a mm-consistent deck multiply by 1e-3 at the call site.
     """
     if thermal_conductivity_w_mk is not None:
         return thermal_conductivity_w_mk
-    if not material:
-        raise ValueError(
-            "resolve_thermal_conductivity_w_mk: provide either a recognized material "
-            "name, or thermal_conductivity_w_mk explicitly."
-        )
-    key = material.strip().lower().replace(" ", "_").replace("-", "_")
-    if key not in MATERIAL_THERMAL_CONDUCTIVITY_W_MK:
-        raise ValueError(
-            f"resolve_thermal_conductivity_w_mk: unknown material {material!r} -- "
-            f"accepted: {sorted(MATERIAL_THERMAL_CONDUCTIVITY_W_MK)}, or pass "
-            "thermal_conductivity_w_mk explicitly."
-        )
-    return MATERIAL_THERMAL_CONDUCTIVITY_W_MK[key]
+    return _figure(
+        "resolve_thermal_conductivity_w_mk",
+        material,
+        "thermal_conductivity_w_mk",
+        "thermal_conductivity_w_mk",
+    )

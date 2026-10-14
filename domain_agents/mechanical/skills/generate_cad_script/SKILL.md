@@ -23,7 +23,7 @@ Generate and execute a CAD script (CadQuery or FreeCAD) from a natural language 
 - `script` -- The script to execute, in whichever dialect `backend` selects; if empty, a deterministic CadQuery fallback is built from `constraints`
 - `backend` -- Which CAD kernel to run `script` against: `cadquery` (default) or `freecad`
 - `constraints` -- Design constraints dict (dimensions, wall thickness, etc.)
-- `material` -- Material name for metadata (default: aluminum_6061)
+- `material` -- Material name for metadata (default: aluminium_6061_t6)
 - `output_format` -- Output file format: step, stl, brep (default: step). Must be `step` when `backend` resolves to `freecad` -- its session export produces STEP only
 
 ## Output

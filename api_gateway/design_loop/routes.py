@@ -61,7 +61,7 @@ class StartDesignLoopRequest(BaseModel):
     loadN: float  # noqa: N815
     deflectionLimitMm: float  # noqa: N815
     sfLimit: float = 2.0  # noqa: N815
-    material: str = "aluminum_6061"
+    material: str = "aluminium_6061_t6"
     wallMinMm: float = 0.5  # noqa: N815
     wallMaxMm: float | None = None  # noqa: N815
     projectId: str | None = None  # noqa: N815

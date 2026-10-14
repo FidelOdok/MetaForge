@@ -57,7 +57,7 @@ tools silently fall back to built-in defaults (a 10 mm cylinder radius, a
 | Part name | Becomes the twin item name; reusing it later revises the same item | `Motor Mount Plate` |
 | Shape | Picks the builder and its parameter keys | plate, bracket, enclosure, cylinder |
 | Every dimension for that shape, in mm | Missing keys become silent defaults | `length 120, width 80, thickness 3` |
-| Material | Drives `mass_kg` on the committed node and later FEA | `aluminum_6061`, `steel`, `ABS` |
+| Material | Drives `mass_kg` on the committed node and later FEA | a material library name (`library.list_materials`), e.g. `aluminium_6061_t6`, `abs`; a generic name like `steel` is refused |
 | Project | The node must link to a project to show in the viewer | the project name or id |
 
 Never pick a part name like `Part_1`, `Body`, `Box` or the material alone.

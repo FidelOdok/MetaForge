@@ -436,7 +436,7 @@ class TestFullRoundTripE2E:
                 "parameters": {
                     "shape_type": "bracket",
                     "dimensions": {"width": 50.0, "height": 30.0, "thickness": 5.0},
-                    "material": "aluminum_6061",
+                    "material": "aluminium_6061_t6",
                 },
             },
         )

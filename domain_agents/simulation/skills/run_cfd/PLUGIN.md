@@ -56,7 +56,7 @@ Ask the user for anything missing. Do not fill these in with defaults.
 |---|---|---|
 | The question in physical terms | Decides flow, convection or conduction | "regulator pad temperature" vs "pressure drop at 2 m/s" |
 | The part | Its twin node id, or its name in the project | `PSU Bracket` |
-| Material | Thermal conductivity drives the answer | `aluminum_6061`, or `{"thermal_conductivity_w_mk": 167}` |
+| Material | Thermal conductivity drives the answer | `aluminium_6061_t6`, or `{"thermal_conductivity_w_mk": 167}` |
 | Heat source face and power | Where the heat enters, total watts | "the regulator pad, 1.5 W" |
 | Where the power figure came from | A wattage with no source is not evidence | the component's datasheet, a measurement |
 | Sink face and its temperature | Where the heat leaves, held at a fixed temperature | "the two mounting tabs, 40 C" |
@@ -103,7 +103,7 @@ bound and let the user decide. Never present a bound as the answer.
 Call `calculix.run_thermal` with:
 
 - `mesh_file`: from step 2
-- `material`: `{"name": "aluminum_6061"}` or
+- `material`: `{"name": "aluminium_6061_t6"}` or
   `{"thermal_conductivity_w_mk": 167}`. **W/(m*K), SI**: the server converts
   to the mesh's millimetre units itself.
 - `heat_source_node_set`: the source face group

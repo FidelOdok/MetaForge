@@ -47,7 +47,7 @@ Ask the user for anything missing. Do not fill these in with defaults.
 | Input | Why it matters | Example |
 |---|---|---|
 | The part | Its twin node id, or its name in the project | `Upper Arm Link` |
-| Material | Elastic properties, and density for modal | `aluminum_6061`, `steel` |
+| Material | Elastic properties, and density for modal | a material library name, e.g. `aluminium_6061_t6`, `steel_s235jr` |
 | Where it is held | Which face is fixed | "the two bolt holes at x = 0" |
 | Where the load acts and how much | Face plus a total force vector in N | "150 N downward on the tip face" |
 | Where the load number came from | A load with no source is not evidence | the user's spec, a standard, a measurement |
@@ -110,7 +110,7 @@ Call `calculix.run_fea`:
 - `mesh_file`: from step 2
 - `load_case`: the load case name (a label only)
 - `analysis_type`: `static_stress` or `modal`
-- `material`: `{"name": "aluminum_6061"}`, or explicit
+- `material`: `{"name": "aluminium_6061_t6"}`, or explicit
   `{"youngs_modulus_mpa": 69000, "poissons_ratio": 0.33}`. **MPa, not Pa**:
   mesh coordinates are millimetres, and Pa understates stiffness by 10^6.
   `modal` needs `name` even with explicit properties, because only the

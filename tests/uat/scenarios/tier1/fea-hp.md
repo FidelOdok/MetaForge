@@ -23,7 +23,7 @@ Tier: 1
 ### When
 1. Call `calculix.solve` with `mesh_size=2mm`, fixed boundary on
    one end face, 10N point load on the opposite end face,
-   material `aluminum_6061`.
+   material `aluminium_6061_t6`.
 
 ### Then
 - A `.frd` output is produced.
@@ -109,7 +109,7 @@ Tier: 1
 - The HP-FEA-01 model.
 
 ### When
-1. Solve with `material="aluminum_6061"` (E=68.9 GPa, ν=0.33,
+1. Solve with `material="aluminium_6061_t6"` (E=68.9 GPa, ν=0.33,
    ρ=2700 kg/m³).
 
 ### Then

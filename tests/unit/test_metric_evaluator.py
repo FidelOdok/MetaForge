@@ -152,7 +152,7 @@ class TestEvaluateTipDeflection:
                 "fixed_node_set": "Surface1",
                 "load_node_set": "Surface2",
                 "load_force_n": [0, 0, -50],
-                "material": {"name": "aluminum_6061"},
+                "material": {"name": "aluminium_6061_t6"},
             },
         )
 
@@ -181,7 +181,7 @@ class TestEvaluateTipDeflection:
                 "fixed_node_set": "Surface1",
                 "load_node_set": "Surface2",
                 "load_force_n": [0, 0, -50],
-                "material": {"name": "aluminum_6061"},
+                "material": {"name": "aluminium_6061_t6"},
             },
         )
 

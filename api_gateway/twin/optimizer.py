@@ -50,6 +50,7 @@ from uuid import UUID
 
 import structlog
 
+from api_gateway.library.material_figures import with_materials
 from api_gateway.twin.metric_evaluator import bounding_box_extents_mm
 from observability.tracing import get_tracer
 from tool_registry.tools.cadquery.materials import (
@@ -75,7 +76,7 @@ def make_wall_thickness_optimizer(
         load_n: float,
         deflection_limit_mm: float,
         sf_limit: float = 2.0,
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
         wall_min_mm: float = 0.5,
         wall_max_mm: float | None = None,
         max_iterations: int = 60,
@@ -90,9 +91,10 @@ def make_wall_thickness_optimizer(
                 raise ValueError(f"twin.optimize_parameter: no work_product {work_product_id!r}")
             length_mm, width_mm, height_mm = bounding_box_extents_mm(wp.metadata)
 
-            youngs_modulus_mpa, _poissons_ratio = resolve_elastic_properties(material)
-            density_kg_m3 = resolve_density_kg_m3(material)
-            yield_mpa = resolve_yield_mpa(material)
+            async with with_materials([material]):
+                youngs_modulus_mpa, _poissons_ratio = resolve_elastic_properties(material)
+                density_kg_m3 = resolve_density_kg_m3(material)
+                yield_mpa = resolve_yield_mpa(material)
 
             span.set_attribute("optimizer.work_product_id", work_product_id)
             span.set_attribute("optimizer.material", material)
@@ -215,7 +217,7 @@ def make_tube_height_optimizer(
         load_n: float,
         deflection_limit_mm: float,
         sf_limit: float = 2.0,
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
         height_min_mm: float = 1.0,
         height_max_mm: float | None = None,
         max_iterations: int = 60,
@@ -230,9 +232,10 @@ def make_tube_height_optimizer(
                 raise ValueError(f"twin.optimize_tube_height: no work_product {work_product_id!r}")
             length_mm, width_mm, _height_mm = bounding_box_extents_mm(wp.metadata)
 
-            youngs_modulus_mpa, _poissons_ratio = resolve_elastic_properties(material)
-            density_kg_m3 = resolve_density_kg_m3(material)
-            yield_mpa = resolve_yield_mpa(material)
+            async with with_materials([material]):
+                youngs_modulus_mpa, _poissons_ratio = resolve_elastic_properties(material)
+                density_kg_m3 = resolve_density_kg_m3(material)
+                yield_mpa = resolve_yield_mpa(material)
 
             span.set_attribute("optimizer.work_product_id", work_product_id)
             span.set_attribute("optimizer.material", material)

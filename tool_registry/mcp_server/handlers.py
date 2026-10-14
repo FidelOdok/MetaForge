@@ -171,8 +171,16 @@ async def handle_tool_call(
             span.set_attribute("mcp.tool.argument_count", len(arguments))
 
         start = time.monotonic()
+        # FORGE-446: library figures the dispatcher resolved for the
+        # materials this call names; taken out before the handler sees the
+        # arguments and held for the call (tool_registry.material_context).
+        from tool_registry.material_context import current, extract, using
+
+        # Added to whatever is already in effect (an outer call), never replacing it.
+        figures = {**current(), **extract(arguments)}
         try:
-            result_data = await registration.handler(arguments)
+            with using(figures):
+                result_data = await registration.handler(arguments)
         except ToolNotFoundError:
             raise
         except Exception as exc:

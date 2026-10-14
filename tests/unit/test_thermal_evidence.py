@@ -71,7 +71,7 @@ class TestEvaluateThermal:
             await evaluate(
                 work_product_id="11111111-1111-1111-1111-111111111111",
                 mesh_file="/tmp/mesh.inp",
-                material={"name": "aluminum_6061"},
+                material={"name": "aluminium_6061_t6"},
                 heat_source_node_set="NHeatSource",
                 power_dissipation_w=61.4,
                 sink_node_set="NSink",
@@ -88,7 +88,7 @@ class TestEvaluateThermal:
         out = await evaluate(
             work_product_id=str(wp.id),
             mesh_file="/tmp/mesh.inp",
-            material={"name": "aluminum_6061"},
+            material={"name": "aluminium_6061_t6"},
             heat_source_node_set="NHeatSource",
             power_dissipation_w=61.4,
             sink_node_set="NSink",
@@ -115,7 +115,7 @@ class TestEvaluateThermal:
         out = await evaluate(
             work_product_id=str(wp.id),
             mesh_file="/tmp/mesh.inp",
-            material={"name": "aluminum_6061"},
+            material={"name": "aluminium_6061_t6"},
             heat_source_node_set="NHeatSource",
             power_dissipation_w=61.4,
             sink_node_set="NSink",
@@ -146,7 +146,7 @@ class TestEvaluateThermal:
         out = await evaluate(
             work_product_id=str(wp.id),
             mesh_file="/tmp/mesh.inp",
-            material={"name": "aluminum_6061"},
+            material={"name": "aluminium_6061_t6"},
             heat_source_node_set="NHeatSource",
             power_dissipation_w=61.4,
             sink_node_set="NSink",
@@ -165,7 +165,7 @@ class TestEvaluateThermal:
         out = await evaluate(
             work_product_id=str(wp.id),
             mesh_file="/tmp/mesh.inp",
-            material={"name": "aluminum_6061"},
+            material={"name": "aluminium_6061_t6"},
             heat_source_node_set="NHeatSource",
             power_dissipation_w=61.4,
             sink_node_set="NSink",
@@ -185,7 +185,7 @@ class TestEvaluateThermal:
         out = await evaluate(
             work_product_id=str(wp.id),
             mesh_file="/tmp/mesh.inp",
-            material={"name": "aluminum_6061"},
+            material={"name": "aluminium_6061_t6"},
             heat_source_node_set="NHeatSource",
             power_dissipation_w=61.4,
             sink_node_set="NSink",
@@ -204,7 +204,7 @@ class TestEvaluateThermal:
         out = await evaluate(
             work_product_id=str(wp.id),
             mesh_file="/tmp/mesh.inp",
-            material={"name": "aluminum_6061"},
+            material={"name": "aluminium_6061_t6"},
             heat_source_node_set="NHeatSource",
             power_dissipation_w=61.4,
             sink_node_set="NSink",
@@ -223,7 +223,7 @@ class TestEvaluateThermal:
         out = await evaluate(
             work_product_id=str(wp.id),
             mesh_file="/tmp/mesh.inp",
-            material={"name": "aluminum_6061"},
+            material={"name": "aluminium_6061_t6"},
             heat_source_node_set="NHeatSource",
             power_dissipation_w=61.4,
             sink_node_set="NSink",
@@ -253,7 +253,7 @@ class TestEvaluateThermalMetricAdapter:
             {
                 "work_product_id": str(wp.id),
                 "mesh_file": "/tmp/mesh.inp",
-                "material": {"name": "aluminum_6061"},
+                "material": {"name": "aluminium_6061_t6"},
                 "heat_source_node_set": "NHeatSource",
                 "power_dissipation_w": 61.4,
                 "sink_node_set": "NSink",
@@ -272,7 +272,7 @@ class TestEvaluateThermalMetricAdapter:
             await server.evaluate_thermal_metric(
                 {
                     "mesh_file": "/tmp/mesh.inp",
-                    "material": {"name": "aluminum_6061"},
+                    "material": {"name": "aluminium_6061_t6"},
                     "heat_source_node_set": "NHeatSource",
                     "power_dissipation_w": 61.4,
                     "sink_node_set": "NSink",

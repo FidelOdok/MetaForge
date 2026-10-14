@@ -86,28 +86,24 @@ class TestRankSensitivity:
             wall_thickness_mm=5,
             load_n=50,
             deflection_limit_mm=0.5,
-            material="aluminum_6061",
+            material="aluminium_6061_t6",
         )
         assert out["metric"] == "tip_deflection"
         params = {e["parameter"] for e in out["rankings"]}
         assert params == {"wall_thickness_mm", "length_mm"}
 
-    async def test_mass_ranking_uses_default_candidate_materials(
-        self, twin: InMemoryTwinAPI
-    ) -> None:
+    async def test_mass_ranking_needs_named_candidates(self, twin: InMemoryTwinAPI) -> None:
+        """FORGE-446: no generic default set; the person or agent names the grades."""
         wp = await _seed_cad(twin)
         rank = make_sensitivity_ranker(twin)
-        out = await rank(
-            metric="mass",
-            work_product_id=str(wp.id),
-            wall_thickness_mm=5,
-            mass_limit_kg=4.5,
-            material="aluminum_6061",
-        )
-        params = {e["parameter"] for e in out["rankings"]}
-        assert "wall_thickness_mm" in params
-        assert "material=titanium" in params
-        assert "material=aluminum_6061" not in params  # baseline excluded
+        with pytest.raises(ValueError, match="needs candidate_materials"):
+            await rank(
+                metric="mass",
+                work_product_id=str(wp.id),
+                wall_thickness_mm=5,
+                mass_limit_kg=4.5,
+                material="aluminium_6061_t6",
+            )
 
     async def test_mass_ranking_respects_explicit_candidate_materials(
         self, twin: InMemoryTwinAPI
@@ -119,7 +115,7 @@ class TestRankSensitivity:
             work_product_id=str(wp.id),
             wall_thickness_mm=5,
             mass_limit_kg=4.5,
-            material="aluminum_6061",
+            material="aluminium_6061_t6",
             candidate_materials=["steel"],
         )
         params = {e["parameter"] for e in out["rankings"]}

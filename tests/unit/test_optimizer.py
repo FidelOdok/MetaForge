@@ -12,7 +12,6 @@ import pytest
 from api_gateway.twin.decision_recorder import make_decision_recorder
 from api_gateway.twin.evidence_recorder import make_evidence_recorder
 from api_gateway.twin.optimizer import make_wall_thickness_optimizer
-from tool_registry.tools.cadquery.materials import MATERIAL_YIELD_MPA, resolve_yield_mpa
 from tool_registry.tools.twin.adapter import TwinServer
 from twin_core.api import InMemoryTwinAPI
 from twin_core.models.enums import WorkProductType
@@ -221,30 +220,6 @@ class TestOptimizeTubeHeight:
             )
 
 
-class TestMaterialYieldTable:
-    def test_known_material_resolves(self) -> None:
-        assert resolve_yield_mpa("aluminum_6061") == MATERIAL_YIELD_MPA["aluminum_6061"]
-
-    def test_name_normalization(self) -> None:
-        assert resolve_yield_mpa("Aluminum 6061") == resolve_yield_mpa("aluminum_6061")
-
-    def test_explicit_override_wins(self) -> None:
-        assert resolve_yield_mpa("steel", yield_mpa=999.0) == 999.0
-
-    def test_unknown_material_raises(self) -> None:
-        with pytest.raises(ValueError, match="unknown material"):
-            resolve_yield_mpa("unobtainium")
-
-    def test_no_material_and_no_override_raises(self) -> None:
-        with pytest.raises(ValueError, match="provide either"):
-            resolve_yield_mpa()
-
-    def test_same_material_set_as_elastic_table(self) -> None:
-        from tool_registry.tools.cadquery.materials import MATERIAL_ELASTIC_MPA
-
-        assert set(MATERIAL_YIELD_MPA) == set(MATERIAL_ELASTIC_MPA)
-
-
 @pytest.fixture
 def twin() -> InMemoryTwinAPI:
     return InMemoryTwinAPI.create()
@@ -296,7 +271,7 @@ class TestMakeWallThicknessOptimizer:
         )
         assert out["status"] == "optimal"
         assert out["winner"] is not None
-        assert out["material"] == "aluminum_6061"
+        assert out["material"] == "aluminium_6061_t6"
 
     async def test_records_evidence_pinned_to_work_product(self, twin: InMemoryTwinAPI) -> None:
         wp = await _seed_cad(twin)

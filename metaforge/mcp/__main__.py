@@ -1876,8 +1876,11 @@ async def _bootstrap(
     # only exists now -- the same late binding the gateway does.
     if lazy_bridges and server.tool_registry is not None:
         from skill_registry.registry_bridge import RegistryMcpBridge
+        from twin_core.library.material_resolver import fill_material_arguments
 
-        registry_bridge = RegistryMcpBridge(server.tool_registry)
+        registry_bridge = RegistryMcpBridge(
+            server.tool_registry, argument_filler=fill_material_arguments
+        )
         for lazy in lazy_bridges:
             lazy.bridge = registry_bridge
     return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
@@ -2082,9 +2085,12 @@ def _build_machine_library() -> Any:
     """
     gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
     if gateway_url:
-        from metaforge.mcp.remote_library import RemoteMachineLibrary
+        from metaforge.mcp.remote_library import RemoteMachineLibrary, remote_material_source
+        from twin_core.library.material_resolver import install_material_source
 
         logger.info("mcp_library_binding_remote", gateway=gateway_url)
+        # FORGE-446: material names resolve against the gateway's library too.
+        install_material_source(remote_material_source(gateway_url))
         return RemoteMachineLibrary(gateway_url)
     try:
         from api_gateway.library.mcp_bindings import make_machine_library

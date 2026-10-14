@@ -43,10 +43,10 @@ def sample_input() -> ValidateStressInput:
             StressConstraint(
                 max_von_mises_mpa=250.0,
                 safety_factor=1.5,
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         ],
-        material_name="aluminum_6061",
+        material_name="aluminium_6061_t6",
         fixed_node_set="Surface1",
         load_node_set="Surface2",
         load_force_n=(0.0, 0.0, -100.0),
@@ -213,7 +213,7 @@ class TestValidateStressHandler:
                 StressConstraint(
                     max_von_mises_mpa=250.0,
                     safety_factor=1.5,
-                    material="aluminum_6061",
+                    material="aluminium_6061_t6",
                 ),
                 StressConstraint(
                     max_von_mises_mpa=400.0,
@@ -221,7 +221,7 @@ class TestValidateStressHandler:
                     material="steel_304",
                 ),
             ],
-            material_name="aluminum_6061",
+            material_name="aluminium_6061_t6",
             fixed_node_set="Surface1",
             load_node_set="Surface2",
             load_force_n=(0.0, 0.0, -100.0),

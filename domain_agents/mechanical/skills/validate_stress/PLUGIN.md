@@ -57,7 +57,7 @@ factor, even where the skill or tool has a default.
 | Input | Why it matters | Example |
 |---|---|---|
 | The part | Node id or name; the verdict is for that revision only | `Upper Arm Link` |
-| Material | Elastic properties for the solve | `aluminum_6061`, `steel`, or explicit E and Poisson's ratio in MPa |
+| Material | Elastic properties for the solve | a material library name, e.g. `aluminium_6061_t6`, `steel_s235jr`, or explicit E and Poisson's ratio in MPa |
 | Limit stress, MPa, and its source | The stress the safety factor is applied to, usually yield | 276 MPa, 6061-T6 yield from the user's datasheet |
 | Required safety factor | Allowable = limit / safety factor | 2.0 |
 | Fixed face, in words | Mapped to a mesh surface group by coordinates | "bolt face at x = 0" |
@@ -90,7 +90,7 @@ Call `calculix.run_fea` with:
 
 - `mesh_file`, `load_case` (a label such as `bracket_200N_static`)
 - `analysis_type: "static_stress"`
-- `material`: `{"name": "aluminum_6061"}` or
+- `material`: `{"name": "aluminium_6061_t6"}` or
   `{"youngs_modulus_mpa": 68900, "poissons_ratio": 0.33}` (MPa, not Pa)
 - `fixed_node_set`, `load_node_set`: the groups from step 1
 - `load_force_n`: `[Fx, Fy, Fz]` total newtons, in the twin frame

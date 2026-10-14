@@ -27,7 +27,7 @@ class TestMeasuredMetadataFromCadResult:
             "surface_area_mm2": 8400.0,
             "mass_kg": 0.03375,
             "bounding_box": {"min_x": 0.0, "max_x": 50.0},
-            "material": "aluminum_6061",  # not a canonical measured key
+            "material": "aluminium_6061_t6",  # not a canonical measured key
             "parameters_used": {"width": 50.0},  # not a canonical measured key
         }
         metadata = measured_metadata_from_cad_result(result)

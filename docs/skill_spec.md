@@ -717,7 +717,7 @@ def sample_input():
             StressConstraint(
                 max_von_mises_mpa=250.0,
                 safety_factor=1.5,
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         ],
     )

@@ -630,7 +630,7 @@ class TestExportUrdf:
             result = ops.export_urdf(
                 "part.step",
                 link_name="widget_link",
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
                 output_path=output_path,
             )
 
@@ -661,25 +661,28 @@ class TestExportUrdf:
         ):
             result = ops.export_urdf(
                 "part.step",
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
                 density_kg_m3=1234.0,
                 output_path=str(tmp_path / "part2.urdf"),
             )
         assert result["density_kg_m3"] == 1234.0
         assert result["mass_kg"] == pytest.approx(1_000_000.0 * 1e-9 * 1234.0)
 
-    def test_unrecognized_material_falls_back_to_default_density(self, tmp_path):
+    def test_unrecognized_material_is_refused_not_given_water(self, tmp_path):
+        """FORGE-457: an unknown material used to get 1000 kg/m3, silently."""
+        from tool_registry.tools.cadquery.materials import MaterialNotResolvedError
+
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         with (
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            result = ops.export_urdf(
-                "part.step",
-                material="some unlisted unobtainium alloy",
-                output_path=str(tmp_path / "part3.urdf"),
-            )
-        assert result["density_kg_m3"] == 1000.0  # DEFAULT_DENSITY_KG_M3
+            with pytest.raises(MaterialNotResolvedError, match="unobtainium"):
+                ops.export_urdf(
+                    "part.step",
+                    material="some unlisted unobtainium alloy",
+                    output_path=str(tmp_path / "part3.urdf"),
+                )
 
     def test_mesh_uri_prefix_is_applied(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
@@ -692,6 +695,7 @@ class TestExportUrdf:
                 "part.step",
                 mesh_uri_prefix="package://widget/meshes/",
                 output_path=output_path,
+                density_kg_m3=1000.0,
             )
         urdf_text = Path(output_path).read_text()
         assert 'filename="package://widget/meshes/part4.stl"' in urdf_text
@@ -702,7 +706,9 @@ class TestExportUrdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            result = ops.export_urdf("part.step", link_name="widget_link", xacro=True)
+            result = ops.export_urdf(
+                "part.step", link_name="widget_link", xacro=True, density_kg_m3=1000.0
+            )
         assert result["output_file"].endswith(".xacro")
         text = Path(result["output_file"]).read_text()
         assert 'xmlns:xacro="http://www.ros.org/wiki/xacro"' in text
@@ -713,7 +719,7 @@ class TestExportUrdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            result = ops.export_urdf("part.step", link_name="widget_link")
+            result = ops.export_urdf("part.step", link_name="widget_link", density_kg_m3=1000.0)
         assert result["output_file"].endswith(".urdf")
         text = Path(result["output_file"]).read_text()
         assert "xacro" not in text
@@ -725,7 +731,10 @@ class TestExportUrdf:
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
             result = ops.export_urdf(
-                "part.step", link_name="widget_link", color_rgba=(0.9, 0.1, 0.1, 1.0)
+                "part.step",
+                link_name="widget_link",
+                color_rgba=(0.9, 0.1, 0.1, 1.0),
+                density_kg_m3=1000.0,
             )
         text = Path(result["output_file"]).read_text()
         assert '<material name="widget_link_material">' in text
@@ -738,7 +747,9 @@ class TestExportUrdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            ops.export_urdf("part.step", link_name="widget_link", mesh_tolerance=0.01)
+            ops.export_urdf(
+                "part.step", link_name="widget_link", mesh_tolerance=0.01, density_kg_m3=1000.0
+            )
         assert _FakeUrdfExporters.kwargs_calls[-1] == {"tolerance": 0.01}
 
 
@@ -1196,7 +1207,7 @@ class TestExportUrdfAssembly:
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         output_path = str(tmp_path / "robot.urdf")
         parts = [
-            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "base.step", "link_name": "base", "material": "aluminium_6061_t6"},
             {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
         ]
         joints = [
@@ -1231,7 +1242,7 @@ class TestExportUrdfAssembly:
 
     def test_xacro_flag_writes_xacro_extension_and_namespace(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
-        parts = [{"input_file": "base.step", "link_name": "base"}]
+        parts = [{"input_file": "base.step", "link_name": "base", "density_kg_m3": 1000.0}]
         with (
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
@@ -1253,8 +1264,13 @@ class TestExportUrdfAssembly:
     def test_per_part_color_rgba_reaches_the_urdf(self, tmp_path):
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         parts = [
-            {"input_file": "base.step", "link_name": "base", "color_rgba": [0.1, 0.2, 0.3, 1.0]},
-            {"input_file": "arm.step", "link_name": "arm"},
+            {
+                "input_file": "base.step",
+                "link_name": "base",
+                "color_rgba": [0.1, 0.2, 0.3, 1.0],
+                "density_kg_m3": 1000.0,
+            },
+            {"input_file": "arm.step", "link_name": "arm", "density_kg_m3": 1000.0},
         ]
         with (
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
@@ -1270,8 +1286,8 @@ class TestExportUrdfAssembly:
         _FakeUrdfExporters.kwargs_calls = []
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         parts = [
-            {"input_file": "base.step", "link_name": "base"},
-            {"input_file": "arm.step", "link_name": "arm"},
+            {"input_file": "base.step", "link_name": "base", "density_kg_m3": 1000.0},
+            {"input_file": "arm.step", "link_name": "arm", "density_kg_m3": 1000.0},
         ]
         with (
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
@@ -1330,7 +1346,7 @@ class TestExportSdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            result = ops.export_sdf("part.step", world_name="my_world")
+            result = ops.export_sdf("part.step", world_name="my_world", density_kg_m3=1000.0)
 
         assert result["output_file"].endswith(".world")
         sdf_text = Path(result["output_file"]).read_text()
@@ -1344,7 +1360,7 @@ class TestExportSdf:
             patch("tool_registry.tools.cadquery.operations.HAS_CADQUERY", True),
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqForUrdf()),
         ):
-            ops.export_sdf("part.step", static=True, output_path=output_path)
+            ops.export_sdf("part.step", static=True, output_path=output_path, density_kg_m3=1000.0)
         sdf_text = Path(output_path).read_text()
         assert "<static>true</static>" in sdf_text
 
@@ -1359,6 +1375,7 @@ class TestExportSdf:
                 "part.step",
                 mesh_uri="model://widget/meshes/part.stl",
                 output_path=output_path,
+                density_kg_m3=1000.0,
             )
         sdf_text = Path(output_path).read_text()
         assert "<uri>model://widget/meshes/part.stl</uri>" in sdf_text
@@ -1639,7 +1656,7 @@ class TestExportSdfAssembly:
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         output_path = str(tmp_path / "robot.sdf")
         parts = [
-            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "base.step", "link_name": "base", "material": "aluminium_6061_t6"},
             {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
         ]
         joints = [
@@ -1719,7 +1736,7 @@ class TestExportUsd:
             result = ops.export_usd(
                 "part.step",
                 prim_name="widget",
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
                 output_path=output_path,
             )
 
@@ -1760,7 +1777,9 @@ class TestExportUsd:
             patch("tool_registry.tools.cadquery.operations.cq", _FakeCqTilted()),
             pytest.raises(NonAxisAlignedInertiaError),
         ):
-            ops.export_usd("part.step", output_path=str(tmp_path / "tilted.usda"))
+            ops.export_usd(
+                "part.step", output_path=str(tmp_path / "tilted.usda"), density_kg_m3=1000.0
+            )
 
 
 class TestExportUsdAssembly:
@@ -1771,7 +1790,7 @@ class TestExportUsdAssembly:
         ops = CadqueryOperations(work_dir=str(tmp_path), sandbox_enabled=True)
         output_path = str(tmp_path / "robot.usda")
         parts = [
-            {"input_file": "base.step", "link_name": "base", "material": "aluminum_6061"},
+            {"input_file": "base.step", "link_name": "base", "material": "aluminium_6061_t6"},
             {"input_file": "arm.step", "link_name": "arm", "material": "steel"},
         ]
         joints = [

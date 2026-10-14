@@ -6,6 +6,7 @@ which adapter owns each tool and delegating to the appropriate McpClient.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -32,8 +33,17 @@ class RegistryMcpBridge(McpBridge):
         result = await bridge.invoke("cadquery.create_parametric", {...})
     """
 
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        *,
+        argument_filler: Callable[[str, dict[str, Any]], Awaitable[Any]] | None = None,
+    ) -> None:
         self._registry = registry
+        # FORGE-446: fills each material a call names with its library
+        # figures before the call goes to the adapter. Injected by the
+        # gateway; this layer cannot import the library.
+        self._argument_filler = argument_filler
         # Commit-by-reference: remember freecad.export_model STEP so
         # twin.commit_geometry can be called with just (session_id, obj_id).
         # This is the gateway chat's dispatch seam (mirrors the sidecar's stash).
@@ -89,6 +99,13 @@ class RegistryMcpBridge(McpBridge):
                     supplied_chars=filled.supplied_chars,
                     resolution="used_stashed_export",
                 )
+
+        if self._argument_filler is not None:
+            try:
+                await self._argument_filler(tool_id, params)
+            except Exception as exc:
+                # An unresolved material fails the call, naming the candidates.
+                raise McpToolError(tool_id, str(exc)) from exc
 
         request = ToolCallRequest(
             tool_id=tool_id,

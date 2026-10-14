@@ -112,7 +112,9 @@ def _first(props: dict[str, Any], keys: tuple[str, ...]) -> Any:
     return None
 
 
-def _mass_kg(props: dict[str, Any], volume_mm3: float | None) -> tuple[float | None, str | None]:
+async def _mass_kg(
+    props: dict[str, Any], volume_mm3: float | None
+) -> tuple[float | None, str | None]:
     for key, scale in _MASS_KEYS:
         value = _num(props.get(key))
         if value is not None:
@@ -120,21 +122,25 @@ def _mass_kg(props: dict[str, Any], volume_mm3: float | None) -> tuple[float | N
     material = props.get("material")
     if volume_mm3 is None or not isinstance(material, str) or not material:
         return None, None
+    # FORGE-446: the density is the library's, with its source; a material the
+    # library cannot resolve gives no mass and says why, rather than a guess.
+    from twin_core.library.material_resolver import MaterialResolutionError, resolve_material
+
     try:
-        from tool_registry.tools.cadquery.materials import MATERIAL_DENSITY_KG_M3
-    except ImportError:  # pragma: no cover -- ships with the gateway
-        return None, None
-    density = MATERIAL_DENSITY_KG_M3.get(material.strip().lower().replace(" ", "_"))
+        block = await resolve_material(material)
+    except MaterialResolutionError:
+        return None, f"no library density for {material!r}"
+    density = ((block.get("properties") or {}).get("density_kg_m3") or {}).get("value")
     if density is None:
-        return None, None
-    return volume_mm3 * 1e-9 * density, f"volume x {material} density"
+        return None, f"library entry {block.get('name')} has no density"
+    return volume_mm3 * 1e-9 * float(density), f"volume x {block.get('name')} density (library)"
 
 
 def _delta(a: float | None, b: float | None) -> float | None:
     return round(b - a, 6) if a is not None and b is not None else None
 
 
-def _geometry_block(
+async def _geometry_block(
     a_props: dict[str, Any], b_props: dict[str, Any], live: dict[str, Any] | None
 ) -> dict[str, Any]:
     if live is not None:
@@ -149,8 +155,8 @@ def _geometry_block(
         bbox_a = _first(a_props, _BBOX_KEYS)
         bbox_b = _first(b_props, _BBOX_KEYS)
         source = "recorded"
-    mass_a, mass_src_a = _mass_kg(a_props, vol_a)
-    mass_b, mass_src_b = _mass_kg(b_props, vol_b)
+    mass_a, mass_src_a = await _mass_kg(a_props, vol_a)
+    mass_b, mass_src_b = await _mass_kg(b_props, vol_b)
     available = any(v is not None for v in (vol_a, vol_b, bbox_a, bbox_b, mass_a, mass_b))
     return {
         "available": available,
@@ -372,7 +378,7 @@ def make_item_differ(twin: Any, *, geometry_diff_provider: Any = None) -> Any:
                         logger.info(
                             "item_diff_geometry_fallback", item_key=item.key, error=str(exc)
                         )
-                geometry = _geometry_block(_props(node_a), _props(node_b), live)
+                geometry = await _geometry_block(_props(node_a), _props(node_b), live)
 
             requirements: list[dict[str, Any]] = []
             if item.item_type == "constraint_set":

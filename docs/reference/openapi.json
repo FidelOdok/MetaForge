@@ -5058,7 +5058,7 @@
             "type": "object"
           },
           "material": {
-            "default": "aluminum_6061",
+            "default": "aluminium_6061_t6",
             "title": "Material",
             "type": "string"
           },
@@ -12700,7 +12700,7 @@
             "type": "number"
           },
           "material": {
-            "default": "aluminum_6061",
+            "default": "aluminium_6061_t6",
             "title": "Material",
             "type": "string"
           },
@@ -19551,6 +19551,51 @@
           }
         },
         "summary": "Register Material",
+        "tags": [
+          "library"
+        ]
+      }
+    },
+    "/v1/library/materials/resolve": {
+      "get": {
+        "description": "The figures a tool call carries for ``name`` (FORGE-446); 422 with candidates.",
+        "operationId": "resolve_material_v1_library_materials_resolve_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resolve Material V1 Library Materials Resolve Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Material",
         "tags": [
           "library"
         ]

@@ -217,6 +217,7 @@ asyncio_mode = "auto"
 testpaths = ["tests", "domain_agents"]
 python_files = ["test_*.py", "*_test.py", "tests.py"]
 markers = [
+    "no_material_library: run without the test material library (FORGE-446)",
     "perf: opt-in latency/throughput baselines; not run in default CI (MET-477 Phase 6)",
 ]
 # Phase 6: exclude perf tests from the default `pytest` invocation. Opt in

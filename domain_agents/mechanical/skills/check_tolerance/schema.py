@@ -53,7 +53,7 @@ class CheckToleranceInput(BaseModel):
     manufacturing_process: ManufacturingProcess = Field(
         ..., description="Manufacturing process capabilities"
     )
-    material: str = Field(default="aluminum_6061", description="Material identifier")
+    material: str = Field(default="aluminium_6061_t6", description="Material identifier")
     check_stack_up: bool = Field(
         default=False, description="Whether to check tolerance stack-up (RSS method)"
     )

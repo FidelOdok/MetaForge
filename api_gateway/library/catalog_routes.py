@@ -125,6 +125,19 @@ async def list_materials(family: str | None = None) -> dict[str, Any]:
     return _list("material", family)
 
 
+@router.get("/materials/resolve")
+async def resolve_material(name: str) -> dict[str, Any]:
+    """The figures a tool call carries for ``name`` (FORGE-446); 422 with candidates."""
+    from twin_core.library.material_resolver import MaterialResolutionError, block, match
+
+    try:
+        return block(match(get_catalog().list("material"), name))
+    except MaterialResolutionError as exc:
+        raise HTTPException(
+            status_code=422, detail={"message": str(exc), "candidates": exc.candidates}
+        ) from exc
+
+
 @router.get("/materials/{ref}")
 async def get_material(ref: str) -> dict[str, Any]:
     return _get("material", ref)

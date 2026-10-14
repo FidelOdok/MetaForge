@@ -106,7 +106,7 @@ class TestGenerateCadHandler:
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
                 backend="cadquery",
             )
         )
@@ -115,7 +115,7 @@ class TestGenerateCadHandler:
         assert output.volume_mm3 == 12500.0
         assert output.surface_area_mm2 == 8400.0
         assert output.shape_type == "bracket"
-        assert output.material == "aluminum_6061"
+        assert output.material == "aluminium_6061_t6"
         assert output.bounding_box.max_x == 50.0
 
     async def test_execute_bracket_freecad(self):
@@ -300,7 +300,7 @@ class TestGenerateCadHandler:
                 surface_area_mm2=50.0,
                 bounding_box=BoundingBox(),
                 parameters_used={},
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         )
         assert any("empty" in e for e in errors)
@@ -356,7 +356,7 @@ class TestGenerateCadHandler:
         """FORGE-97: the committed work product's name must be the caller's
         real part name, never the old synthetic "shape_type (material)"
         pattern -- two differently-named parts ('Shoulder Yoke', 'Upper Arm
-        Link') both landed as 'plate (aluminum_6061)' in the live repro."""
+        Link') both landed as 'plate (aluminium_6061_t6)' in the live repro."""
         ctx, handler, work_product = await _make_ctx_and_handler()
         step_file = tmp_path / "bracket_test.step"
         step_file.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
@@ -372,7 +372,7 @@ class TestGenerateCadHandler:
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         )
 
@@ -400,7 +400,7 @@ class TestGenerateCadHandler:
                 work_product_id=work_product.id,
                 shape_type="bracket",
                 dimensions={"width": 50.0, "height": 30.0, "thickness": 5.0},
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         )
 
@@ -515,7 +515,7 @@ class TestGenerateCadHandler:
                 surface_area_mm2=50.0,
                 bounding_box=BoundingBox(),
                 parameters_used={},
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         )
         assert any("volume" in e.lower() for e in errors)

@@ -19,7 +19,7 @@ None -- this is a pure computation skill. No MCP tool invocation.
 - `work_product_id` -- ID of the work_product in the Digital Twin
 - `tolerances` -- List of tolerance specs (dimension_id, feature_name, nominal_value, upper/lower tolerance)
 - `manufacturing_process` -- Process capabilities (process_type, achievable_tolerance, min_feature_size, etc.)
-- `material` -- Material identifier (default: aluminum_6061)
+- `material` -- Material identifier (default: aluminium_6061_t6)
 - `check_stack_up` -- Whether to perform RSS tolerance stack-up analysis
 
 ## Output
