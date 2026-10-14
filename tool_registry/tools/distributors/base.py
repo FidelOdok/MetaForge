@@ -25,6 +25,40 @@ class LifecycleStatus(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+def parse_price(value: Any) -> float | None:
+    """A distributor's price as a number, or ``None`` when it cannot be read.
+
+    Prices arrive as numbers or as display strings in the account's
+    currency: ``"$1.23"``, ``"£89.42"``, ``"1.234,56 €"``. Anything that is
+    not a clean non-negative number is ``None`` (unknown), never ``0.0``: a
+    price read as zero is a part that looks free (FORGE-613 follow-up).
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value) if value >= 0 else None
+    if not isinstance(value, str):
+        return None
+    text = "".join(ch for ch in value if ch.isdigit() or ch in ".,")
+    if not text or not any(ch.isdigit() for ch in text):
+        return None
+    if "," in text and "." in text:
+        # The later separator is the decimal one: 1,234.56 or 1.234,56.
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        whole, _, frac = text.rpartition(",")
+        # 1,23 is a decimal comma; 1,234 is a thousands separator.
+        text = f"{whole.replace(',', '')}.{frac}" if len(frac) != 3 else text.replace(",", "")
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    return number if number >= 0 else None
+
+
 class PricingBreak(BaseModel):
     """Price break for a quantity tier."""
 

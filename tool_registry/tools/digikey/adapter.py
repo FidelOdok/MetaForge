@@ -17,6 +17,7 @@ from tool_registry.tools.distributors.base import (
     PartDetail,
     PartSearchResult,
     PricingBreak,
+    parse_price,
 )
 from tool_registry.tools.distributors.rate_limiter import TokenBucketRateLimiter
 
@@ -245,10 +246,14 @@ class DigiKeyAdapter(DistributorAdapter):
     def _map_pricing(self, data: dict[str, Any]) -> list[PricingBreak]:
         breaks: list[PricingBreak] = []
         for bp in data.get("StandardPricing", []):
+            price = parse_price(bp.get("UnitPrice"))
+            if price is None:
+                logger.warning("digikey_price_unreadable", price=bp.get("UnitPrice"))
+                continue
             breaks.append(
                 PricingBreak(
                     quantity=bp.get("BreakQuantity", 1),
-                    unit_price=bp.get("UnitPrice", 0.0),
+                    unit_price=price,
                     currency="USD",
                 )
             )
