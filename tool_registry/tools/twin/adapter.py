@@ -4721,7 +4721,7 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "object",
                             "description": (
-                                "{'name': <materials.py name>} or explicit "
+                                "{'name': <material library name>} or explicit "
                                 "{'thermal_conductivity_w_mk': ...} (SI W/(m*K))."
                             ),
                         },
@@ -5512,8 +5512,8 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "Baseline material name (tool_registry.tools.cadquery."
-                                "materials, e.g. 'aluminum_6061'). Default 'aluminum_6061'."
+                                "Baseline material library name (library.list_materials), "
+                                "e.g. 'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
                             ),
                         },
                         "load_n": {
@@ -5532,8 +5532,8 @@ class TwinServer(McpToolServer):
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Materials to rank against for metric='mass'. Default "
-                                "['aluminum_6061', 'steel', 'titanium', 'carbon_fiber']."
+                                "Library materials to rank against for metric='mass' "
+                                "(library.list_materials); required for that metric."
                             ),
                         },
                         "delta_fraction": {
@@ -5574,7 +5574,7 @@ class TwinServer(McpToolServer):
         if not isinstance(wall_thickness_mm, (int, float)):
             raise ValueError("twin.rank_sensitivity: 'wall_thickness_mm' is required (number)")
         project_id = arguments.get("project_id")
-        material = arguments.get("material", "aluminum_6061")
+        material = arguments.get("material", "aluminium_6061_t6")
         load_n = arguments.get("load_n")
         deflection_limit_mm = arguments.get("deflection_limit_mm")
         mass_limit_kg = arguments.get("mass_limit_kg")
@@ -5585,7 +5585,7 @@ class TwinServer(McpToolServer):
             work_product_id=work_product_id,
             wall_thickness_mm=float(wall_thickness_mm),
             project_id=project_id if isinstance(project_id, str) else None,
-            material=material if isinstance(material, str) else "aluminum_6061",
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
             load_n=float(load_n) if isinstance(load_n, (int, float)) else None,
             deflection_limit_mm=(
                 float(deflection_limit_mm)
@@ -5960,8 +5960,8 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "tool_registry.tools.cadquery.materials name, e.g. "
-                                "'aluminum_6061'. Default 'aluminum_6061'."
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
                             ),
                         },
                         "wall_min_mm": {
@@ -6029,7 +6029,7 @@ class TwinServer(McpToolServer):
         if not isinstance(deflection_limit_mm, (int, float)):
             raise ValueError("twin.optimize_parameter: 'deflection_limit_mm' is required (number)")
         sf_limit = arguments.get("sf_limit", 2.0)
-        material = arguments.get("material", "aluminum_6061")
+        material = arguments.get("material", "aluminium_6061_t6")
         wall_min_mm = arguments.get("wall_min_mm", 0.5)
         wall_max_mm = arguments.get("wall_max_mm")
         project_id = arguments.get("project_id")
@@ -6041,7 +6041,7 @@ class TwinServer(McpToolServer):
             load_n=float(load_n),
             deflection_limit_mm=float(deflection_limit_mm),
             sf_limit=float(sf_limit),
-            material=material if isinstance(material, str) else "aluminum_6061",
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
             wall_min_mm=float(wall_min_mm),
             wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
             max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
@@ -6089,8 +6089,8 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "tool_registry.tools.cadquery.materials name, e.g. "
-                                "'aluminum_6061'. Default 'aluminum_6061'."
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
                             ),
                         },
                         "wall_min_mm": {
@@ -6157,7 +6157,7 @@ class TwinServer(McpToolServer):
         if not isinstance(deflection_limit_mm, (int, float)):
             raise ValueError("twin.start_design_loop: 'deflection_limit_mm' is required (number)")
         sf_limit = arguments.get("sf_limit", 2.0)
-        material = arguments.get("material", "aluminum_6061")
+        material = arguments.get("material", "aluminium_6061_t6")
         wall_min_mm = arguments.get("wall_min_mm", 0.5)
         wall_max_mm = arguments.get("wall_max_mm")
         project_id = arguments.get("project_id")
@@ -6168,7 +6168,7 @@ class TwinServer(McpToolServer):
             load_n=float(load_n),
             deflection_limit_mm=float(deflection_limit_mm),
             sf_limit=float(sf_limit),
-            material=material if isinstance(material, str) else "aluminum_6061",
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
             wall_min_mm=float(wall_min_mm),
             wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
             max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
@@ -6219,8 +6219,8 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "tool_registry.tools.cadquery.materials name, e.g. "
-                                "'aluminum_6061'. Default 'aluminum_6061'."
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
                             ),
                         },
                         "height_min_mm": {
@@ -6296,7 +6296,7 @@ class TwinServer(McpToolServer):
                 "twin.start_tube_height_design_loop: 'deflection_limit_mm' is required (number)"
             )
         sf_limit = arguments.get("sf_limit", 2.0)
-        material = arguments.get("material", "aluminum_6061")
+        material = arguments.get("material", "aluminium_6061_t6")
         height_min_mm = arguments.get("height_min_mm", 1.0)
         height_max_mm = arguments.get("height_max_mm")
         project_id = arguments.get("project_id")
@@ -6308,7 +6308,7 @@ class TwinServer(McpToolServer):
             load_n=float(load_n),
             deflection_limit_mm=float(deflection_limit_mm),
             sf_limit=float(sf_limit),
-            material=material if isinstance(material, str) else "aluminum_6061",
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
             height_min_mm=float(height_min_mm),
             height_max_mm=float(height_max_mm) if isinstance(height_max_mm, (int, float)) else None,
             max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,

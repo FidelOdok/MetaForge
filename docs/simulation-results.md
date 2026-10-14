@@ -97,7 +97,7 @@ Pass the field by reference when recording the result:
     "metadata": {"max_von_mises_mpa": 182.4, "max_displacement_mm": 0.41, "load_case": "tip-500N"},
     "field_file": "/workspace/bracket_solved_field.json.gz",
     "analysed_geometry_node_id": "<cad_model node id>",
-    "load_case_spec": {"material": {"name": "aluminum_6061"}, "fixed_node_set": "Surface1",
+    "load_case_spec": {"material": {"name": "aluminium_6061_t6"}, "fixed_node_set": "Surface1",
                        "load_node_set": "Surface7", "load_force_n": [0, 0, -500]}
   }
 }

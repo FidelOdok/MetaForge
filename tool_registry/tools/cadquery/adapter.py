@@ -269,9 +269,10 @@ class CadqueryServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "Material name for density lookup (e.g. 'aluminum_6061', "
-                                "'steel', 'abs'); unrecognized names fall back to a "
-                                "neutral default density rather than failing"
+                                "A material library name (library.list_materials, e.g. "
+                                "'aluminium_6061_t6', 'abs'); its density comes from the "
+                                "library with its source. A name the library does not hold "
+                                "is refused, with the closest entries."
                             ),
                         },
                         "density_kg_m3": {
@@ -520,9 +521,10 @@ class CadqueryServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "Material name for density lookup (e.g. 'aluminum_6061', "
-                                "'steel', 'abs'); unrecognized names fall back to a "
-                                "neutral default density rather than failing"
+                                "A material library name (library.list_materials, e.g. "
+                                "'aluminium_6061_t6', 'abs'); its density comes from the "
+                                "library with its source. A name the library does not hold "
+                                "is refused, with the closest entries."
                             ),
                         },
                         "density_kg_m3": {
@@ -711,9 +713,10 @@ class CadqueryServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "Material name for density lookup (e.g. 'aluminum_6061', "
-                                "'steel', 'abs'); unrecognized names fall back to a "
-                                "neutral default density rather than failing"
+                                "A material library name (library.list_materials, e.g. "
+                                "'aluminium_6061_t6', 'abs'); its density comes from the "
+                                "library with its source. A name the library does not hold "
+                                "is refused, with the closest entries."
                             ),
                         },
                         "density_kg_m3": {

@@ -332,7 +332,7 @@ class TestGenerateCadIrHandler:
                 name="Shoulder Yoke",
                 work_product_id=work_product.id,
                 entities=_BRACKET_ENTITIES,
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         )
 
@@ -461,7 +461,7 @@ class TestGenerateCadIrHandler:
                 volume_mm3=0.0,
                 surface_area_mm2=10.0,
                 bounding_box=BoundingBox(),
-                material="aluminum_6061",
+                material="aluminium_6061_t6",
             )
         )
         assert any("volume" in e.lower() for e in errors)

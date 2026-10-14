@@ -66,7 +66,7 @@ class GenerateParametricFeatureInput(BaseModel):
             "CadQuery Lowering Pass -- use 'freecad' (the default) for it."
         ),
     )
-    material: str = Field(default="aluminum_6061", description="Material name for metadata")
+    material: str = Field(default="aluminium_6061_t6", description="Material name for metadata")
     project_id: str | None = Field(
         default=None,
         description="Project UUID to link the resulting work product to, when committed",

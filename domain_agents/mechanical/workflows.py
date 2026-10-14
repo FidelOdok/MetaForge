@@ -85,7 +85,7 @@ class DesignWorkflowParams:
     name: str = ""
     shape_type: str = "bracket"
     dimensions: dict[str, float] = field(default_factory=dict)
-    material: str = "aluminum_6061"
+    material: str = "aluminium_6061_t6"
     output_path: str = ""
 
     # Mesh generation

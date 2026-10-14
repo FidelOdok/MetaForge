@@ -64,7 +64,7 @@ fit the part it is meant to bolt to.
 | `bolt_pattern`: `plate_length_mm`, `plate_width_mm`, `plate_thickness_mm` | Plate size | 60, 60, 5 |
 | `bolt_pattern`: `hole_diameter_mm`, `hole_count`, `pattern_radius_mm` | The pattern itself; from the mating part's datasheet | 3.4, 4, 20 |
 | `rib`: `length_mm`, `height_mm`, `thickness_mm` | Base, rise and extrusion of the triangle | 30, 20, 3 |
-| Material | Written into the STEP so the viewer colours it; recorded with the part | `aluminum_6061` |
+| Material | Written into the STEP so the viewer colours it; recorded with the part | `aluminium_6061_t6` |
 
 Before building, check the bolt pattern is physically possible and, if not,
 tell the user which rule fails and ask for new numbers (do not adjust them):

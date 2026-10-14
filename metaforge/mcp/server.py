@@ -2532,6 +2532,13 @@ class UnifiedMcpServer:
             # The tool reads its deciding human from here and nowhere else.
             arguments[APPROVED_BY_ARG] = approver.label
 
+        # FORGE-446: every material the call names gets its library figures,
+        # here, because the adapter containers cannot read the library. An
+        # unresolved name fails the call with the closest library entries.
+        from twin_core.library.material_resolver import fill_material_arguments
+
+        await fill_material_arguments(tool_id, arguments)
+
         # Commit-by-reference: fill a commit_geometry call's step_base64 from the
         # last export for this (session_id, obj_id) so agents needn't thread the
         # blob. Explicit step_base64 always wins.

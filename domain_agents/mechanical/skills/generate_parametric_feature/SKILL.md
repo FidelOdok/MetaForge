@@ -22,7 +22,7 @@ Same as `generate_cad_ir` (this skill composes it directly): FreeCAD session lif
 - `feature` -- **required.** `{"feature_type": "bolt_pattern", "plate_length_mm": ..., "plate_width_mm": ..., "plate_thickness_mm": ..., "hole_diameter_mm": ..., "hole_count": ..., "pattern_radius_mm": ...}` or `{"feature_type": "rib", "length_mm": ..., "height_mm": ..., "thickness_mm": ...}`. `bolt_pattern`'s macro rejects a `pattern_radius_mm` that would leave holes overlapping or running outside the plate -- a structural check, not just a plausible-sounding one.
 - `work_product_id` -- optional (new generation vs. existing)
 - `adapter` -- `"freecad"` (default) or `"cadquery"`
-- `material` -- default `aluminum_6061`
+- `material` -- default `aluminium_6061_t6`
 - `project_id` -- optional
 - `commit` -- default `true`
 

@@ -588,6 +588,29 @@ processes, materials by the stated stock names), or failing that the
 library's entries up to fifteen, and says which of the three it did. A
 library with no entries leaves the context text as it was.
 
+**Material figures come only from the library (FORGE-446, FORGE-457).** The
+hard-coded material tables are gone (they held sixteen generic names with no
+sources, and an unknown material silently got the density of water). Every
+material name a tool call carries is resolved against the library before the
+tool runs, by `twin_core.library.material_resolver.fill_material_arguments`
+at both dispatch points (the MCP server and the gateway's registry bridge):
+each `material` string, each `{"name": ...}` material object and each
+`candidate_materials` list gets the entry's figures, with their sources,
+beside it. The adapter base server takes them out of the arguments before
+any schema sees them and holds them for the call
+(`tool_registry.material_context`), so the CAD and FEA containers, which
+cannot read the library, still compute with library figures. Inside the
+gateway the resolver reads the catalog; the MCP sidecar asks the gateway
+(`GET /v1/library/materials/resolve`). Code called outside a tool call
+(the design loop, item diffs, evals) resolves through
+`api_gateway.library.material_figures.with_materials`.
+
+A name resolves only to an entry it names exactly (identifier, title or
+designation). A generic name such as "steel" or "pla" is refused with the
+closest entries, so a grade is never picked silently; a missing property is
+refused naming the entry and the fix (record it with its source, or pass the
+figure explicitly). An explicit figure from the caller always wins.
+
 **The machine library (FORGE-451).** Process ranking and DFM need a
 machine's real limits, so machines are recorded once, outside any project,
 in the gateway's SQLite store (`METAFORGE_MACHINE_LIBRARY_PATH`, default

@@ -371,7 +371,7 @@ class TestItemDiff:
             properties={
                 "volume_mm3": 1000.0,
                 "bounding_box": {"x": 10, "y": 20, "z": 5},
-                "material": "aluminum_6061",
+                "material": "aluminium_6061_t6",
             },
         )
         await _part(

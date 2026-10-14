@@ -1324,7 +1324,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.design_flows.lifecycle_service import set_tool_registry
 
     set_tool_registry(tool_registry)
-    registry_bridge = RegistryMcpBridge(tool_registry)
+    # FORGE-446: material names become library figures before a tool runs.
+    from twin_core.library.material_resolver import fill_material_arguments
+
+    registry_bridge = RegistryMcpBridge(tool_registry, argument_filler=fill_material_arguments)
     logger.info(
         "tool_registry_bootstrapped",
         adapters=len(tool_registry.list_adapters()),
@@ -1582,6 +1585,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from twin_core.library.catalog import SqliteCatalog
 
         init_catalog(SqliteCatalog(str(default_machine_library_path())))
+        # FORGE-446: this process resolves material names against its own catalog.
+        from api_gateway.library.catalog_routes import get_catalog
+        from twin_core.library.material_resolver import catalog_source, install_material_source
+
+        install_material_source(catalog_source(get_catalog))
         # FORGE-427: quotes and orders must outlive a restart.
         from api_gateway.vendors.service import (
             SqliteVendorStore,

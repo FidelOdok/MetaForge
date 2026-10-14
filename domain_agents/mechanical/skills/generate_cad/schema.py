@@ -45,7 +45,7 @@ class GenerateCadInput(BaseModel):
         description="Shape-specific dimensions in mm (e.g., width, height, thickness)",
     )
     material: str = Field(
-        default="aluminum_6061",
+        default="aluminium_6061_t6",
         description="Material name for metadata",
     )
     output_path: str = Field(

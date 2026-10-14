@@ -69,7 +69,7 @@ Ask the user. Do not fill these in: a missing dimension in
 | Base form and every dimension (mm) | Each feature needs its own numbers | disc 80 OD x 10 |
 | Each feature's position and size | Holes, pockets, bosses need coordinates | 6 x 6.5 mm holes on 60 mm PCD |
 | Which edges to round, and radius | Edge fillets need named edges or "all edges" | "all outer edges, R1" |
-| Material | Mass on the node, colour in the STEP | `aluminum_6061` |
+| Material | Mass on the node, colour in the STEP | `aluminium_6061_t6` |
 | Project | Where the item lives | project name or id |
 
 ## Procedure

@@ -70,7 +70,7 @@ class GenerateFeatureRequest(BaseModel):
     workProductId: str | None = None  # noqa: N815 -- dashboard contract is camelCase
     feature: dict[str, Any]
     adapter: str = "freecad"
-    material: str = "aluminum_6061"
+    material: str = "aluminium_6061_t6"
     projectId: str | None = None  # noqa: N815
     commit: bool = True
 

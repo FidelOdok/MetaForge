@@ -186,10 +186,10 @@ class TestCreateParametricMassKg:
             patch.object(ops, "work_dir", str(tmp_path)),
         ):
             result = ops.create_parametric(
-                "box", {"length": 100, "width": 50, "height": 20}, material="aluminum_6061"
+                "box", {"length": 100, "width": 50, "height": 20}, material="aluminium_6061_t6"
             )
 
-        # volume 100,000 mm^3 = 1e-4 m^3; aluminum_6061 = 2700 kg/m^3
+        # volume 100,000 mm^3 = 1e-4 m^3; aluminium_6061_t6 = 2700 kg/m^3
         assert result["mass_kg"] == pytest.approx(0.27)
 
     def test_mass_kg_omitted_when_no_material_given(self, tmp_path) -> None:

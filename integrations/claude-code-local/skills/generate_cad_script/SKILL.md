@@ -62,7 +62,7 @@ Ask the user for anything missing. Do not fill these in with defaults or
 | Every dimension, in mm | The script hard-codes them; a guessed one is an invented design | "legs 40 and 30 mm, 3 mm thick" |
 | Hole sizes and positions | Clearance vs tapped vs press fit changes the number | "two M4 clearance, 4.5 mm, 10 mm from each end" |
 | Datum and orientation | Which face sits on XY, where the origin is; FEA and assembly later rely on it | "mounting face on XY, origin at the corner" |
-| Material | Recorded with the part; on the FreeCAD path it is written into the STEP so the viewer colours it | `aluminum_6061`, `PETG` |
+| Material | Recorded with the part; on the FreeCAD path it is written into the STEP so the viewer colours it | `aluminium_6061_t6`, `PETG` |
 | Project | The commit links the part to it | the project name or id |
 | Dialect, if the user cares | CadQuery is the default; FreeCAD when they want a session they can keep editing | `cadquery` |
 

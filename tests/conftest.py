@@ -7,6 +7,7 @@ TwinAPI, McpBridge, EventBus, WorkflowEngine, Scheduler, and test work_products.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 # MET-701: build no OTLP exporters during tests. `api_gateway.server` calls
 # init_observability() at MODULE scope, so merely importing the app stood up
@@ -279,3 +280,21 @@ def make_diamond_workflow(name: str = "test-diamond") -> WorkflowDefinition:
             ),
         ],
     )
+
+
+# FORGE-446: material figures come only from the library. Tests that drive CAD,
+# FEA and optimiser code directly get the test material library (a test double
+# holding the retired table's values) unless marked no_material_library.
+@pytest.fixture(autouse=True)
+def material_library(request: pytest.FixtureRequest) -> Any:
+    if request.node.get_closest_marker("no_material_library"):
+        yield
+        return
+    from tests.support import material_library as lib
+    from tool_registry.material_context import using
+    from twin_core.library.material_resolver import install_material_source
+
+    install_material_source(lib.source)
+    with using(lib.figures()):
+        yield
+    install_material_source(None)

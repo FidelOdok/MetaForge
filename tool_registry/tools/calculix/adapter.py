@@ -307,12 +307,12 @@ class CalculixServer(McpToolServer):
                             "type": "object",
                             "description": (
                                 "Required for both 'static_stress' and 'modal'. Either "
-                                "{'name': <materials.py name, e.g. 'steel'/"
-                                "'aluminum_6061'>} or explicit {'youngs_modulus_mpa': ..., "
+                                "{'name': <material library name, e.g. "
+                                "'aluminium_6061_t6'>} or explicit {'youngs_modulus_mpa': ..., "
                                 "'poissons_ratio': ...}. 'modal' additionally needs a real "
                                 "density (a wrong one silently reports a confidently wrong "
-                                "frequency), which this codebase only has a lookup table "
-                                "for by name -- 'name' is required for 'modal' even when "
+                                "frequency), which comes from the material library by "
+                                "name -- 'name' is required for 'modal' even when "
                                 "explicit elastic properties are also given. MPa (N/mm^2), "
                                 "NOT Pa -- mesh "
                                 "coordinates are in millimeters, and mixing unit systems "
@@ -450,8 +450,8 @@ class CalculixServer(McpToolServer):
                         "material": {
                             "type": "object",
                             "description": (
-                                "Required. {'name': <materials.py name, e.g. 'steel'/"
-                                "'aluminum_6061'>} or explicit "
+                                "Required. {'name': <material library name, e.g. "
+                                "'aluminium_6061_t6'>} or explicit "
                                 "{'thermal_conductivity_w_mk': ...} (SI W/(m*K), NOT "
                                 "the mesh's mm-consistent W/(mm*K) -- converted "
                                 "internally)."
