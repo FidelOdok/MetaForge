@@ -19,3 +19,25 @@ export const VIEWER_COLOR_MANAGEMENT = {
   toneMapping: THREE.NeutralToneMapping,
   toneMappingExposure: 1,
 } as const;
+
+/**
+ * Which GPU this canvas asks for (FORGE-625).
+ *
+ * A WebGL context that says nothing gets `powerPreference: 'default'`, and on
+ * a machine with two GPUs that is exactly when a browser picks the integrated
+ * one to save power. Measured on two of this project's machines: both report
+ * AMD integrated graphics over D3D11, including the one with an RTX in it.
+ * Windows' own per-application graphics preference cannot rescue that --
+ * it can only honour a preference the application expressed.
+ *
+ * Applied to every 3D surface rather than only the main viewer, so a preview
+ * and the viewer never end up on different adapters at the same time, which
+ * costs a copy between them.
+ *
+ * The trade is real: on a laptop this can wake the discrete GPU and draw more
+ * power. For a CAD viewer whose whole job is showing geometry, that is the
+ * right side of the trade.
+ */
+export const VIEWER_GPU_PREFERENCE = {
+  powerPreference: 'high-performance',
+} as const;

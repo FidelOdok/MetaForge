@@ -1,4 +1,4 @@
-import { VIEWER_COLOR_MANAGEMENT } from './viewerColor';
+import { VIEWER_COLOR_MANAGEMENT, VIEWER_GPU_PREFERENCE } from './viewerColor';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -602,6 +602,7 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
         // more again, which is most of why the viewer felt heavy.
         dpr={[1, 2]}
         gl={{
+          ...VIEWER_GPU_PREFERENCE,
           // Kept deliberately: TwinViewerPage exports the view with
           // canvas.toDataURL, which reads blank without it.
           preserveDrawingBuffer: true,

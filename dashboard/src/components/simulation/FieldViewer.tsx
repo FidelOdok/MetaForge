@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { VIEWER_GPU_PREFERENCE } from '../viewer/viewerColor';
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -131,6 +132,7 @@ export function FieldViewer({
       }}
     >
       <Canvas
+            gl={{ ...VIEWER_GPU_PREFERENCE }}
         camera={initialCamera(payload)}
         onPointerMissed={() => setProbe(null)}
       >
