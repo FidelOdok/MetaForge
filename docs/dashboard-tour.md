@@ -304,43 +304,37 @@ with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
-The Model tab shows the model standing on a visible workplane, and a
-pair of buttons beside **Reset view** chooses between two ways of
-rotating it, with the active one picked out in the accent colour
-(FORGE-616, FORGE-617):
+The Model tab shows the model standing on a visible workplane, turned by
+a Tinkercad-style turntable (FORGE-620). **Right-drag rotates,
+middle-drag pans, the wheel zooms toward the cursor, and the left button
+is left alone for selecting parts** — so orbiting and picking never
+compete for the same gesture.
 
-- **Turntable** keeps the camera's up vector fixed, so the
-  workplane stays a floor and the model is never left rolled. Horizontal
-  rotation goes round and round; vertical rotation stops just short of
-  straight up and straight down, which is three.js's own limit on this
-  kind of control rather than a setting. Every face is still reachable —
-  the underside by carrying on down past the horizon rather than by
-  rolling over the top.
-- **Free orbit** (the default) is an arcball: no stopping point in any direction, so a
-  drag tumbles the model continuously. The cost is the fixed up vector —
-  the floor tilts with the view and the model can end up rolled. **Reset
-  view** puts it back upright.
+The camera's orientation is held as an azimuth and an elevation rather
+than accumulated as a rotation, and the camera is rebuilt from those two
+numbers every frame. That makes roll structurally impossible: the
+workplane can never tilt and the model can never end up on its side. The
+elevation stops just short of straight overhead and straight underneath,
+which is what Tinkercad does too — crossing the pole would swing the
+camera to the opposite side and invert the horizon. Horizontal rotation
+is unbounded.
 
-The choice is remembered in the browser. Left-drag rotates, right-drag
-pans, and the wheel zooms **toward the cursor** rather than toward the
-pivot, so what you aim at stays where you aimed (FORGE-618).
+The pivot is the whole model's centre, so a single part of a large
+assembly swings through a wide arc. **Double-click a part, or press F
+with one selected, to frame it** — the camera fits its bounding sphere
+and moves the pivot onto it. **Reset view** returns to the home
+three-quarter view and frames the whole model. The view cube in the
+corner jumps to a face.
 
-The pivot is the whole model's centre, which means a single part of a
-large assembly swings through a wide arc. **Double-click a part, or
-press F with one selected, to frame it and put the pivot on it** —
-the fit-to-selection key CAD tools use. **Reset view** puts the pivot
-back on the whole model. The view cube in the corner jumps to a face.
-
-The workplane is a single mipmapped texture rather than drawn lines,
-which is what keeps it still while the camera moves: a receding patch of
-floor averages its cells into a flat tint instead of aliasing into a
-crawling shimmer. Two earlier attempts shimmered for that reason — a
-procedural shader anti-aliasing its lines with screen-space derivatives
-(FORGE-34), then plain line segments with no anti-aliasing at all
-(FORGE-612). It is sized and placed from the model's own bounds, so it
-sits under whatever is loaded instead of at a fixed spot the model may
-be nowhere near. A robot description carries no bounds, so it gets no
-workplane rather than one at a guessed height.
+The workplane itself is a single mipmapped texture rather than drawn
+lines, which is what keeps it still while the camera moves: a receding
+patch of floor averages its cells into a flat tint instead of aliasing
+into a crawling shimmer. Two earlier attempts shimmered for that reason
+— a procedural shader anti-aliasing its lines with screen-space
+derivatives (FORGE-34), then plain line segments with no anti-aliasing
+at all (FORGE-612). It is sized and placed from the model's own bounds,
+so it sits under whatever is loaded. A robot description carries no
+bounds, so it gets no workplane rather than one at a guessed height.
 
 A node that is a revision of an item (FORGE-526) shows a **revision
 picker** (`KEY @n`) in the inspector Overview: picking another revision

@@ -1,13 +1,10 @@
 import { VIEWER_COLOR_MANAGEMENT } from './viewerColor';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { ArcballControls, OrbitControls, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
-import type {
-  ArcballControls as ArcballControlsImpl,
-  OrbitControls as OrbitControlsImpl,
-} from 'three-stdlib';
-import { RotateCcw, Orbit, RotateCw } from 'lucide-react';
+import { Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { TinkercadControls } from '../../lib/TinkercadControls';
+import { RotateCcw } from 'lucide-react';
 import { useViewerStore } from '../../store/viewer-store';
 import { useThemeStore } from '../../store/theme-store';
 import { useTransientTransform } from '../../store/transient-transform-store';
@@ -31,28 +28,6 @@ const RobotControlsOverlay = lazy(() =>
 );
 
 const RAD_TO_DEG = 180 / Math.PI;
-
-/** Selected-state colours for the camera toggle -- the dashboard's accent
- * orange on its usual translucent wash (FORGE-617). */
-const CAMERA_MODE_ACCENT = '#e67e22';
-const CAMERA_MODE_ACCENT_BG = 'rgba(230,126,34,0.15)';
-
-/** The camera modes, in the order they appear in the toggle. The hints say
- * what each one costs, since neither is strictly better. */
-const CAMERA_MODE_OPTIONS = [
-  {
-    mode: 'turntable' as const,
-    label: 'Turntable',
-    Icon: RotateCw,
-    hint: 'Turntable: the floor stays level and the model is never rolled, but rotation stops just short of straight up and straight down.',
-  },
-  {
-    mode: 'free' as const,
-    label: 'Free orbit',
-    Icon: Orbit,
-    hint: 'Free orbit: tumbles in any direction with no limit, but the floor tilts with the view and the model can end up rolled.',
-  },
-];
 
 /** Pixels per workplane texture tile. One tile spans one major section. */
 const GRID_TEXTURE_PX = 256;
@@ -119,13 +94,6 @@ function LoadingFallback() {
   );
 }
 
-// Isometric-ish viewing direction, pre-normalized (1, 0.75, 1) — a fixed
-// angle looks natural regardless of model size; only the DISTANCE scales
-// with modelBounds.radius below.
-const VIEW_DIR = { x: 0.6247, y: 0.4685, z: 0.6247 };
-// Distance-to-radius ratio that comfortably fits a bounding sphere in a 45°
-// FOV camera with headroom (a tighter ratio clips corners on a tilted view).
-const FIT_DISTANCE_FACTOR = 2.2;
 // Generic framing used only before any model has reported its bounds (e.g.
 // the very first frame, or an empty scene) — matches the previous hardcoded
 // camera/target so behavior is unchanged until real bounds are available.
@@ -299,21 +267,46 @@ function GroundGrid({ isDark }: { isDark: boolean }) {
  * could put the orbit pivot nowhere near the model, which reads as the ground
  * grid rotating rather than the camera orbiting the object. */
 function CameraController() {
-  const { camera, scene } = useThree();
-  const controlsRef = useRef<OrbitControlsImpl | ArcballControlsImpl | null>(null);
-  const cameraMode = useViewerStore((s) => s.cameraMode);
+  const { camera, scene, gl, set } = useThree();
+  const controlsRef = useRef<TinkercadControls | null>(null);
   const registerCameraReset = useViewerStore((s) => s.registerCameraReset);
   const registerFocusPart = useViewerStore((s) => s.registerFocusPart);
-  const modelBounds = useViewerStore((s) => s.modelBounds);
   const registerOrbitControlsEnabledSetter = useViewerStore(
     (s) => s.registerOrbitControlsEnabledSetter,
   );
+  const modelBounds = useViewerStore((s) => s.modelBounds);
 
-  // FORGE-250: lets drag-to-pose flip OrbitControls.enabled imperatively the
-  // instant a joint drag starts/ends, same registration pattern as
-  // registerCameraReset above -- see viewer-store's
-  // `_orbitControlsEnabledSetterFn` docstring for why this can't just be a
-  // React prop bound to store state (one frame too slow).
+  // FORGE-620: the Tinkercad turntable. It keeps orientation as azimuth,
+  // elevation and radius and rebuilds the camera from them every frame, so
+  // roll is structurally impossible and the workplane can never tilt -- the
+  // property the arcball gave up and OrbitControls only approximated.
+  //
+  // upAxis is 'y' here, not Tinkercad's 'z': the workplane convention is the
+  // same either way, but this viewer's GLB pipeline emits Y-up geometry, and
+  // SceneContents already reads the model's floor off box.min.y.
+  useEffect(() => {
+    const controls = new TinkercadControls(camera as THREE.PerspectiveCamera, gl.domElement, {
+      upAxis: 'y',
+    });
+    controlsRef.current = controls;
+    // Stand in for drei's `makeDefault` so GizmoHelper and anything else
+    // reading `state.controls` finds these. The cast is the same one drei
+    // makes: r3f types `controls` as its own event-ful shape.
+    set({ controls: controls as unknown as THREE.EventDispatcher });
+    return () => {
+      controls.dispose();
+      controlsRef.current = null;
+      set({ controls: null });
+    };
+  }, [camera, gl, set]);
+
+  // The camera is derived state: nothing moves until update() rebuilds it from
+  // the angles, and the damping eases toward whatever the last gesture asked
+  // for. Priority -1 so this lands before anything that reads the camera.
+  useFrame(() => controlsRef.current?.update(), -1);
+
+  // FORGE-250: lets drag-to-pose suppress the camera the instant a joint drag
+  // starts, same registration pattern as registerCameraReset below.
   useEffect(() => {
     registerOrbitControlsEnabledSetter((enabled) => {
       if (controlsRef.current) controlsRef.current.enabled = enabled;
@@ -321,59 +314,39 @@ function CameraController() {
     return () => registerOrbitControlsEnabledSetter(null);
   }, [registerOrbitControlsEnabledSetter]);
 
-  /** Point the camera at `center` from the standard three-quarter direction,
-   * far enough back for something of `radius`. Shared by the whole-model fit
-   * and the focus-one-part path so both frame the same way. */
-  const frame = useCallback(
-    (center: [number, number, number], radius: number) => {
-      const dist = radius * FIT_DISTANCE_FACTOR;
-      camera.position.set(
-        center[0] + VIEW_DIR.x * dist,
-        center[1] + VIEW_DIR.y * dist,
-        center[2] + VIEW_DIR.z * dist,
-      );
-      // Free orbit leaves the up vector wherever the drag ended and lookAt
-      // reads it, so a reset would otherwise land in the right place at an
-      // arbitrary roll. Harmless on the turntable, where it never moves.
-      camera.up.set(0, 1, 0);
-      camera.lookAt(center[0], center[1], center[2]);
-      const controls = controlsRef.current;
-      if (controls) {
-        // The arcball keeps its pivot in internal gizmo state, so assigning
-        // `target` alone would move nothing; the turntable has no setTarget.
-        if ('setTarget' in controls) {
-          controls.setTarget(center[0], center[1], center[2]);
-        } else {
-          controls.target.set(center[0], center[1], center[2]);
-        }
-        controls.update();
-      }
-    },
-    [camera],
-  );
+  /** Frame a bounding box: the controls fit it by bounding sphere, which is
+   * why no view direction is passed -- framing keeps the current angles. */
+  const frameBox = useCallback((box: THREE.Box3) => {
+    controlsRef.current?.frame(box);
+  }, []);
 
   const fitToModel = useCallback(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
     const { center, radius } = modelBounds ?? DEFAULT_BOUNDS;
-    frame(center, radius);
-  }, [frame, modelBounds]);
+    const c = new THREE.Vector3(center[0], center[1], center[2]);
+    // modelBounds.radius is already the model's bounding-SPHERE radius, and
+    // frame() re-derives a sphere from whatever box it is given. A cube of
+    // +/-radius would have a sphere sqrt(3) bigger, pushing the camera 73%
+    // too far out, so size the box so its own sphere comes back to radius.
+    const side = (2 * radius) / Math.sqrt(3);
+    // Reset view goes home as well as re-framing, so it recovers a known
+    // orientation and not just a known distance.
+    controls.setView('home');
+    frameBox(new THREE.Box3().setFromCenterAndSize(c, new THREE.Vector3(side, side, side)));
+  }, [frameBox, modelBounds]);
 
-  /** Frame one part, pivot included (FORGE-618). Without this the pivot is
-   * always the whole assembly's centre, so a part off to one side swings
-   * through a wide arc and can never be settled on -- the "too many drags"
-   * complaint. Reset view puts the pivot back on the whole model. */
+  /** Frame one part (FORGE-618). The pivot moves onto it, so it turns in
+   * place instead of swinging through a wide arc. */
   const focusPart = useCallback(
     (meshName: string) => {
       const object = scene.getObjectByName(meshName);
       if (!object) return;
       const box = new THREE.Box3().setFromObject(object);
       if (box.isEmpty()) return;
-      const center = new THREE.Vector3();
-      const size = new THREE.Vector3();
-      box.getCenter(center);
-      box.getSize(size);
-      frame([center.x, center.y, center.z], Math.max(size.length() / 2, 1));
+      frameBox(box);
     },
-    [frame, scene],
+    [frameBox, scene],
   );
 
   useEffect(() => {
@@ -395,55 +368,7 @@ function CameraController() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelBounds]);
 
-  // The arcball draws its own circles over the scene; this viewer has a view
-  // cube already, so they stay hidden. `activateGizmos`, which the controls
-  // call on every interaction, only changes their opacity, so hiding once holds.
-  useEffect(() => {
-    const controls = controlsRef.current;
-    if (controls && 'setGizmosVisible' in controls) controls.setGizmosVisible(false);
-  }, [cameraMode]);
-
-  // Both, chosen by the viewer's toggle (FORGE-616), because which one is
-  // right is a matter of taste.
-  //
-  // `turntable` holds the up vector fixed, so the workplane below reads as a
-  // floor and the model is never left rolled -- the Tinkercad feel. Its
-  // ceiling is not these props but three's own `Spherical.makeSafe()`, which
-  // clamps the polar angle to [EPS, PI - EPS] no matter what min/max say: a
-  // drag stops just short of straight up and straight down. Every face is
-  // still reachable, the underside by carrying on down past the horizon.
-  //
-  // `free` is an arcball: no pole, tumbles in any direction, at the cost of
-  // the fixed up vector -- the floor tilts with the view and the model can end
-  // up rolled. Reset view puts it back upright.
-  if (cameraMode === 'free') {
-    return (
-      <ArcballControls
-        ref={controlsRef as React.RefObject<ArcballControlsImpl>}
-        makeDefault
-        enableAnimations
-        dampingFactor={25}
-        // FORGE-618: zoom toward the cursor, not the pivot. Zooming at the
-        // pivot pushes whatever you aimed at off the edge and costs a pan to
-        // get back.
-        cursorZoom
-      />
-    );
-  }
-
-  return (
-    <OrbitControls
-      ref={controlsRef as React.RefObject<OrbitControlsImpl>}
-      makeDefault
-      enableDamping
-      dampingFactor={0.1}
-      minPolarAngle={0}
-      maxPolarAngle={Math.PI}
-      // FORGE-618: zoom toward the cursor, not the pivot -- see the arcball's
-      // cursorZoom above for why.
-      zoomToCursor
-    />
-  );
+  return null;
 }
 
 /**
@@ -586,8 +511,6 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
   const modelFormat = useViewerStore((s) => s.modelFormat);
   const manifest = useViewerStore((s) => s.manifest);
   const resetCamera = useViewerStore((s) => s.resetCamera);
-  const cameraMode = useViewerStore((s) => s.cameraMode);
-  const setCameraMode = useViewerStore((s) => s.setCameraMode);
   const selectedMeshName = useViewerStore((s) => s.selectedMeshName);
   const focusPart = useViewerStore((s) => s.focusPart);
   const booleanCut = useViewerStore((s) => s.booleanCut);
@@ -755,48 +678,13 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
           tall, spans 40-72px), which this overlay's old bottom-14 (56-84px)
           overlapped (MET-624). */}
       <div className="absolute bottom-20 left-3 z-10 rounded-md bg-black/50 px-3 py-1.5 text-xs text-white/80 select-none pointer-events-none">
-        Left drag: rotate · Scroll: zoom at cursor · Right drag: pan · Double-click or F: focus a part
+        Right drag: rotate · Middle drag: pan · Scroll: zoom at cursor · Left click: select · Double-click or F: focus
       </div>
 
       {/* Camera reset button — bottom-right (bottom-20 clears the twin status
           bar and matches the controls-hint overlay's height, MET-624) so it
           doesn't sit on top of the ViewCube anchored top-right. */}
       <div className="absolute right-3 bottom-20 z-30 flex items-center gap-2">
-        {/* FORGE-617: both modes are shown, with the selected one marked,
-            because a single button labelled with the current mode reads
-            exactly like one labelled with the mode it would switch to. Accent
-            + aria-pressed is the selected-state pattern the rest of the
-            dashboard uses. FORGE-616 has the why of the two modes: a
-            turntable keeps the floor a floor but stops just short of straight
-            up/down (three clamps the polar angle itself), while free orbit has
-            no pole but lets the view roll. */}
-        <div
-          role="group"
-          aria-label="Camera rotation"
-          className="flex items-center overflow-hidden rounded-md bg-black/50 text-xs"
-        >
-          {CAMERA_MODE_OPTIONS.map(({ mode, label, Icon, hint }) => {
-            const selected = cameraMode === mode;
-            return (
-              <button
-                key={mode}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setCameraMode(mode)}
-                title={hint}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 transition-colors"
-                style={{
-                  color: selected ? CAMERA_MODE_ACCENT : 'rgba(255,255,255,0.65)',
-                  background: selected ? CAMERA_MODE_ACCENT_BG : 'transparent',
-                }}
-              >
-                <Icon size={12} />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
         <button
           type="button"
           onClick={resetCamera}
