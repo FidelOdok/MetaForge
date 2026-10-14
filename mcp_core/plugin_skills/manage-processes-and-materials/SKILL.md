@@ -19,7 +19,10 @@ figures rather than numbers from memory.
   standard grade name), forms, the processes it suits, and **properties**:
   density, stiffness, yield and ultimate strength, fatigue, elongation,
   thermal figures, cost per kg (with the currency in the unit), and the
-  across-the-grain pair for woods and sheet goods.
+  across-the-grain pair for woods and sheet goods. Woods and panels have no
+  yield point: record their bending strength (`bending_strength_mpa`, and
+  `bending_strength_across_mpa`) and tension across the grain
+  (`tensile_strength_across_mpa`), never as yield.
 
 ## Rules
 

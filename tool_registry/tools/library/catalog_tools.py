@@ -58,7 +58,9 @@ _RULES = (
 _PROPERTIES = (
     "properties is an object keyed by name: density_kg_m3 (kg/m3), youngs_modulus_mpa, "
     "youngs_modulus_across_mpa, yield_strength_mpa, yield_strength_across_mpa, "
-    "ultimate_strength_mpa, fatigue_strength_mpa (MPa), poisson_ratio (-), elongation_pct "
+    "ultimate_strength_mpa, fatigue_strength_mpa, bending_strength_mpa, "
+    "bending_strength_across_mpa, tensile_strength_across_mpa (MPa; woods and panels have no "
+    "yield point, so give bending strength, never yield), poisson_ratio (-), elongation_pct "
     "(%), thermal_conductivity_w_mk (W/mK), cte_um_mk (um/mK), max_service_temp_c, "
     "melting_point_c (C), cost_per_kg (unit with currency, e.g. GBP/kg). "
 )

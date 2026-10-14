@@ -295,3 +295,29 @@ class TestFlowContext:
     def test_an_empty_library_leaves_the_text_unchanged(self, catalog: SqliteCatalog) -> None:
         prompt = _request().flow_context().describe_for_prompt()
         assert "Manufacturing processes" not in prompt and "Materials " not in prompt
+
+
+def test_timber_strengths_have_their_own_properties(catalog: SqliteCatalog) -> None:
+    oak = catalog.register(
+        "material",
+        {
+            "name": "oak_d30",
+            "family": "wood",
+            "properties": {
+                "bending_strength_mpa": {
+                    "value": 30,
+                    "unit": "MPa",
+                    "source_kind": "standard",
+                    "source_ref": "EN 338 D30",
+                },
+                "tensile_strength_across_mpa": {
+                    "value": 0.6,
+                    "unit": "MPa",
+                    "source_kind": "standard",
+                    "source_ref": "EN 338 D30",
+                },
+            },
+        },
+    )
+    assert "yield_strength_mpa" not in oak.properties
+    assert oak.properties["bending_strength_mpa"].value == 30
