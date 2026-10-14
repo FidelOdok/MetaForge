@@ -78,6 +78,51 @@ class LocalMachineLibrary:
         except JobError as exc:
             raise ValueError(str(exc)) from exc
 
+    # FORGE-451 / FORGE-446: processes and materials.
+
+    async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]:
+        from api_gateway.library.catalog_routes import get_catalog
+
+        return {"entries": [e.as_dict() for e in get_catalog().list(kind, family=family)]}
+
+    async def get_entry(self, kind: str, ref: str) -> dict[str, Any]:
+        from api_gateway.library.catalog_routes import get_catalog
+        from twin_core.library.catalog import CatalogNotFoundError
+
+        catalog = get_catalog()
+        try:
+            entry = catalog.get(ref, kind)
+        except CatalogNotFoundError as exc:
+            raise ValueError(f"no {kind} '{ref}'") from exc
+        return {"entry": entry.as_dict(), "history": catalog.history(entry.id)}
+
+    async def register_entry(self, kind: str, data: dict[str, Any], by: str) -> dict[str, Any]:
+        from api_gateway.library.catalog_routes import get_catalog
+
+        return {"entry": get_catalog().register(kind, data, by=by).as_dict()}
+
+    async def update_entry(
+        self, kind: str, ref: str, changes: dict[str, Any], by: str
+    ) -> dict[str, Any]:
+        from api_gateway.library.catalog_routes import get_catalog
+        from twin_core.library.catalog import CatalogNotFoundError
+
+        catalog = get_catalog()
+        try:
+            current = catalog.get(ref, kind)
+        except CatalogNotFoundError as exc:
+            raise ValueError(f"no {kind} '{ref}'") from exc
+        return {"entry": catalog.update(current.id, changes, by=by).as_dict()}
+
+    async def process_limits(self, ref: str, material: str | None) -> dict[str, Any]:
+        from api_gateway.library.catalog_routes import get_catalog
+        from twin_core.library.catalog import CatalogNotFoundError
+
+        try:
+            return get_catalog().process_limits(ref, material)
+        except CatalogNotFoundError as exc:
+            raise ValueError(f"no entry '{exc.args[0]}'") from exc
+
 
 def make_machine_library() -> LocalMachineLibrary:
     return LocalMachineLibrary()

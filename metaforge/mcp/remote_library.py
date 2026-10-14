@@ -92,3 +92,45 @@ class RemoteMachineLibrary:
             "POST", f"/v1/library/jobs/{quote(job_id, safe='')}/result", json={"by": by}
         )
         return result
+
+    # FORGE-451 / FORGE-446: processes and materials.
+
+    @staticmethod
+    def _plural(kind: str) -> str:
+        return {"process": "processes", "material": "materials"}[kind]
+
+    async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]:
+        query = f"?{urlencode({'family': family})}" if family else ""
+        result: dict[str, Any] = await self._gateway.request(
+            "GET", f"/v1/library/{self._plural(kind)}{query}"
+        )
+        return result
+
+    async def get_entry(self, kind: str, ref: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "GET", f"/v1/library/{self._plural(kind)}/{quote(ref, safe='')}"
+        )
+        return result
+
+    async def register_entry(self, kind: str, data: dict[str, Any], by: str) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "POST", f"/v1/library/{self._plural(kind)}", json={**data, "by": by}
+        )
+        return result
+
+    async def update_entry(
+        self, kind: str, ref: str, changes: dict[str, Any], by: str
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = await self._gateway.request(
+            "PATCH",
+            f"/v1/library/{self._plural(kind)}/{quote(ref, safe='')}",
+            json={"changes": changes, "by": by},
+        )
+        return result
+
+    async def process_limits(self, ref: str, material: str | None) -> dict[str, Any]:
+        query = f"?{urlencode({'material': material})}" if material else ""
+        result: dict[str, Any] = await self._gateway.request(
+            "GET", f"/v1/library/processes/{quote(ref, safe='')}/limits{query}"
+        )
+        return result

@@ -96,11 +96,27 @@ class ManufacturingContext:
     #: none were chosen, every available one so the generator and the phases
     #: know what exists.
     library_machines: tuple[str, ...] = ()
+    #: FORGE-451 / FORGE-446: process and material library entries the person
+    #: chose, and one line each (rules or properties with their sources),
+    #: resolved at proposal and frozen. With none chosen, the lines are the
+    #: entries that match what was stated, or the library's entries.
+    process_ids: tuple[str, ...] = ()
+    material_ids: tuple[str, ...] = ()
+    library_processes: tuple[str, ...] = ()
+    library_materials: tuple[str, ...] = ()
+    #: How the lines were picked: "chosen", "matched" or "listed".
+    process_basis: str = ""
+    material_basis: str = ""
 
     @property
     def has_capabilities(self) -> bool:
         return bool(
-            self.processes or self.machines or self.stock_materials or self.library_machines
+            self.processes
+            or self.machines
+            or self.stock_materials
+            or self.library_machines
+            or self.library_processes
+            or self.library_materials
         )
 
 
@@ -184,6 +200,10 @@ class FlowContext:
             parts.append(f"machines: {'; '.join(m.machines)}")
         if m.machine_ids:
             parts.append(f"library machines: {', '.join(m.machine_ids)}")
+        if m.process_ids:
+            parts.append(f"library processes: {', '.join(m.process_ids)}")
+        if m.material_ids:
+            parts.append(f"library materials: {', '.join(m.material_ids)}")
         if m.stock_materials:
             parts.append(f"stock: {', '.join(m.stock_materials)}")
         if m.production_quantity is not None:
@@ -241,6 +261,25 @@ class FlowContext:
                 "library.machine_limits gives each one's limits with their sources:"
             )
             lines.extend(f"  - {line}" for line in m.library_machines)
+        headings = {
+            "chosen": "chosen for this project",
+            "matched": "matching what was stated (none chosen)",
+            "listed": "in the library (none chosen or matched)",
+        }
+        if m.library_processes:
+            lines.append(
+                f"Manufacturing processes {headings.get(m.process_basis, '')}. Their rules are "
+                "the design and DFM limits, with sources; library.process_limits gives them "
+                "as limits, for a material if you name one:"
+            )
+            lines.extend(f"  - {line}" for line in m.library_processes)
+        if m.library_materials:
+            lines.append(
+                f"Materials {headings.get(m.material_basis, '')}. Use these properties, with "
+                "their sources, rather than values from memory; library.get_material has "
+                "every property:"
+            )
+            lines.extend(f"  - {line}" for line in m.library_materials)
         return "\n".join(lines)
 
 

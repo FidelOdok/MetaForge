@@ -64,6 +64,19 @@ class MachineLibraryService(Protocol):
 
     async def record_job_result(self, job_id: str, by: str) -> dict[str, Any]: ...
 
+    # FORGE-451 / FORGE-446: processes and materials (catalog_tools).
+    async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]: ...
+
+    async def get_entry(self, kind: str, ref: str) -> dict[str, Any]: ...
+
+    async def register_entry(self, kind: str, data: dict[str, Any], by: str) -> dict[str, Any]: ...
+
+    async def update_entry(
+        self, kind: str, ref: str, changes: dict[str, Any], by: str
+    ) -> dict[str, Any]: ...
+
+    async def process_limits(self, ref: str, material: str | None) -> dict[str, Any]: ...
+
 
 _CAPABILITY_HELP = (
     "capabilities is an object keyed by name, each {value, unit, source_kind, source_ref}. "
@@ -122,6 +135,10 @@ class LibraryServer(McpToolServer):
     def __init__(self, library: MachineLibraryService) -> None:
         super().__init__(adapter_id="library", version="0.1.0")
         self._library = library
+        # FORGE-451 / FORGE-446: processes and materials on the same adapter.
+        from tool_registry.tools.library.catalog_tools import register_catalog_tools
+
+        register_catalog_tools(self.register_tool, library)
         self.register_tool(
             manifest=ToolManifest(
                 tool_id="library.list_machines",

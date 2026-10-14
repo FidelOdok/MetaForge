@@ -255,6 +255,13 @@ class ManufacturingContextBody(BaseModel):
     machineIds: list[str] = Field(  # noqa: N815
         default_factory=list, validation_alias=_alias("machineIds", "machine_ids")
     )
+    #: FORGE-451 / FORGE-446: process and material library entries (ids or names).
+    processIds: list[str] = Field(  # noqa: N815
+        default_factory=list, validation_alias=_alias("processIds", "process_ids")
+    )
+    materialIds: list[str] = Field(  # noqa: N815
+        default_factory=list, validation_alias=_alias("materialIds", "material_ids")
+    )
 
 
 def _chosen_machine_ids(m: ManufacturingContextBody) -> list[str]:
@@ -301,6 +308,99 @@ def _library_machine_lines(m: ManufacturingContextBody) -> tuple[str, ...]:
         if isinstance(inst, MachineInstance) and inst.status == "available"
     ]
     return tuple(summarize_limits(library.limits(inst.id)) for inst in available)
+
+
+#: With nothing chosen or matched, at most this many entries are listed.
+_CATALOG_LIST_CAP = 15
+
+
+def _catalog_context(m: ManufacturingContextBody) -> dict[str, Any]:
+    """Process and material lines for a flow (FORGE-451, FORGE-446).
+
+    Chosen entries must exist (an unknown id or name is refused). With none
+    chosen: the entries that match what was stated (processes by name, from
+    the stated processes and the library machines' processes; materials by
+    the stated stock names), otherwise the library's entries up to a cap.
+    """
+    from api_gateway.library.catalog_routes import get_catalog
+    from api_gateway.library.routes import get_machine_library
+    from twin_core.library.catalog import (
+        CatalogNotFoundError,
+        MaterialEntry,
+        ProcessEntry,
+        summarize_material,
+        summarize_process,
+    )
+    from twin_core.library.machines import MachineInstance, MachineNotFoundError
+
+    catalog = get_catalog()
+
+    def chosen(kind: str, refs: list[str], field: str) -> list[Any]:
+        out = []
+        for ref in dict.fromkeys(r.strip() for r in refs if r.strip()):
+            try:
+                out.append(catalog.get(ref, kind))
+            except CatalogNotFoundError as exc:
+                plural = "processes" if kind == "process" else "materials"
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"manufacturingContext.{field}: no {kind} '{ref}' in the library "
+                    f"(library.list_{plural} lists them)",
+                ) from exc
+        return out
+
+    def capped(entries: list[Any]) -> list[Any]:
+        return entries[:_CATALOG_LIST_CAP]
+
+    processes: list[ProcessEntry] = chosen("process", m.processIds, "processIds")
+    process_basis = "chosen" if processes else ""
+    if not processes:
+        wanted = {p.strip().lower() for p in m.processes if p.strip()}
+        library = get_machine_library()
+        machine_ids = _chosen_machine_ids(m)
+        machines: list[Any] = []
+        for machine_id in machine_ids:
+            try:
+                machines.append(library.get(machine_id))
+            except MachineNotFoundError:
+                continue  # already refused by the machine resolver
+        if not machine_ids:
+            machines = [
+                i
+                for i in library.list(layer="instance")
+                if isinstance(i, MachineInstance) and i.status == "available"
+            ]
+        for machine in machines:
+            wanted |= {p.strip().lower() for p in machine.processes}
+        every = catalog.list("process")
+        processes = [p for p in every if p.name in wanted or p.title.lower() in wanted]
+        process_basis = "matched" if processes else ""
+        if not processes and every:
+            processes, process_basis = capped(every), "listed"
+
+    materials: list[MaterialEntry] = chosen("material", m.materialIds, "materialIds")
+    material_basis = "chosen" if materials else ""
+    if not materials:
+        stated = [s.strip().lower() for s in m.stockMaterials if s.strip()]
+        every_m = catalog.list("material")
+
+        def matches(entry: MaterialEntry) -> bool:
+            names = [entry.name, entry.title.lower(), entry.designation.lower()]
+            return any(s and n and (s in n or n in s) for s in stated for n in names)
+
+        materials = [e for e in every_m if matches(e)]
+        material_basis = "matched" if materials else ""
+        if not materials and every_m:
+            materials, material_basis = capped(every_m), "listed"
+
+    return {
+        "process_ids": tuple(p.id for p in processes) if process_basis == "chosen" else (),
+        "material_ids": tuple(e.id for e in materials) if material_basis == "chosen" else (),
+        "library_processes": tuple(summarize_process(p) for p in processes),
+        "library_materials": tuple(summarize_material(e) for e in materials),
+        "process_basis": process_basis,
+        "material_basis": material_basis,
+    }
 
 
 class CallerOperation(BaseModel):
@@ -368,6 +468,7 @@ class ProposeFlowRequest(BaseModel):
                     production_quantity=m.productionQuantity,
                     machine_ids=tuple(_chosen_machine_ids(m)),
                     library_machines=_library_machine_lines(m),
+                    **_catalog_context(m),
                 )
             ),
             target_maturity=self.targetMaturity,

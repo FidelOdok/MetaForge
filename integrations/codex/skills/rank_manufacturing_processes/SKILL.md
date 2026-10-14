@@ -52,6 +52,7 @@ which is honest and visible at the gate. Never fill one in from memory.
 | Step | Tool |
 |---|---|
 | a library machine's capabilities, as a candidate | `library.list_machines`, `library.machine_limits` |
+| a library process's rules and tolerance, as a candidate | `library.list_processes`, `library.process_limits` |
 | a vendor's real price (connected vendors) | `vendor.list_connectors`, `vendor.quote` |
 | where to send it when a vendor has no API | `vendor.handoffs` |
 | a rough cost before any quote exists (CNC, sheet metal) | `cost.estimate_manufacturing` |
