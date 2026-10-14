@@ -123,6 +123,16 @@ class LocalMachineLibrary:
         except CatalogNotFoundError as exc:
             raise ValueError(f"no entry '{exc.args[0]}'") from exc
 
+    async def standard_part(
+        self, family: str, size: str, length_mm: float | None
+    ) -> dict[str, Any]:
+        from twin_core.library.standard_parts import StandardPartError, build_standard_part
+
+        try:
+            return {"entry": build_standard_part(family, size, length_mm)}
+        except StandardPartError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 def make_machine_library() -> LocalMachineLibrary:
     return LocalMachineLibrary()

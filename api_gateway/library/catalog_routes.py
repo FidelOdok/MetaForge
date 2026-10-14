@@ -151,3 +151,35 @@ async def register_material(body: dict[str, Any], request: Request) -> dict[str,
 @router.patch("/materials/{ref}")
 async def update_material(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
     return _update("material", ref, body, request)
+
+
+@router.get("/components")
+async def list_components(family: str | None = None) -> dict[str, Any]:
+    """Mechanical components (FORGE-449): standard and purchased parts."""
+    return _list("component", family)
+
+
+@router.get("/components/standard")
+async def standard_part(family: str, size: str, length_mm: float | None = None) -> dict[str, Any]:
+    """A standard part built from its standard's table; stores nothing."""
+    from twin_core.library.standard_parts import StandardPartError, build_standard_part
+
+    try:
+        return {"entry": build_standard_part(family, size, length_mm)}
+    except StandardPartError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/components/{ref}")
+async def get_component(ref: str) -> dict[str, Any]:
+    return _get("component", ref)
+
+
+@router.post("/components", status_code=201)
+async def register_component(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    return _register("component", body, request)
+
+
+@router.patch("/components/{ref}")
+async def update_component(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
+    return _update("component", ref, body, request)

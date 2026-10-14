@@ -97,7 +97,7 @@ class RemoteMachineLibrary:
 
     @staticmethod
     def _plural(kind: str) -> str:
-        return {"process": "processes", "material": "materials"}[kind]
+        return {"process": "processes", "material": "materials", "component": "components"}[kind]
 
     async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]:
         query = f"?{urlencode({'family': family})}" if family else ""
@@ -132,6 +132,17 @@ class RemoteMachineLibrary:
         query = f"?{urlencode({'material': material})}" if material else ""
         result: dict[str, Any] = await self._gateway.request(
             "GET", f"/v1/library/processes/{quote(ref, safe='')}/limits{query}"
+        )
+        return result
+
+    async def standard_part(
+        self, family: str, size: str, length_mm: float | None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"family": family, "size": size}
+        if length_mm is not None:
+            params["length_mm"] = length_mm
+        result: dict[str, Any] = await self._gateway.request(
+            "GET", f"/v1/library/components/standard?{urlencode(params)}"
         )
         return result
 

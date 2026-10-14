@@ -129,6 +129,11 @@ READ_ONLY: frozenset[str] = frozenset(
         "library.process_limits",
         "library.list_materials",
         "library.get_material",
+        # FORGE-449: mechanical component reads, and building a standard part
+        # from its table (stores nothing).
+        "library.list_components",
+        "library.get_component",
+        "library.standard_part",
         # FORGE-451 step 3: reads the printer's controller; registers nothing.
         "library.discover_machine",
         # FORGE-451 step 4: asks the machine about a job; writes nothing.
@@ -338,6 +343,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "library.update_process",
         "library.register_material",
         "library.update_material",
+        "library.register_component",
+        "library.update_component",
         # Records one evidence entity from the machine's own report.
         "library.record_job_result",
         # FORGE-427: a quote is recorded in the twin; nothing is bought.
