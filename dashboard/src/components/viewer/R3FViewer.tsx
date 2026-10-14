@@ -255,14 +255,18 @@ function GroundGrid({ isDark }: { isDark: boolean }) {
       receiveShadow
     >
       <planeGeometry args={[size, size]} />
-      {/* Standard, not basic: this plane is what the model's shadow lands on
-          now that the separate catcher is gone. */}
-      <meshStandardMaterial
+      {/* Lambert, not standard (FORGE-624): this plane still has to receive
+          the model's shadow now that the separate catcher is gone, but it
+          covers most of the screen, and a standard material pays full PBR
+          with the studio environment map on every one of those pixels.
+          Measured on the deployed viewer, that cost more than switching the
+          shadow map to on-demand saved: 19.8 fps before the merge, 13.3
+          after. Lambert is lit and shadow-receiving at a fraction of the
+          per-pixel work, which is all a floor needs. */}
+      <meshLambertMaterial
         map={texture}
         transparent
         opacity={0.9}
-        roughness={1}
-        metalness={0}
         side={THREE.DoubleSide}
       />
     </mesh>

@@ -414,7 +414,9 @@ describe('R3FViewer — one ground plane, not two (FORGE-623)', () => {
     expect(grounds).toHaveLength(1);
     // It carries a lit material, which is what lets a shadow land on it; the
     // separate shadowMaterial catcher is gone, so nothing is coplanar with it.
-    expect(grounds[0]!.querySelector('meshStandardMaterial')).toBeTruthy();
+    // Lit (so a shadow can land on it), but not full PBR -- see FORGE-624.
+    expect(grounds[0]!.querySelector('meshLambertMaterial')).toBeTruthy();
+    expect(grounds[0]!.querySelector('meshStandardMaterial')).toBeNull();
     expect(container.querySelectorAll('shadowMaterial')).toHaveLength(0);
   });
 });
