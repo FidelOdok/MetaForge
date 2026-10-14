@@ -22,9 +22,33 @@
 # actually healthy, and fails loudly naming every service that is still wrong.
 
 # Services that exist but are not running, one "name state" per line.
+#
+# A one-shot container is not a failure (FORGE-626). The stack has setup
+# containers -- lightrag-ui-ollama-bootstrap is one -- that do their work and
+# exit 0, and compose leaves them in `exited` for good. Demanding that
+# everything be running would fail a perfectly good deploy as soon as one of
+# those had finished, and a check that cries wolf is one people learn to
+# ignore. A container is only wrong if it exited when it was meant to stay up,
+# or exited with a non-zero status.
 _compose_not_running() {
+  local name state
   docker compose ps -a --format '{{.Name}} {{.State}}' 2>/dev/null \
-    | awk '$2 != "running" { print $1 " " $2 }'
+    | awk '$2 != "running" { print $1 " " $2 }' \
+    | while read -r name state; do
+        if [ "$state" = "exited" ] && _compose_finished_cleanly "$name"; then
+          continue
+        fi
+        echo "$name $state"
+      done
+}
+
+# True when a container was meant to run once and did so successfully: no
+# restart policy, and exit status 0.
+_compose_finished_cleanly() {
+  local policy status
+  policy="$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$1" 2>/dev/null)"
+  status="$(docker inspect --format '{{.State.ExitCode}}' "$1" 2>/dev/null)"
+  [ "$policy" = "no" ] && [ "$status" = "0" ]
 }
 
 # Services with a healthcheck that are not yet passing it.

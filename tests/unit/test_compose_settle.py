@@ -28,6 +28,7 @@ def _run(
     *,
     up_rc: int = 0,
     advance: str = "up",
+    inspect: dict[str, tuple[str, int]] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run compose_settle against a stub docker.
 
@@ -41,6 +42,8 @@ def _run(
     for i, table in enumerate(states):
         (tmp_path / f"state{i}").write_text(table, encoding="utf-8")
     (tmp_path / "step").write_text("0", encoding="utf-8")
+    for name, (policy, code) in (inspect or {}).items():
+        (tmp_path / f"inspect_{name}").write_text(f"{policy} {code}\n", encoding="utf-8")
 
     (bin_dir / "docker").write_text(
         textwrap.dedent(
@@ -59,6 +62,22 @@ def _run(
                 esac
               done < "$table"
               if [ "{advance}" = "ps" ]; then echo "$((step + 1))" > {tmp_path}/step; fi
+              exit 0
+            fi
+            if [ "$1" = "inspect" ]; then
+              # Restart policy and exit code, read from a per-container file
+              # written by the test; absent means "stays up, exited 1".
+              name="${{@: -1}}"
+              f={tmp_path}/inspect_$name
+              if [ -f "$f" ]; then
+                read -r policy code < "$f"
+              else
+                policy=always; code=1
+              fi
+              case "$*" in
+                *RestartPolicy*) echo "$policy" ;;
+                *ExitCode*) echo "$code" ;;
+              esac
               exit 0
             fi
             if [ "$2" = "up" ]; then
@@ -144,3 +163,42 @@ def test_the_retry_does_not_abort_when_compose_itself_fails(tmp_path: Path, rc: 
     result = _run(tmp_path, [STRANDED, HEALTHY], up_rc=rc)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_a_one_shot_container_that_finished_is_not_a_failure(tmp_path: Path) -> None:
+    """FORGE-626: setup containers exit 0 and stay exited, by design.
+
+    Demanding that everything be running would fail a good deploy the moment
+    one of those had done its job.
+    """
+    result = _run(
+        tmp_path,
+        ["gateway running healthy\nbootstrap exited \n"],
+        inspect={"bootstrap": ("no", 0)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "ups").exists(), "a finished one-shot needs no restart"
+
+
+def test_a_one_shot_that_failed_is_still_reported(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        ["gateway running healthy\nbootstrap exited \n"],
+        inspect={"bootstrap": ("no", 1)},
+    )
+
+    assert result.returncode == 1
+    assert "not running: bootstrap (exited)" in result.stderr
+
+
+def test_a_service_meant_to_stay_up_is_still_reported_when_it_exits(tmp_path: Path) -> None:
+    # Exit 0 is not an excuse when the service was supposed to keep running.
+    result = _run(
+        tmp_path,
+        ["gateway running healthy\ndashboard exited \n"],
+        inspect={"dashboard": ("unless-stopped", 0)},
+    )
+
+    assert result.returncode == 1
+    assert "not running: dashboard (exited)" in result.stderr
