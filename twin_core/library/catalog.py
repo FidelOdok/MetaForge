@@ -57,6 +57,11 @@ __all__ = [
     "CatalogError",
     "CatalogNotFoundError",
     "SqliteCatalog",
+    "COMPONENT_FAMILIES",
+    "COMPONENT_ORIGINS",
+    "COMPONENT_SPECS",
+    "ComponentEntry",
+    "summarize_component",
     "summarize_material",
     "summarize_process",
 ]
@@ -113,6 +118,62 @@ MATERIAL_FORMS: tuple[str, ...] = (
     "board",
     "other",
 )
+
+#: FORGE-449: mechanical COTS part families.
+COMPONENT_FAMILIES: tuple[str, ...] = (
+    "screw",
+    "nut",
+    "washer",
+    "bearing",
+    "bushing",
+    "standoff",
+    "pin",
+    "retaining_ring",
+    "shaft_collar",
+    "linear_rail",
+    "linear_bearing",
+    "profile_extrusion",
+    "hinge",
+    "slide",
+    "gear",
+    "pulley",
+    "belt",
+    "spring",
+    "actuator",
+    "motor",
+    "other",
+)
+#: "standard": dimensions from a standard's table, geometry generated from them;
+#: "purchased": a supplier's part with its own CAD.
+COMPONENT_ORIGINS: tuple[str, ...] = ("standard", "purchased")
+
+#: Typed component specs; a key outside this table is refused.
+COMPONENT_SPECS: dict[str, str] = {
+    "nominal_diameter_mm": "mm",
+    "thread_pitch_mm": "mm",
+    "length_mm": "mm",
+    "head_diameter_mm": "mm",
+    "head_height_mm": "mm",
+    "socket_size_mm": "mm",
+    "socket_depth_mm": "mm",
+    "width_across_flats_mm": "mm",
+    "height_mm": "mm",
+    "inner_diameter_mm": "mm",
+    "outer_diameter_mm": "mm",
+    "thickness_mm": "mm",
+    "bore_mm": "mm",
+    "width_mm": "mm",
+    "dynamic_load_kn": "kN",
+    "static_load_kn": "kN",
+    "fatigue_load_limit_kn": "kN",
+    "reference_speed_rpm": "rpm",
+    "limiting_speed_rpm": "rpm",
+    "mass_kg": "kg",
+    "travel_mm": "mm",
+    "force_n": "N",
+    "torque_nm": "N m",
+    "voltage_v": "V",
+}
 
 #: Rule kinds, the same vocabulary as check_manufacturability, plus tolerance.
 #: Each has one unit; a rule in another unit is refused.
@@ -227,6 +288,59 @@ def parse_properties(raw: Any) -> dict[str, Sourced]:
     return out
 
 
+def parse_specs(raw: Any) -> dict[str, Sourced]:
+    """Component specs: known names, fixed units, a source on each."""
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise CatalogError("specs must be an object keyed by spec name")
+    out: dict[str, Sourced] = {}
+    for key, item in raw.items():
+        unit = COMPONENT_SPECS.get(key)
+        if unit is None:
+            raise CatalogError(f"unknown spec '{key}'; known: {', '.join(sorted(COMPONENT_SPECS))}")
+        if not isinstance(item, dict):
+            raise CatalogError(f"spec {key} must be an object with value, unit and source")
+        if str(item.get("unit") or unit).strip() != unit:
+            raise CatalogError(f"spec {key} is in {unit}")
+        value = _number(f"spec {key}", item.get("value"))
+        kind, ref = _source(f"spec {key}", item)
+        out[key] = Sourced(value, unit, kind, ref, kind == "assumption")
+    return out
+
+
+def parse_geometry(raw: Any) -> dict[str, Any]:
+    """Where the part's CAD comes from: a generator and its parameters, or a STEP file."""
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise CatalogError("geometry must be an object")
+    if raw.get("generator"):
+        params = raw.get("params") or {}
+        if not isinstance(params, dict):
+            raise CatalogError("geometry.params must be an object")
+        return {"generator": str(raw["generator"]), "params": params}
+    if raw.get("step_url") or raw.get("step_work_product_id"):
+        out = {k: str(raw[k]) for k in ("step_url", "step_work_product_id") if raw.get(k)}
+        if raw.get("licence"):
+            out["licence"] = str(raw["licence"])
+        return out
+    raise CatalogError("geometry needs a generator, a step_url or a step_work_product_id")
+
+
+def parse_suppliers(raw: Any) -> list[dict[str, str]]:
+    if raw in (None, []):
+        return []
+    if not isinstance(raw, list):
+        raise CatalogError("suppliers must be a list of {supplier, sku, url}")
+    out = []
+    for item in raw:
+        if not isinstance(item, dict) or not item.get("supplier") or not item.get("sku"):
+            raise CatalogError("each supplier needs supplier and sku")
+        out.append({k: str(item[k]) for k in ("supplier", "sku", "url") if item.get(k)})
+    return out
+
+
 def parse_rules(raw: Any) -> list[dict[str, Any]]:
     if raw in (None, []):
         return []
@@ -315,6 +429,30 @@ class MaterialEntry:
         return out
 
 
+@dataclass
+class ComponentEntry:
+    id: str
+    name: str
+    title: str
+    family: str
+    origin: str
+    standard: str
+    size: str
+    specs: dict[str, Sourced]
+    geometry: dict[str, Any]
+    material: str
+    suppliers: list[dict[str, str]]
+    notes: str = ""
+    version: int = 1
+    updated_at: float = 0.0
+    kind: str = field(default="component")
+
+    def as_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        out["specs"] = {k: v.as_dict() for k, v in self.specs.items()}
+        return out
+
+
 def _name(value: Any) -> str:
     name = str(value or "").strip().lower()
     if not _NAME.match(name):
@@ -352,13 +490,16 @@ class SqliteCatalog:
 
     # ── reads ────────────────────────────────────────────────────────────
 
-    def _load(self, body: dict[str, Any]) -> ProcessEntry | MaterialEntry:
+    def _load(self, body: dict[str, Any]) -> Any:
         if body.get("kind") == "process":
             return ProcessEntry(**body)
+        if body.get("kind") == "component":
+            specs = {k: Sourced(**v) for k, v in (body.pop("specs", None) or {}).items()}
+            return ComponentEntry(specs=specs, **body)
         props = {k: Sourced(**v) for k, v in (body.pop("properties", None) or {}).items()}
         return MaterialEntry(properties=props, **body)
 
-    def get(self, ref: str, kind: str | None = None) -> ProcessEntry | MaterialEntry:
+    def get(self, ref: str, kind: str | None = None) -> Any:
         """By id, or by name when ``kind`` is given."""
         with self._lock:
             row = self._conn.execute(
@@ -451,7 +592,7 @@ class SqliteCatalog:
 
     # ── writes ───────────────────────────────────────────────────────────
 
-    def _save(self, entry: ProcessEntry | MaterialEntry, by: str, *, new: bool) -> None:
+    def _save(self, entry: Any, by: str, *, new: bool) -> None:
         body = json.dumps(entry.as_dict())
         with self._lock:
             try:
@@ -481,7 +622,7 @@ class SqliteCatalog:
 
     def register(self, kind: str, data: dict[str, Any], *, by: str = "") -> Any:
         now = self._clock()
-        entry: ProcessEntry | MaterialEntry
+        entry: ProcessEntry | MaterialEntry | ComponentEntry
         if kind == "process":
             family = str(data.get("family") or "")
             if family not in PROCESS_FAMILIES:
@@ -515,8 +656,33 @@ class SqliteCatalog:
                 notes=str(data.get("notes") or ""),
                 updated_at=now,
             )
+        elif kind == "component":
+            family = str(data.get("family") or "")
+            if family not in COMPONENT_FAMILIES:
+                raise CatalogError(f"family must be one of {', '.join(COMPONENT_FAMILIES)}")
+            origin = str(data.get("origin") or "")
+            if origin not in COMPONENT_ORIGINS:
+                raise CatalogError("origin must be standard or purchased")
+            standard = str(data.get("standard") or "").strip()
+            if origin == "standard" and not standard:
+                raise CatalogError("a standard part names its standard, e.g. ISO 4762")
+            entry = ComponentEntry(
+                id=f"co_{uuid.uuid4().hex[:12]}",
+                name=_name(data.get("name")),
+                title=str(data.get("title") or data.get("name") or "").strip(),
+                family=family,
+                origin=origin,
+                standard=standard,
+                size=str(data.get("size") or "").strip(),
+                specs=parse_specs(data.get("specs")),
+                geometry=parse_geometry(data.get("geometry")),
+                material=str(data.get("material") or "").strip().lower(),
+                suppliers=parse_suppliers(data.get("suppliers")),
+                notes=str(data.get("notes") or ""),
+                updated_at=now,
+            )
         else:
-            raise CatalogError("kind must be process or material")
+            raise CatalogError("kind must be process, material or component")
         self._save(entry, by, new=True)
         return entry
 
@@ -525,12 +691,23 @@ class SqliteCatalog:
         entry = self.get(entry_id)
         if isinstance(entry, ProcessEntry):
             allowed = {"title", "machine_kinds", "material_families", "rules", "notes"}
+        elif isinstance(entry, ComponentEntry):
+            allowed = {"title", "specs", "geometry", "material", "suppliers", "notes"}
         else:
             allowed = {"title", "designation", "forms", "properties", "processes", "notes"}
         unknown = set(changes) - allowed
         if unknown:
             raise CatalogError(f"cannot change {', '.join(sorted(unknown))}")
-        if isinstance(entry, ProcessEntry):
+        if isinstance(entry, ComponentEntry):
+            if "specs" in changes:
+                entry.specs = {**entry.specs, **parse_specs(changes["specs"])}
+            if "geometry" in changes:
+                entry.geometry = parse_geometry(changes["geometry"])
+            if "material" in changes:
+                entry.material = str(changes["material"] or "").strip().lower()
+            if "suppliers" in changes:
+                entry.suppliers = parse_suppliers(changes["suppliers"])
+        elif isinstance(entry, ProcessEntry):
             if "machine_kinds" in changes:
                 entry.machine_kinds = _choices(
                     "machine_kinds", changes["machine_kinds"], MACHINE_KINDS
@@ -614,3 +791,12 @@ def summarize_material(entry: MaterialEntry) -> str:
         + (f", forms {', '.join(entry.forms)}" if entry.forms else "")
     )
     return f"{head}: {'; '.join(parts) or 'no properties recorded'}"
+
+
+def summarize_component(entry: ComponentEntry) -> str:
+    """One line: the part, its standard and size, its key specs."""
+    parts = [f"{k} {_fmt(v.value)} {v.unit}" for k, v in list(entry.specs.items())[:6]]
+    head = f"{entry.title or entry.name} [{entry.id}] {entry.family}" + (
+        f" {entry.standard} {entry.size}".rstrip() if entry.standard or entry.size else ""
+    )
+    return f"{head}: {'; '.join(parts) or 'no specs recorded'}"

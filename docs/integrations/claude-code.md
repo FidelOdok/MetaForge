@@ -236,6 +236,9 @@ Two more sources feed the package's skills (FORGE-533):
   (FORGE-427), and `manage-processes-and-materials`, which records
   manufacturing processes with their rules and materials with their
   properties, each sourced, and uses them in a flow (FORGE-451, FORGE-446).
+  `mechanical-components` builds standard screws, nuts, washers and
+  bearings from their standards' tables and records purchased parts with
+  their CAD licence (FORGE-449).
   These carry their own frontmatter and ship verbatim.
 
 A test checks that every tool a shipped skill names is one the repo

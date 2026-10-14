@@ -29,6 +29,29 @@ PROCESS_FAMILIES = [
     "finishing",
     "other",
 ]
+COMPONENT_FAMILIES = [
+    "screw",
+    "nut",
+    "washer",
+    "bearing",
+    "bushing",
+    "standoff",
+    "pin",
+    "retaining_ring",
+    "shaft_collar",
+    "linear_rail",
+    "linear_bearing",
+    "profile_extrusion",
+    "hinge",
+    "slide",
+    "gear",
+    "pulley",
+    "belt",
+    "spring",
+    "actuator",
+    "motor",
+    "other",
+]
 MATERIAL_FAMILIES = [
     "metal",
     "polymer",
@@ -55,6 +78,14 @@ _RULES = (
     "hole_diameter, inside_corner_radius, bend_radius, feature_size (mm), draft_angle, "
     "overhang_angle (deg), envelope (max_dims_mm [x, y, z]) or tolerance (value, mm). "
 )
+_SPECS = (
+    "specs is an object keyed by name, each {value, unit, source_kind, source_ref}: "
+    "nominal_diameter_mm, thread_pitch_mm, length_mm, head_diameter_mm, head_height_mm, "
+    "socket_size_mm, socket_depth_mm, width_across_flats_mm, height_mm, inner_diameter_mm, "
+    "outer_diameter_mm, thickness_mm, bore_mm, width_mm, travel_mm (mm); dynamic_load_kn, "
+    "static_load_kn, fatigue_load_limit_kn (kN); reference_speed_rpm, limiting_speed_rpm "
+    "(rpm); mass_kg (kg); force_n (N); torque_nm (N m); voltage_v (V). "
+)
 _PROPERTIES = (
     "properties is an object keyed by name: density_kg_m3 (kg/m3), youngs_modulus_mpa, "
     "youngs_modulus_across_mpa, yield_strength_mpa, yield_strength_across_mpa, "
@@ -72,8 +103,12 @@ def catalog_tool_ids() -> set[str]:
     The ids are assembled per kind, which a literal-id source scan cannot
     see, so coverage checks import this (the same as ``distributor_tool_ids``).
     """
-    ids = {"library.process_limits"}
-    for kind, plural in (("process", "processes"), ("material", "materials")):
+    ids = {"library.process_limits", "library.standard_part"}
+    for kind, plural in (
+        ("process", "processes"),
+        ("material", "materials"),
+        ("component", "components"),
+    ):
         ids |= {
             f"library.list_{plural}",
             f"library.get_{kind}",
@@ -95,6 +130,10 @@ class CatalogService(Protocol):
     ) -> dict[str, Any]: ...
 
     async def process_limits(self, ref: str, material: str | None) -> dict[str, Any]: ...
+
+    async def standard_part(
+        self, family: str, size: str, length_mm: float | None
+    ) -> dict[str, Any]: ...
 
 
 Register = Callable[..., None]
@@ -142,6 +181,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
     for kind, plural, families in (
         ("process", "processes", PROCESS_FAMILIES),
         ("material", "materials", MATERIAL_FAMILIES),
+        ("component", "components", COMPONENT_FAMILIES),
     ):
 
         async def list_(args: dict[str, Any], kind: str = kind) -> dict[str, Any]:
@@ -178,7 +218,31 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             ref_schema,
             get_,
         )
-        if kind == "process":
+        if kind == "component":
+            register_desc = (
+                "Add a mechanical component: name (identifier), title, family, origin "
+                "(standard: dimensions from a standard's table, standard required; purchased: "
+                "a supplier's part), size, specs, geometry ({generator, params} for a "
+                "standard part, or {step_url, licence} / {step_work_product_id} for a "
+                "purchased one), material (a library material name), and suppliers "
+                "[{supplier, sku, url}]. " + _SPECS + _SOURCES + " For a standard part, "
+                "build the entry with library.standard_part and register what it returns. "
+                "Held for the person's approval."
+            )
+            register_props: dict[str, Any] = {
+                "name": {"type": "string"},
+                "title": {"type": "string"},
+                "family": {"type": "string", "enum": families},
+                "origin": {"type": "string", "enum": ["standard", "purchased"]},
+                "standard": {"type": "string"},
+                "size": {"type": "string"},
+                "specs": {"type": "object"},
+                "geometry": {"type": "object"},
+                "material": {"type": "string"},
+                "suppliers": {"type": "array", "items": {"type": "object"}},
+                "notes": {"type": "string"},
+            }
+        elif kind == "process":
             register_desc = (
                 "Add a manufacturing process: name (identifier, e.g. cnc_milling), title, "
                 "family, machine_kinds (the machine library's kinds that run it), "
@@ -187,7 +251,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 + _SOURCES
                 + " Held for the person's approval."
             )
-            register_props: dict[str, Any] = {
+            register_props = {
                 "name": {"type": "string"},
                 "title": {"type": "string"},
                 "family": {"type": "string", "enum": families},
@@ -227,12 +291,14 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             f"Update {kind.title()}",
             (
                 f"Change a {kind}: "
-                + (
-                    "title, machine_kinds, material_families, rules (replaced) or notes."
-                    if kind == "process"
-                    else "title, designation, forms, processes, properties (merged by "
-                    "name) or notes."
-                )
+                + {
+                    "process": "title, machine_kinds, material_families, rules (replaced) or "
+                    "notes.",
+                    "material": "title, designation, forms, processes, properties (merged by "
+                    "name) or notes.",
+                    "component": "title, specs (merged by name), geometry, material, "
+                    "suppliers (replaced) or notes.",
+                }[kind]
                 + " The old version is kept. Held for the person's approval."
             ),
             {
@@ -245,6 +311,38 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
 
     async def limits(args: dict[str, Any]) -> dict[str, Any]:
         return await service.process_limits(str(args["ref"]), args.get("material") or None)
+
+    async def standard(args: dict[str, Any]) -> dict[str, Any]:
+        length = args.get("length_mm")
+        return await service.standard_part(
+            str(args["family"]), str(args["size"]), float(length) if length is not None else None
+        )
+
+    tool(
+        "library.standard_part",
+        "Build Standard Part",
+        (
+            "Build a standard mechanical part from its standard's dimension table, without "
+            "storing it: family iso4762 (socket head cap screw; give size like M4 and "
+            "length_mm), iso4032 (hex nut), iso7089 (plain washer) or deep_groove_bearing "
+            "(size is the designation, e.g. 608). Every dimension cites the table row. A "
+            "size or length the standard does not have is refused. Pass the result to "
+            "library.register_component to add it."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "family": {
+                    "type": "string",
+                    "enum": ["iso4762", "iso4032", "iso7089", "deep_groove_bearing"],
+                },
+                "size": {"type": "string"},
+                "length_mm": {"type": "number"},
+            },
+            "required": ["family", "size"],
+        },
+        standard,
+    )
 
     tool(
         "library.process_limits",

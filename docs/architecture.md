@@ -588,6 +588,20 @@ processes, materials by the stated stock names), or failing that the
 library's entries up to fifteen, and says which of the three it did. A
 library with no entries leaves the context text as it was.
 
+**Mechanical components (FORGE-449).** The library also holds mechanical
+parts, in the pattern CAD tools use for them. A *standard* part is built from
+its standard's dimension table (`twin_core/library/standard_parts.py`: ISO
+4762 socket head cap screws, ISO 4032 hex nuts, ISO 7089 plain washers, deep
+groove ball bearings by designation); its specs cite the table row and its
+geometry is a generator with parameters, so CAD is made on demand rather
+than stored per size. A *purchased* part carries a supplier's STEP (with its
+licence) and part numbers. The tables are bd_warehouse's, vendored unmodified
+under Apache-2.0 with its licence and a NOTICE (`twin_core/library/data/
+bd_warehouse`). bd_warehouse itself is not a dependency: it needs build123d,
+whose OCCT build conflicts with CadQuery's in the CAD adapter. A seed of 69
+common parts (26 screws, 6 nuts, 6 washers, 31 bearings) builds from the
+tables.
+
 **Material figures come only from the library (FORGE-446, FORGE-457).** The
 hard-coded material tables are gone (they held sixteen generic names with no
 sources, and an unknown material silently got the density of water). Every
