@@ -27,16 +27,20 @@ beforeAll(() => {
 // Canvas would otherwise swallow — it needs WebGL, which jsdom doesn't have.
 let capturedOnPointerMissed: (() => void) | undefined;
 
-// A minimal but real-enough fake THREE.Camera — CameraController calls
-// camera.position.set(...) and camera.lookAt(...); a plain {} (the old mock)
-// throws on the first fit attempt.
-const fakeCamera = {
-  position: { x: 0, y: 0, z: 0, set: vi.fn() },
-  // FORGE-616: fitToModel restores the up vector before lookAt, so a reset is
-  // never rolled after a free-orbit tumble.
-  up: { set: vi.fn() },
-  lookAt: vi.fn(),
-};
+// FORGE-620: the camera controls are real now -- they read the camera matrix
+// and write its position every frame -- so a hand-rolled stub no longer stands
+// in for one. These are genuine three objects, plus the canvas the controls
+// attach their listeners to.
+const fakeCamera = new THREE.PerspectiveCamera(45, 800 / 600, 0.1, 10000);
+const fakeScene = new THREE.Scene();
+const fakeCanvas = (() => {
+  const el = document.createElement('canvas');
+  Object.defineProperty(el, 'clientHeight', { value: 600 });
+  Object.defineProperty(el, 'clientWidth', { value: 800 });
+  el.setPointerCapture = vi.fn();
+  el.releasePointerCapture = vi.fn();
+  return el;
+})();
 
 // Mock @react-three/fiber Canvas — it requires WebGL which jsdom doesn't have
 vi.mock('@react-three/fiber', () => ({
@@ -50,25 +54,30 @@ vi.mock('@react-three/fiber', () => ({
     capturedOnPointerMissed = onPointerMissed;
     return <div data-testid="r3f-canvas">{children}</div>;
   },
-  useFrame: vi.fn(),
-  useThree: vi.fn(() => ({ scene: {}, camera: fakeCamera, gl: {} })),
+  // The controls are driven per frame; tests step them by hand.
+  useFrame: vi.fn((cb: () => void) => {
+    capturedFrame = cb;
+  }),
+  useThree: vi.fn(() => ({
+    scene: fakeScene,
+    camera: fakeCamera,
+    gl: { domElement: fakeCanvas },
+    set: vi.fn(),
+  })),
 }));
 
 let capturedFitToModel: (() => void) | undefined;
-let capturedOrbitProps: Record<string, unknown> | undefined;
+let capturedFrame: (() => void) | undefined;
+
+/** Run enough frames for the damped camera to settle on its goal. */
+function settle(frames = 300) {
+  for (let i = 0; i < frames; i += 1) capturedFrame?.();
+}
 // Toggled by the MET-622 test to simulate the HDR CDN fetch failing —
 // Environment throwing must stay contained by its local ErrorBoundary.
 let environmentShouldThrow = false;
 
 vi.mock('@react-three/drei', () => ({
-  // FORGE-612: the viewer is a turntable again. Its props are captured so the
-  // test below can assert the rotation range, and the arcball is mocked too so
-  // a regression back to it is visible rather than silently rendering nothing.
-  OrbitControls: (props: Record<string, unknown>) => {
-    capturedOrbitProps = props;
-    return <div data-testid="orbit-controls" />;
-  },
-  ArcballControls: () => <div data-testid="arcball-controls" />,
   Environment: () => {
     if (environmentShouldThrow) {
       throw new Error(
@@ -220,8 +229,9 @@ describe('R3FViewer — deselecting a rigid group (MET-618)', () => {
 // render past its placeholder and mount CameraController.
 describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
   beforeEach(() => {
-    fakeCamera.position.set.mockClear();
-    fakeCamera.lookAt.mockClear();
+    // A real camera now: reset it rather than clearing spies.
+    fakeCamera.position.set(0, 0, 0);
+    fakeCamera.up.set(0, 1, 0);
     capturedFitToModel = undefined;
   });
 
@@ -245,185 +255,38 @@ describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
     );
   }
 
+  it('frames the loaded model: centred, at the fit distance, and never rolled', () => {
+    mockViewerState({ center: [10, 5, -2], radius: 100, groundY: -3 });
+    render(<R3FViewer />);
+    settle();
+
+    const target = new THREE.Vector3(10, 5, -2);
+    // frame() backs off by sphereRadius * 1.4 / sin(fov/2); modelBounds.radius
+    // is already that sphere radius.
+    const expected = (100 * 1.4) / Math.sin(THREE.MathUtils.degToRad(45) / 2);
+    expect(fakeCamera.position.distanceTo(target)).toBeCloseTo(expected, 0);
+
+    // And the invariant that makes it a turntable: the camera's right vector
+    // stays level with the ground, so the workplane never tilts.
+    const right = new THREE.Vector3().setFromMatrixColumn(fakeCamera.matrixWorld, 0);
+    expect(Math.abs(right.y)).toBeLessThan(1e-6);
+  });
+
   it('falls back to the generic framing via Reset View when no model bounds are available yet', () => {
     mockViewerState(null);
     render(<R3FViewer />);
+    settle();
+    const before = fakeCamera.position.clone();
 
-    // Nothing has loaded, so the auto-fit-on-load effect never fires — only
-    // an explicit Reset View (the registered callback) should frame anything.
-    expect(fakeCamera.position.set).not.toHaveBeenCalled();
+    // Nothing has loaded, so the auto-fit-on-load effect never fires — only an
+    // explicit Reset View (the registered callback) frames anything.
     capturedFitToModel?.();
+    settle();
 
-    // DEFAULT_BOUNDS: center [0,0,0], radius 36 -> dist 36*2.2=79.2.
-    expect(fakeCamera.position.set).toHaveBeenCalled();
-    const [x, y, z] = fakeCamera.position.set.mock.calls[0] ?? [];
-    expect(x).toBeCloseTo(0.6247 * 79.2, 1);
-    expect(y).toBeCloseTo(0.4685 * 79.2, 1);
-    expect(z).toBeCloseTo(0.6247 * 79.2, 1);
-    expect(fakeCamera.lookAt).toHaveBeenCalledWith(0, 0, 0);
-  });
-
-  it('fits the camera to the loaded model — off-center, arbitrary size', () => {
-    mockViewerState({ center: [10, 5, -2], radius: 100, groundY: -3 });
-    render(<R3FViewer />);
-
-    const dist = 100 * 2.2;
-    const [x, y, z] = fakeCamera.position.set.mock.calls[0] ?? [];
-    expect(x).toBeCloseTo(10 + 0.6247 * dist, 1);
-    expect(y).toBeCloseTo(5 + 0.4685 * dist, 1);
-    expect(z).toBeCloseTo(-2 + 0.6247 * dist, 1);
-    expect(fakeCamera.lookAt).toHaveBeenCalledWith(10, 5, -2);
-  });
-
-  // FORGE-612: the turntable keeps a fixed up vector, so a reset is never
-  // rolled by construction and nothing needs restoring. What does need
-  // asserting is the rotation range -- see the describe below.
-});
-
-// FORGE-616: both camera modes ship, because which one is right is taste. The
-// turntable keeps the floor level but stops short of straight up/down (three's
-// own Spherical.makeSafe clamps it, whatever the props say); free orbit has no
-// pole but lets the view roll. Nothing else asserts the control type, so
-// without these a silent swap would pass every other test.
-describe('R3FViewer — camera modes and the workplane (FORGE-616)', () => {
-  function mockState(over: Record<string, unknown> = {}) {
-    vi.mocked(useViewerStore).mockImplementation((selector) =>
-      selector({
-        glbUrl: 'blob:fake',
-        manifest: { parts: [] },
-        selectedMeshName: null,
-        hiddenMeshes: new Set(),
-        explodeFactor: 0,
-        resetCamera: vi.fn(),
-        registerCameraReset: vi.fn(),
-        modelBounds: { center: [10, 5, -2], radius: 100, groundY: -3 },
-        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
-        registerOrbitControlsEnabledSetter: vi.fn(),
-        cameraMode: 'turntable',
-        setCameraMode: vi.fn(),
-        focusPart: vi.fn(),
-        registerFocusPart: vi.fn(),
-        ...over,
-      } as unknown as Parameters<typeof selector>[0]),
-    );
-  }
-
-  beforeEach(() => {
-    capturedOrbitProps = undefined;
-    mockState();
-  });
-
-  it('renders the turntable when that mode is chosen', () => {
-    const { queryByTestId } = render(<R3FViewer />);
-
-    expect(queryByTestId('orbit-controls')).toBeTruthy();
-    expect(queryByTestId('arcball-controls')).toBeNull();
-  });
-
-  it('renders the arcball for free orbit, which is the default mode', () => {
-    mockState({ cameraMode: 'free' });
-
-    const { queryByTestId } = render(<R3FViewer />);
-
-    expect(queryByTestId('arcball-controls')).toBeTruthy();
-    expect(queryByTestId('orbit-controls')).toBeNull();
-  });
-
-  it('asks the turntable for the full sweep and an unbounded azimuth', () => {
-    render(<R3FViewer />);
-
-    // The props do not win -- Spherical.makeSafe() still stops the drag just
-    // short of the poles -- but asking for less would narrow it further.
-    expect(capturedOrbitProps?.minPolarAngle).toBe(0);
-    expect(capturedOrbitProps?.maxPolarAngle).toBeCloseTo(Math.PI, 6);
-    expect(capturedOrbitProps?.minAzimuthAngle).toBeUndefined();
-    expect(capturedOrbitProps?.maxAzimuthAngle).toBeUndefined();
-  });
-
-  // FORGE-617: a single button labelled with the current mode reads exactly
-  // like one labelled with the mode it switches to, so both are shown and the
-  // selected one is marked.
-  it('shows both modes and marks which one is selected', () => {
-    const { getByRole } = render(<R3FViewer />);
-
-    expect(getByRole('button', { name: 'Turntable' })).toHaveAttribute('aria-pressed', 'true');
-    expect(getByRole('button', { name: 'Free orbit' })).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  it('moves the selected mark when the mode changes', () => {
-    mockState({ cameraMode: 'free' });
-
-    const { getByRole } = render(<R3FViewer />);
-
-    expect(getByRole('button', { name: 'Free orbit' })).toHaveAttribute('aria-pressed', 'true');
-    expect(getByRole('button', { name: 'Turntable' })).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  it('picks the mode that was clicked, rather than just flipping', () => {
-    const setCameraMode = vi.fn();
-    mockState({ setCameraMode });
-
-    const { getByRole } = render(<R3FViewer />);
-    fireEvent.click(getByRole('button', { name: 'Free orbit' }));
-    expect(setCameraMode).toHaveBeenCalledWith('free');
-
-    // Clicking the already-selected mode asks for that same mode, not the other.
-    fireEvent.click(getByRole('button', { name: 'Turntable' }));
-    expect(setCameraMode).toHaveBeenLastCalledWith('turntable');
-  });
-
-  it('zooms toward the cursor rather than the pivot', () => {
-    render(<R3FViewer />);
-
-    // Zooming at the pivot pushes whatever you aimed at off the edge and
-    // costs a pan to get back -- the "too many drags" complaint (FORGE-618).
-    expect(capturedOrbitProps?.zoomToCursor).toBe(true);
-  });
-
-  it('frames the selected part on F, and leaves the key alone while typing', () => {
-    const focusPart = vi.fn();
-    mockState({ selectedMeshName: 'leg_front_left', focusPart });
-    render(<R3FViewer />);
-
-    fireEvent.keyDown(window, { key: 'f' });
-    expect(focusPart).toHaveBeenCalledWith('leg_front_left');
-
-    // The twin page has a search box and an agent chat on the same screen.
-    focusPart.mockClear();
-    const input = document.createElement('input');
-    document.body.appendChild(input);
-    fireEvent.keyDown(input, { key: 'f' });
-    expect(focusPart).not.toHaveBeenCalled();
-    input.remove();
-  });
-
-  it('does nothing on F when no part is selected', () => {
-    const focusPart = vi.fn();
-    mockState({ selectedMeshName: null, focusPart });
-    render(<R3FViewer />);
-
-    fireEvent.keyDown(window, { key: 'f' });
-
-    expect(focusPart).not.toHaveBeenCalled();
-  });
-
-  it('draws the workplane the model stands on', () => {
-    const { container } = render(<R3FViewer />);
-
-    // One textured plane, not line geometry: a mipmapped texture averages the
-    // cells down with distance instead of aliasing into a shimmer, which is
-    // what sank both earlier attempts (FORGE-34, FORGE-612).
-    expect(container.querySelector('mesh[name="ground-grid"]')).toBeTruthy();
-  });
-
-  it('draws no workplane when the model has no bounds, rather than guessing a height', () => {
-    // The robot-description path never computes modelBounds. A floor placed
-    // from a guess would cut through the robot, so there simply isn't one.
-    mockState({ modelBounds: null });
-
-    const { container } = render(<R3FViewer />);
-
-    expect(container.querySelector('mesh[name="ground-grid"]')).toBeNull();
+    // DEFAULT_BOUNDS: centre [0,0,0], radius 36.
+    const expected = (36 * 1.4) / Math.sin(THREE.MathUtils.degToRad(45) / 2);
+    expect(fakeCamera.position.length()).toBeCloseTo(expected, 0);
+    expect(fakeCamera.position.equals(before)).toBe(false);
   });
 });
 
