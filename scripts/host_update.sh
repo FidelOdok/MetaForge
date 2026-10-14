@@ -25,6 +25,9 @@ VERIFY=1
 REPO="${METAFORGE_REPO:-FidelOdok/MetaForge}"
 COSIGN="${COSIGN:-$(command -v cosign || echo "$HOME/.local/bin/cosign")}"
 IDENTITY="^https://github\\.com/${REPO}/\\.github/workflows/"
+
+# shellcheck source=lib/compose_settle.sh
+. "$(dirname "$0")/lib/compose_settle.sh"
 ISSUER="https://token.actions.githubusercontent.com"
 
 while [ $# -gt 0 ]; do
@@ -133,7 +136,12 @@ for img in $ours; do
 done
 
 log "start"
-docker compose up -d --no-build --remove-orphans
+# A slow dependency must not end the deploy here: compose gives up on
+# `service_healthy` before the gateway finishes starting, and `set -e` would
+# turn that into a half-updated stack with the dashboard dark (FORGE-622).
+# compose_settle below waits it out and starts whatever was left behind.
+up_rc=0
+docker compose up -d --no-build --remove-orphans || up_rc=$?
 # A container keeps the image it was created from; a re-pulled tag does not
 # move it. Recreate every service whose container runs an older image.
 stale=()
@@ -147,19 +155,13 @@ for svc in $(docker compose config --services 2>/dev/null); do
 done
 if [ ${#stale[@]} -gt 0 ]; then
   echo "recreating: ${stale[*]}"
-  docker compose up -d --no-build --force-recreate "${stale[@]}"
+  docker compose up -d --no-build --force-recreate "${stale[@]}" || up_rc=$?
 fi
+[ "$up_rc" -eq 0 ] || echo "compose exited $up_rc; waiting for the stack to settle" >&2
 
 log "health"
-for _ in $(seq 1 60); do
-  [ -z "$(docker compose ps --format '{{.Name}} {{.Health}}' \
-    | awk '$2!="" && $2!="healthy"')" ] && break
-  sleep 5
-done
-if docker compose ps --format '{{.Name}} {{.Health}}' \
-    | awk '$2!="" && $2!="healthy"{print "not healthy: "$1" ("$2")"; bad=1} END{exit bad}'; then
+if compose_settle; then
   log "done: bundle ${sha:0:12}"
 else
-  echo "some services are not healthy" >&2
   exit 1
 fi
