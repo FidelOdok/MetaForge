@@ -4,7 +4,7 @@ import { Bounds, OrbitControls, useGLTF } from '@react-three/drei';
 import type * as THREE from 'three';
 import { getNodeModel, nodeFileUrl } from '../../../api/endpoints/twin';
 import { resolveGatewayHref } from '../../../lib/gatewayConfig';
-import { VIEWER_COLOR_MANAGEMENT } from '../../viewer/viewerColor';
+import { VIEWER_COLOR_MANAGEMENT, VIEWER_GPU_PREFERENCE } from '../../viewer/viewerColor';
 import { useMeshFileObject } from '../../viewer/meshFileObject';
 import { DIRECT_MESH_FORMATS } from '../registry';
 import { AssemblyPartTree } from '../../viewer/AssemblyPartTree';
@@ -88,7 +88,7 @@ export function ModelPreview({ node, engine, format, mode }: ModelPreviewProps) 
           <ErrorBoundary fallback={<Message>The 3D file could not be read.</Message>}>
             <Canvas
               camera={{ position: [80, 60, 80], fov: 45, near: 0.1, far: 100000 }}
-              gl={{ ...VIEWER_COLOR_MANAGEMENT }}
+              gl={{ ...VIEWER_GPU_PREFERENCE, ...VIEWER_COLOR_MANAGEMENT }}
               style={{ width: '100%', height: '100%' }}
             >
               <ambientLight intensity={0.6} />

@@ -1,4 +1,5 @@
 import { Suspense, useMemo, useState } from 'react';
+import { VIEWER_GPU_PREFERENCE } from './viewerColor';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF } from '@react-three/drei';
 import { Boxes } from 'lucide-react';
@@ -92,6 +93,7 @@ function GlbPreview({ glbUrl }: { glbUrl: string }) {
   const { scene } = useGLTF(glbUrl);
   return (
     <Canvas
+          gl={{ ...VIEWER_GPU_PREFERENCE }}
       camera={{ position: [2, 2, 2], fov: 45 }}
       style={{ height: 180, background: 'var(--mf-c-191b22)', borderRadius: 6 }}
     >
