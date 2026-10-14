@@ -146,6 +146,11 @@ MATERIAL_PROPERTIES: dict[str, _Prop] = {
     "ultimate_strength_mpa": _Prop("MPa", "ultimate tensile strength"),
     "yield_strength_across_mpa": _Prop("MPa", "yield strength across the grain"),
     "fatigue_strength_mpa": _Prop("MPa", "fatigue strength (state the cycle count in the source)"),
+    # Timber and panels have no yield point: their design strengths are
+    # bending (f_m) and tension across the grain (f_t,90), not yield.
+    "bending_strength_mpa": _Prop("MPa", "bending strength (along the grain or main axis)"),
+    "bending_strength_across_mpa": _Prop("MPa", "bending strength across the grain or minor axis"),
+    "tensile_strength_across_mpa": _Prop("MPa", "tension strength across the grain"),
     "elongation_pct": _Prop("%", "elongation at break"),
     "thermal_conductivity_w_mk": _Prop("W/mK", "thermal conductivity"),
     "cte_um_mk": _Prop("um/mK", "coefficient of thermal expansion"),
