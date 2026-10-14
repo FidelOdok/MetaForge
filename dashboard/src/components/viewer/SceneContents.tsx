@@ -124,6 +124,21 @@ export function SceneBody({ scene, manifest, onPartClick, overlayTint }: SceneBo
     [overlayTint?.color, overlayTint?.opacity],
   );
 
+  // FORGE-621: CAD geometry is authored Z-up and the STEP -> GLB converter
+  // keeps it that way, but this viewer (and three) treat Y as up. Left alone,
+  // a table's 18mm top lies on Z while the workplane lies in XZ, so the floor
+  // cuts through the model and the turntable spins about an axis that is not
+  // the model's up. The URDF path has always corrected this on load
+  // (use-urdf-robot.ts); CAD models now do the same, so both share one
+  // convention. Setting the rotation absolutely keeps it idempotent across
+  // re-renders, and the matrices are flushed here so every bound computed
+  // below -- whole-scene, per-mesh, explode centres -- is already in Y-up
+  // world space.
+  useMemo(() => {
+    scene.rotation.set(-Math.PI / 2, 0, 0);
+    scene.updateMatrixWorld(true);
+  }, [scene]);
+
   // Whole-scene bounding box — backs both the exploded-view center below and
   // modelBounds (camera auto-fit + grid sizing), so it's computed once.
   const assemblyBox = useMemo(() => {
