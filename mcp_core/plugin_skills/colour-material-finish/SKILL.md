@@ -36,6 +36,14 @@ properties and the library materials and processes it applies to.
    `library.update_appearance`; both are held for the person's approval and
    keep the old version.
 
+## Seeing it
+
+`twin.render_work_product` with `appearances` (part name to appearance name)
+renders a work product with each part in its appearance: the screen colour,
+`render_roughness` and `render_metallic` go to Blender, and the render records
+which appearance and version it used. A part name that matches nothing comes
+back in `unmatched_colours`.
+
 ## Checklist
 
 - [ ] looked for an existing appearance
