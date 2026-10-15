@@ -1943,6 +1943,19 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
         factory = getattr(structured_document_recorder, f"make_{name}")
         _try(name, lambda f=factory: f(twin, project_backend))
 
+    # FORGE-630: twin.render_work_product, whose blender.render call goes
+    # through this server's own registry once it exists.
+    try:
+        from api_gateway.twin.render_recorder import make_work_product_renderer
+
+        render_bridge = _LateBridge()
+        bindings["work_product_renderer"] = make_work_product_renderer(
+            twin, project_backend, mcp_bridge=render_bridge
+        )
+        bridges.append(render_bridge)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="renderer", error=str(exc))
+
     try:
         from api_gateway.requirement_intelligence.promotion import attempt_promotion
 

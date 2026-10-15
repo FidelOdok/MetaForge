@@ -56,6 +56,7 @@ _ROUTES: dict[str, tuple[str, str | None, str | None, str]] = {
     # the thing that changed.
     "twin.commit_geometry": ("twin?tab=model", "node_id", "node", "View the part in the twin"),
     "twin.commit_design_sketch": ("twin?tab=model", "node_id", "node", "View the sketch"),
+    "twin.render_work_product": ("twin?tab=model", "node_id", "node", "View the renders"),
     "twin.commit_system_architecture": (
         "twin?tab=structure",
         "node_id",

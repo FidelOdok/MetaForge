@@ -149,6 +149,12 @@ class WorkProductType(StrEnum):
     # ROBOT_DESCRIPTION/CAD_SOURCE_SCRIPT already use for their own source
     # geometry link).
     LOAD_CASE = "load_case"
+    # FORGE-630: studio renders of a model (Blender, via blender.render),
+    # one PNG per view. The first view is the primary blob; the rest are
+    # named blobs in `metadata.image_files`. Linked to the model it shows by
+    # a GENERATED_FROM edge, and records that model's content hash so a
+    # stale render can be told apart from a current one.
+    RENDER = "render"
 
 
 class ConstraintSeverity(StrEnum):

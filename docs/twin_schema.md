@@ -195,6 +195,16 @@ class WorkProductType(StrEnum):
     DOCUMENTATION = "documentation"
 ```
 
+The enum has grown since this list was written; `twin_core/models/enums.py`
+is the full set. One of the later additions is `RENDER = "render"`
+(FORGE-630): studio renders of a model from `twin.render_work_product`. The
+first view is the node's primary blob (`format` is `png`) and the others are
+named blobs in `metadata.image_files` (served by
+`GET /v1/twin/nodes/{id}/files/{filename}`). A `GENERATED_FROM` edge points
+at the rendered model, and `metadata.source_content_hash` records which
+revision of it was rendered, so a render of an older revision can be told
+apart from a current one.
+
 **Pydantic Model**:
 
 ```python

@@ -674,8 +674,13 @@ async def download_node_named_file(node_id: str, filename: str) -> Response:
         if wp is None:
             raise HTTPException(status_code=404, detail="Node not found")
 
-        mesh_files = wp.metadata.get("mesh_files")
-        mesh_key = mesh_files.get(filename) if isinstance(mesh_files, dict) else None
+        # A render node (FORGE-630) keeps its other views the same way.
+        mesh_key = None
+        for field in ("mesh_files", "image_files"):
+            named = wp.metadata.get(field)
+            if isinstance(named, dict) and named.get(filename):
+                mesh_key = named[filename]
+                break
 
         if mesh_key:
             from api_gateway.twin.blob_store import fetch_work_product_blob
