@@ -9,6 +9,7 @@ quietly, and the MCP reply carries the images as image content.
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -293,3 +294,164 @@ async def test_the_twin_tool_is_registered_and_passes_options_through() -> None:
         await server.render_work_product({})
 
     assert "twin.render_work_product" not in TwinServer(twin=_Twin()).tool_ids
+
+
+APPEARANCE = {
+    "entry": {
+        "id": "ap_0123456789ab",
+        "name": "black_anodised_6061",
+        "version": 3,
+        "finish": "anodised",
+        "colour": {
+            "system": "ral",
+            "code": "RAL 9005",
+            "name": "Jet black",
+            "srgb_hex": "#0E0E10",
+            "needs_review": False,
+        },
+        "properties": {
+            "render_roughness": {"value": 0.45, "unit": "-", "needs_review": False},
+            "render_metallic": {"value": 0.0, "unit": "-", "needs_review": True},
+        },
+    }
+}
+
+
+class _Library(_Blender):
+    """blender.render plus library.get_appearance, as the bridge serves both."""
+
+    async def invoke(self, tool_id: str, params: dict[str, Any], timeout: Any = None) -> Any:
+        if tool_id == "library.get_appearance":
+            self.calls.append((tool_id, params, timeout))
+            if params["ref"] != "black_anodised_6061":
+                raise ValueError(f"no appearance '{params['ref']}'")
+            return APPEARANCE
+        result = await super().invoke(tool_id, params, timeout)
+        result["unmatched_colours"] = ["hinge"] if "hinge" in params.get("colours", {}) else []
+        return result
+
+
+async def test_parts_render_in_their_library_appearance(tmp_path: Path) -> None:
+    source = _wp(tmp_path, "enclosure", "glb")
+    twin, bridge = _Twin(source), _Library()
+    render = make_work_product_renderer(twin, mcp_bridge=bridge, blob_writer=_writer({}))
+    out = await render(
+        work_product_id=str(source.id),
+        appearances={"base": "black_anodised_6061"},
+        colours={"lid": [0.1, 0.3, 0.8, 1.0]},
+    )
+    assert bridge.calls[0][:2] == ("library.get_appearance", {"ref": "black_anodised_6061"})
+    _, params, _ = bridge.calls[1]
+    assert params["colours"]["lid"] == [0.1, 0.3, 0.8, 1.0]
+    base = params["colours"]["base"]
+    assert base["rgba"] == pytest.approx([14 / 255, 14 / 255, 16 / 255, 1.0])
+    assert (base["roughness"], base["metallic"]) == (0.45, 0.0)
+
+    used = out["appearances"]
+    assert used == [
+        {
+            "part": "base",
+            "appearance": "black_anodised_6061",
+            "appearance_id": "ap_0123456789ab",
+            "version": 3,
+            "finish": "anodised",
+            "colour": "RAL 9005 Jet black",
+            "srgb_hex": "#0E0E10",
+            "needs_review": ["render_metallic"],
+        }
+    ]
+    (node,) = twin.created
+    assert node.metadata["appearances"] == used
+
+
+async def test_appearance_problems_are_refused_before_rendering(tmp_path: Path) -> None:
+    source = _wp(tmp_path, "enclosure", "glb")
+    bridge = _Library()
+    render = make_work_product_renderer(_Twin(source), mcp_bridge=bridge, blob_writer=_writer({}))
+    with pytest.raises(RenderError, match="appearance 'chrome' for 'base': no appearance"):
+        await render(work_product_id=str(source.id), appearances={"base": "chrome"})
+    with pytest.raises(RenderError, match="base given both a colour and an appearance"):
+        await render(
+            work_product_id=str(source.id),
+            appearances={"base": "black_anodised_6061"},
+            colours={"base": [0, 0, 0, 1]},
+        )
+    with pytest.raises(RenderError, match="appearances must map"):
+        await render(work_product_id=str(source.id), appearances=["black_anodised_6061"])
+    assert all(call[0] != "blender.render" for call in bridge.calls)
+
+
+async def test_a_part_name_that_matches_nothing_is_reported(tmp_path: Path) -> None:
+    source = _wp(tmp_path, "enclosure", "glb")
+    render = make_work_product_renderer(
+        _Twin(source), mcp_bridge=_Library(), blob_writer=_writer({})
+    )
+    out = await render(work_product_id=str(source.id), colours={"hinge": [1, 0, 0, 1]})
+    assert out["unmatched_colours"] == ["hinge"]
+
+
+def test_images_reach_a_client_as_image_content_over_tools_call() -> None:
+    """Through the server's real tools/call path, where the adapter's output
+    arrives wrapped as {tool_id, status, data}. The first live call on the
+    sandbox returned the PNGs as 2.9 MB of base64 text because the split only
+    looked at the top level."""
+    import asyncio
+
+    from metaforge.mcp.server import UnifiedMcpServer
+    from tool_registry.mcp_server.handlers import ToolManifest
+    from tool_registry.mcp_server.server import McpToolServer
+
+    class _Stub(McpToolServer):
+        def __init__(self) -> None:
+            super().__init__(adapter_id="blender", version="0")
+            self.register_tool(
+                ToolManifest(
+                    tool_id="blender.render",
+                    adapter_id="blender",
+                    name="blender.render",
+                    description="stub",
+                    capability="render",
+                ),
+                self._render,
+            )
+
+        async def _render(self, args: dict[str, Any]) -> dict[str, Any]:
+            png = base64.b64encode(PNG_ISO).decode()
+            return {"images": [{"view": "iso", "png_base64": png}], "engine": "cycles-cpu"}
+
+    raw = asyncio.run(
+        UnifiedMcpServer([_Stub()]).handle_request(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "tools/call",
+                    "params": {"name": "blender.render", "arguments": {}},
+                }
+            )
+        )
+    )
+    content = json.loads(raw)["result"]["content"]
+    assert [b["type"] for b in content] == ["text", "image"]
+    assert base64.b64decode(content[1]["data"]) == PNG_ISO
+    assert content[1]["mimeType"] == "image/png"
+    assert "png_base64" not in content[0]["text"]
+    text = json.loads(content[0]["text"])
+    assert text["data"]["images"] == [{"view": "iso", "content_index": 1}]
+
+
+async def test_a_converted_step_is_rendered_z_up(tmp_path: Path) -> None:
+    """The converter keeps CAD's Z-up axes in its GLB (FORGE-621); the first
+    live render showed a table lying on its side until this was passed."""
+    step, mesh = _wp(tmp_path, "table", "step"), _wp(tmp_path, "scan", "glb")
+    bridge = _Blender()
+    render = make_work_product_renderer(
+        _Twin(step, mesh),
+        mcp_bridge=bridge,
+        step_converter=lambda content, filename: b"glb",
+        blob_writer=_writer({}),
+    )
+    await render(work_product_id=str(step.id), store=False)
+    await render(work_product_id=str(mesh.id), store=False)
+    assert bridge.calls[0][1]["model_up_axis"] == "z"
+    assert "model_up_axis" not in bridge.calls[1][1]

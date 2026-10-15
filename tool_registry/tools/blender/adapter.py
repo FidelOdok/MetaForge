@@ -50,13 +50,25 @@ _MODEL_PROPS: dict[str, Any] = {
     },
     "model_base64": {"type": "string", "description": "The mesh file itself, base64."},
     "model_format": {"type": "string", "enum": list(MESH_FORMATS)},
+    "model_up_axis": {
+        "type": "string",
+        "enum": ["y", "z"],
+        "description": (
+            "Which axis is up in a glTF/GLB: y (the glTF convention, the default) or z (a "
+            "file written in CAD's Z-up axes, as MetaForge's STEP converter does). STL, "
+            "OBJ and PLY are always read Z-up."
+        ),
+    },
 }
 _SCENE_PROPS: dict[str, Any] = {
     "colours": {
         "type": "object",
         "description": (
-            "Override part colours: {part-name substring: [r, g, b, a]} in 0..1. Parts not "
-            "named keep the colours the model carries (from its STEP)."
+            "Override part colours: {part-name substring: [r, g, b, a]} in 0..1, sRGB (as a "
+            "colour picker or a hex code gives it), or {rgba, roughness, metallic} to set "
+            "the surface too (both 0..1). Parts not named keep the colours the model "
+            "carries (from its STEP). A name that matches no part is reported in "
+            "unmatched_colours."
         ),
     },
     "background": {
@@ -172,15 +184,42 @@ class BlenderServer(McpToolServer):
             return path
         raise ValueError("give input_file (in the workspace) or model_base64 with model_format")
 
+    @staticmethod
+    def _surface(value: Any) -> dict[str, Any]:
+        """One part's colour: [r, g, b, a], or {rgba, roughness, metallic}; all 0..1."""
+
+        def unit(x: Any) -> bool:
+            return isinstance(x, int | float) and not isinstance(x, bool) and 0 <= x <= 1
+
+        surface = value if isinstance(value, dict) else {"rgba": value}
+        rgba = surface.get("rgba")
+        if not (isinstance(rgba, list) and len(rgba) == 4 and all(unit(c) for c in rgba)):
+            raise ValueError(
+                "colours must map a part name to [r, g, b, a] in 0..1, or to "
+                "{rgba, roughness, metallic}"
+            )
+        out: dict[str, Any] = {"rgba": [float(c) for c in rgba]}
+        for key in ("roughness", "metallic"):
+            if surface.get(key) is not None:
+                if not unit(surface[key]):
+                    raise ValueError(f"colours: {key} must be between 0 and 1")
+                out[key] = float(surface[key])
+        unknown = set(surface) - {"rgba", "roughness", "metallic"}
+        if unknown:
+            raise ValueError(f"colours: unknown fields {', '.join(sorted(unknown))}")
+        return out
+
     def _scene(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        colours = arguments.get("colours") or {}
-        if not isinstance(colours, dict) or not all(
-            isinstance(v, list) and len(v) == 4 and all(0 <= float(c) <= 1 for c in v)
-            for v in colours.values()
-        ):
+        raw = arguments.get("colours") or {}
+        if not isinstance(raw, dict):
             raise ValueError("colours must map a part name to [r, g, b, a] in 0..1")
+        colours = {str(k): self._surface(v) for k, v in raw.items()}
         background = arguments.get("background") or [0.92, 0.92, 0.92]
+        up = str(arguments.get("model_up_axis") or "y").lower()
+        if up not in ("y", "z"):
+            raise ValueError("model_up_axis must be y or z")
         return {
+            "model_up_axis": up,
             "projection": arguments.get("projection") or "perspective",
             "colours": colours,
             "background": [float(c) for c in background],
@@ -241,6 +280,7 @@ class BlenderServer(McpToolServer):
                     "images": images,
                     "mesh_objects": result.get("mesh_objects"),
                     "coloured_objects": result.get("coloured_objects", []),
+                    "unmatched_colours": result.get("unmatched_colours", []),
                     "bounds_min": result.get("bounds_min"),
                     "bounds_max": result.get("bounds_max"),
                     "blender_version": result.get("blender_version"),

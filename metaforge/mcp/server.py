@@ -3048,7 +3048,15 @@ def split_image_content(result: Any) -> tuple[Any, list[dict[str, Any]]]:
     standard ``tools/call`` reply does this: the legacy ``tool/call`` dialect
     the gateway's own bridge uses still gets the base64 in the result.
     """
-    if not isinstance(result, dict) or not isinstance(result.get("images"), list):
+    if not isinstance(result, dict):
+        return result, []
+    # The sidecar's tool result wraps the adapter's output as
+    # {tool_id, status, data}; the images are in data.
+    wrapped = result.get("data")
+    if isinstance(wrapped, dict) and isinstance(wrapped.get("images"), list):
+        lean, lifted = split_image_content(wrapped)
+        return ({**result, "data": lean}, lifted) if lifted else (result, [])
+    if not isinstance(result.get("images"), list):
         return result, []
     blocks: list[dict[str, Any]] = []
     images: list[Any] = []

@@ -626,6 +626,14 @@ content, so a harness such as Claude Code or Codex shows the renders in chat
 instead of reading base64 as text (FORGE-373); the gateway's own bridge uses
 the legacy dialect and still receives the base64.
 
+A render can show parts in their library appearances (FORGE-632):
+`appearances` maps a part name to an appearance, which the renderer reads with
+`library.get_appearance` over the same bridge. The appearance's screen colour
+(sRGB, converted to Blender's scene-linear values in the GPL script) and its
+render roughness and metallic set the part's surface, and the render node
+records the appearance and its version, so a render made before the
+appearance changed is recognisably stale.
+
 **Mechanical components (FORGE-449).** The library also holds mechanical
 parts, in the pattern CAD tools use for them. A *standard* part is built from
 its standard's dimension table (`twin_core/library/standard_parts.py`: ISO

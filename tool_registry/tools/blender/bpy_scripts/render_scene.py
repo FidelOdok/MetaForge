@@ -20,10 +20,13 @@ Usage (the adapter builds this command):
         --python render_scene.py -- /path/to/job.json
 
 Job fields: ``input`` (a .glb/.gltf/.stl/.obj/.ply path), ``out_dir``,
+``model_up_axis`` (``y``, the glTF convention, or ``z`` for a glTF written in
+CAD's Z-up axes; mesh formats are always read Z-up),
 ``views`` (names below, or ``"turntable"`` with ``turntable_frames``),
 ``resolution`` [w, h], ``samples``, ``projection`` (perspective or
 orthographic), ``transparent`` (bool), ``background`` [r, g, b],
-``colours`` ({object-name substring: [r, g, b, a]}), ``save_blend`` (bool).
+``colours`` ({object-name substring: {rgba, roughness?, metallic?}}, rgba in
+sRGB 0..1, as a colour picker or a hex code gives it), ``save_blend`` (bool).
 A ``result.json`` in ``out_dir`` lists what was written.
 """
 
@@ -33,7 +36,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 VIEWS = {
     "iso": (1.0, -1.0, 0.8),
@@ -58,10 +61,19 @@ def clear_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
-def import_model(path):
+def import_model(path, up_axis="Y"):
     ext = os.path.splitext(path)[1].lower()
     if ext in (".glb", ".gltf"):
         bpy.ops.import_scene.gltf(filepath=path)
+        if up_axis == "Z":
+            # The file is Z-up despite the glTF convention (MetaForge's STEP
+            # converter keeps CAD's axes). The importer turned it +90 degrees
+            # about X as if it were Y-up; turn the roots back.
+            undo = Matrix.Rotation(-math.pi / 2, 4, "X")
+            for obj in bpy.context.scene.objects:
+                if obj.parent is None:
+                    obj.matrix_world = undo @ obj.matrix_world
+            bpy.context.view_layer.update()
     # CAD exports are Z-up; glTF is Y-up by its spec and its importer
     # converts. The mesh formats default to Y-up, so say Z-up explicitly.
     elif ext == ".stl":
@@ -89,21 +101,39 @@ def bounds(meshes):
     return lo, hi
 
 
+def srgb_to_linear(c):
+    """A display sRGB channel as Blender's scene-linear value (IEC 61966-2-1)."""
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
 def apply_colours(meshes, colours):
+    """Give each mesh whose name contains a key that key's surface.
+
+    Returns the objects coloured and the keys that matched no object.
+    """
     applied = []
+    used = set()
     for obj in meshes:
-        for key, rgba in colours.items():
+        for key, surface in colours.items():
             if key.lower() in obj.name.lower():
+                r, g, b, a = surface["rgba"]
                 mat = bpy.data.materials.new(name=f"metaforge_{key}")
                 mat.use_nodes = True
                 bsdf = mat.node_tree.nodes.get("Principled BSDF")
                 if bsdf is not None:
-                    bsdf.inputs["Base Color"].default_value = tuple(rgba)
+                    # Node colours are scene-linear; the given colour is sRGB.
+                    linear = tuple(srgb_to_linear(c) for c in (r, g, b))
+                    bsdf.inputs["Base Color"].default_value = (*linear, a)
+                    if surface.get("roughness") is not None:
+                        bsdf.inputs["Roughness"].default_value = surface["roughness"]
+                    if surface.get("metallic") is not None:
+                        bsdf.inputs["Metallic"].default_value = surface["metallic"]
                 obj.data.materials.clear()
                 obj.data.materials.append(mat)
                 applied.append(obj.name)
+                used.add(key)
                 break
-    return applied
+    return applied, sorted(set(colours) - used)
 
 
 def setup_world(background):
@@ -202,8 +232,8 @@ def main():
     out_dir = job["out_dir"]
     os.makedirs(out_dir, exist_ok=True)
     clear_scene()
-    meshes = import_model(job["input"])
-    applied = apply_colours(meshes, job.get("colours") or {})
+    meshes = import_model(job["input"], str(job.get("model_up_axis") or "y").upper())
+    applied, unmatched = apply_colours(meshes, job.get("colours") or {})
     lo, hi = bounds(meshes)
     centre = (lo + hi) / 2.0
     radius = max((hi - lo).length / 2.0, 1e-6)
@@ -227,6 +257,7 @@ def main():
         "blend": blend,
         "mesh_objects": len(meshes),
         "coloured_objects": applied,
+        "unmatched_colours": unmatched,
         "bounds_min": list(lo),
         "bounds_max": list(hi),
         "blender_version": bpy.app.version_string,
