@@ -66,6 +66,30 @@ MATERIAL_FAMILIES = [
     "other",
 ]
 
+#: FORGE-631: an appearance is filtered by its finish.
+APPEARANCE_FINISHES = [
+    "as_made",
+    "painted",
+    "powder_coated",
+    "anodised",
+    "plated",
+    "moulded_in_colour",
+    "printed",
+    "textured",
+    "polished",
+    "brushed",
+    "bead_blasted",
+    "other",
+]
+_APPEARANCE = (
+    "colour is {system (ral, pantone, ncs, supplier or custom), code (e.g. RAL 9005; not "
+    "for custom), name, srgb_hex (#RRGGBB, the on-screen value), source_kind, source_ref}: "
+    "a screen sRGB of a RAL or Pantone code is an approximation, so source it like any "
+    "value. properties is an object keyed by name: gloss_gu_60 (GU, ISO 2813 at 60 deg), "
+    "coating_thickness_um, surface_roughness_ra_um (um), render_roughness and "
+    "render_metallic (0..1, how a renderer draws it: usually user or assumption). "
+)
+
 _SOURCES = (
     "Every value is {value, unit, source_kind, source_ref}. source_kind is standard, "
     "datasheet, manufacturer_spec, supplier or measurement (each needs source_ref: the "
@@ -108,6 +132,7 @@ def catalog_tool_ids() -> set[str]:
         ("process", "processes"),
         ("material", "materials"),
         ("component", "components"),
+        ("appearance", "appearances"),
     ):
         ids |= {
             f"library.list_{plural}",
@@ -182,6 +207,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
         ("process", "processes", PROCESS_FAMILIES),
         ("material", "materials", MATERIAL_FAMILIES),
         ("component", "components", COMPONENT_FAMILIES),
+        ("appearance", "appearances", APPEARANCE_FINISHES),
     ):
 
         async def list_(args: dict[str, Any], kind: str = kind) -> dict[str, Any]:
@@ -205,8 +231,8 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             (
                 f"The {plural} in the library with every "
                 f"{'rule' if kind == 'process' else 'property'} and its source; family "
-                "narrows the list. Read this before choosing a "
-                f"{kind} so the choice rests on recorded figures."
+                f"{'(the finish) ' if kind == 'appearance' else ''}narrows the list. Read "
+                f"this before choosing a {kind} so the choice rests on recorded figures."
             ),
             {"type": "object", "properties": {"family": {"type": "string", "enum": families}}},
             list_,
@@ -218,7 +244,31 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             ref_schema,
             get_,
         )
-        if kind == "component":
+        required = ["name", "family"]
+        if kind == "appearance":
+            register_desc = (
+                "Add an appearance (colour, material and finish): name (identifier, e.g. "
+                "black_anodised_6061), title, finish, colour, texture (a texture standard "
+                "reference, e.g. VDI 3400 Ref 27), properties, materials and processes "
+                "(library names it applies to) and suppliers [{supplier, sku, url}]. "
+                + _APPEARANCE
+                + _SOURCES
+                + " Held for the person's approval."
+            )
+            register_props: dict[str, Any] = {
+                "name": {"type": "string"},
+                "title": {"type": "string"},
+                "finish": {"type": "string", "enum": families},
+                "colour": {"type": "object"},
+                "texture": {"type": "string"},
+                "properties": {"type": "object"},
+                "materials": {"type": "array", "items": {"type": "string"}},
+                "processes": {"type": "array", "items": {"type": "string"}},
+                "suppliers": {"type": "array", "items": {"type": "object"}},
+                "notes": {"type": "string"},
+            }
+            required = ["name", "finish", "colour"]
+        elif kind == "component":
             register_desc = (
                 "Add a mechanical component: name (identifier), title, family, origin "
                 "(standard: dimensions from a standard's table, standard required; purchased: "
@@ -229,7 +279,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 "build the entry with library.standard_part and register what it returns. "
                 "Held for the person's approval."
             )
-            register_props: dict[str, Any] = {
+            register_props = {
                 "name": {"type": "string"},
                 "title": {"type": "string"},
                 "family": {"type": "string", "enum": families},
@@ -283,7 +333,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             f"library.register_{kind}",
             f"Register {kind.title()}",
             register_desc,
-            {"type": "object", "properties": register_props, "required": ["name", "family"]},
+            {"type": "object", "properties": register_props, "required": required},
             register_,
         )
         tool(
@@ -298,6 +348,8 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                     "name) or notes.",
                     "component": "title, specs (merged by name), geometry, material, "
                     "suppliers (replaced) or notes.",
+                    "appearance": "title, finish, colour (replaced), texture, properties "
+                    "(merged by name), materials, processes, suppliers (replaced) or notes.",
                 }[kind]
                 + " The old version is kept. Held for the person's approval."
             ),

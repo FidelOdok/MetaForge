@@ -238,7 +238,9 @@ Two more sources feed the package's skills (FORGE-533):
   properties, each sourced, and uses them in a flow (FORGE-451, FORGE-446).
   `mechanical-components` builds standard screws, nuts, washers and
   bearings from their standards' tables and records purchased parts with
-  their CAD licence (FORGE-449).
+  their CAD licence (FORGE-449). `colour-material-finish` records a part's
+  colour, finish and texture as a library appearance, the colour named in
+  its colour system with a sourced screen value (FORGE-631).
   These carry their own frontmatter and ship verbatim.
 
 A test checks that every tool a shipped skill names is one the repo

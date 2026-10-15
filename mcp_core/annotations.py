@@ -138,6 +138,9 @@ READ_ONLY: frozenset[str] = frozenset(
         "library.list_components",
         "library.get_component",
         "library.standard_part",
+        # FORGE-631: appearance (colour, material, finish) reads.
+        "library.list_appearances",
+        "library.get_appearance",
         # FORGE-451 step 3: reads the printer's controller; registers nothing.
         "library.discover_machine",
         # FORGE-451 step 4: asks the machine about a job; writes nothing.
@@ -352,6 +355,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "library.update_material",
         "library.register_component",
         "library.update_component",
+        "library.register_appearance",
+        "library.update_appearance",
         # Records one evidence entity from the machine's own report.
         "library.record_job_result",
         # FORGE-427: a quote is recorded in the twin; nothing is bought.
