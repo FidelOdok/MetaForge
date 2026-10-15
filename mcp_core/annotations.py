@@ -141,6 +141,9 @@ READ_ONLY: frozenset[str] = frozenset(
         # FORGE-631: appearance (colour, material, finish) reads.
         "library.list_appearances",
         "library.get_appearance",
+        # FORGE-635: ergonomic limit reads.
+        "library.list_ergonomic_limits",
+        "library.get_ergonomic_limit",
         # FORGE-451 step 3: reads the printer's controller; registers nothing.
         "library.discover_machine",
         # FORGE-451 step 4: asks the machine about a job; writes nothing.
@@ -357,6 +360,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "library.update_component",
         "library.register_appearance",
         "library.update_appearance",
+        "library.register_ergonomic_limit",
+        "library.update_ergonomic_limit",
         # Records one evidence entity from the machine's own report.
         "library.record_job_result",
         # FORGE-427: a quote is recorded in the twin; nothing is bought.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 ErgoKind = Literal[
     "grip_diameter",
@@ -56,6 +56,32 @@ class ErgoLimit(BaseModel):
     max: float | None = None
     population: str = Field(..., min_length=1, description="Who it is for, e.g. 'UK adults 5-95%'")
     source_ref: str = Field(..., min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_library_entry(cls, data: object) -> object:
+        """Accept a library ergonomic_limit entry as it is (FORGE-635).
+
+        ``library.list_ergonomic_limits`` returns ``limit_kind`` and the
+        source separately; the entry's name and version are kept in the
+        source so a finding cites the exact library record.
+        """
+        if (
+            isinstance(data, dict)
+            and "limit_kind" in data
+            and data.get("kind") in (None, "ergonomic_limit")
+        ):
+            ref = str(data.get("source_ref") or data.get("source_kind") or "")
+            if data.get("name"):
+                ref = f"{ref} [{data['name']} v{data.get('version', 1)}]"
+            return {
+                "kind": data["limit_kind"],
+                "min": data.get("min"),
+                "max": data.get("max"),
+                "population": data.get("population"),
+                "source_ref": ref,
+            }
+        return data
 
 
 class CheckErgonomicsInput(BaseModel):

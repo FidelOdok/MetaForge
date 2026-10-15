@@ -684,6 +684,26 @@ figure and an assumed one is flagged for review. Entries follow the
 library's rules (fixed units, a source on every value, every change
 versioned) and are filtered by finish. No colours ship built in.
 
+**Ergonomic limits (FORGE-635).** A fifth kind holds design limits for the
+features people touch, press, reach or lift, in `check_ergonomics`' own
+vocabulary and units (grip diameter and width, handle length, finger
+clearance, button size, operating height, reach in mm; actuation force in
+N; product mass in kg). Each entry names what it applies to (a fingertip
+push button, a one-hand bar handle), the population it describes, and its
+source; `family` filters by feature kind, and `check_ergonomics` accepts an
+entry as it is, citing its name and version. A seed of 30 limits from
+MIL-STD-1472H (2020; US Government work, approved for public release) is in
+`twin_core/library/data/ergonomic_limits/`: push button sizes and forces
+(Figure 14), toggle switches (Figure 16), bar handle clearance and grip
+length and minimum handle diameter by item weight (Figure 101), joystick
+grips, work surface heights and control panel reach depth, each read from
+the standard and cited to its clause or figure. Its population is US
+military users (the central 90 percent of males and of females), so
+`check_ergonomics` reports it as a mismatch for other users rather than
+applying it silently. Paywalled standards (ISO 7250, EN 894) are not
+seeded; ANSUR II body measurements are measurements, not limits, and are
+not seeded either.
+
 **Material figures come only from the library (FORGE-446, FORGE-457).** The
 hard-coded material tables are gone (they held sixteen generic names with no
 sources, and an unknown material silently got the density of water). Every

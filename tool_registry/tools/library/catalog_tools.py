@@ -81,6 +81,26 @@ APPEARANCE_FINISHES = [
     "bead_blasted",
     "other",
 ]
+#: FORGE-635: an ergonomic limit is filtered by the feature kind it bounds.
+ERGONOMIC_KINDS = [
+    "grip_diameter",
+    "grip_width",
+    "handle_length",
+    "finger_clearance",
+    "button_size",
+    "actuation_force",
+    "operating_height",
+    "reach_distance",
+    "product_mass",
+]
+_ERGONOMIC = (
+    "limit_kind is the feature it bounds, each in one unit: grip_diameter, grip_width, "
+    "handle_length, finger_clearance, button_size, operating_height, reach_distance (mm), "
+    "actuation_force (N), product_mass (kg). Give min, max or both, applies_to (what kind "
+    "of control or object, e.g. 'finger-operated push button'), population (who the "
+    "figure is for, as the source states it) and the source (source_kind, source_ref: the "
+    "document and its section or table). "
+)
 _APPEARANCE = (
     "colour is {system (ral, pantone, ncs, supplier or custom), code (e.g. RAL 9005; not "
     "for custom), name, srgb_hex (#RRGGBB, the on-screen value), source_kind, source_ref}: "
@@ -133,6 +153,7 @@ def catalog_tool_ids() -> set[str]:
         ("material", "materials"),
         ("component", "components"),
         ("appearance", "appearances"),
+        ("ergonomic_limit", "ergonomic_limits"),
     ):
         ids |= {
             f"library.list_{plural}",
@@ -208,6 +229,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
         ("material", "materials", MATERIAL_FAMILIES),
         ("component", "components", COMPONENT_FAMILIES),
         ("appearance", "appearances", APPEARANCE_FINISHES),
+        ("ergonomic_limit", "ergonomic_limits", ERGONOMIC_KINDS),
     ):
 
         async def list_(args: dict[str, Any], kind: str = kind) -> dict[str, Any]:
@@ -231,8 +253,10 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             (
                 f"The {plural} in the library with every "
                 f"{'rule' if kind == 'process' else 'property'} and its source; family "
-                f"{'(the finish) ' if kind == 'appearance' else ''}narrows the list. Read "
-                f"this before choosing a {kind} so the choice rests on recorded figures."
+                f"{'(the finish) ' if kind == 'appearance' else ''}"
+                f"{'(the feature kind) ' if kind == 'ergonomic_limit' else ''}"
+                f"narrows the list. Read this before choosing a {kind} so the choice rests "
+                "on recorded figures."
             ),
             {"type": "object", "properties": {"family": {"type": "string", "enum": families}}},
             list_,
@@ -245,7 +269,31 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
             get_,
         )
         required = ["name", "family"]
-        if kind == "appearance":
+        register_props: dict[str, Any]
+        if kind == "ergonomic_limit":
+            register_desc = (
+                "Add an ergonomic design limit: name (identifier, e.g. "
+                "mil1472h_pushbutton_finger_diameter), title, limit_kind, min and/or max, "
+                "applies_to, population and its source. "
+                + _ERGONOMIC
+                + _SOURCES
+                + " Held for the person's approval."
+            )
+            register_props = {
+                "name": {"type": "string"},
+                "title": {"type": "string"},
+                "limit_kind": {"type": "string", "enum": families},
+                "min": {"type": "number"},
+                "max": {"type": "number"},
+                "unit": {"type": "string"},
+                "applies_to": {"type": "string"},
+                "population": {"type": "string"},
+                "source_kind": {"type": "string"},
+                "source_ref": {"type": "string"},
+                "notes": {"type": "string"},
+            }
+            required = ["name", "limit_kind", "population", "source_kind"]
+        elif kind == "appearance":
             register_desc = (
                 "Add an appearance (colour, material and finish): name (identifier, e.g. "
                 "black_anodised_6061), title, finish, colour, texture (a texture standard "
@@ -255,7 +303,7 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                 + _SOURCES
                 + " Held for the person's approval."
             )
-            register_props: dict[str, Any] = {
+            register_props = {
                 "name": {"type": "string"},
                 "title": {"type": "string"},
                 "finish": {"type": "string", "enum": families},
@@ -350,6 +398,8 @@ def register_catalog_tools(register: Register, service: CatalogService) -> None:
                     "suppliers (replaced) or notes.",
                     "appearance": "title, finish, colour (replaced), texture, properties "
                     "(merged by name), materials, processes, suppliers (replaced) or notes.",
+                    "ergonomic_limit": "title, applies_to, min, max, population, "
+                    "source_kind, source_ref or notes.",
                 }[kind]
                 + " The old version is kept. Held for the person's approval."
             ),
