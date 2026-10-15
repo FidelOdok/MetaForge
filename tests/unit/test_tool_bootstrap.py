@@ -91,13 +91,14 @@ class TestBootstrapToolRegistry:
         MET-635/636 added the Isaac Sim adapter (2 tools, opt-in like
         freecad/kicad) for 8. FORGE-544 added the in-process power budget
         adapter for 9, FORGE-542 the ngspice adapter for 10, and FORGE-615 the
-        in-process cost estimate adapter for 11.
+        in-process cost estimate adapter for 11, and FORGE-628 the Blender
+        render adapter for 12.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 11
+        assert len(adapters) == 12
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -111,6 +112,7 @@ class TestBootstrapToolRegistry:
             "power",
             "spice",
             "cost",
+            "blender",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -118,7 +120,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 11
+        assert len(registry.list_adapters()) == 12
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -226,12 +228,13 @@ class TestBootstrapToolRegistry:
         calculix.compute_joint_loads for 84. FORGE-282 adds
         calculix.cross_check_thermal_steady_state for 85. FORGE-544 adds
         power.check_budget for 86. FORGE-542 adds spice.run_simulation
-        for 87. FORGE-615 adds cost.estimate_manufacturing for 88.
+        for 87. FORGE-615 adds cost.estimate_manufacturing for 88. FORGE-628 adds
+        blender.render and blender.export_blend for 90.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 88
+        assert len(tools) == 90
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

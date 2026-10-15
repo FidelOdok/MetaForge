@@ -24,6 +24,7 @@ MCP-based tool access layer. Manages containerized tool adapters (KiCad, FreeCAD
   - `spice/` -- Circuit simulation (ngspice)
   - `gazebo/` -- ROS-native physics/dynamics simulation (Gazebo Sim, opt-in)
   - `omniverse_usd/` -- GLB -> OpenUSD conversion (usd-core/trimesh, opt-in, pip-installable no GPU)
+  - `blender/` -- Blender 5.2 LTS headless renders (FORGE-628). GPL boundary: only `bpy_scripts/` (GPL-3.0-or-later) imports `bpy`; the adapter runs Blender as a separate program and exchanges files. Never import `bpy` anywhere else (a test enforces it)
   - `isaac_sim/` -- PhysX physics + RTX rendering, opt-in, dispatches to `nvcr.io/nvidia/isaac-sim` via `compute_providers.resolve_runtime()` (no GPU needed for the adapter container itself)
   - `digikey/`, `mouser/`, `nexar/`, `distributors/` -- Component distributor APIs
 
