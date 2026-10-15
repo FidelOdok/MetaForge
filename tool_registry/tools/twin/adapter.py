@@ -5009,6 +5009,16 @@ class TwinServer(McpToolServer):
                                 "substring: [r, g, b, a]} in 0..1. The model is unchanged."
                             ),
                         },
+                        "appearances": {
+                            "type": "object",
+                            "description": (
+                                "Show parts in library appearances (FORGE-632): {part-name "
+                                "substring: appearance name or id}. The appearance's "
+                                "colour, roughness and metallic are used, and the render "
+                                "records which appearance and version. A part may have a "
+                                "colour or an appearance, not both."
+                            ),
+                        },
                         "store": {
                             "type": "boolean",
                             "description": "Record the images in the twin. Default true.",
@@ -5053,6 +5063,7 @@ class TwinServer(McpToolServer):
                 "transparent",
                 "background",
                 "colours",
+                "appearances",
                 "name",
                 "project_id",
             )

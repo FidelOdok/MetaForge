@@ -125,6 +125,15 @@ async def test_export_blend(server: BlenderServer) -> None:
         ({"input_file": "part.glb", "resolution": [8000, 8000]}, "larger than"),
         ({"input_file": "part.glb", "views": ["turntable"], "turntable_frames": 40}, "at most"),
         ({"input_file": "part.glb", "colours": {"lid": [2, 0, 0, 1]}}, "colours must map"),
+        (
+            {"input_file": "part.glb", "colours": {"lid": {"rgba": [0, 0, 0, 1], "roughness": 3}}},
+            "roughness must be between 0 and 1",
+        ),
+        (
+            {"input_file": "part.glb", "colours": {"lid": {"rgba": [0, 0, 0, 1], "gloss": 1}}},
+            "unknown fields gloss",
+        ),
+        ({"input_file": "part.glb", "model_up_axis": "x"}, "model_up_axis must be y or z"),
     ],
 )
 async def test_bad_requests_are_refused(
@@ -237,3 +246,19 @@ def test_annotations() -> None:
     for tool in ("blender.render", "blender.export_blend"):
         assert tool in READ_ONLY
         assert tool not in OPEN_WORLD
+
+
+def test_a_colour_can_carry_its_surface(server: BlenderServer) -> None:
+    """FORGE-632: an appearance sets roughness and metallic as well as colour."""
+    scene = server._scene(
+        {
+            "colours": {
+                "lid": [0.1, 0.3, 0.8, 1],
+                "base": {"rgba": [0.1, 0.1, 0.1, 1], "roughness": 0.45, "metallic": 0},
+            }
+        }
+    )
+    assert scene["colours"] == {
+        "lid": {"rgba": [0.1, 0.3, 0.8, 1.0]},
+        "base": {"rgba": [0.1, 0.1, 0.1, 1.0], "roughness": 0.45, "metallic": 0.0},
+    }

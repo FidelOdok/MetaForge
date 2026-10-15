@@ -15,6 +15,14 @@
 5. return the images inline as well, so a harness can show them in chat
    (the MCP server sends them as image content, FORGE-373).
 
+A part can be shown in a library **appearance** (FORGE-632): ``appearances``
+maps a part name to an appearance's name or id, looked up with
+``library.get_appearance`` over the same bridge. Its sourced screen colour
+and its render roughness and metallic go to Blender, and the render records
+which appearance, at which version, it used, so a later change to the
+appearance shows the render is out of date. An appearance that does not
+exist is refused; one with an assumed value says so in ``needs_review``.
+
 Nothing falls back quietly. A converter that is down produces a stub GLB
 with no geometry (``ConversionService._write_fallback``); rendering that
 would store a picture of nothing, so it is refused, and the stub is dropped
@@ -66,6 +74,11 @@ _RENDER_TIMEOUT_S = 900
 
 class RenderError(ValueError):
     """This work product could not be rendered; the message says why."""
+
+
+def _hex_to_rgba(value: str) -> list[float]:
+    """``#RRGGBB`` as sRGB [r, g, b, 1] in 0..1 (what blender.render takes)."""
+    return [int(value[i : i + 2], 16) / 255 for i in (1, 3, 5)] + [1.0]
 
 
 def _slug(name: str) -> str:
@@ -131,6 +144,44 @@ def make_work_product_renderer(
 
     write_blob = blob_writer or _default_writer
 
+    async def _appearance_surfaces(
+        appearances: dict[str, str],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Each part's appearance as a blender.render surface, and the record of it."""
+        surfaces: dict[str, Any] = {}
+        used: list[dict[str, Any]] = []
+        for part, ref in appearances.items():
+            try:
+                found = await mcp_bridge.invoke("library.get_appearance", {"ref": str(ref)})
+            except Exception as exc:
+                raise RenderError(f"appearance {ref!r} for {part!r}: {exc}") from exc
+            entry = (found or {}).get("entry") or {}
+            colour = entry.get("colour") or {}
+            if not colour.get("srgb_hex"):
+                raise RenderError(f"appearance {ref!r} has no screen colour to render")
+            surface: dict[str, Any] = {"rgba": _hex_to_rgba(str(colour["srgb_hex"]))}
+            props = entry.get("properties") or {}
+            review = ["colour"] if colour.get("needs_review") else []
+            for key, field in (("render_roughness", "roughness"), ("render_metallic", "metallic")):
+                if isinstance(props.get(key), dict):
+                    surface[field] = float(props[key]["value"])
+                    if props[key].get("needs_review"):
+                        review.append(key)
+            surfaces[str(part)] = surface
+            used.append(
+                {
+                    "part": str(part),
+                    "appearance": entry.get("name"),
+                    "appearance_id": entry.get("id"),
+                    "version": entry.get("version"),
+                    "finish": entry.get("finish"),
+                    "colour": " ".join(p for p in (colour.get("code"), colour.get("name")) if p),
+                    "srgb_hex": colour.get("srgb_hex"),
+                    "needs_review": review,
+                }
+            )
+        return surfaces, used
+
     async def render(
         *,
         work_product_id: str,
@@ -157,6 +208,16 @@ def make_work_product_renderer(
                 detail = getattr(exc, "detail", None) or str(exc)
                 raise RenderError(f"{wp.name!r} has no readable model file: {detail}") from exc
 
+            appearances = options.pop("appearances", None) or {}
+            if not isinstance(appearances, dict):
+                raise RenderError("appearances must map a part name to an appearance name")
+            surfaces, used = await _appearance_surfaces(appearances)
+            clash = sorted(set(surfaces) & set(options.get("colours") or {}))
+            if clash:
+                raise RenderError(
+                    f"{', '.join(clash)} given both a colour and an appearance; give one"
+                )
+
             fmt = _format_of(wp, filename)
             span.set_attribute("render.source_format", fmt)
             if fmt in CAD_FORMATS:
@@ -174,8 +235,14 @@ def make_work_product_renderer(
             arguments: dict[str, Any] = {
                 key: options[key] for key in _PASS_THROUGH if options.get(key) is not None
             }
+            if surfaces:
+                arguments["colours"] = {**(arguments.get("colours") or {}), **surfaces}
             arguments["model_base64"] = base64.b64encode(model).decode("ascii")
             arguments["model_format"] = model_format
+            if fmt in CAD_FORMATS:
+                # The converter keeps CAD's Z-up axes in its GLB (the dashboard
+                # viewer turns it the same way, FORGE-621).
+                arguments["model_up_axis"] = "z"
             try:
                 result = await mcp_bridge.invoke(
                     "blender.render", arguments, timeout=_RENDER_TIMEOUT_S
@@ -197,6 +264,8 @@ def make_work_product_renderer(
                 "samples": result.get("samples"),
                 "engine": result.get("engine"),
                 "blender_version": result.get("blender_version"),
+                "appearances": used,
+                "unmatched_colours": result.get("unmatched_colours", []),
             }
             response: dict[str, Any] = {
                 "source_work_product_id": str(source_id),
