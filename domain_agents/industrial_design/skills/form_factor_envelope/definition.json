@@ -1,0 +1,35 @@
+{
+  "name": "form_factor_envelope",
+  "version": "0.1.0",
+  "domain": "industrial_design",
+  "agent": "industrial_design",
+  "description": "The smallest outer envelope of a product from its internal components (sizes and either positions or a stacking axis), the internal clearance and the wall thickness, with its volumes and fill ratio, checked against a sourced maximum envelope when one is given",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "library.process_limits",
+      "capability": "material_process_library",
+      "required": false
+    },
+    {
+      "tool_id": "library.machine_limits",
+      "capability": "machine_library",
+      "required": false
+    },
+    {
+      "tool_id": "freecad.measure",
+      "capability": "measure",
+      "required": false
+    }
+  ],
+  "input_schema": "schema.FormFactorEnvelopeInput",
+  "output_schema": "schema.FormFactorEnvelopeOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": true,
+  "tags": [
+    "industrial_design",
+    "form_factor",
+    "envelope"
+  ]
+}
