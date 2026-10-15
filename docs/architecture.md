@@ -588,6 +588,33 @@ processes, materials by the stated stock names), or failing that the
 library's entries up to fifteen, and says which of the three it did. A
 library with no entries leaves the context text as it was.
 
+**Blender renders, and the GPL boundary (FORGE-627, FORGE-628).** Industrial
+design reviews need to see a product, so MetaForge renders models with
+Blender 5.2.2 LTS in its own container (`blender-adapter`, port 8202):
+`blender.render` returns studio PNGs (named views and a turntable, Cycles on
+the CPU, headless) and `blender.export_blend` returns the staged scene.
+
+Blender is GPL (version 2 or later; binaries are distributed under GPL
+version 3), and blender.org states that scripts using its Python API must be
+GPL when published. So the boundary is drawn in code:
+
+- everything that runs inside Blender is `tool_registry/tools/blender/
+  bpy_scripts/`, licensed GPL-3.0-or-later with its own `LICENSE`;
+- the adapter (MetaForge code) never imports `bpy`; it starts Blender as a
+  separate program (`blender --background --python ... -- job.json`) and
+  they exchange only files: a mesh and a job JSON in, PNGs, a .blend and a
+  result JSON out;
+- a test fails if any MetaForge module outside `bpy_scripts/` imports `bpy`
+  or `mathutils`;
+- the image installs the unmodified blender.org build, checked against its
+  published SHA-256, keeps Blender's licence files, and names the matching
+  source (`tool_registry/tools/blender/BLENDER_NOTICE.md`).
+
+Renders and .blend files are the user's ("What you create with Blender is
+your sole property", blender.org). Models are meshes: a STEP is converted to
+GLB first (the OCCT converter), and OBJ, STL and PLY are read Z-up, the CAD
+convention.
+
 **Mechanical components (FORGE-449).** The library also holds mechanical
 parts, in the pattern CAD tools use for them. A *standard* part is built from
 its standard's dimension table (`twin_core/library/standard_parts.py`: ISO

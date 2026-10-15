@@ -49,6 +49,8 @@ services:
       - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
       # FORGE-542: ngspice is only in spice-adapter's image.
       - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
+      # FORGE-628: Blender (GPL) runs only in blender-adapter's own image.
+      - METAFORGE_ADAPTER_BLENDER_URL=http://blender-adapter:8202
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/onboarding.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -479,7 +481,7 @@ services:
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
-      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender
       --allow-twin-mutations
       --capture-sessions
     ports:
@@ -544,6 +546,8 @@ services:
       - METAFORGE_ADAPTER_CALCULIX_URL=http://calculix-adapter:8200
       # FORGE-542: ngspice is only in spice-adapter's image.
       - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
+      # FORGE-628: Blender (GPL) runs only in blender-adapter's own image.
+      - METAFORGE_ADAPTER_BLENDER_URL=http://blender-adapter:8202
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       # MET-495: same MinIO config as the gateway so twin.record_decision can
@@ -737,6 +741,40 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── Blender Adapter (FORGE-628: headless renders, Blender 5.2 LTS) ─
+  # Blender is GPL. It runs here, as a separate program; only
+  # tool_registry/tools/blender/bpy_scripts/ (GPL-3.0-or-later) runs inside
+  # it. See tool_registry/tools/blender/BLENDER_NOTICE.md.
+  blender-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/blender/Dockerfile
+    image: ghcr.io/fidelodok/metaforge-blender-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "8202:8202"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - BLENDER_WORK_DIR=/workspace
+      - BLENDER_BINARY=blender
+      - MCP_PORT=8202
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "python3.12", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8202/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     networks:
       - metaforge
     restart: unless-stopped

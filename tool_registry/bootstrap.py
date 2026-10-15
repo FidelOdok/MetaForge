@@ -96,6 +96,16 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.gazebo.config",
         "config_class": "GazeboConfig",
     },
+    # FORGE-628: Blender 5.2 LTS renders. Registers regardless so tools/list
+    # is stable; without METAFORGE_ADAPTER_BLENDER_URL (the blender-adapter
+    # container) the handlers say Blender is not installed here. Blender is
+    # GPL: this process never imports bpy (see tools/blender/BLENDER_NOTICE.md).
+    "blender": {
+        "module": "tool_registry.tools.blender.adapter",
+        "class": "BlenderServer",
+        "config_module": "tool_registry.tools.blender.config",
+        "config_class": "BlenderConfig",
+    },
     # MET-634: opt-in like freecad/kicad above -- needs the 'omniverse-usd'
     # extra (usd-core, trimesh, scipy; plain PyPI wheels, no GPU/conda).
     # Adapter registers regardless so tools/list is stable; handlers raise

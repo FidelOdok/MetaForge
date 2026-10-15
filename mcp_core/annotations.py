@@ -117,6 +117,10 @@ READ_ONLY: frozenset[str] = frozenset(
         "web.search",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
+        # FORGE-628: renders and a staged .blend are returned inline and the
+        # scratch directory removed; nothing is left behind.
+        "blender.render",
+        "blender.export_blend",
         # FORGE-615: arithmetic over the caller's figures.
         "cost.estimate_manufacturing",
         # FORGE-451: machine library reads.
