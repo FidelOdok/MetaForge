@@ -212,7 +212,7 @@ single `event: done` block.
 
 `integrations/codex/` is a generated Codex plugin (build output of
 `scripts/build_integrations.py`). It brings the MCP server, an `AGENTS.md`
-and the same skills as the Claude Code package: the 30 engineering skills,
+and the same skills as the Claude Code package: the 35 engineering skills,
 shipped from each skill's detailed `PLUGIN.md`, plus the
 `intent-to-verified-design` lifecycle skill (FORGE-533). Codex has no slash
 commands, so the lifecycle rules (never use a value without a source, found

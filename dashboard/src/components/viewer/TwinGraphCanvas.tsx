@@ -46,6 +46,7 @@ const DOMAIN_COLOR: Record<string, string> = {
   simulation: 'var(--mf-c-a78bfa)',
   compliance: 'var(--mf-c-f472b6)',
   supply_chain: 'var(--mf-c-34d399)',
+  industrial_design: 'var(--mf-c-86cfff)',
 };
 
 function domainColor(domain: string) {

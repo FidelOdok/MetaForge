@@ -1032,6 +1032,7 @@ graph TB
         ELEC["Electronics Agent"]
         FW["Firmware Agent"]
         SIM["Simulation Agent"]
+        ID["Industrial Design Agent"]
         MORE["... (1 per discipline)"]
     end
 
@@ -1072,8 +1073,8 @@ graph TB
     TEMP --> DAG
     TEMP --> SCHED
     TEMP --> ITER
-    SCHED --> MECH & ELEC & FW & SIM & MORE
-    MECH & ELEC & FW & SIM --> REG
+    SCHED --> MECH & ELEC & FW & SIM & ID & MORE
+    MECH & ELEC & FW & SIM & ID --> REG
     REG --> LOAD
     REG --> SCHEMA
     REG --> BRIDGE
@@ -1081,7 +1082,7 @@ graph TB
     CLIENT --> PROTO
     PROTO --> TREG
     TREG --> CALC & FCAD & KICAD & SPICE
-    MECH & ELEC & FW & SIM --> NEO
+    MECH & ELEC & FW & SIM & ID --> NEO
     NEO --> VER
     NEO --> CONST
     GW -.-> KAFKA
@@ -1194,6 +1195,32 @@ Each agent is a specialist for exactly one engineering discipline (1:1 ratio). A
 | Tools | Skills registered as PydanticAI tools via the Skill Registry |
 | State | Stateless — all persistent state lives in the Digital Twin |
 | Communication | Via Temporal workflows (agent-to-agent) and Kafka events |
+
+**Industrial design (FORGE-627, FORGE-633).** The Planner's discipline #2
+(form factor, ergonomics, DFM-aware aesthetics), scheduled there for Phase 2,
+now has its agent: `domain_agents/industrial_design/`. Its three skills are
+deterministic and carry no built-in data:
+
+- `form_factor_envelope`: the smallest outer envelope for the product's
+  contents (component boxes, positioned or stacked), adding the internal
+  clearance and the wall, with volumes, fill ratio and overlaps, checked in
+  any orientation against a sourced maximum envelope;
+- `check_ergonomics`: grip diameter and width, handle length, finger
+  clearance, button size, actuation force, operating height, reach and
+  hand-held mass against limits that each name their population and source
+  (a cited anthropometric dataset or ergonomics guidance); a limit for a
+  different population than the intended users is reported;
+- `check_cmf_compatibility`: each part's library appearance against its
+  material, using only the materials the appearance records, with the
+  finishing processes the choices need and any assumed values to review.
+
+A missing value or limit is `unknown`, never a pass. The `industrial_design`
+tool profile (and `DISCIPLINE_PROFILES` entry) gives a phase the renders,
+appearances, materials, processes and machine limits, model measurement and
+value sourcing; chat exposes the three skills beside mechanical's, and a
+project whose description speaks of form factor, ergonomics or finishes (or
+that holds renders) is scoped to the discipline. Flow templates do not yet
+include an industrial design phase.
 
 ### 5.4 Skill System (Layer 3)
 

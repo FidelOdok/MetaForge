@@ -307,6 +307,35 @@ PROFILES: dict[str, frozenset[str]] = {
         # FORGE-615: a rough cost before any quote exists.
         "cost.estimate_manufacturing",
     },
+    # FORGE-633: industrial design (the Planner's discipline #2): form factor,
+    # ergonomics and DFM-aware finishes. Renders a design in its library
+    # appearances, reads materials, processes and machines for what a finish
+    # or a wall can be, measures the model, and sources ergonomic limits. No
+    # CAD authoring: the envelope it fixes is what mechanical design draws.
+    "industrial_design": _BASE
+    | {
+        "twin.render_work_product",
+        "library.list_appearances",
+        "library.get_appearance",
+        "library.register_appearance",
+        "library.update_appearance",
+        "library.list_materials",
+        "library.get_material",
+        "library.process_limits",
+        "library.machine_limits",
+        "freecad.measure",
+        "freecad.describe_model",
+        "freecad.describe_step_file",
+        "knowledge.extract",
+        "memory.retrieve_similar_experience",
+        "web.fetch",
+        "web.search",
+        "twin.record_claim",
+        "twin.query_cypher",
+        "twin.record_constraint_set",
+        "twin.record_document",
+        "twin.record_engineering_entity",
+    },
     "client_run": _BASE
     | {
         "flow.list",
@@ -360,6 +389,7 @@ DISCIPLINE_PROFILES: dict[str, str] = {
     "supply_chain": "electronics",
     "robotics": "robotics",
     "manufacturing": "manufacturing",
+    "industrial_design": "industrial_design",
 }
 
 #: Slots a phase turn keeps back for the harness's own native tools

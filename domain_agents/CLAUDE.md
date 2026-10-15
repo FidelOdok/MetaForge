@@ -21,6 +21,7 @@ Domain specialist agents -- one per engineering discipline. Each agent uses Pyda
 - `simulation/` -- Simulation and validation agent
 - `compliance/` -- Certification and compliance agent
 - `supply_chain/` -- Supply chain and BOM risk agent
+- `industrial_design/` -- Industrial design agent (FORGE-633): form factor envelope, ergonomics against sourced limits, CMF compatibility
 
 ## Testing
 

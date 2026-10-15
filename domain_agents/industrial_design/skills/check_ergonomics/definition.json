@@ -1,0 +1,25 @@
+{
+  "name": "check_ergonomics",
+  "version": "0.1.0",
+  "domain": "industrial_design",
+  "agent": "industrial_design",
+  "description": "Checks a design's human-contact features (grip diameter and width, handle length, finger clearance, button size, actuation force, operating height, reach, hand-held mass) against limits taken from sourced anthropometric data or ergonomic guidance for a stated user population, reporting pass, fail or unknown per feature and a fits / does not fit / incomplete verdict",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "freecad.measure",
+      "capability": "measure",
+      "required": false
+    }
+  ],
+  "input_schema": "schema.CheckErgonomicsInput",
+  "output_schema": "schema.CheckErgonomicsOutput",
+  "timeout_seconds": 30,
+  "retries": 0,
+  "idempotent": true,
+  "tags": [
+    "industrial_design",
+    "ergonomics",
+    "anthropometry"
+  ]
+}

@@ -44,6 +44,7 @@ capability does not exist.
 | `robotics` | 32 | Assemblies, URDF/SDF/USD export, simulators |
 | `mechanical_product` | 36 | A mechanical product end to end (FORGE-479): the FreeCAD session tools (open, sketch, pad/pocket, assembly, export, close), geometry commit, component selection. No promotion tool: promotion is a human authority |
 | `manufacturing` | 38 | Choosing a process before design and the DFM review after it (FORGE-611): web and knowledge sourcing, component search, the machine library reads (`library.list_machines`, `library.get_machine`, `library.machine_limits`, FORGE-451), `library.process_limits` (a library process's rules as DFM limits; the chosen processes and materials are already in the flow context), vendor quotes and handoffs (`vendor.list_connectors`, `vendor.quote`, `vendor.handoffs`, FORGE-427/614; ordering is not in any capped set), a rough cost estimate (`cost.estimate_manufacturing`, FORGE-615), the geometry reads a DFM check can use (`freecad.measure`, `freecad.describe_model`, `freecad.describe_session`, `freecad.list_named_faces`, `twin.evaluate_overhang_metric`) and the records. No CAD authoring |
+| `industrial_design` | 35 | Industrial design (FORGE-633): renders of a work product in its appearances (`twin.render_work_product`), the appearance library (`library.list_appearances`, `library.get_appearance`, `library.register_appearance`, `library.update_appearance`), materials, process and machine limits for what a finish or a wall can be, model measurement (`freecad.measure`, `freecad.describe_model`, `freecad.describe_step_file`) and value sourcing for ergonomic limits (web, `knowledge.extract`). No CAD authoring: the envelope it fixes is what mechanical design draws |
 | `client_run` | 38 | Driving a client-mode run on a harness with a hard tool cap (FORGE-588): start and watch the run, `phase.list_tasks`/`claim`/`submit`, `flow.await_gate`, and value sourcing (`knowledge.extract`, web, component search, the records), and the machine library (`library.list_machines`, `library.machine_limits`). No CAD authoring or solvers: they do not fit beside these |
 
 `all` is not a capped set: it asks for every tool by name (FORGE-588). It is
@@ -1167,7 +1168,7 @@ and reports what came back. It does not read the registration table.
   "profile": {
     "active": "core",
     "served_tool_count": 21,
-    "available": ["core", "electronics", "mechanical", "robotics", "simulation"],
+    "available": ["core", "electronics", "industrial_design", "mechanical", "robotics", "simulation"],
     "detail": "Profile 'core' serves 21 of 100 registered tools on this connection. The rest are not missing and nothing is down -- connect with a different profile to reach them."
   },
   "unreachable_adapters": ["calculix", "freecad"],

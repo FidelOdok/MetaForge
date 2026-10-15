@@ -157,7 +157,7 @@ Routes through `calculix.run_fea`. Captures the run via the MET-331
 ## Install as a plugin
 
 The MCP config below is the manual route. There is also a generated plugin
-that brings the MCP server, the 30 engineering skills, the
+that brings the MCP server, the 35 engineering skills, the
 `intent-to-verified-design` lifecycle skill and the slash commands in one
 install:
 
