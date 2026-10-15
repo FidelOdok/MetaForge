@@ -482,8 +482,9 @@ class TestFlowStateReportsUnknownNotIdle:
         assert body["detail"], "a degraded state with no reason is not actionable"
         # The phases are still listed -- a run whose shape is known and whose
         # progress is not should show the shape.
-        # FORGE-611: mech_v1 gained route_selection and dfm_review.
-        assert len(body["phases"]) == 8
+        # FORGE-611: mech_v1 gained route_selection and dfm_review;
+        # FORGE-634: and industrial_design.
+        assert len(body["phases"]) == 9
         assert {p["status"] for p in body["phases"]} == {"unknown"}
 
     def test_a_plain_run_is_not_pretended_to_have_phases(self, client: TestClient) -> None:

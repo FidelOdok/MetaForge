@@ -132,6 +132,15 @@ TAILORING: list[dict[str, Any]] = [
         "rationale": "outcomes come before tasks",
     },
     {
+        # FORGE-634: mech_v1 carries an industrial design phase. A mounting
+        # bracket is bolted in place and never handled or seen, and its
+        # envelope is already a requirement, so the client drops the phase,
+        # saying why, as a tailored flow may.
+        "op": "drop_phase",
+        "phase": "industrial_design",
+        "rationale": "a mounting bracket nobody holds or sees; its envelope is a requirement",
+    },
+    {
         "op": "set_outcome",
         "phase": "design",
         "value": "bracket geometry within the envelope committed",

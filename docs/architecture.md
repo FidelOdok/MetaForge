@@ -534,6 +534,27 @@ the envelope, volume and mass (`twin.get_node`, `freecad.measure`) and the
 3D-printing overhang (`twin.evaluate_overhang_metric`). The `hardware_v1`
 `manufacturing` phase (electronics, G8) is unchanged.
 
+**Industrial design before mechanical design (FORGE-634).** `hardware_v1`
+(template 1.1.0) and `mech_v1` (template 1.3.0) have an `industrial_design`
+phase, with the `industrial_design` discipline (its tool profile and skill
+cards), placed where the Planner puts the discipline: before mechanical
+design, which depends on the form factor it fixes. In `hardware_v1` it
+follows `concept_selection`; in `mech_v1` it follows `route_selection`, so
+the chosen process's minimum wall is known.
+
+The phase works through the three skills: `form_factor_envelope` from the
+sized contents, clearance and wall (the envelope is recorded with
+`twin.record_constraint_set` for mechanical design to work to);
+`check_ergonomics` against sourced limits for the users the requirements
+state, or a recorded reason that nobody handles the product; and a library
+appearance per visible part checked with `check_cmf_compatibility` (the look
+is the person's choice). Its required deliverable is one `design_decision`
+naming the envelope, the ergonomics verdict, the finishes and every unknown
+or assumed value; the gate (Industrial design review) reads it like any
+other required deliverable. There is no product-type fact yet, so the phase
+runs on every `mech_v1` run as well; a part nobody handles records that, and
+tailoring can drop the phase.
+
 **Vendor connectors (FORGE-427).** Quotes and orders from outside vendors
 go through connectors on the gateway (`api_gateway/vendors/`). Every
 connector is built on one base that guarantees typed failures (never an

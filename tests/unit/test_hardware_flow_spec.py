@@ -29,6 +29,8 @@ def test_hardware_flow_registered_and_ordered() -> None:
         "feasibility",
         "architecture",
         "concept_selection",
+        # FORGE-634: industrial design fixes the form factor before design.
+        "industrial_design",
         "design",
         "electronics",
         "firmware",

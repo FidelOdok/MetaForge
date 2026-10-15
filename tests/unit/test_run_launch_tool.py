@@ -72,10 +72,10 @@ async def test_launcher_creates_and_launches_flow(monkeypatch: pytest.MonkeyPatc
     # phase (G2); FORGE-60 adds G3 (feasibility) right after it; FORGE-73
     # adds concept_selection (G5) right after architecture (G4) -- so
     # hardware_v1 is 11 phases starting intent -> needs -> requirements ->
-    # feasibility.
+    # feasibility. FORGE-634 adds industrial_design before design: 12.
     assert out["phases"][0] == "intent" and out["phases"][1] == "needs"
     assert out["phases"][2] == "requirements" and out["phases"][3] == "feasibility"
-    assert len(out["phases"]) == 11
+    assert len(out["phases"]) == 12
     assert "approval" in out["note"]
 
 
