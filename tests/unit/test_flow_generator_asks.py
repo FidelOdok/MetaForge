@@ -287,7 +287,9 @@ class TestFullContextIsUsed:
         )
         ids = [p.id for p in proposal.definition.phases]
         assert ids.count(ROUTE_SELECTION_PHASE_ID) == 1
-        assert ids.index(ROUTE_SELECTION_PHASE_ID) == ids.index("design") - 1
+        # FORGE-634: industrial design sits between the process choice and design.
+        assert ids.index(ROUTE_SELECTION_PHASE_ID) == ids.index("industrial_design") - 1
+        assert ids.index("industrial_design") == ids.index("design") - 1
         assert all(op.kind is not OperationKind.ADD_ROUTE_SELECTION for op in proposal.operations)
 
     def test_an_undecided_route_becomes_a_gated_decision(self) -> None:

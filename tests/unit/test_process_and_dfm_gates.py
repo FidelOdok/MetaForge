@@ -252,12 +252,18 @@ async def test_a_mech_v1_run_chooses_the_process_first_and_stops_on_a_failed_dfm
         store=store, brain=brain, coordinator=coord, gate_evaluator=_FlowEvaluator(_FAILED)
     )
     task = asyncio.create_task(executor.run(run.id))
-    for _ in range(6):  # intent .. route_selection, design
+    for _ in range(7):  # intent .. route_selection, industrial_design, design
         await wait_for_gate(store, run.id)
         store.submit_approval(run.id, ApprovalDecision.APPROVE)
     await wait_for_gate(store, run.id)
     # The process was chosen before the design, and the DFM gate held the run.
     assert brain.seen.index("route_selection") < brain.seen.index("design")
+    # FORGE-634: industrial design fixes the form factor between the two.
+    assert (
+        brain.seen.index("route_selection")
+        < brain.seen.index("industrial_design")
+        < brain.seen.index("design")
+    )
     assert brain.seen[-1] == "dfm_review"
     reason = store.get(run.id).approval_reason or ""
     assert "NOT READY" in reason and "failing feature" in reason

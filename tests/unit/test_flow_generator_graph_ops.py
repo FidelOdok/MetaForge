@@ -23,7 +23,8 @@ def _op(kind: OperationKind, phase: str, value: object = None) -> Operation:
 
 def test_hardware_v1_tailored_into_parallel_disciplines() -> None:
     # Electronics and firmware no longer wait for mechanical design: both
-    # need only the concept. Verification needs all three.
+    # need only the concept. Verification needs all three. Mechanical design
+    # waits for industrial design (FORGE-634), so electronics runs beside that.
     base = get_flow("hardware_v1")
     ops = [
         _op(OperationKind.SET_DEPENDENCIES, "electronics", ["concept_selection"]),
@@ -34,8 +35,9 @@ def test_hardware_v1_tailored_into_parallel_disciplines() -> None:
     proposal = build_proposal(base, base_version="1", operations=ops)
     assert proposal.valid, proposal.validation.violations
     graph = build_graph(proposal.definition.phases)
-    wave = next(w for w in graph.waves() if "design" in w)
-    assert "electronics" in wave, "design and electronics run in the same wave"
+    wave = next(w for w in graph.waves() if "industrial_design" in w)
+    assert "electronics" in wave, "industrial design and electronics run in the same wave"
+    assert "design" in graph.downstream("industrial_design")
     assert graph.downstream("design") == ["design", "simulation", "manufacturing"]
     electronics = next(p for p in proposal.definition.phases if p.id == "electronics")
     assert electronics.outcome == "schematic and BOM reviewed"
