@@ -25,11 +25,20 @@ flagged for review; nothing is defaulted; every change keeps the previous
 version. No property or rule ships built in: entries are recorded with
 their sources.
 
+FORGE-631 adds a fourth kind, an **appearance**: a colour, material and
+finish (CMF) specification an industrial designer picks for a part: the
+finish ("anodised", "powder_coated", "moulded_in_colour"), a colour named in
+a colour system (a RAL or Pantone code, or a supplier's own name) with the
+sRGB value used to show it on screen and its source, a texture standard
+reference, measurable surface properties (gloss, coating thickness,
+roughness) and the material and process names it applies to.
+
 Layer: stdlib and structlog (twin_core may import nothing above it).
 """
 
 from __future__ import annotations
 
+import builtins
 import json
 import re
 import sqlite3
@@ -57,6 +66,11 @@ __all__ = [
     "CatalogError",
     "CatalogNotFoundError",
     "SqliteCatalog",
+    "APPEARANCE_FINISHES",
+    "APPEARANCE_PROPERTIES",
+    "COLOUR_SYSTEMS",
+    "AppearanceEntry",
+    "summarize_appearance",
     "COMPONENT_FAMILIES",
     "COMPONENT_ORIGINS",
     "COMPONENT_SPECS",
@@ -175,6 +189,38 @@ COMPONENT_SPECS: dict[str, str] = {
     "voltage_v": "V",
 }
 
+#: FORGE-631: how a surface is finished.
+APPEARANCE_FINISHES: tuple[str, ...] = (
+    "as_made",
+    "painted",
+    "powder_coated",
+    "anodised",
+    "plated",
+    "moulded_in_colour",
+    "printed",
+    "textured",
+    "polished",
+    "brushed",
+    "bead_blasted",
+    "other",
+)
+#: Where a colour's name comes from. A screen sRGB of a RAL or Pantone code
+#: is an approximation and is sourced like any other value.
+COLOUR_SYSTEMS: tuple[str, ...] = ("ral", "pantone", "ncs", "supplier", "custom")
+
+#: Measurable surface properties, plus the two render parameters (which
+#: describe how it is drawn, not the part, so they are usually a user's
+#: choice or an assumption). Each has one unit; ``-`` values are 0..1.
+APPEARANCE_PROPERTIES: dict[str, str] = {
+    "gloss_gu_60": "GU",
+    "coating_thickness_um": "um",
+    "surface_roughness_ra_um": "um",
+    "render_roughness": "-",
+    "render_metallic": "-",
+}
+
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
 #: Rule kinds, the same vocabulary as check_manufacturability, plus tolerance.
 #: Each has one unit; a rule in another unit is refused.
 RULE_KINDS: dict[str, str] = {
@@ -245,7 +291,8 @@ class Sourced:
 
 
 def _source(where: str, raw: dict[str, Any]) -> tuple[str, str]:
-    src = raw.get("source") if isinstance(raw.get("source"), dict) else raw
+    nested = raw.get("source")
+    src: dict[str, Any] = nested if isinstance(nested, dict) else raw
     kind = str(src.get("source_kind") or src.get("kind") or "").strip()
     ref = str(src.get("source_ref") or src.get("ref") or "").strip()
     if kind not in SOURCE_KINDS:
@@ -307,6 +354,56 @@ def parse_specs(raw: Any) -> dict[str, Sourced]:
         kind, ref = _source(f"spec {key}", item)
         out[key] = Sourced(value, unit, kind, ref, kind == "assumption")
     return out
+
+
+def parse_appearance_properties(raw: Any) -> dict[str, Sourced]:
+    """Appearance properties: known names, fixed units, a source on each."""
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise CatalogError("properties must be an object keyed by property name")
+    out: dict[str, Sourced] = {}
+    for key, item in raw.items():
+        unit = APPEARANCE_PROPERTIES.get(key)
+        if unit is None:
+            raise CatalogError(
+                f"unknown property '{key}'; known: {', '.join(sorted(APPEARANCE_PROPERTIES))}"
+            )
+        if not isinstance(item, dict):
+            raise CatalogError(f"property {key} must be an object with value, unit and source")
+        if str(item.get("unit") or unit).strip() != unit:
+            raise CatalogError(f"property {key} is in {unit}")
+        value = _number(f"property {key}", item.get("value"), allow_zero=True)
+        if unit == "-" and value > 1:
+            raise CatalogError(f"property {key} is between 0 and 1")
+        kind, ref = _source(f"property {key}", item)
+        out[key] = Sourced(value, unit, kind, ref, kind == "assumption")
+    return out
+
+
+def parse_colour(raw: Any) -> dict[str, Any]:
+    """A colour: its system and code, and the sourced sRGB used on screen."""
+    if not isinstance(raw, dict):
+        raise CatalogError("colour needs system, code (unless custom), srgb_hex and a source")
+    system = str(raw.get("system") or "").strip().lower()
+    if system not in COLOUR_SYSTEMS:
+        raise CatalogError(f"colour.system must be one of {', '.join(COLOUR_SYSTEMS)}")
+    code = str(raw.get("code") or "").strip()
+    if system != "custom" and not code:
+        raise CatalogError(f"a {system} colour needs its code, e.g. RAL 9005")
+    hex_value = str(raw.get("srgb_hex") or "").strip()
+    if not _HEX.match(hex_value):
+        raise CatalogError("colour.srgb_hex must be #RRGGBB")
+    kind, ref = _source("colour", raw)
+    return {
+        "system": system,
+        "code": code,
+        "name": str(raw.get("name") or "").strip(),
+        "srgb_hex": hex_value.upper(),
+        "source_kind": kind,
+        "source_ref": ref,
+        "needs_review": kind == "assumption",
+    }
 
 
 def parse_geometry(raw: Any) -> dict[str, Any]:
@@ -453,6 +550,38 @@ class ComponentEntry:
         return out
 
 
+@dataclass
+class AppearanceEntry:
+    id: str
+    name: str
+    title: str
+    finish: str
+    colour: dict[str, Any]
+    texture: str
+    properties: dict[str, Sourced]
+    materials: list[str]
+    processes: list[str]
+    suppliers: list[dict[str, str]]
+    notes: str = ""
+    version: int = 1
+    updated_at: float = 0.0
+    kind: str = field(default="appearance")
+
+    @property
+    def family(self) -> str:
+        """The finish, so ``list(kind, family=...)`` filters appearances too."""
+        return self.finish
+
+    def as_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        out["properties"] = {k: v.as_dict() for k, v in self.properties.items()}
+        return out
+
+
+def _names(values: Any) -> list[str]:
+    return [str(v).strip().lower() for v in values or [] if str(v).strip()]
+
+
 def _name(value: Any) -> str:
     name = str(value or "").strip().lower()
     if not _NAME.match(name):
@@ -496,6 +625,9 @@ class SqliteCatalog:
         if body.get("kind") == "component":
             specs = {k: Sourced(**v) for k, v in (body.pop("specs", None) or {}).items()}
             return ComponentEntry(specs=specs, **body)
+        if body.get("kind") == "appearance":
+            props = {k: Sourced(**v) for k, v in (body.pop("properties", None) or {}).items()}
+            return AppearanceEntry(properties=props, **body)
         props = {k: Sourced(**v) for k, v in (body.pop("properties", None) or {}).items()}
         return MaterialEntry(properties=props, **body)
 
@@ -525,7 +657,7 @@ class SqliteCatalog:
         entries = [self._load(json.loads(r[0])) for r in rows]
         return [e for e in entries if family is None or e.family == family]
 
-    def history(self, entry_id: str) -> list[dict[str, Any]]:
+    def history(self, entry_id: str) -> builtins.list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT version, changed_at, changed_by FROM catalog_history "
@@ -622,7 +754,7 @@ class SqliteCatalog:
 
     def register(self, kind: str, data: dict[str, Any], *, by: str = "") -> Any:
         now = self._clock()
-        entry: ProcessEntry | MaterialEntry | ComponentEntry
+        entry: ProcessEntry | MaterialEntry | ComponentEntry | AppearanceEntry
         if kind == "process":
             family = str(data.get("family") or "")
             if family not in PROCESS_FAMILIES:
@@ -681,8 +813,26 @@ class SqliteCatalog:
                 notes=str(data.get("notes") or ""),
                 updated_at=now,
             )
+        elif kind == "appearance":
+            finish = str(data.get("finish") or "")
+            if finish not in APPEARANCE_FINISHES:
+                raise CatalogError(f"finish must be one of {', '.join(APPEARANCE_FINISHES)}")
+            entry = AppearanceEntry(
+                id=f"ap_{uuid.uuid4().hex[:12]}",
+                name=_name(data.get("name")),
+                title=str(data.get("title") or data.get("name") or "").strip(),
+                finish=finish,
+                colour=parse_colour(data.get("colour")),
+                texture=str(data.get("texture") or "").strip(),
+                properties=parse_appearance_properties(data.get("properties")),
+                materials=_names(data.get("materials")),
+                processes=_names(data.get("processes")),
+                suppliers=parse_suppliers(data.get("suppliers")),
+                notes=str(data.get("notes") or ""),
+                updated_at=now,
+            )
         else:
-            raise CatalogError("kind must be process, material or component")
+            raise CatalogError("kind must be process, material, component or appearance")
         self._save(entry, by, new=True)
         return entry
 
@@ -693,12 +843,44 @@ class SqliteCatalog:
             allowed = {"title", "machine_kinds", "material_families", "rules", "notes"}
         elif isinstance(entry, ComponentEntry):
             allowed = {"title", "specs", "geometry", "material", "suppliers", "notes"}
+        elif isinstance(entry, AppearanceEntry):
+            allowed = {
+                "title",
+                "finish",
+                "colour",
+                "texture",
+                "properties",
+                "materials",
+                "processes",
+                "suppliers",
+                "notes",
+            }
         else:
             allowed = {"title", "designation", "forms", "properties", "processes", "notes"}
         unknown = set(changes) - allowed
         if unknown:
             raise CatalogError(f"cannot change {', '.join(sorted(unknown))}")
-        if isinstance(entry, ComponentEntry):
+        if isinstance(entry, AppearanceEntry):
+            if "finish" in changes:
+                if changes["finish"] not in APPEARANCE_FINISHES:
+                    raise CatalogError(f"finish must be one of {', '.join(APPEARANCE_FINISHES)}")
+                entry.finish = str(changes["finish"])
+            if "colour" in changes:
+                entry.colour = parse_colour(changes["colour"])
+            if "texture" in changes:
+                entry.texture = str(changes["texture"] or "").strip()
+            if "properties" in changes:
+                entry.properties = {
+                    **entry.properties,
+                    **parse_appearance_properties(changes["properties"]),
+                }
+            if "materials" in changes:
+                entry.materials = _names(changes["materials"])
+            if "processes" in changes:
+                entry.processes = _names(changes["processes"])
+            if "suppliers" in changes:
+                entry.suppliers = parse_suppliers(changes["suppliers"])
+        elif isinstance(entry, ComponentEntry):
             if "specs" in changes:
                 entry.specs = {**entry.specs, **parse_specs(changes["specs"])}
             if "geometry" in changes:
@@ -800,3 +982,24 @@ def summarize_component(entry: ComponentEntry) -> str:
         f" {entry.standard} {entry.size}".rstrip() if entry.standard or entry.size else ""
     )
     return f"{head}: {'; '.join(parts) or 'no specs recorded'}"
+
+
+def summarize_appearance(entry: AppearanceEntry) -> str:
+    """One line: the finish, its colour and how it was sourced."""
+    colour = entry.colour
+    named = " ".join(
+        part for part in (colour.get("code"), colour.get("name")) if part
+    ) or colour.get("system", "")
+    parts = [f"colour {named} ({colour.get('srgb_hex')} on screen)"]
+    if entry.texture:
+        parts.append(f"texture {entry.texture}")
+    parts += [f"{k} {_fmt(v.value)} {v.unit}" for k, v in entry.properties.items()]
+    review = sorted(k for k, v in entry.properties.items() if v.needs_review)
+    if colour.get("needs_review"):
+        review.insert(0, "colour")
+    if review:
+        parts.append(f"assumed, needs review: {', '.join(review)}")
+    head = f"{entry.title or entry.name} [{entry.id}] {entry.finish}" + (
+        f", for {', '.join(entry.materials)}" if entry.materials else ""
+    )
+    return f"{head}: {'; '.join(parts)}"

@@ -183,3 +183,24 @@ async def register_component(body: dict[str, Any], request: Request) -> dict[str
 @router.patch("/components/{ref}")
 async def update_component(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
     return _update("component", ref, body, request)
+
+
+@router.get("/appearances")
+async def list_appearances(family: str | None = None) -> dict[str, Any]:
+    """Appearances (FORGE-631): colour, material and finish; family is the finish."""
+    return _list("appearance", family)
+
+
+@router.get("/appearances/{ref}")
+async def get_appearance(ref: str) -> dict[str, Any]:
+    return _get("appearance", ref)
+
+
+@router.post("/appearances", status_code=201)
+async def register_appearance(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    return _register("appearance", body, request)
+
+
+@router.patch("/appearances/{ref}")
+async def update_appearance(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
+    return _update("appearance", ref, body, request)

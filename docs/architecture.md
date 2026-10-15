@@ -640,6 +640,21 @@ whose OCCT build conflicts with CadQuery's in the CAD adapter. A seed of 69
 common parts (26 screws, 6 nuts, 6 washers, 31 bearings) builds from the
 tables.
 
+**Appearances: colour, material and finish (FORGE-627, FORGE-631).** A fourth
+library kind holds what an industrial designer specifies for a surface: the
+finish (as made, painted, powder coated, anodised, plated, moulded-in colour,
+printed, textured, polished, brushed, bead blasted), the colour, a texture
+reference, measurable surface properties (`gloss_gu_60`,
+`coating_thickness_um`, `surface_roughness_ra_um`), two render parameters
+(`render_roughness`, `render_metallic`, 0 to 1) and the library materials and
+processes it applies to. A colour is named in its colour system (`ral`,
+`pantone`, `ncs`, a `supplier` code, or `custom`) and carries the sRGB used to
+draw it on screen as `srgb_hex`, with its own source: a screen value for a
+RAL or Pantone code is an approximation, so it is sourced like any other
+figure and an assumed one is flagged for review. Entries follow the
+library's rules (fixed units, a source on every value, every change
+versioned) and are filtered by finish. No colours ship built in.
+
 **Material figures come only from the library (FORGE-446, FORGE-457).** The
 hard-coded material tables are gone (they held sixteen generic names with no
 sources, and an unknown material silently got the density of water). Every
