@@ -193,6 +193,7 @@ class TwinServer(McpToolServer):
         metric_evaluator: Any = None,
         thermal_evaluator: Any = None,
         overhang_evaluator: Any = None,
+        work_product_renderer: Any = None,
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
@@ -383,6 +384,10 @@ class TwinServer(McpToolServer):
         # injection seam as every recorder above; None keeps tool_registry
         # free of api_gateway imports.
         self._overhang_evaluator = overhang_evaluator
+        # FORGE-630: an injected async ``render(*, work_product_id, ...)``
+        # (make_work_product_renderer) -- a work product rendered by
+        # blender.render over MCP and kept as a ``render`` work product.
+        self._work_product_renderer = work_product_renderer
         # FORGE-316: an injected async ``execute(ect_id) -> dict``
         # (make_revalidation_executor) -- re-runs exactly the Evidence a
         # committed ECT's real revalidation_plan marked stale, for any
@@ -552,6 +557,8 @@ class TwinServer(McpToolServer):
             self._register_evaluate_thermal_metric()
         if overhang_evaluator is not None:
             self._register_evaluate_overhang_metric()
+        if work_product_renderer is not None:
+            self._register_render_work_product()
         if revalidation_executor is not None:
             self._register_execute_revalidation_plan()
         if sensitivity_ranker is not None:
@@ -4933,6 +4940,130 @@ class TwinServer(McpToolServer):
             build_axis=[float(v) for v in build_axis] if build_axis is not None else None,
             threshold_deg=float(threshold_deg) if isinstance(threshold_deg, (int, float)) else None,
         )
+
+    # ------------------------------------------------------------------
+    # twin.render_work_product (FORGE-630)
+    # ------------------------------------------------------------------
+
+    def _register_render_work_product(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.render_work_product",
+                adapter_id="twin",
+                name="Render Work Product",
+                description=(
+                    "Studio renders of a work product in the twin (a STEP part or "
+                    "assembly, or a mesh) by blender.render: the STEP is converted to "
+                    "GLB the same way the dashboard viewer does, so colours and part "
+                    "names come from the model. Stores the PNGs as a 'render' work "
+                    "product linked to the model (GENERATED_FROM) and returns them as "
+                    "images. Views: iso, front, back, left, right, top, bottom, "
+                    "turntable. store=false renders without recording anything."
+                ),
+                capability="twin_render",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "The work product to render (STEP, GLB, STL, OBJ, PLY).",
+                        },
+                        "views": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "iso",
+                                    "front",
+                                    "back",
+                                    "left",
+                                    "right",
+                                    "top",
+                                    "bottom",
+                                    "turntable",
+                                ],
+                            },
+                            "description": "Default ['iso'].",
+                        },
+                        "turntable_frames": {"type": "integer", "minimum": 1, "maximum": 36},
+                        "resolution": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 64},
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "description": "[width, height]. Default [1280, 960].",
+                        },
+                        "samples": {"type": "integer", "minimum": 1, "maximum": 1024},
+                        "projection": {"type": "string", "enum": ["perspective", "orthographic"]},
+                        "transparent": {"type": "boolean"},
+                        "background": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                        },
+                        "colours": {
+                            "type": "object",
+                            "description": (
+                                "Override part colours for this render only: {part-name "
+                                "substring: [r, g, b, a]} in 0..1. The model is unchanged."
+                            ),
+                        },
+                        "store": {
+                            "type": "boolean",
+                            "description": "Record the images in the twin. Default true.",
+                        },
+                        "name": {"type": "string", "description": "Name of the render node."},
+                        "project_id": {
+                            "type": "string",
+                            "description": "Default: the rendered work product's project.",
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "stored": {"type": "boolean"},
+                        "images": {"type": "array"},
+                        "files": {"type": "array"},
+                        "source_work_product_id": {"type": "string"},
+                        "source_content_hash": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=900),
+            ),
+            handler=self.render_work_product,
+        )
+
+    async def render_work_product(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.render_work_product: 'work_product_id' is required")
+        options = {
+            key: arguments[key]
+            for key in (
+                "views",
+                "turntable_frames",
+                "resolution",
+                "samples",
+                "projection",
+                "transparent",
+                "background",
+                "colours",
+                "name",
+                "project_id",
+            )
+            if arguments.get(key) is not None
+        }
+        result: dict[str, Any] = await self._work_product_renderer(
+            work_product_id=work_product_id,
+            store=arguments.get("store") is not False,
+            **options,
+        )
+        return result
 
     # ------------------------------------------------------------------
     # twin.create_release_package (FORGE-299)

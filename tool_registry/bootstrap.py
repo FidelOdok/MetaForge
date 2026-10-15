@@ -307,6 +307,7 @@ async def bootstrap_tool_registry(
     metric_evaluator: Any = None,
     thermal_evaluator: Any = None,
     overhang_evaluator: Any = None,
+    work_product_renderer: Any = None,
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
@@ -454,6 +455,11 @@ async def bootstrap_tool_registry(
             Evidence, single-tier (no hand-calc-gated escalation like
             metric_evaluator). ``None`` skips registration (same pattern
             as ``document_recorder``).
+        work_product_renderer: Optional async ``render(...)``
+            (make_work_product_renderer, FORGE-630). When supplied,
+            registers ``twin.render_work_product``: a STEP or mesh work
+            product rendered by ``blender.render`` and stored as a
+            ``render`` work product. ``None`` skips registration.
         overhang_evaluator: Optional async ``evaluate_overhang(...)``
             (make_overhang_evidence_recorder, FORGE-273). When supplied,
             registers ``twin.evaluate_overhang_metric`` -- runs a real
@@ -757,6 +763,7 @@ async def bootstrap_tool_registry(
                     metric_evaluator=metric_evaluator,
                     thermal_evaluator=thermal_evaluator,
                     overhang_evaluator=overhang_evaluator,
+                    work_product_renderer=work_product_renderer,
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,
                     promotion_attempter=promotion_attempter,

@@ -306,6 +306,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # metadata -- a pure append, never overwrites the source work
         # product or its joints.
         "twin.create_firmware_scaffold",
+        # FORGE-630: adds a render node linked to the model it shows; the
+        # model itself is never touched. With store=false it records nothing.
+        "twin.render_work_product",
         "twin.optimize_parameter",
         "twin.propose_change",
         "twin.propose_engineering_change",

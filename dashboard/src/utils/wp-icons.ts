@@ -38,6 +38,7 @@ export const WP_TYPE_ICONS: Record<string, string> = {
   technical_drawing: 'square_foot',
   compliance_checklist: 'verified',
   procurement_record: 'receipt_long',
+  render: 'photo_camera',
 };
 
 /** Icon for the few graph-node kinds that aren't `work_product`. */

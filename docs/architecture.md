@@ -615,6 +615,17 @@ your sole property", blender.org). Models are meshes: a STEP is converted to
 GLB first (the OCCT converter), and OBJ, STL and PLY are read Z-up, the CAD
 convention.
 
+`twin.render_work_product` (FORGE-630) renders a work product in the twin:
+it resolves the stored model, converts a STEP with the same OCCT converter
+the dashboard viewer uses, calls `blender.render` over MCP, and keeps the
+PNGs as a `render` work product linked to the model (`GENERATED_FROM`, with
+the model's content hash). The tool is wired in both the gateway and the MCP
+sidecar (`api_gateway/twin/render_recorder.py`). The sidecar's standard
+`tools/call` reply turns any `images[].png_base64` in a result into MCP image
+content, so a harness such as Claude Code or Codex shows the renders in chat
+instead of reading base64 as text (FORGE-373); the gateway's own bridge uses
+the legacy dialect and still receives the base64.
+
 **Mechanical components (FORGE-449).** The library also holds mechanical
 parts, in the pattern CAD tools use for them. A *standard* part is built from
 its standard's dimension table (`twin_core/library/standard_parts.py`: ISO

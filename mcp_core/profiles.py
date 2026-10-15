@@ -110,7 +110,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "flow.capabilities",
         "flow.lifecycle",
         "flow.patch",
-        "run.get_status",
+        # FORGE-630: run.get_status gave its place to twin.render_work_product;
+        # flow.status reports a run's state, and run.get_status stays in `all`.
         "run.start_design_flow",
         "twin.compute_hierarchy_rollup",
         "twin.evaluate_metric",
@@ -120,6 +121,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.record_constraint_set",
         "twin.record_document",
         "twin.record_hierarchy_node",
+        # FORGE-630: see a part. The Codex plugin connects with `core`, so
+        # without it there a Codex user could not render anything.
+        "twin.render_work_product",
         "web.fetch",
         "web.search",
     },
@@ -143,6 +147,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "freecad.get_properties",
         "freecad.list_named_faces",
         "twin.commit_geometry",
+        # FORGE-630: see what was modelled.
+        "twin.render_work_product",
         "twin.stage_work_product_file",
     },
     # A mechanical product end to end (FORGE-479): the stateful FreeCAD session
@@ -428,6 +434,8 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
             "twin.record_component_selection",
         }
     ),
+    # FORGE-630: studio renders of a model, kept in the twin.
+    "render": frozenset({"twin.render_work_product"}),
     "pinmap": frozenset({"twin.create_firmware_scaffold"}),
     "firmware_source": frozenset({"twin.create_firmware_scaffold"}),
 }
