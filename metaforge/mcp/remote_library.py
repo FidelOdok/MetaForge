@@ -102,6 +102,7 @@ class RemoteMachineLibrary:
             "material": "materials",
             "component": "components",
             "appearance": "appearances",
+            "ergonomic_limit": "ergonomic-limits",
         }[kind]
 
     async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]:

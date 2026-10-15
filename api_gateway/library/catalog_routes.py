@@ -204,3 +204,26 @@ async def register_appearance(body: dict[str, Any], request: Request) -> dict[st
 @router.patch("/appearances/{ref}")
 async def update_appearance(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
     return _update("appearance", ref, body, request)
+
+
+@router.get("/ergonomic-limits")
+async def list_ergonomic_limits(family: str | None = None) -> dict[str, Any]:
+    """Ergonomic design limits (FORGE-635); family is the feature kind they bound."""
+    return _list("ergonomic_limit", family)
+
+
+@router.get("/ergonomic-limits/{ref}")
+async def get_ergonomic_limit(ref: str) -> dict[str, Any]:
+    return _get("ergonomic_limit", ref)
+
+
+@router.post("/ergonomic-limits", status_code=201)
+async def register_ergonomic_limit(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    return _register("ergonomic_limit", body, request)
+
+
+@router.patch("/ergonomic-limits/{ref}")
+async def update_ergonomic_limit(
+    ref: str, body: UpdateEntryRequest, request: Request
+) -> dict[str, Any]:
+    return _update("ergonomic_limit", ref, body, request)

@@ -27,7 +27,16 @@ it as `user_population`.
 
 ## Finding the limits
 
-Each limit is `{kind, min, max, population, source_ref}`. Find them with the
+Each limit is `{kind, min, max, population, source_ref}`. Look in the library
+first: `library.list_ergonomic_limits` with `family` set to the feature kind
+returns recorded limits, each citing its standard and clause (the seed is
+MIL-STD-1472H, 2020: push buttons, toggle switches, bar handles, handle
+diameter by item weight, joystick grips, work surface heights). Pick the
+entry whose `applies_to` matches the feature (a fingertip push button, not a
+palm one) and pass it as it is: the skill reads a library entry directly and
+cites its name and version. MIL-STD-1472H describes US military users, so
+for other users the skill lists it under `population_mismatches`; say so.
+When the library has nothing for a feature, find it with the
 `source-engineering-values` skill, in its order: the person, the project's
 documents (`knowledge.search`), then a standard or reference (`web.search`,
 `web.fetch`): anthropometric tables such as ISO 7250 or a national survey,
@@ -57,6 +66,8 @@ rather than treating it as a match.
 ## Checklist
 
 - [ ] users stated, from the requirement or the person
+- [ ] library limits used where one matches; new ones recorded with
+      `library.register_ergonomic_limit` (held for the person's approval)
 - [ ] every limit cites its dataset or guidance, measure and percentile
 - [ ] population mismatches called out
 - [ ] findings recorded as evidence

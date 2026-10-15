@@ -319,6 +319,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "library.get_appearance",
         "library.register_appearance",
         "library.update_appearance",
+        # FORGE-635: the sourced limits check_ergonomics reads.
+        "library.list_ergonomic_limits",
+        "library.get_ergonomic_limit",
         "library.list_materials",
         "library.get_material",
         "library.process_limits",

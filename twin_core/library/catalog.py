@@ -33,6 +33,13 @@ sRGB value used to show it on screen and its source, a texture standard
 reference, measurable surface properties (gloss, coating thickness,
 roughness) and the material and process names it applies to.
 
+FORGE-635 adds a fifth, an **ergonomic limit**: a design limit for a
+feature people touch, press, reach or lift (the same kinds and units the
+``check_ergonomics`` skill reads), with what it applies to, the population
+it describes, and its source (a public-domain standard or survey, cited to
+the section or table). The industrial design phase passes them to that
+skill; none is built in.
+
 Layer: stdlib and structlog (twin_core may import nothing above it).
 """
 
@@ -66,6 +73,9 @@ __all__ = [
     "CatalogError",
     "CatalogNotFoundError",
     "SqliteCatalog",
+    "ERGONOMIC_KINDS",
+    "ErgonomicLimitEntry",
+    "summarize_ergonomic_limit",
     "APPEARANCE_FINISHES",
     "APPEARANCE_PROPERTIES",
     "COLOUR_SYSTEMS",
@@ -220,6 +230,20 @@ APPEARANCE_PROPERTIES: dict[str, str] = {
 }
 
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+#: FORGE-635: the feature kinds an ergonomic limit can bound, each with its
+#: one unit. Must match ``check_ergonomics``' ``UNITS`` (a test pins it).
+ERGONOMIC_KINDS: dict[str, str] = {
+    "grip_diameter": "mm",
+    "grip_width": "mm",
+    "handle_length": "mm",
+    "finger_clearance": "mm",
+    "button_size": "mm",
+    "actuation_force": "N",
+    "operating_height": "mm",
+    "reach_distance": "mm",
+    "product_mass": "kg",
+}
 
 #: Rule kinds, the same vocabulary as check_manufacturability, plus tolerance.
 #: Each has one unit; a rule in another unit is refused.
@@ -551,6 +575,75 @@ class ComponentEntry:
 
 
 @dataclass
+class ErgonomicLimitEntry:
+    id: str
+    name: str
+    title: str
+    limit_kind: str
+    applies_to: str
+    min: float | None
+    max: float | None
+    unit: str
+    population: str
+    source_kind: str
+    source_ref: str
+    needs_review: bool = False
+    notes: str = ""
+    version: int = 1
+    updated_at: float = 0.0
+    kind: str = field(default="ergonomic_limit")
+
+    @property
+    def family(self) -> str:
+        """The feature kind, so ``list(kind, family=...)`` filters by it."""
+        return self.limit_kind
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def as_limit(self) -> dict[str, Any]:
+        """The shape ``check_ergonomics`` takes as one of its ``limits``."""
+        return {
+            "kind": self.limit_kind,
+            "min": self.min,
+            "max": self.max,
+            "population": self.population,
+            "source_ref": f"{self.source_ref} [{self.name} v{self.version}]",
+        }
+
+
+def parse_ergonomic_limit(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate the measurable part of an ergonomic limit."""
+    limit_kind = str(data.get("limit_kind") or "")
+    unit = ERGONOMIC_KINDS.get(limit_kind)
+    if unit is None:
+        raise CatalogError(f"limit_kind must be one of {', '.join(ERGONOMIC_KINDS)}")
+    if str(data.get("unit") or unit) != unit:
+        raise CatalogError(f"a {limit_kind} limit is in {unit}")
+    bounds: dict[str, float | None] = {}
+    for bound in ("min", "max"):
+        value = data.get(bound)
+        bounds[bound] = None if value is None else _number(bound, value, allow_zero=True)
+    if bounds["min"] is None and bounds["max"] is None:
+        raise CatalogError("give min, max or both")
+    if bounds["min"] is not None and bounds["max"] is not None and bounds["min"] > bounds["max"]:
+        raise CatalogError("min is larger than max")
+    population = str(data.get("population") or "").strip()
+    if not population:
+        raise CatalogError("population is required: who the limit is for")
+    kind, ref = _source("ergonomic limit", data)
+    return {
+        "limit_kind": limit_kind,
+        "unit": unit,
+        **bounds,
+        "population": population,
+        "source_kind": kind,
+        "source_ref": ref,
+        "needs_review": kind == "assumption",
+    }
+
+
+@dataclass
 class AppearanceEntry:
     id: str
     name: str
@@ -625,6 +718,8 @@ class SqliteCatalog:
         if body.get("kind") == "component":
             specs = {k: Sourced(**v) for k, v in (body.pop("specs", None) or {}).items()}
             return ComponentEntry(specs=specs, **body)
+        if body.get("kind") == "ergonomic_limit":
+            return ErgonomicLimitEntry(**body)
         if body.get("kind") == "appearance":
             props = {k: Sourced(**v) for k, v in (body.pop("properties", None) or {}).items()}
             return AppearanceEntry(properties=props, **body)
@@ -754,7 +849,7 @@ class SqliteCatalog:
 
     def register(self, kind: str, data: dict[str, Any], *, by: str = "") -> Any:
         now = self._clock()
-        entry: ProcessEntry | MaterialEntry | ComponentEntry | AppearanceEntry
+        entry: ProcessEntry | MaterialEntry | ComponentEntry | AppearanceEntry | ErgonomicLimitEntry
         if kind == "process":
             family = str(data.get("family") or "")
             if family not in PROCESS_FAMILIES:
@@ -831,8 +926,20 @@ class SqliteCatalog:
                 notes=str(data.get("notes") or ""),
                 updated_at=now,
             )
+        elif kind == "ergonomic_limit":
+            entry = ErgonomicLimitEntry(
+                id=f"el_{uuid.uuid4().hex[:12]}",
+                name=_name(data.get("name")),
+                title=str(data.get("title") or data.get("name") or "").strip(),
+                applies_to=str(data.get("applies_to") or "").strip(),
+                notes=str(data.get("notes") or ""),
+                updated_at=now,
+                **parse_ergonomic_limit(data),
+            )
         else:
-            raise CatalogError("kind must be process, material, component or appearance")
+            raise CatalogError(
+                "kind must be process, material, component, appearance or ergonomic_limit"
+            )
         self._save(entry, by, new=True)
         return entry
 
@@ -843,6 +950,17 @@ class SqliteCatalog:
             allowed = {"title", "machine_kinds", "material_families", "rules", "notes"}
         elif isinstance(entry, ComponentEntry):
             allowed = {"title", "specs", "geometry", "material", "suppliers", "notes"}
+        elif isinstance(entry, ErgonomicLimitEntry):
+            allowed = {
+                "title",
+                "applies_to",
+                "min",
+                "max",
+                "population",
+                "source_kind",
+                "source_ref",
+                "notes",
+            }
         elif isinstance(entry, AppearanceEntry):
             allowed = {
                 "title",
@@ -860,7 +978,27 @@ class SqliteCatalog:
         unknown = set(changes) - allowed
         if unknown:
             raise CatalogError(f"cannot change {', '.join(sorted(unknown))}")
-        if isinstance(entry, AppearanceEntry):
+        if isinstance(entry, ErgonomicLimitEntry):
+            merged = {
+                "limit_kind": entry.limit_kind,
+                "min": entry.min,
+                "max": entry.max,
+                "population": entry.population,
+                "source_kind": entry.source_kind,
+                "source_ref": entry.source_ref,
+                **{k: v for k, v in changes.items() if k in {"min", "max", "population"}},
+            }
+            if "source_kind" in changes or "source_ref" in changes:
+                merged["source_kind"] = changes.get("source_kind", entry.source_kind)
+                merged["source_ref"] = changes.get("source_ref", entry.source_ref)
+            parsed = parse_ergonomic_limit(merged)
+            entry.min, entry.max = parsed["min"], parsed["max"]
+            entry.population = parsed["population"]
+            entry.source_kind, entry.source_ref = parsed["source_kind"], parsed["source_ref"]
+            entry.needs_review = parsed["needs_review"]
+            if "applies_to" in changes:
+                entry.applies_to = str(changes["applies_to"] or "").strip()
+        elif isinstance(entry, AppearanceEntry):
             if "finish" in changes:
                 if changes["finish"] not in APPEARANCE_FINISHES:
                     raise CatalogError(f"finish must be one of {', '.join(APPEARANCE_FINISHES)}")
@@ -1003,3 +1141,18 @@ def summarize_appearance(entry: AppearanceEntry) -> str:
         f", for {', '.join(entry.materials)}" if entry.materials else ""
     )
     return f"{head}: {'; '.join(parts)}"
+
+
+def summarize_ergonomic_limit(entry: ErgonomicLimitEntry) -> str:
+    """One line: the limit, what it applies to, for whom, and its source."""
+    bounds = []
+    if entry.min is not None:
+        bounds.append(f">= {_fmt(entry.min)} {entry.unit}")
+    if entry.max is not None:
+        bounds.append(f"<= {_fmt(entry.max)} {entry.unit}")
+    review = "; assumed, needs review" if entry.needs_review else ""
+    return (
+        f"{entry.title or entry.name} [{entry.id}] {entry.limit_kind} {' and '.join(bounds)}"
+        f"{f' ({entry.applies_to})' if entry.applies_to else ''}, for {entry.population}; "
+        f"source: {entry.source_ref or entry.source_kind}{review}"
+    )
