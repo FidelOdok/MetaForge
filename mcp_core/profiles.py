@@ -110,7 +110,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "flow.capabilities",
         "flow.lifecycle",
         "flow.patch",
-        "run.get_status",
+        # FORGE-630: run.get_status gave its place to twin.render_work_product;
+        # flow.status reports a run's state, and run.get_status stays in `all`.
         "run.start_design_flow",
         "twin.compute_hierarchy_rollup",
         "twin.evaluate_metric",
@@ -120,6 +121,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.record_constraint_set",
         "twin.record_document",
         "twin.record_hierarchy_node",
+        # FORGE-630: see a part. The Codex plugin connects with `core`, so
+        # without it there a Codex user could not render anything.
+        "twin.render_work_product",
         "web.fetch",
         "web.search",
     },

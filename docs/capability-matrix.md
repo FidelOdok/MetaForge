@@ -37,7 +37,7 @@ capability does not exist.
 
 | Profile | Tools | For |
 |---|---|---|
-| `core` | 40 | Projects, sessions, twin reads, the records that are not domain-specific, and the design-flow lifecycle tools (FORGE-539) |
+| `core` | 40 | Projects, sessions, twin reads, the records that are not domain-specific, and the design-flow lifecycle tools (FORGE-539), and renders of a work product (`twin.render_work_product`, FORGE-630; `run.get_status` made room for it, `flow.status` covers a run's state) |
 | `mechanical` | 32 | CAD authoring across both kernels, plus geometry commit and renders of what was modelled (`twin.render_work_product`, FORGE-630) |
 | `simulation` | 33 | FEA, circuit simulation (`spice.run_simulation`, FORGE-542), load cases, meshes and the evidence they produce, including `twin.record_document` to record a `simulation_result` or `load_case` (FORGE-533) |
 | `electronics` | 29 | Schematic and board checks, component search, sourcing, the per-rail power budget (`power.check_budget`, FORGE-544) and circuit simulation (`spice.run_simulation`, FORGE-542) |

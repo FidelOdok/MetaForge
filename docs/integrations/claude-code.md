@@ -520,7 +520,7 @@ profile the plugin installs by default (FORGE-462):
 | `flow.await_gate` | wait for a run's next gate and ask **you** to decide it in this chat; the agent cannot answer the prompt (FORGE-582). Its default windows (30 s for a gate, then 80 s to answer) end before Claude Code's 120 s call timeout (FORGE-589) |
 | `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back (FORGE-581). Submit with `outcome: incomplete` when the objective was not met, so the gate reads not ready (FORGE-590). If the sidecar owner set `METAFORGE_CLIENT_TASK_WRITES=on`, approving the claim once lets this session's writes for that phase run without further holds until you submit (FORGE-584) |
 | `run.start_design_flow` | start one of the built-in flows on a goal (held write) |
-| `run.get_status` | a run's state, gate reason and result (read) |
+| `run.get_status` | a run's state, gate reason and result (read). In `all` but not in `core`, where it gave its place to `twin.render_work_product` (FORGE-630); `flow.status` reports a run's state there |
 
 They act on the gateway's state, not the sidecar's: a flow proposed here
 is the one on the dashboard's **Approvals** page, and a run started here
