@@ -202,3 +202,62 @@ async def test_a_cad_call_through_the_server_uses_the_library_density(
 async def test_us_and_uk_spellings_of_aluminium_are_one_material(catalog: SqliteCatalog) -> None:
     block = await resolve_material("Aluminum 6061-T6")
     assert block["name"] == "aluminium_6061_t6"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_material_over_tools_call_is_a_tool_error_not_a_500(
+    catalog: SqliteCatalog,
+) -> None:
+    """FORGE-638: the resolver's refusal used to escape the HTTP transport as a
+    500 with a traceback (live: a plugin's twin.commit_geometry naming
+    'birch plywood BB/BB EN 636-2'). It is the caller's to fix, so it comes
+    back as an isError result with the closest library materials."""
+    import json
+
+    from mcp_core.guardrails import Caller
+    from metaforge.mcp.server import UnifiedMcpServer
+    from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
+    from tool_registry.mcp_server.server import McpToolServer
+
+    calls: list[dict[str, Any]] = []
+
+    class Probe(McpToolServer):
+        def __init__(self) -> None:
+            super().__init__(adapter_id="cadquery", version="0")
+            self.register_tool(
+                manifest=ToolManifest(
+                    tool_id="cadquery.probe",
+                    adapter_id="cadquery",
+                    name="probe",
+                    description="",
+                    capability="probe",
+                    input_schema={"type": "object"},
+                    output_schema={"type": "object"},
+                    phase=1,
+                    resource_limits=ResourceLimits(),
+                ),
+                handler=self.probe,
+            )
+
+        async def probe(self, arguments: dict[str, Any]) -> dict[str, Any]:
+            calls.append(arguments)
+            return {}
+
+    server = UnifiedMcpServer([Probe()])
+    server.declare_caller(Caller.LOCAL)
+    raw = await server.handle_request(
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "tools/call",
+                "params": {"name": "cadquery.probe", "arguments": {"material": "aluminium 6061"}},
+            }
+        )
+    )
+    result = json.loads(raw)["result"]
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "'aluminium 6061' is not in the material library" in text
+    assert "aluminium_6061_t6" in text
+    assert calls == [], "the tool must not run on an unresolved material"
