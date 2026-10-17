@@ -150,6 +150,23 @@ name already existed and nothing new was created: do not commit again.
 - Report the node id, revision, outer dimensions from `bounding_box`, volume,
   mass (or "material not recognised, no mass"), and the viewer link.
 
+## Colours (required)
+
+Every part you commit must carry a colour. The viewer shows only the colours
+written in the STEP, and `twin.commit_geometry` refuses a plugin's model while
+any part is uncoloured, naming the parts. A part's colour is its finish, and
+the finish is the person's choice:
+
+1. Find each part's finish with the `colour-material-finish` skill
+   (`library.list_appearances`, `library.get_appearance`). If the person has
+   not chosen one, ask; never invent a colour.
+2. Pass `part_colours` = {part name (the STEP product, i.e. the FreeCAD
+   Label or the name you gave the part): the appearance's `srgb_hex`} to
+   `twin.commit_geometry`, which writes them into the STEP. `color` colours a
+   one-part model. On the FreeCAD session path `freecad.export_model` takes
+   the same `part_colours`.
+3. If the commit is refused, colour the parts it names and commit again.
+
 ## Checks before you report
 
 - [ ] Every dimension came from the user, and `parameters_used` matches it
@@ -157,8 +174,7 @@ name already existed and nothing new was created: do not commit again.
 - [ ] `bounding_box` agrees with the requested outer size
 - [ ] Committed with `file_path`, `source_tool` and `properties`
 - [ ] `project_linked` is true, or you told the user it is not
-- [ ] You did not claim colours: these tools write no colour into the STEP,
-      so the viewer shows the part uncoloured
+- [ ] Every part coloured from its chosen finish (`part_colours` on the commit)
 
 ## Failure handling
 
@@ -177,9 +193,9 @@ name already existed and nothing new was created: do not commit again.
 - One solid per call. No holes at chosen positions, fillets, chamfers or
   patterns; the bracket's hole position and leg height are fixed.
 - The STEP written by these stateless tools carries no part name and no
-  colour. The twin item takes the `name` you commit with. A per-part STEP
-  label or an authored colour needs the FreeCAD session path
-  (`freecad.export_model` with `material` or `color`), which is in the
+  colour. The twin item takes the `name` you commit with, and the colour is
+  written at commit (`color`, or `part_colours` by part name). A per-part
+  STEP label needs the FreeCAD session path, which is in the
   `mechanical_product` profile, not `mechanical`.
 - Mass is volume times one tabulated density. It is a first estimate, not a
   weighed value.

@@ -38,6 +38,12 @@ properties and the library materials and processes it applies to.
 
 ## Seeing it
 
+The 3D viewer shows only the colours written into the model's STEP. Every
+part a plugin commits must carry one (`twin.commit_geometry` refuses an
+uncoloured model): pass `part_colours` {part name: the appearance's
+`srgb_hex`} to the commit.
+
+
 `twin.render_work_product` with `appearances` (part name to appearance name)
 renders a work product with each part in its appearance: the screen colour,
 `render_roughness` and `render_metallic` go to Blender, and the render records

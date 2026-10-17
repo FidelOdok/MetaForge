@@ -136,6 +136,23 @@ Read `node_id`, `model_url` and `project_linked`.
 - Report the outer dimensions, the inner clearance, holes and cutouts as
   requested, `node_id`, `model_url`, and what the tool cannot do (no lid).
 
+## Colours (required)
+
+Every part you commit must carry a colour. The viewer shows only the colours
+written in the STEP, and `twin.commit_geometry` refuses a plugin's model while
+any part is uncoloured, naming the parts. A part's colour is its finish, and
+the finish is the person's choice:
+
+1. Find each part's finish with the `colour-material-finish` skill
+   (`library.list_appearances`, `library.get_appearance`). If the person has
+   not chosen one, ask; never invent a colour.
+2. Pass `part_colours` = {part name (the STEP product, i.e. the FreeCAD
+   Label or the name you gave the part): the appearance's `srgb_hex`} to
+   `twin.commit_geometry`, which writes them into the STEP. `color` colours a
+   one-part model. On the FreeCAD session path `freecad.export_model` takes
+   the same `part_colours`.
+3. If the commit is refused, colour the parts it names and commit again.
+
 ## Checks before you report
 
 - [ ] Board size, component height and every cutout and hole came from the user or a recorded PCB node
@@ -166,7 +183,7 @@ Read `node_id`, `model_url` and `project_linked`.
 - Rectangular cutouts only; round connectors need a scripted cut.
 - Clearance (1 mm) and post size are fixed in the tool.
 - The STEP carries no part name or colour; the twin name comes from
-  `twin.commit_geometry`. The viewer will show it uncoloured, which is
-  correct: do not describe or apply a colour the user did not author.
+  `twin.commit_geometry`, and so does the colour (`color`, from the
+  enclosure's chosen finish). Do not apply a colour nobody chose.
 - It fits the board; it does not check that the board's connectors line up
   with real panel positions or that the housing survives a drop or a load.
