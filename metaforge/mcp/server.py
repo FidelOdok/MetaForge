@@ -2540,9 +2540,25 @@ class UnifiedMcpServer:
         # FORGE-446: every material the call names gets its library figures,
         # here, because the adapter containers cannot read the library. An
         # unresolved name fails the call with the closest library entries.
-        from twin_core.library.material_resolver import fill_material_arguments
+        from twin_core.library.material_resolver import (
+            MaterialResolutionError,
+            fill_material_arguments,
+        )
 
-        await fill_material_arguments(tool_id, arguments)
+        try:
+            await fill_material_arguments(tool_id, arguments)
+        except MaterialResolutionError as exc:
+            # FORGE-638: an unresolved material is the caller's to fix (name a
+            # library material, or record it), so it is a tool error carrying
+            # the closest entries, not an exception that leaves the HTTP
+            # transport as a 500 with a traceback.
+            logger.info(
+                "mcp_tool_material_unresolved",
+                tool_id=tool_id,
+                material=exc.name,
+                candidates=exc.candidates,
+            )
+            raise ToolHandlerError(tool_id, str(exc)) from exc
 
         # FORGE-637: geometry a harness plugin commits must carry a colour for
         # every part, because the viewer shows only the colours in the STEP and
