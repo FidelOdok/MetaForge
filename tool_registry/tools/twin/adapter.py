@@ -23,6 +23,7 @@ import structlog
 from mcp_core.context import current_context
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
+    REQUIRE_PART_COLOURS_ARG,
     HumanAuthorityRequiredError,
     reject_caller_supplied_approver,
 )
@@ -2565,7 +2566,12 @@ class TwinServer(McpToolServer):
                     "works and needs neither id nor file_path — but when it "
                     "names an export the server already holds, the server's "
                     "copy is used, because a copied 30,000-character blob can "
-                    "only be equal or damaged.)"
+                    "only be equal or damaged.) COLOURS (FORGE-637): the viewer "
+                    "shows only colours written in the STEP, and a call from a "
+                    "harness plugin is refused while any part is uncoloured. Pass "
+                    "part_colours {part name: '#RRGGBB'} (each part's library "
+                    "appearance srgb_hex) or color for the whole model, and they are "
+                    "written into the STEP here; a part name the STEP lacks is refused."
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -2592,6 +2598,16 @@ class TwinServer(McpToolServer):
                                 "the server substitutes its own copy of that export "
                                 "anyway (MET-684)."
                             ),
+                        },
+                        "part_colours": {
+                            "type": "object",
+                            "description": (
+                                "Part (STEP product) name -> '#RRGGBB' or [r, g, b]; "
+                                "written into the STEP before it is stored."
+                            ),
+                        },
+                        "color": {
+                            "description": "One colour for every part: '#RRGGBB' or [r, g, b].",
                         },
                         "file_path": {
                             "type": "string",
@@ -2793,6 +2809,65 @@ class TwinServer(McpToolServer):
             )
         if not name or not isinstance(name, str):
             raise ValueError("twin.commit_geometry: 'name' is required (non-empty string)")
+        # FORGE-637: a harness plugin's geometry must carry a colour for every
+        # part. The viewer shows only the colours written in the STEP, so an
+        # uncoloured part arrives grey. The MCP server sets the reserved flag
+        # for external clients (never the client itself); nothing is coloured
+        # here, because a colour has to be chosen, not invented.
+        part_colours = arguments.get("part_colours")
+        whole_colour = arguments.get("color")
+        if part_colours or whole_colour is not None:
+            # FORGE-637: colour at commit, so every CAD route (a stateless
+            # CadQuery or FreeCAD tool writes no colour) can be coloured where
+            # it enters the twin. A part name the STEP does not have is refused
+            # rather than skipped, which would leave that part grey unnoticed.
+            from tool_registry.tools.freecad.materials_appearance import (
+                apply_step_colours,
+                resolve_rgb,
+                step_part_names,
+            )
+
+            if part_colours is not None and not isinstance(part_colours, dict):
+                raise ValueError(
+                    "twin.commit_geometry: part_colours must map a part name to "
+                    "'#RRGGBB' or [r, g, b]"
+                )
+            step_bytes = base64.b64decode(step_base64)
+            known = step_part_names(step_bytes)
+            unknown = sorted(set(part_colours or {}) - set(known))
+            if unknown:
+                raise ValueError(
+                    f"twin.commit_geometry: part_colours names {', '.join(unknown)}, which this "
+                    f"STEP does not have; its parts are: {', '.join(known) or '(none named)'}"
+                )
+            try:
+                part_rgb = {str(k): resolve_rgb(v) for k, v in (part_colours or {}).items()}
+                default_rgb = resolve_rgb(whole_colour) if whole_colour is not None else None
+            except ValueError as exc:
+                raise ValueError(f"twin.commit_geometry: {exc}") from exc
+            step_base64 = base64.b64encode(
+                apply_step_colours(step_bytes, default_rgb, part_rgb)
+            ).decode("ascii")
+            extra_colours = {"part_colours": part_colours or {}, "color": whole_colour}
+            logger.info("commit_geometry_coloured", name=name, **extra_colours)
+        if arguments.get(REQUIRE_PART_COLOURS_ARG):
+            from tool_registry.tools.freecad.materials_appearance import uncoloured_products
+
+            try:
+                step_bytes = base64.b64decode(step_base64, validate=False)
+            except (ValueError, TypeError) as exc:
+                raise ValueError("twin.commit_geometry: step_base64 is not valid base64") from exc
+            if uncoloured := uncoloured_products(step_bytes):
+                logger.warning("commit_geometry_uncoloured_refused", name=name, parts=uncoloured)
+                raise ValueError(
+                    "twin.commit_geometry: every part must carry a colour, and these do not: "
+                    + ", ".join(uncoloured)
+                    + ". Choose each part's finish (library.list_appearances / "
+                    "library.get_appearance, the colour-material-finish skill) and export "
+                    "again with freecad.export_model part_colours {part Label: the "
+                    "appearance's srgb_hex}, or pass part_colours (or color for the whole "
+                    "model) to this commit, which writes them into the STEP."
+                )
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
         domain = arguments.get("domain")

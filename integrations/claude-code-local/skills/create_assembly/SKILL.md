@@ -150,6 +150,23 @@ material), and what was not checked: interference and any rotation the user
 wanted. Record a placement choice a reviewer could question with
 `twin.record_decision` (`title`, `rationale`, `alternatives`).
 
+## Colours (required)
+
+Every part you commit must carry a colour. The viewer shows only the colours
+written in the STEP, and `twin.commit_geometry` refuses a plugin's model while
+any part is uncoloured, naming the parts. A part's colour is its finish, and
+the finish is the person's choice:
+
+1. Find each part's finish with the `colour-material-finish` skill
+   (`library.list_appearances`, `library.get_appearance`). If the person has
+   not chosen one, ask; never invent a colour.
+2. Pass `part_colours` = {part name (the STEP product, i.e. the FreeCAD
+   Label or the name you gave the part): the appearance's `srgb_hex`} to
+   `twin.commit_geometry`, which writes them into the STEP. `color` colours a
+   one-part model. On the FreeCAD session path `freecad.export_model` takes
+   the same `part_colours`.
+3. If the commit is refused, colour the parts it names and commit again.
+
 ## Checks before you report
 
 - [ ] Every part was a committed `cad_model`, staged from the twin
@@ -181,6 +198,7 @@ wanted. Record a placement choice a reviewer could question with
   the user when a requested rotation was not applied.
 - No joints or kinematics in this route; the FreeCAD session route records
   joints but needs a no-profile connection.
-- No colours: CadQuery re-imports each part as bare geometry, so any colour
-  the part files carried is not kept, and none is added.
+- CadQuery re-imports each part as bare geometry, so any colour the part
+  files carried is not kept: colour the assembly at commit with
+  `part_colours` (each part's chosen finish).
 - Mass, when given, is the summed volume times one material's density.

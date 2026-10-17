@@ -54,6 +54,7 @@ from mcp_core.elicitation import (
 )
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
+    REQUIRE_PART_COLOURS_ARG,
     ApprovalAsk,
     ApprovalGateFn,
     ApprovalLedger,
@@ -2542,6 +2543,13 @@ class UnifiedMcpServer:
         from twin_core.library.material_resolver import fill_material_arguments
 
         await fill_material_arguments(tool_id, arguments)
+
+        # FORGE-637: geometry a harness plugin commits must carry a colour for
+        # every part, because the viewer shows only the colours in the STEP and
+        # an uncoloured model reads as unfinished. The design-flow worker
+        # (SERVICE) is not held to it here.
+        if tool_id == "twin.commit_geometry" and self._effective_caller() is not Caller.SERVICE:
+            arguments[REQUIRE_PART_COLOURS_ARG] = True
 
         # Commit-by-reference: fill a commit_geometry call's step_base64 from the
         # last export for this (session_id, obj_id) so agents needn't thread the

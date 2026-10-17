@@ -25,6 +25,7 @@ from tool_registry.tools.freecad.materials_appearance import (
     lookup_material_rgb,
     read_step_colours,
     resolve_rgb,
+    uncoloured_products,
 )
 from tool_registry.tools.freecad.operations import FreecadOperations, capped_result
 from tool_registry.tools.freecad.session import FreecadSessionStore
@@ -1286,9 +1287,13 @@ class FreecadServer(McpToolServer):
                 "'material' (e.g. '18 mm birch plywood', 'PETG') or 'color' "
                 "([r,g,b], 0-1 or 0-255) writes that appearance into the STEP so "
                 "the viewer shows it; 'part_materials' maps an assembly part "
-                "Label to its material for per-part colours. With none of these, "
-                "parts loaded by import_step keep their imported colour. Unknown "
-                "materials stay uncoloured (nothing is invented).",
+                "Label to its material for per-part colours, and 'part_colours' "
+                "maps a Label to a colour as given ('#RRGGBB', e.g. a library "
+                "appearance's srgb_hex, or [r,g,b]), which wins over its material. "
+                "With none of these, parts loaded by import_step keep their imported "
+                "colour. Unknown materials stay uncoloured (nothing is invented); the "
+                "result lists 'uncoloured_parts'. A harness plugin's "
+                "twin.commit_geometry refuses a model with an uncoloured part.",
                 "cad_export",
                 obj_schema(
                     {
@@ -1299,6 +1304,10 @@ class FreecadServer(McpToolServer):
                         "part_materials": {
                             "type": "object",
                             "additionalProperties": {"type": "string"},
+                        },
+                        "part_colours": {
+                            "type": "object",
+                            "description": "Part Label -> '#RRGGBB' or [r, g, b].",
                         },
                     },
                     ["session_id", "obj_id"],
@@ -1982,6 +1991,11 @@ class FreecadServer(McpToolServer):
             for label, mat in part_materials.items()
             if (rgb := lookup_material_rgb(mat)) is not None
         }
+        # FORGE-637: an explicit colour (a library appearance's srgb_hex) wins.
+        part_colours = arguments.get("part_colours") or {}
+        if not isinstance(part_colours, dict):
+            raise ValueError("part_colours must map a part Label to '#RRGGBB' or [r, g, b]")
+        part_rgb.update({str(label): resolve_rgb(colour) for label, colour in part_colours.items()})
         imported_rgb = self._imported_part_colours(session_id)
         if default_rgb is None and (own := entry.metadata.get("color")):
             default_rgb = (float(own[0]), float(own[1]), float(own[2]))
@@ -1998,6 +2012,9 @@ class FreecadServer(McpToolServer):
             "format": "step",
             "size_bytes": len(step_bytes),
             "step_base64": base64.b64encode(step_bytes).decode("ascii"),
+            # FORGE-637: what the viewer would show grey; a plugin's commit
+            # refuses the model until this is empty.
+            "uncoloured_parts": uncoloured_products(step_bytes),
             # FORGE-505: measured from the exported bytes, so the recorded
             # bounding box is the stored file's own frame, not the session's.
             **stored,

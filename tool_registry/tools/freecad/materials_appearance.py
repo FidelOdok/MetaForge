@@ -43,8 +43,21 @@ MATERIAL_APPEARANCE: tuple[tuple[tuple[str, ...], RGB], ...] = (
 )
 
 
+_HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
+
+
 def _normalise_rgb(color: object) -> RGB:
-    """Accept 0-1 floats or 0-255 ints; return clamped 0-1 floats."""
+    """Accept 0-1 floats, 0-255 ints or ``#RRGGBB``; return clamped 0-1 floats.
+
+    ``#RRGGBB`` is what a library appearance records as its ``srgb_hex``
+    (FORGE-637), so a part can take its appearance's colour as it is.
+    """
+    if isinstance(color, str):
+        match = _HEX_RE.match(color.strip())
+        if not match:
+            raise ValueError(f"colour must be '#RRGGBB' or an [r, g, b] triple, got {color!r}")
+        hexa = match.group(1)
+        return (int(hexa[0:2], 16) / 255.0, int(hexa[2:4], 16) / 255.0, int(hexa[4:6], 16) / 255.0)
     if not isinstance(color, (list, tuple)) or len(color) != 3:
         raise ValueError(f"colour must be an [r, g, b] triple, got {color!r}")
     vals = [float(c) for c in color]
@@ -209,6 +222,32 @@ def read_step_colours(step: bytes | str) -> dict[str, RGB]:
         for n in names:
             out.setdefault(n, rgb)
     return out
+
+
+def step_part_names(step: bytes | str) -> list[str]:
+    """The PRODUCT names that own solids in this STEP, i.e. its colourable parts."""
+    text = step.decode("utf-8", errors="replace") if isinstance(step, bytes) else step
+    return sorted(name for name, solids in _product_solids(_parse(text)).items() if solids)
+
+
+def uncoloured_products(step: bytes | str) -> list[str]:
+    """The PRODUCT names whose solids carry no colour (FORGE-637).
+
+    A STEP whose solids belong to no named product, and that carries no
+    colour at all, is reported as ``["(whole model)"]``. An unreadable file
+    is reported the same way: nothing in it can be shown to be coloured.
+    """
+    text = step.decode("utf-8", errors="replace") if isinstance(step, bytes) else step
+    ents = _parse(text)
+    if not ents:
+        return ["(whole model)"]
+    by_product = _product_solids(ents)
+    if not by_product:
+        has_solid = any(t in _SOLID_TYPES for t, _a in ents.values())
+        has_colour = any(t == "COLOUR_RGB" for t, _a in ents.values())
+        return ["(whole model)"] if has_solid and not has_colour else []
+    coloured = read_step_colours(text)
+    return sorted(name for name, solids in by_product.items() if solids and name not in coloured)
 
 
 def apply_step_colours(

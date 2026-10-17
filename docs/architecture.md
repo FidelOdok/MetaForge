@@ -684,6 +684,26 @@ figure and an assumed one is flagged for review. Entries follow the
 library's rules (fixed units, a source on every value, every change
 versioned) and are filtered by finish. No colours ship built in.
 
+**Plugin geometry always carries part colours (FORGE-637).** The 3D viewer
+shows only the colours written into a model's STEP (MET-537), and headless
+FreeCAD and CadQuery write none unless told, so a table designed through the
+Claude Code plugin arrived grey. Now a `twin.commit_geometry` call from an
+external MCP client (a harness plugin: stdio, HTTP, or a client-mode phase
+task) is refused while any part is uncoloured, and the refusal names the
+parts. The MCP server decides this, not the client: it sets a reserved
+argument on the call (`REQUIRE_PART_COLOURS_ARG`, stripped from whatever the
+client sends, like the approver key). The design-flow worker and in-app
+chat are not held to it yet. Colours are chosen, not invented: the commit
+takes `part_colours` {part name: `#RRGGBB`, typically a library appearance's
+`srgb_hex`} or `color` for the whole model and writes them into the STEP
+before storing it, so every CAD route (FreeCAD session, stateless FreeCAD or
+CadQuery tools, a file path) can be coloured where it enters the twin; a
+part name the STEP does not have is refused rather than skipped.
+`freecad.export_model` takes the same `part_colours` and reports
+`uncoloured_parts`. The CAD plugin skills tell the agent to take each part's
+finish from the library (the `colour-material-finish` skill) and to ask the
+person when none is chosen.
+
 **Ergonomic limits (FORGE-635).** A fifth kind holds design limits for the
 features people touch, press, reach or lift, in `check_ergonomics`' own
 vocabulary and units (grip diameter and width, handle length, finger
