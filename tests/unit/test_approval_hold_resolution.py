@@ -320,7 +320,8 @@ class TestAnsweringAClosedHold:
                 f"{ENDPOINT}/{run_id}/resolve", json={"outcome": "timed_out"}
             )
         assert response.status_code == 409
-        assert _store().get(run_id).status is RunStatus.RUNNING
+        # FORGE-639: an approved hold is closed COMPLETED at the decision.
+        assert _store().get(run_id).status is RunStatus.COMPLETED
 
     async def test_closing_an_unknown_hold_is_404(self, app) -> None:
         async with _client(app) as http:

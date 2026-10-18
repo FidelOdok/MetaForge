@@ -109,6 +109,20 @@ So the sidecar parks held calls in the gateway's ledger over HTTP
 (`POST /v1/chat/tool_approvals`), and polls for the decision. There is
 exactly **one** ledger.
 
+A decided hold is closed at the decision (FORGE-639). The decision, with the
+approver, its verification and the surface, is logged on the hold's
+`request` (`decisions`), which the ledger persists on every transition, and
+an approved hold moves straight to `completed`. Before this an approved hold
+stayed `running`, since nothing ever finished it; the heartbeat reaper then
+cancelled it as abandoned an hour later, and the approver, kept only on the
+run object and not in the ledger, was lost at the next restart, so every
+approval read as `canceled` on the Approvals page. The approvals view also
+shows a hold that carries a logged decision as that decision even if it was
+later cancelled, which recovers the approvals reaped before the fix that
+were decided through `/v1/approvals`; ones answered in a client's prompt
+before the fix logged nothing and still read `canceled`. Waiters take
+`running` and `completed` alike as approved.
+
 A hold is closed by whichever side stops waiting (FORGE-466). The sidecar
 calls `POST /v1/chat/tool_approvals/{id}/resolve` with `timed_out` when its
 window closes and `canceled` when the call is cancelled; the in-process wait

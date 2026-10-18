@@ -66,7 +66,7 @@ def test_submit_approve_resumes_running(client: TestClient) -> None:
     _pending_run("run_1")
     resp = client.post("/v1/chat/tool_approvals/run_1", json={"decision": "approve"})
     assert resp.status_code == 200
-    assert resp.json()["status"] == "running"
+    assert resp.json()["status"] == "completed"  # FORGE-639: closed at the decision
 
 
 def test_submit_reject_is_terminal(client: TestClient) -> None:
