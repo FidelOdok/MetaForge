@@ -15,6 +15,8 @@ just without a frontend wired to it yet.
 
 from __future__ import annotations
 
+import time
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import structlog
@@ -397,6 +399,47 @@ def resolve_unanswered_hold(run_id: str, body: ResolveHoldRequest, request: Requ
     return RunResponse.from_run(run)
 
 
+#: The persisted decision log on a hold's request (FORGE-507); the ledger
+#: stores ``request`` on every transition, so this outlives a restart, which
+#: ``Run.approved_by`` does not (the ledger has no column for it).
+_DECISIONS_KEY = "decisions"
+
+
+def _close_decided_hold(
+    run_id: str, *, approved: bool, approver: str | None, verified: bool, reason: str = ""
+) -> Run:
+    """Log the decision on the hold and, when approved, close it (FORGE-639).
+
+    An approved hold used to stay RUNNING, because the decision is the whole
+    of its job and nothing ever completed it. The heartbeat reaper then
+    cancelled it as abandoned an hour later, so every approval read as
+    "canceled", and with the approver kept only on ``Run.approved_by`` (not
+    persisted) a restart erased who gave it. The log entry is written first,
+    so the transition that persists the run carries it.
+    """
+    run = _approval_store.get(run_id)
+    log = run.request.setdefault(_DECISIONS_KEY, [])
+    if not log:
+        log.append(
+            {
+                "decision": "approve" if approved else "reject",
+                "reason": reason,
+                "approver": approver,
+                "approver_verified": verified,
+                "surface": "unknown",
+                "on_behalf_of": None,
+                "agent": None,
+                "decided_at": datetime.fromtimestamp(time.time(), UTC).isoformat(),
+            }
+        )
+    if approved and run.status is RunStatus.RUNNING:
+        run = _approval_store.complete(
+            run_id, result={"approved_by": approver, "approver_verified": verified}
+        )
+    logger.info("tool_approval_hold_closed", run_id=run_id, status=run.status.value)
+    return run
+
+
 def record_inline_answer(
     run_id: str, *, approved: bool, approver: str | None, verified: bool
 ) -> Run:
@@ -414,6 +457,13 @@ def record_inline_answer(
         ApprovalDecision.APPROVE if approved else ApprovalDecision.REJECT,
         approved_by=approver or LOCAL_ELICITATION_ACTOR,
         approver_verified=verified if approver else False,
+    )
+    run = _close_decided_hold(
+        run_id,
+        approved=approved,
+        approver=run.approved_by,
+        verified=run.approver_verified,
+        reason="answered in the client's own approval prompt",
     )
     logger.info(
         "tool_approval_answered_inline",
@@ -511,6 +561,12 @@ def decide_tool_approval(run_id: str, decision: str, approver: Approver) -> Run:
     except InvalidTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     _decide_flow_version(run, approved=decision == ApprovalDecision.APPROVE.value)
+    run = _close_decided_hold(
+        run_id,
+        approved=decision == ApprovalDecision.APPROVE.value,
+        approver=approver.label,
+        verified=approver.verified,
+    )
     logger.info(
         "tool_approval_submitted",
         run_id=run_id,

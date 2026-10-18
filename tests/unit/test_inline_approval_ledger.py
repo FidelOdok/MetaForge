@@ -126,7 +126,7 @@ class TestAnInlineAnswerIsInTheLedger:
         assert ran == ["twin.commit_geometry"]
         assert len(entries) == 1
         entry = entries[0]
-        assert entry["status"] == "running"
+        assert entry["status"] == "completed"  # FORGE-639: closed at the decision
         assert entry["request"]["route"] == "elicitation"
         assert entry["request"]["tool"] == "twin.commit_geometry"
         assert entry["request"]["client"] == "claude-code 2.1.4"
