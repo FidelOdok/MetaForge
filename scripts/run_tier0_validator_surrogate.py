@@ -41,7 +41,7 @@ def _postgres_dsn() -> str:
     if not password:
         raise SystemExit(
             "POSTGRES_PASSWORD is unset, and there is no default any more. "
-            "Source your .env (or run scripts/onboarding.sh) before this script."
+            "Source your .env (or run scripts/install.sh) before this script."
         )
     host = os.environ.get("POSTGRES_HOST", "localhost")
     port = os.environ.get("POSTGRES_PORT", "5432")

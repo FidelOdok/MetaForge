@@ -408,7 +408,7 @@ service is not involved. That is a property of compose, not a bug here.
 Fix it in either direction:
 
 ```bash
-scripts/onboarding.sh            # fills every blank, in both --usage and --develop
+scripts/install.sh            # fills every blank, in both --usage and --develop
 # or, by hand, for each one the error names:
 for v in POSTGRES_PASSWORD NEO4J_PASSWORD MINIO_SECRET_KEY \
          TEMPORAL_POSTGRES_PASSWORD GRAFANA_PASSWORD; do
@@ -420,7 +420,7 @@ Fix them one at a time and compose will name the next one, since interpolation
 stops at the first failure.
 
 If you copied `.env.example` and skipped onboarding, you will hit this: the file
-ships these keys blank **on purpose**. `onboarding.sh` generates secrets with
+ships these keys blank **on purpose**. `install.sh` generates secrets with
 `set_if_blank`, which returns early for any key that already has a value — so
 the old shipped defaults silently guaranteed the generator never fired, and
 every install kept the published passwords.

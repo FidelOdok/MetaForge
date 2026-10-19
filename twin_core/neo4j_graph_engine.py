@@ -90,7 +90,7 @@ class Neo4jGraphEngine(GraphEngine):
         """Establish connection to Neo4j and create indexes/constraints."""
         if neo4j is None:
             raise Neo4jConnectionError(
-                "neo4j package is not installed. Install with: pip install metaforge[neo4j]"
+                "neo4j package is not installed. Install with: pip install 'metaforge-hw[neo4j]'"
             )
 
         with tracer.start_as_current_span("neo4j.connect") as span:

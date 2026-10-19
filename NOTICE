@@ -1,0 +1,17 @@
+MetaForge
+Copyright 2024-2026 iDrone Images Ltd (trading as iDrone Innovations)
+
+This product includes software developed at iDrone Images Ltd.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this file except in compliance with the License. You may obtain
+a copy of the License in the LICENSE file at the root of this
+repository, or at http://www.apache.org/licenses/LICENSE-2.0
+
+---
+
+Third-party material
+
+Reference datasheets cached under tests/fixtures/datasheets/ are
+excerpted for technical-reference testing only. Original vendor
+copyrights apply; see tests/fixtures/datasheets/README.md.
