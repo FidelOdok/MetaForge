@@ -97,7 +97,7 @@ export function PhaseActivity({
             <ol aria-label="Tool calls" data-testid="tool-calls">
               {phaseCalls.map((c) => (
                 <li key={c.callId} data-status={c.status}>
-                  <strong className="mono-value">{c.tool}</strong>
+                  <strong className="mono-value">{c.tool}</strong>{' '}
                   <span>{toolLabel(c)}</span>
                 </li>
               ))}

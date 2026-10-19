@@ -427,9 +427,14 @@ Code plugin therefore shows in the dashboard the same as one driven from a flow.
 reconnects is correct without replaying anything. Each change after it is one
 `live.event` with an `id:`. The stream sends a 2 KB padding comment first and
 a heartbeat comment when idle, with the same no-buffer headers as the run
-stream. That is not cosmetic: a Cloudflare quick tunnel held the first frame
-of an unpadded stream indefinitely (measured: HTTP 200, no body for 10 s),
-while the same stream through the dashboard's nginx arrived at once. The hub
+stream. Those guard against ordinary proxies that buffer or time out an idle
+response. They do not make a Cloudflare quick tunnel work: it relays the
+response headers and never the body (measured with and without the padding:
+HTTP 200, no body for 8 to 10 s), while the same stream through the dashboard's
+nginx delivers the snapshot at once. Quick tunnels do not carry server-sent
+events at all, so the live panel and the run page's tool calls need the
+dashboard reached directly or through a named tunnel; behind a quick tunnel they
+report "not connected" rather than showing a blank view. The hub
 keeps the picture in the gateway's memory:
 a restart drops it, and nothing else, because the committed assembly is still
 made by `cadquery.create_assembly` and `twin.commit_geometry`.
