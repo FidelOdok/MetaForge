@@ -42,6 +42,7 @@ from orchestrator.harness.runs import (
     InMemoryRunStore,
     await_approval_decision,
 )
+from orchestrator.harness.tool_events import new_call_id, report_tool_event
 from orchestrator.harness.tools import (
     NATIVE,
     ApprovalDeniedError,
@@ -270,6 +271,8 @@ class HarnessRuntime:
         """Invoke a registered tool, enforcing this runtime's gate + approval policy."""
         start = time.monotonic()
         status = "ok"
+        call_id = new_call_id()
+        report_tool_event(call_id, name, "started")
         with tracer.start_as_current_span("harness.tool_call") as span:
             span.set_attribute("tool.name", name)
             try:
@@ -325,6 +328,12 @@ class HarnessRuntime:
                 raise
             finally:
                 span.set_attribute("tool.status", status)
+                report_tool_event(
+                    call_id,
+                    name,
+                    "finished" if status == "ok" else "failed",
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                )
                 if self.metrics is not None:
                     try:
                         self.metrics.record_harness_tool_call(

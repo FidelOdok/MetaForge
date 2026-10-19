@@ -339,6 +339,39 @@ Known gaps, stated rather than papered over:
   SSE subscription that silently only updated on status changes would look
   live and not be.
 
+#### Tool progress on the run stream (FORGE-643, FORGE-644)
+
+`GET /v1/runs/{id}/events` now carries a second event, `tool.progress`, next to
+`run.status`. Each one is a tool call edge: `started`, then `finished` or
+`failed`, with the tool name, the phase and the duration. It carries no
+arguments and no result, because anyone who can open the run can read the
+stream and arguments can hold another project's data.
+
+Where the event comes from depends on where the phase runs. `HarnessRuntime.call_tool`
+reports every call through a scope opened around the phase
+(`orchestrator/harness/tool_events.py`). Inside the gateway the scope's sink
+publishes straight into the run stream. The Temporal worker is a separate
+process with no stream, so its sink posts each event to
+`POST /v1/runs/{id}/tool-events`, using the same gateway address and key as the
+gate announcer. The route answers 404 for a run that does not exist.
+
+The stream is built so a slow or dropped client cannot hurt the gateway:
+
+- Each event has an `id:` line. A client that reconnects with `Last-Event-ID`
+  is sent the events it missed, from the last 200 kept per run.
+- A subscriber's queue holds at most 256 events. When it is full the oldest
+  tool event is dropped, never a `run.status`.
+- Only a `run.status` that is terminal ends the stream. Progress never does.
+- Reporting is best effort. A sink that fails or stalls never changes what the
+  tool call does or returns, and an event is lost rather than retried.
+
+Events are a view, not the record: the 2s `flow-state` poll stays the source of
+truth, and a missed event costs a viewer a moment, not correctness. The
+dashboard does not draw these events yet (FORGE-645). Client-intelligence runs
+make no harness tool calls in the gateway, so they emit none. Tools that run
+inside one call, such as a CadQuery script or a CalculiX solve, show `started`
+and `finished` only; progress inside the call is FORGE-646.
+
 ### Editing a flow, and where an edited flow lives (FORGE-399)
 
 FORGE-398 generated a proposal, held it for approval, and stored only a *text

@@ -334,7 +334,14 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
 
     await ensure_mcp_bridge()
     _log_phase_skills(request)
-    brain = await build_phase_brain(request.run_id, request.flow_id)
+    from api_gateway.runs.tool_events import ScopedPhaseBrain, http_tool_event_sink
+
+    # FORGE-643: this process has no run stream, so tool events go to the gateway.
+    brain = ScopedPhaseBrain(
+        await build_phase_brain(request.run_id, request.flow_id),
+        request.run_id,
+        http_tool_event_sink(),
+    )
     phase = Phase(
         id=request.phase.id,
         title=request.phase.title,
