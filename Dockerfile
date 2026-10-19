@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+COPY pyproject.toml README.md LICENSE NOTICE ./
 # Install runtime + gateway database dependencies.
 #
 # ``kafka`` and ``temporal`` are included deliberately: both tiers were built
@@ -51,7 +51,7 @@ COPY tool_registry/ ./tool_registry/
 COPY domain_agents/ ./domain_agents/
 COPY observability/ ./observability/
 COPY metaforge/ ./metaforge/
-COPY pyproject.toml ./
+COPY pyproject.toml README.md LICENSE NOTICE ./
 
 # Install the package itself (editable not needed in container)
 RUN pip install --no-cache-dir --no-deps .
