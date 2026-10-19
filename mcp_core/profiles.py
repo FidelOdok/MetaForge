@@ -422,6 +422,8 @@ _CAD_AUTHORING: frozenset[str] = frozenset(
         "freecad.close_session",
         "twin.commit_geometry",
         "twin.stage_work_product_file",
+        # FORGE-647: shows committed parts coming together in the viewer.
+        "twin.place_part",
     }
 )
 

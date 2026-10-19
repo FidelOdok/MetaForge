@@ -1824,6 +1824,13 @@ async def _bootstrap(
 
     entity_recorder = make_engineering_entity_recorder(twin, project_backend)
 
+    # FORGE-647: placements reach the viewer through the gateway, which holds
+    # the live stream; this process posts them there.
+    from mcp_core.live_events import set_live_event_publisher
+    from metaforge.mcp.live_publisher import http_live_publisher
+
+    set_live_event_publisher(http_live_publisher())
+
     # FORGE-462: flow.* and run.* registered in the gateway and never here, so
     # no harness plugin could list, propose or start a design flow.
     flow_bindings = _build_flow_bindings()

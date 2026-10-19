@@ -499,6 +499,9 @@ services:
       # Unset, the sidecar falls back to that in-process queue and says so on
       # every start-up rather than only when somebody tries to write.
       - METAFORGE_GATEWAY_URL=http://gateway:8000
+      # FORGE-647: the key the sidecar presents when it posts a live assembly
+      # placement to the gateway. Empty on a gateway with no key, as for the worker.
+      - METAFORGE_GATEWAY_API_KEY=${METAFORGE_GATEWAY_API_KEY:-}
       # FORGE-487: matches `design-flow-worker`'s value and nothing else's.
       # It is how this sidecar recognises the worker as a service caller (and
       # then only for a run the gateway confirms is running an approved flow

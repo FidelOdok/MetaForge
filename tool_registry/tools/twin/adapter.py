@@ -27,6 +27,7 @@ from mcp_core.guardrails import (
     HumanAuthorityRequiredError,
     reject_caller_supplied_approver,
 )
+from mcp_core.live_events import publish_live_event
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import (
     ResourceLimits,
@@ -506,6 +507,7 @@ class TwinServer(McpToolServer):
         # item logic lives in twin_core.items, which this layer can't import.
         self._item_history_reader = item_history_reader
         self._register_tools()
+        self._register_place_part()
         self._register_thread_questions()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -3776,6 +3778,134 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             **({"domain": domain} if isinstance(domain, str) and domain else {}),
         )
+
+    # ------------------------------------------------------------------
+    # twin.place_part (FORGE-647)
+    # ------------------------------------------------------------------
+
+    def _register_place_part(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.place_part",
+                adapter_id="twin",
+                name="Place Part In Live Assembly",
+                description=(
+                    "Place, move or remove one committed part (a cad_model node) in an "
+                    "assembly that is being put together, and show it in the twin viewer "
+                    "as it happens. Call it once per part: the viewer composes each "
+                    "part's stored model at the given position (mm) and rotation (degrees "
+                    "about x, y, z), so a person watching sees the assembly come together. "
+                    "Calling it again for the same part moves it; remove=true takes it "
+                    "out. This is the live picture only. It does not create the "
+                    "assembly: when the layout is final, build it with "
+                    "cadquery.create_assembly and commit it with twin.commit_geometry "
+                    "(parts=[...]). 'live' in the result says whether anything could "
+                    "show the placement."
+                ),
+                capability="twin_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "description": "The part's cad_model node UUID.",
+                        },
+                        "assembly": {
+                            "type": "string",
+                            "description": "Name of the assembly being built.",
+                        },
+                        "position": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "x, y, z in mm. Default 0, 0, 0.",
+                        },
+                        "rotation": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Rotation about x, y, z in degrees. Default 0, 0, 0.",
+                        },
+                        "remove": {
+                            "type": "boolean",
+                            "description": "Take the part out of the live assembly.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Defaults to the call's project.",
+                        },
+                    },
+                    "required": ["node_id", "assembly"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "assembly": {"type": "string"},
+                        "node_id": {"type": "string"},
+                        "action": {"type": "string"},
+                        "live": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.place_part,
+        )
+
+    async def place_part(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        raw_id = str(arguments.get("node_id") or "").strip()
+        assembly = str(arguments.get("assembly") or "").strip()
+        if not raw_id or not assembly:
+            raise ValueError("twin.place_part: 'node_id' and 'assembly' are required")
+        try:
+            node_id = UUID(raw_id)
+        except ValueError as exc:
+            raise ValueError(f"twin.place_part: node_id {raw_id!r} is not a UUID") from exc
+
+        project_id = arguments.get("project_id")
+        if not project_id:
+            ctx_project = current_context().project_id
+            project_id = str(ctx_project) if ctx_project else None
+        if not project_id:
+            raise ValueError(
+                "twin.place_part: no project. Pass project_id or run inside a project."
+            )
+
+        position = _vec3(arguments.get("position"), "position")
+        rotation = _vec3(arguments.get("rotation"), "rotation")
+
+        node = await self._twin.get_work_product(node_id)
+        if node is None:
+            raise ValueError(f"twin.place_part: part {raw_id} does not exist in the twin")
+        node_type = getattr(node.type, "value", node.type)
+        if str(node_type) != "cad_model":
+            raise ValueError(f"twin.place_part: part {raw_id} is a {node_type}, not a cad_model")
+        node_project = getattr(node, "project_id", None)
+        if node_project is not None and str(node_project) != str(project_id):
+            raise ValueError(f"twin.place_part: part {raw_id} belongs to a different project")
+
+        remove = bool(arguments.get("remove"))
+        action = "removed" if remove else "placed"
+        live = await publish_live_event(
+            str(project_id),
+            {
+                "type": "assembly.part_removed" if remove else "assembly.part_placed",
+                "assembly": assembly,
+                "part": {"node_id": str(node_id), "name": node.name},
+                "position": position,
+                "rotation": rotation,
+            },
+        )
+        return {
+            "assembly": assembly,
+            "node_id": str(node_id),
+            "action": action,
+            "position": position,
+            "rotation": rotation,
+            "live": live,
+        }
 
     def _register_stage_work_product_file(self) -> None:
         self.register_tool(
@@ -7075,3 +7205,15 @@ class TwinServer(McpToolServer):
             ),
             predicted_tier=int(arguments.get("predicted_tier", 0)),
         )
+
+
+def _vec3(value: Any, label: str) -> list[float]:
+    """A three-number vector, ``[0, 0, 0]`` when none is given."""
+    if value is None:
+        return [0.0, 0.0, 0.0]
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"twin.place_part: {label} must be three numbers [x, y, z]")
+    try:
+        return [float(v) for v in value]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"twin.place_part: {label} must be three numbers [x, y, z]") from exc
