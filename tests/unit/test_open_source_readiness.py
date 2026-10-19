@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -134,10 +135,37 @@ class TestTheInstallInstructionsPointAtUs:
 class TestThereIsOneInstaller:
     """Two scripts, and the obvious name did the least (FORGE-648)."""
 
+    # Every script the docs tell people to run by bare path. `bash foo.sh`
+    # does not need the bit; `./foo.sh` and `scripts/foo.sh` do.
+    DIRECTLY_INVOKED = ["install.sh", "build_forge_binary.sh", "host_update.sh"]
+
     def test_the_installer_is_where_people_will_look(self) -> None:
-        installer = REPO / "scripts" / "install.sh"
-        assert installer.is_file()
-        assert installer.stat().st_mode & 0o111, "scripts/install.sh is not executable"
+        assert (REPO / "scripts" / "install.sh").is_file()
+
+    @pytest.mark.parametrize("name", DIRECTLY_INVOKED)
+    def test_a_script_people_run_by_path_is_executable(self, name: str) -> None:
+        """...in git's index, which is the only copy a clone gets.
+
+        Asserting ``Path.stat().st_mode`` instead is how this first shipped,
+        and it was useless: this repo is developed on a ``/mnt/c`` mount
+        where ``core.fileMode`` is false, so a local ``chmod +x`` is real on
+        disk and invisible to git. The test passed on the machine that made
+        the change and failed in CI, where the clone had mode 644 -- and
+        ``./scripts/install.sh`` is "Permission denied" for everyone who
+        clones. Every ``.sh`` in ``scripts/`` was 644 at the time.
+        """
+        mode = subprocess.run(
+            ["git", "ls-tree", "HEAD", f"scripts/{name}"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        assert mode, f"scripts/{name} is not tracked"
+        assert mode[0] == "100755", (
+            f"scripts/{name} is mode {mode[0]} in git, so a fresh clone cannot "
+            f"run it by path. Fix with: git update-index --chmod=+x scripts/{name}"
+        )
 
     def test_the_second_installer_is_gone(self) -> None:
         assert not (REPO / "scripts" / "onboarding.sh").exists(), (
