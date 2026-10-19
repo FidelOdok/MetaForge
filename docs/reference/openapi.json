@@ -13341,6 +13341,57 @@
         "title": "ThreadSummaryResponse",
         "type": "object"
       },
+      "ToolEventRequest": {
+        "description": "One tool call edge reported by a process that has no stream of its own.",
+        "properties": {
+          "call_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Call Id",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "phase": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Phase",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "started",
+              "finished",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tool": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call_id",
+          "tool",
+          "status"
+        ],
+        "title": "ToolEventRequest",
+        "type": "object"
+      },
       "ToolInfo": {
         "properties": {
           "capability": {
@@ -21810,7 +21861,7 @@
     },
     "/v1/runs/{run_id}/events": {
       "get": {
-        "description": "SSE stream of a run's status transitions until it reaches a terminal state.",
+        "description": "SSE stream of a run: status transitions plus tool progress (FORGE-644).\n\n``run.status`` frames carry the run's state and end the stream when the run\nis terminal. ``tool.progress`` frames (FORGE-643) carry an ``id:`` so a\nclient that reconnects with ``Last-Event-ID`` is sent the ones it missed.",
         "operationId": "stream_run_events_v1_runs__run_id__events_get",
         "parameters": [
           {
@@ -21820,6 +21871,22 @@
             "schema": {
               "title": "Run Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
             }
           }
         ],
@@ -22088,6 +22155,63 @@
           }
         },
         "summary": "Apply Run Patch",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/tool-events": {
+      "post": {
+        "description": "Accept a tool event from the design-flow worker or the MCP sidecar (FORGE-643).\n\nThose run in their own processes and cannot reach the gateway's stream, so\nthey post here. The route needs the same gateway key as every other route,\nand it takes no arguments or results, only the tool's name, phase, status\nand duration. An unknown run is a 404, so the stream cannot be filled for a\nrun that does not exist.",
+        "operationId": "ingest_tool_event_v1_runs__run_id__tool_events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Ingest Tool Event V1 Runs  Run Id  Tool Events Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Tool Event",
         "tags": [
           "runs"
         ]
