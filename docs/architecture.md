@@ -378,7 +378,21 @@ duration. When the stream is not connected the section says so: "no calls shown"
 and "none made" must not read the same. Client-intelligence runs
 make no harness tool calls in the gateway, so they emit none. Tools that run
 inside one call, such as a CadQuery script or a CalculiX solve, show `started`
-and `finished` only; progress inside the call is FORGE-646.
+and `finished` only.
+
+**Why a CalculiX solve shows no percentage (FORGE-646 spike).** A real linear
+static solve on the sandbox leaves a `.sta` with a single increment line
+(`STEP 1, INC 1, total time 1.0`) and a `.cvg` with headers and no rows. CalculiX
+writes those files per increment, and a linear static or modal analysis has one,
+so there is no fraction to read: the file goes from absent to complete. Only a
+nonlinear or multi-increment step would give a real fraction, and nothing in
+this system runs one today. Inventing a percentage from elapsed time would be a
+guess shown as a measurement, so the run page shows the call as running with
+its elapsed time instead. If a nonlinear step is added, the adapter can tail
+`.sta` where it lives (the `calculix-adapter` container) and forward each
+increment through a gateway callback, as the worker does for tool events; the
+adapter has no gateway address or key today, and the call's `run_id` would
+come from the request headers.
 
 ### Watching an assembly come together (FORGE-647)
 
