@@ -212,4 +212,56 @@ describe('PhaseActivity', () => {
     render(<PhaseActivity phase={phase()} events={[]} live />);
     expect(screen.getByTestId('coverage-note')).toHaveTextContent('session capture');
   });
+
+  describe('tool calls (FORGE-645)', () => {
+    const calls = [
+      {
+        callId: 'c1',
+        tool: 'calculix.run_fea',
+        phase: 'requirements',
+        status: 'finished' as const,
+        durationMs: 1200,
+        seq: 2,
+      },
+      {
+        callId: 'c2',
+        tool: 'twin.get_node',
+        phase: 'design',
+        status: 'running' as const,
+        durationMs: null,
+        seq: 3,
+      },
+    ];
+
+    it("lists the selected phase's calls with their status and duration", () => {
+      render(<PhaseActivity phase={phase()} events={[]} live toolCalls={calls} toolStreamConnected />);
+      const list = screen.getByRole('list', { name: 'Tool calls' });
+      expect(list).toHaveTextContent('calculix.run_fea');
+      expect(list).toHaveTextContent('finished in 1.2s');
+      expect(list).not.toHaveTextContent('twin.get_node');
+    });
+
+    it('shows a running call as running', () => {
+      render(
+        <PhaseActivity phase={phase({ id: 'design' })} events={[]} live toolCalls={calls} toolStreamConnected />,
+      );
+      expect(screen.getByRole('list', { name: 'Tool calls' })).toHaveTextContent('running');
+    });
+
+    it('says none yet only when the stream is connected', () => {
+      render(<PhaseActivity phase={phase()} events={[]} live toolCalls={[]} toolStreamConnected />);
+      expect(screen.getByTestId('tool-calls-empty')).toHaveTextContent('No tool calls from this phase yet');
+    });
+
+    it('says the stream is not connected rather than implying none were made', () => {
+      render(<PhaseActivity phase={phase()} events={[]} live toolCalls={[]} toolStreamConnected={false} />);
+      expect(screen.getByTestId('tool-calls-empty')).toHaveTextContent('not connected');
+      expect(screen.getByTestId('tool-calls-empty')).toHaveTextContent('not the same as none made');
+    });
+
+    it('renders no tool section where nothing streams calls', () => {
+      render(<PhaseActivity phase={phase()} events={[]} live />);
+      expect(screen.queryByText('TOOL CALLS')).toBeNull();
+    });
+  });
 });

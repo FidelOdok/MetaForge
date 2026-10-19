@@ -327,8 +327,8 @@ the shape), and every status reads `unknown`.
 
 Known gaps, stated rather than papered over:
 
-- **The activity lane does not yet show tool calls, decisions, evidence or
-  token cost.** Those come from session capture and twin commits, which the
+- **The activity lane shows tool calls (FORGE-645) but not yet decisions,
+  evidence or token cost.** Those come from session capture and twin commits, which the
   workflow's event log does not carry. The panel names what is missing instead
   of rendering empty headings — an empty "Tool calls" section reads as "this
   phase made none".
@@ -366,8 +366,16 @@ The stream is built so a slow or dropped client cannot hurt the gateway:
   tool call does or returns, and an event is lost rather than retried.
 
 Events are a view, not the record: the 2s `flow-state` poll stays the source of
-truth, and a missed event costs a viewer a moment, not correctness. The
-dashboard does not draw these events yet (FORGE-645). Client-intelligence runs
+truth, and a missed event costs a viewer a moment, not correctness.
+
+The run page draws them (FORGE-645). The browser's `EventSource` cannot send an
+`Authorization` header, so `useRunToolEvents` reads the stream with `fetch`
+(`dashboard/src/lib/sse.ts`), which can. It asks for `Last-Event-ID: 0` on
+first connect so a viewer that opens a run already underway gets the history
+the gateway still holds, reconnects with backoff, and keeps at most 200 calls.
+`PhaseActivity` lists the selected phase's calls with their status and
+duration. When the stream is not connected the section says so: "no calls shown"
+and "none made" must not read the same. Client-intelligence runs
 make no harness tool calls in the gateway, so they emit none. Tools that run
 inside one call, such as a CadQuery script or a CalculiX solve, show `started`
 and `finished` only; progress inside the call is FORGE-646.
