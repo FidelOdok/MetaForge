@@ -380,6 +380,43 @@ make no harness tool calls in the gateway, so they emit none. Tools that run
 inside one call, such as a CadQuery script or a CalculiX solve, show `started`
 and `finished` only; progress inside the call is FORGE-646.
 
+### Watching an assembly come together (FORGE-647)
+
+An agent can put a committed assembly together in front of a person.
+`twin.place_part` takes one committed part, an assembly name, a position (mm)
+and a rotation (degrees), checks the part exists, is a `cad_model` and belongs
+to the project, and publishes a placement. The twin viewer's Live assembly
+panel draws each part as it arrives.
+
+The geometry is not rebuilt per step. A committed part already has a cached
+GLB (`/v1/twin/nodes/{id}/model`), so the panel loads it and applies the
+transform. A step costs the event's trip, not a STEP to GLB conversion. A part
+that has never been viewed pays one conversion the first time.
+
+Where the event goes depends on the process, because the stream lives in the
+gateway. A tool running in the gateway publishes straight to the hub
+(`api_gateway/twin/live.py`). The `mcp-http` sidecar, which also serves
+plugin clients, is a separate process: it installs an HTTP publisher
+(`metaforge/mcp/live_publisher.py`) that posts to
+`POST /v1/twin/projects/{id}/live-events` with the gateway key
+(`METAFORGE_GATEWAY_API_KEY`, now passed to the sidecar in compose). The seam
+is `mcp_core/live_events.py`: the tool calls `publish_live_event`, and each
+process installs the publisher that fits it. A build driven from the Claude
+Code plugin therefore shows in the dashboard the same as one driven from a flow.
+
+`GET /v1/twin/projects/{id}/live` streams it. Its first frame is
+`live.snapshot`, the whole in-progress picture, so a viewer that opens late or
+reconnects is correct without replaying anything. Each change after it is one
+`live.event` with an `id:`. The hub keeps the picture in the gateway's memory:
+a restart drops it, and nothing else, because the committed assembly is still
+made by `cadquery.create_assembly` and `twin.commit_geometry`.
+
+What this does not show: a part being *modelled*. A CadQuery script is one
+blocking call, and the FreeCAD session tools run in their own container and
+return only session object ids, so neither has a part in the twin to draw
+until it is committed. The panel says when it is not connected, because a view
+that cannot see and an assembly with no parts must not read the same.
+
 ### Editing a flow, and where an edited flow lives (FORGE-399)
 
 FORGE-398 generated a proposal, held it for approval, and stored only a *text

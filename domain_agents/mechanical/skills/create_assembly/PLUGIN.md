@@ -186,6 +186,25 @@ the finish is the person's choice:
 | Commit held for approval | Writes need a person | Tell the user where it waits; do not retry or reword. |
 | `cadquery.create_assembly` not in your list | Wrong profile | Ask for `?profile=mechanical` or `?profile=robotics`. |
 
+## Letting the person watch it come together
+
+The assembly this skill commits appears all at once, at the end. When the
+person wants to watch it being put together, place each committed part as you
+go with `twin.place_part` (`node_id` of the part's `cad_model`, `assembly`
+name, `position` in mm, `rotation` in degrees about x, y, z). The twin viewer's
+"Live assembly" panel draws each part at that placement within about a second.
+
+- Call it once per part, in the order you would assemble them. Calling it
+  again for the same part moves it; `remove: true` takes it out.
+- The result's `live` says whether anything could show the placement. If it is
+  `false`, say so; do not tell the person they can watch.
+- It shows the layout only. It makes no assembly and records nothing in the
+  twin. When the layout is final, build and commit the real one with the steps
+  above, using the same positions.
+- `twin.place_part` takes `position` and `rotation` as two lists. The skill's
+  `location` is one object (`x, y, z, rx, ry, rz`). Use the same numbers, and
+  check the committed assembly sits where the person watched it go.
+
 ## Limits
 
 - **No real interference check.** The result's `interference_check_passed`
