@@ -32,7 +32,12 @@ from api_gateway.runs.schemas import (
     RunResponse,
     filter_by_project,
 )
-from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
+from api_gateway.runs.streaming import (
+    SSE_HEADERS,
+    RunStreamManager,
+    run_event_stream,
+    run_ws_loop,
+)
 from api_gateway.twin.baseline import create_item_baseline
 from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector
@@ -1263,6 +1268,7 @@ def stream_run_events(
     return StreamingResponse(
         run_event_stream(run_id, snapshot, _stream_manager, resume_from),
         media_type="text/event-stream",
+        headers=SSE_HEADERS,
     )
 
 

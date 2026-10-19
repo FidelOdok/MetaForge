@@ -71,11 +71,49 @@ async def test_stream_sends_snapshot_then_each_change_without_duplicating() -> N
     await asyncio.sleep(0.01)
     hub.close("p1")
     await asyncio.wait_for(task, timeout=2)
-    names = [f.split("event: ")[1].split("\n")[0] for f in frames]
+    assert frames[0].startswith(":")  # padding first, to push the stream through proxies
+    assert len(frames[0]) > 2048
+    data = [f for f in frames if not f.startswith(":")]
+    names = [f.split("event: ")[1].split("\n")[0] for f in data]
     assert names == ["live.snapshot", "live.event"]
-    snapshot = json.loads(frames[0].split("data: ")[1])
+    snapshot = json.loads(data[0].split("data: ")[1])
     assert [p["node_id"] for p in snapshot["assemblies"][0]["parts"]] == ["a"]
-    assert frames[1].startswith("id: 2\n")
+    assert data[1].startswith("id: 2\n")
+
+
+@pytest.mark.asyncio
+async def test_idle_stream_sends_a_heartbeat_comment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from api_gateway.twin import live as live_mod
+
+    monkeypatch.setattr(live_mod, "HEARTBEAT_SECONDS", 0.05)
+    hub = LiveAssemblyHub()
+    frames: list[str] = []
+
+    async def read() -> None:
+        async for frame in live_event_stream("p1", hub):
+            frames.append(frame)
+
+    task = asyncio.create_task(read())
+    await asyncio.sleep(0.2)
+    hub.close("p1")
+    await asyncio.wait_for(task, timeout=2)
+    assert live_mod.SSE_HEARTBEAT in frames
+
+
+@pytest.mark.asyncio
+async def test_stream_routes_ask_proxies_not_to_buffer_or_rewrite() -> None:
+    from api_gateway.runs import routes as run_routes
+    from api_gateway.twin.live_routes import stream_live_assembly
+
+    live = await stream_live_assembly(str(uuid4()), None)
+    assert live.headers["cache-control"] == "no-cache, no-transform"
+    assert live.headers["x-accel-buffering"] == "no"
+
+    run_routes.reset_run_store()
+    run_routes._store.create({}, run_id="rh")
+    runs = run_routes.stream_run_events("rh", None)
+    assert runs.headers["cache-control"] == "no-cache, no-transform"
+    assert runs.headers["x-accel-buffering"] == "no"
 
 
 def test_ingest_route_publishes_and_validates() -> None:

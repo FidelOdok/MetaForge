@@ -14,7 +14,7 @@ from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api_gateway.twin.live import hub, live_event_stream
+from api_gateway.twin.live import SSE_HEADERS, hub, live_event_stream
 
 logger = structlog.get_logger(__name__)
 
@@ -52,6 +52,7 @@ async def stream_live_assembly(
     return StreamingResponse(
         live_event_stream(project_id, hub, resume),
         media_type="text/event-stream",
+        headers=SSE_HEADERS,
     )
 
 
