@@ -1335,7 +1335,9 @@ export function TwinViewerPage() {
       </section>
 
       {liveOpen && activeProjectId && (
-        <LiveAssemblyPanel projectId={activeProjectId} onClose={() => setLiveOpen(false)} />
+        <div className="tw-live">
+          <LiveAssemblyPanel projectId={activeProjectId} onClose={() => setLiveOpen(false)} />
+        </div>
       )}
 
       <section className="tw-view" aria-label="Twin model and graph">

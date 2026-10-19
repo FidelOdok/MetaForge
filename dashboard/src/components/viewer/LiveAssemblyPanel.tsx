@@ -57,7 +57,7 @@ export function LiveAssemblyPanel({ projectId, onClose }: LiveAssemblyPanelProps
             <ol aria-label={`Parts of ${assembly.name}`}>
               {assembly.parts.map((p) => (
                 <li key={p.nodeId}>
-                  <strong>{p.name}</strong>
+                  <strong>{p.name}</strong>{' '}
                   <span className="mono-value">
                     at {fmt(p.position)} mm, rotated {fmt(p.rotation)} deg
                   </span>

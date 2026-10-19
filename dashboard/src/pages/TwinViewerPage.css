@@ -39,6 +39,39 @@
 .tw-workspace button {
   font: inherit;
 }
+/* FORGE-647: the live assembly panel floats over the view. It cannot be a grid
+   item: the workspace places its children by named area, and an unplaced one
+   lands in a column of no width. */
+.tw-live header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.tw-live header button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+.tw-live ol {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+}
+.tw-live {
+  position: absolute;
+  top: 92px;
+  right: calc(var(--tw-inspector) + var(--tw-chat) + 16px);
+  z-index: 6;
+  width: min(480px, calc(100% - var(--tw-inspector) - var(--tw-chat) - 48px));
+  max-height: calc(100% - 140px);
+  overflow: auto;
+  padding: 12px;
+  background: var(--tw-panel);
+  border: 1px solid var(--tw-line);
+  border-radius: 8px;
+}
 .tw-workspace h1,
 .tw-workspace h2,
 .tw-workspace h3,

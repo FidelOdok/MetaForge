@@ -31,6 +31,17 @@ SUBSCRIBER_QUEUE_LIMIT = 256
 #: Most tool events kept per run for a reconnecting client to replay.
 REPLAY_LIMIT = 200
 
+#: A comment sent when nothing else has been, so a proxy does not close an
+#: idle stream (a phase can think for a minute between tool calls).
+SSE_HEARTBEAT = ": keep-alive\n\n"
+HEARTBEAT_SECONDS = 15.0
+
+#: Headers that keep a proxy from buffering or rewriting the stream.
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+}
+
 
 @dataclass(frozen=True)
 class ToolEvent:
@@ -188,7 +199,11 @@ async def run_event_stream(
         if snapshot.is_terminal:
             return
         while True:
-            item = await queue.get()
+            try:
+                item = await asyncio.wait_for(queue.get(), HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield SSE_HEARTBEAT
+                continue
             if item is _CLOSE:
                 return
             if isinstance(item, ToolEvent):

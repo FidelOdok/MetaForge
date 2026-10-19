@@ -34,6 +34,22 @@ SUBSCRIBER_QUEUE_LIMIT = 256
 
 _CLOSE = object()
 
+#: Some proxies hold a streamed response until a buffer fills. A comment this
+#: long, sent first, pushes the first real frame through them. SSE clients
+#: ignore comments.
+SSE_PADDING = ": " + " " * 2048 + "\n\n"
+
+#: A comment sent when nothing else has been, so an idle connection is not
+#: closed by a proxy and a dead one is noticed.
+SSE_HEARTBEAT = ": keep-alive\n\n"
+HEARTBEAT_SECONDS = 15.0
+
+#: Headers that keep a proxy from buffering or rewriting the stream.
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+}
+
 
 class LiveAssemblyHub:
     """Per-project placements, a sequence number and a replay buffer."""
@@ -128,11 +144,16 @@ async def live_event_stream(
     """
     queue = live_hub.subscribe(project_id)
     try:
+        yield SSE_PADDING
         snapshot = live_hub.snapshot(project_id)
         sent = int(snapshot["seq"])
         yield _frame("live.snapshot", sent, snapshot)
         while True:
-            item = await queue.get()
+            try:
+                item = await asyncio.wait_for(queue.get(), HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield SSE_HEARTBEAT
+                continue
             if item is _CLOSE:
                 return
             assert isinstance(item, dict)

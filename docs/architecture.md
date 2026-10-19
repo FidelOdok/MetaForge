@@ -362,6 +362,10 @@ The stream is built so a slow or dropped client cannot hurt the gateway:
 - A subscriber's queue holds at most 256 events. When it is full the oldest
   tool event is dropped, never a `run.status`.
 - Only a `run.status` that is terminal ends the stream. Progress never does.
+- An idle stream sends a `: keep-alive` comment every 15 seconds, and the
+  response asks proxies not to buffer or rewrite it (`Cache-Control: no-cache,
+  no-transform`, `X-Accel-Buffering: no`). A phase can think for a minute
+  between tool calls, and a proxy that sees silence closes the connection.
 - Reporting is best effort. A sink that fails or stalls never changes what the
   tool call does or returns, and an event is lost rather than retried.
 
@@ -421,7 +425,12 @@ Code plugin therefore shows in the dashboard the same as one driven from a flow.
 `GET /v1/twin/projects/{id}/live` streams it. Its first frame is
 `live.snapshot`, the whole in-progress picture, so a viewer that opens late or
 reconnects is correct without replaying anything. Each change after it is one
-`live.event` with an `id:`. The hub keeps the picture in the gateway's memory:
+`live.event` with an `id:`. The stream sends a 2 KB padding comment first and
+a heartbeat comment when idle, with the same no-buffer headers as the run
+stream. That is not cosmetic: a Cloudflare quick tunnel held the first frame
+of an unpadded stream indefinitely (measured: HTTP 200, no body for 10 s),
+while the same stream through the dashboard's nginx arrived at once. The hub
+keeps the picture in the gateway's memory:
 a restart drops it, and nothing else, because the committed assembly is still
 made by `cadquery.create_assembly` and `twin.commit_geometry`.
 
