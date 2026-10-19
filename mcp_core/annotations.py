@@ -286,6 +286,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.commit_design_sketch",
         "twin.commit_engineering_change",
         "twin.commit_geometry",
+        # FORGE-647: a live-view placement, see guardrails.BOOKKEEPING.
+        "twin.place_part",
         "twin.commit_hazard_analysis",
         "twin.commit_procurement_record",
         "twin.commit_system_architecture",

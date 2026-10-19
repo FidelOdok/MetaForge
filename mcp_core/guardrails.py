@@ -148,6 +148,10 @@ BOOKKEEPING: frozenset[str] = frozenset(
         "session.start",
         "session.log_event",
         "session.complete",
+        # FORGE-647: shows a committed part in the live assembly view and
+        # records nothing in the twin. Holding each placement for approval
+        # would make the view a series of prompts instead of a build.
+        "twin.place_part",
     }
 )
 
