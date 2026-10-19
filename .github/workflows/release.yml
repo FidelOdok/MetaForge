@@ -227,7 +227,7 @@ jobs:
           fail_on_unmatched_files: true
 
   docker-publish:
-    # Publishes the gateway image to GHCR so `onboarding.sh` (usage mode) and
+    # Publishes the gateway image to GHCR so `install.sh` (usage mode) and
     # docker-compose.yml's `image:` reference can pull instead of building
     # from source (MET-638). Runs on every push to main (tags `:latest`) and
     # additionally tags the resolved version when this run is release-worthy,

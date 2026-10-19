@@ -42,6 +42,16 @@ DEFAULT_GATEWAY_URL = "http://localhost:8765/mcp"
 #: needs its own name -- components are namespaced under it.
 LOCAL_PLUGIN_NAME = "metaforge-local"
 
+# FORGE-648. Both of these READMEs used to say `pip install metaforge`, and
+# `metaforge` on PyPI is an unrelated job-shop scheduling library by someone
+# else -- so the documented first step installed a stranger's package and
+# left `metaforge-mcp` nowhere on PATH. The distribution is `metaforge-hw`;
+# until it is published, installing from the repository is the command that
+# actually works, so that is the command the READMEs give.
+DISTRIBUTION_NAME = "metaforge-hw"
+LOCAL_INSTALL_COMMAND = 'pipx install "git+https://github.com/FidelOdok/MetaForge.git"'
+
+
 PLUGIN_NAME = "metaforge"
 VERSION = "0.1.0"
 
@@ -491,7 +501,9 @@ def build_marketplace() -> Path:
                 "source": "./integrations/claude-code-local",
                 "description": (
                     "Runs MetaForge as a local process over stdio. No gateway, no "
-                    "account, no network. Needs `pip install metaforge`."
+                    "account, no network. Needs the `metaforge-mcp` command on "
+                    "your PATH; the package README gives the one line that "
+                    "installs it."
                 ),
                 "category": "engineering",
                 "tags": ["hardware", "cad", "simulation", "local-first"],
@@ -526,11 +538,17 @@ def build_claude_code_local() -> Path:
         "The same plugin as `claude-code/`, run as a local process instead of "
         "reached over HTTP. No gateway to start, no URL, no token, no network.\n\n"
         "## Install\n\n"
-        "```\npip install metaforge\n"
+        f"```\n{LOCAL_INSTALL_COMMAND}\n"
         "/plugin marketplace add FidelOdok/MetaForge\n"
         f"/plugin install {LOCAL_PLUGIN_NAME}\n```\n\n"
-        "`pip install` first: the plugin launches `metaforge-mcp` as a "
-        "subprocess, so it has to be on your PATH.\n\n"
+        "Install the package first: the plugin launches `metaforge-mcp` as "
+        "a subprocess, so it has to be on your PATH.\n\n"
+        f"The distribution is `{DISTRIBUTION_NAME}`, not `metaforge` — that "
+        "name on PyPI belongs to an unrelated project. Until it is "
+        "published there, install from this repository with the line "
+        "above. `pip install` works too; pipx is suggested because it "
+        "keeps the CLI in its own environment and still puts "
+        "`metaforge-mcp` on your PATH.\n\n"
         "## Which package\n\n"
         "Install **one**. The manifest format has no way to switch a server "
         "entry off, so a package that declared both an HTTP and a stdio "
@@ -538,7 +556,7 @@ def build_claude_code_local() -> Path:
         "| | `metaforge` | `metaforge-local` |\n"
         "|---|---|---|\n"
         "| Reaches | a gateway over HTTP | a process on this machine |\n"
-        "| Needs | a gateway running, and its URL | `pip install metaforge` |\n"
+        "| Needs | a gateway running, and its URL | `metaforge-mcp` on your PATH |\n"
         "| Suits | a team or hosted gateway | working on your own |\n\n"
         "## What runs locally\n\n"
         "Everything the gateway package exposes. The server starts with no "

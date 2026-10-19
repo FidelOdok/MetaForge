@@ -70,7 +70,7 @@ class Neo4jInsightStore(InsightStore):
             import neo4j
         except ImportError as exc:  # pragma: no cover — env-dependent
             raise Neo4jInsightStoreError(
-                "neo4j package is not installed. Install with: pip install metaforge[neo4j]"
+                "neo4j package is not installed. Install with: pip install 'metaforge-hw[neo4j]'"
             ) from exc
 
         with tracer.start_as_current_span("neo4j_insight.connect") as span:

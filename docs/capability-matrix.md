@@ -744,7 +744,7 @@ now two packages:
 | | `metaforge` | `metaforge-local` |
 |---|---|---|
 | Reaches | a gateway over HTTP | a process on this machine |
-| Needs | a gateway running, and its URL | `pip install metaforge` |
+| Needs | a gateway running, and its URL | `metaforge-mcp` on your PATH |
 | Suits | a team or hosted gateway | working on your own |
 
 **Install one, not both.** The plugin manifest format has no conditional —

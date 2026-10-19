@@ -22,7 +22,7 @@
     {
       "name": "metaforge-local",
       "source": "./integrations/claude-code-local",
-      "description": "Runs MetaForge as a local process over stdio. No gateway, no account, no network. Needs `pip install metaforge`.",
+      "description": "Runs MetaForge as a local process over stdio. No gateway, no account, no network. Needs the `metaforge-mcp` command on your PATH; the package README gives the one line that installs it.",
       "category": "engineering",
       "tags": [
         "hardware",

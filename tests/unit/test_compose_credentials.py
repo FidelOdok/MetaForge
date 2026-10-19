@@ -9,7 +9,7 @@ while ``GF_AUTH_ANONYMOUS_ENABLED=true`` meant that password was the only thing
 separating "read the dashboards" from "administer the instance".
 
 The shipped default also defeated the fix that already existed.
-``scripts/onboarding.sh`` generates strong secrets with ``set_if_blank``, which
+``scripts/install.sh`` generates strong secrets with ``set_if_blank``, which
 returns early for any key that already has a value — so a non-empty
 ``GRAFANA_PASSWORD`` in ``.env.example`` guaranteed the generator never fired.
 
@@ -130,22 +130,22 @@ class TestOnboardingCanStillGenerateThem:
         text = _text(ENV_EXAMPLE)
         for var in CREDENTIALS:
             assert re.search(rf"^{var}=$", text, re.MULTILINE), (
-                f".env.example must ship {var} blank. onboarding.sh's set_if_blank "
+                f".env.example must ship {var} blank. install.sh's set_if_blank "
                 "skips keys that already have a value, so any default here silently "
                 "disables the secret generator — which is exactly how the published "
                 "passwords survived having a generator written to replace them."
             )
 
     def test_onboarding_generates_every_credential(self):
-        script = _text(REPO_ROOT / "scripts" / "onboarding.sh")
+        script = _text(REPO_ROOT / "scripts" / "install.sh")
         for var in CREDENTIALS:
             assert f'set_if_blank {var} "$(rand_secret)"' in script, (
-                f"onboarding.sh must generate {var} — compose now refuses to start without it."
+                f"install.sh must generate {var} — compose now refuses to start without it."
             )
 
     def test_generation_is_not_gated_on_a_mode(self):
         """Compose refuses in both modes, so both must get credentials."""
-        script = _text(REPO_ROOT / "scripts" / "onboarding.sh")
+        script = _text(REPO_ROOT / "scripts" / "install.sh")
         generation = script.index('set_if_blank NEO4J_PASSWORD "$(rand_secret)"')
         mode_branch = script.index('if [ "$MODE" = "usage" ]', generation - 4000)
         assert generation < mode_branch, (

@@ -80,4 +80,8 @@ fix:
 dashboard-check:
 	cd dashboard && npx tsc --noEmit
 	cd dashboard && npx eslint .
-	cd dashboard && npx vitest run
+# `npm test` runs check-suite.mjs, which asserts every test file actually
+# executed. `npx vitest run` (the `test:raw` script) silently runs a
+# subset -- 67 of 73 files, last time it was counted -- and still exits 0,
+# so it reads as a pass (FORGE-648).
+	cd dashboard && npm test

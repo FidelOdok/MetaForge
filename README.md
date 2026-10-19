@@ -40,8 +40,11 @@ flowchart LR
 
 ## Phase 1 — what works today
 
-- **41 MCP tools** across 10 adapters (knowledge, twin, constraint,
-  cadquery, calculix, freecad, kicad, project, memory, session). UAT-tested.
+- **121 MCP tools** across 20 adapters — knowledge, twin, constraint,
+  CAD (CadQuery, FreeCAD), analysis (CalculiX), EDA (KiCad), project,
+  memory, session and more. Counted in
+  [`docs/capability-matrix.md`](docs/capability-matrix.md), which is the
+  list that gets kept current.
 - **Python CLI** at `cli/forge_cli/` — `run`, `status`, `twin`,
   `proposals`, `approve`, `reject`, `ingest`, `sources`.
 - **Dashboard** with 11 routes (projects, sessions, approvals, BOM,
@@ -61,12 +64,17 @@ Full inventory: **[`docs/capability-matrix.md`](docs/capability-matrix.md)**.
 
 ## Quickstart
 
-The fastest path — one script handles Docker, secrets, the `forge`
-CLI, and your first project:
+One script handles Docker, secrets, the `forge` CLI, and your first
+project:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/onboarding.sh | bash
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | bash
 ```
+
+It asks whether you want a stable instance or an editable checkout, picks
+up an `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY` already
+in your environment, and is safe to re-run. Just the `forge` binary and
+nothing else: add `--cli-only`.
 
 ### High-level flow
 
@@ -88,7 +96,7 @@ flowchart TD
 
 Non-interactive / scripted installs, adapter and provider flags, and
 `--develop` mode (editable source, hot-reload) are documented in
-`onboarding.sh --help`.
+`scripts/install.sh --help`.
 
 ### Manual install
 
@@ -123,6 +131,31 @@ metaforge-capture install --user --gateway-url http://localhost:8000
 ```
 
 Five-minute walkthrough: **[`docs/getting-started.md`](docs/getting-started.md)**.
+
+## Drive it from your own agent
+
+MetaForge speaks MCP, so your harness can do the engineering rather than
+the dashboard. There are two packages, and you install **one**:
+
+```
+/plugin marketplace add FidelOdok/MetaForge
+/plugin install metaforge          # reaches a gateway over HTTP
+```
+
+```
+pipx install "git+https://github.com/FidelOdok/MetaForge.git"
+/plugin install metaforge-local    # runs on this machine, no gateway
+```
+
+The HTTP package asks for your gateway's MCP endpoint on first enable, so
+it needs one running and reachable — the installer above does not start
+one by default (`docker compose up -d mcp-http` in a checkout does). The
+local package needs no gateway at all, and no network. Either way, a tool
+that writes is held for a human; held calls land on the dashboard's
+Approvals page.
+
+Codex and the per-client details are in
+[`docs/integrations/`](docs/integrations/claude-code.md).
 
 ## Documentation
 
@@ -183,15 +216,24 @@ this repository is shaped to make the hosted option the easy one.
 ## Contributing
 
 This README is for engineers **using** MetaForge. If you want to
-**contribute** to the codebase, start with
-[`CLAUDE.md`](CLAUDE.md) — it covers the architecture, the
-testing taxonomy, the observability requirements, and the git
-workflow. Issue tracking lives in Linear under the **MetaForge**
-team.
+**contribute**, start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+workflow and the checks a PR has to pass, then
+[`CLAUDE.md`](CLAUDE.md) for the architecture, the testing taxonomy and
+the observability requirements. Everyone taking part is covered by the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+Bugs and proposals go to
+[GitHub Issues](https://github.com/FidelOdok/MetaForge/issues). Day-to-day
+planning happens in a private Jira project, so the `FORGE-<n>` references
+in commit messages will not resolve for you — nothing needed to review a
+change is behind them. (`MET-<n>` is older still, from before the move off
+Linear.)
 
 ## License
 
-See [`LICENSE`](LICENSE) for the project license. Reference
-datasheets cached under `tests/fixtures/datasheets/` are excerpted
-for technical-reference UAT testing only — original vendor
+MetaForge is licensed under the
+[Apache License 2.0](LICENSE); attribution is in [`NOTICE`](NOTICE).
+
+Reference datasheets cached under `tests/fixtures/datasheets/` are
+excerpted for technical-reference UAT testing only — original vendor
 copyrights apply, see `tests/fixtures/datasheets/README.md`.
