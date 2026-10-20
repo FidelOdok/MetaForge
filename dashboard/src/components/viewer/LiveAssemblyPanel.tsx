@@ -24,8 +24,9 @@ function fmt(v: [number, number, number]): string {
 }
 
 export function LiveAssemblyPanel({ projectId, onClose }: LiveAssemblyPanelProps) {
-  const { state, connected } = useLiveAssembly(projectId);
+  const { state, mode } = useLiveAssembly(projectId);
   const parts = state.assemblies.flatMap((a) => a.parts);
+  const seeing = mode === 'stream' || mode === 'polling';
 
   return (
     <section className="glass rounded" data-testid="live-assembly" aria-label="Live assembly">
@@ -36,14 +37,28 @@ export function LiveAssemblyPanel({ projectId, onClose }: LiveAssemblyPanelProps
         </button>
       </header>
 
-      {!connected && (
+      {mode === 'connecting' && (
+        <p className="field-help" role="status" data-testid="live-assembly-connecting">
+          Connecting to the live view.
+        </p>
+      )}
+
+      {mode === 'offline' && (
         <p className="field-help" role="status" data-testid="live-assembly-offline">
           Not connected to the live stream, so nothing can be shown. This is not the same as nothing
           being built.
         </p>
       )}
 
-      {connected && parts.length === 0 && (
+      {mode === 'polling' && (
+        <p className="field-help" role="status" data-testid="live-assembly-polling">
+          The live stream cannot be opened on this connection (a tunnel or proxy that holds streamed
+          responses back), so this view checks for changes every couple of seconds instead. It is
+          current, but a second or two behind.
+        </p>
+      )}
+
+      {seeing && parts.length === 0 && (
         <p className="field-help" role="status" data-testid="live-assembly-empty">
           Nothing is being assembled. Parts appear here as an agent places them with twin.place_part.
         </p>

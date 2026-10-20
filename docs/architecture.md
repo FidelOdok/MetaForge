@@ -432,9 +432,15 @@ response. They do not make a Cloudflare quick tunnel work: it relays the
 response headers and never the body (measured with and without the padding:
 HTTP 200, no body for 8 to 10 s), while the same stream through the dashboard's
 nginx delivers the snapshot at once. Quick tunnels do not carry server-sent
-events at all, so the live panel and the run page's tool calls need the
-dashboard reached directly or through a named tunnel; behind a quick tunnel they
-report "not connected" rather than showing a blank view. The hub
+events at all. The live panel copes with that: it waits 4 seconds for the stream's
+first frame, then abandons it and re-reads `GET /v1/twin/projects/{id}/live/state`
+every 1.5 seconds, probing the stream again every 30 seconds and returning to it
+if it connects. It says which it is doing: no banner while streaming, a banner
+saying the view is polling and a second or two behind, a "connecting" line before
+anything has answered, and the "not connected" message only when neither works,
+so a view that cannot see never reads as an empty assembly. The run page's tool
+calls have no state route to poll and are still stream-only: behind a quick
+tunnel they report "not connected". The hub
 keeps the picture in the gateway's memory:
 a restart drops it, and nothing else, because the committed assembly is still
 made by `cadquery.create_assembly` and `twin.commit_geometry`.
