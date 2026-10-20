@@ -104,37 +104,116 @@ export function applyLiveEvent(state: LiveState, event: LiveEventWire): LiveStat
 const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 15_000;
 
+/** How long to wait for the stream's first frame before falling back to polling. */
+export const FIRST_FRAME_MS = 4_000;
+/** How often the picture is re-read while the stream is unavailable. */
+export const POLL_MS = 1_500;
+/** How often the stream is tried again while polling. */
+export const PROBE_MS = 30_000;
+
 /**
- * The assemblies being put together in a project, streamed from
- * `GET /twin/projects/{id}/live` (FORGE-647).
+ * How the view is getting its data.
  *
- * The first frame of every connection is a full snapshot, so a viewer that
- * opens late, or reconnects after a gap, is correct without replaying events.
- * `connected` is false until the stream is open: an empty list while
- * disconnected means "can't see", not "nothing is being built".
+ * - `stream`: server-sent events, under a second behind.
+ * - `polling`: the stream could not be opened on this connection (a tunnel or
+ *   proxy that holds a streamed response back), so the current picture is
+ *   re-read every {@link POLL_MS}. A second or two behind, and the panel says so.
+ * - `connecting`: nothing has answered yet.
+ * - `offline`: neither the stream nor a plain request works.
  */
-export function useLiveAssembly(projectId: string | undefined) {
+export type LiveMode = 'connecting' | 'stream' | 'polling' | 'offline';
+
+export interface LiveAssemblyTiming {
+  firstFrameMs?: number;
+  pollMs?: number;
+  probeMs?: number;
+}
+
+/**
+ * The assemblies being put together in a project (FORGE-647), streamed from
+ * `GET /twin/projects/{id}/live`, or polled from `.../live/state` when the
+ * stream cannot be opened.
+ *
+ * The first frame of every stream is a full snapshot, so a viewer that opens
+ * late, or reconnects after a gap, is correct without replaying events. A
+ * stream that answers with headers but never a frame (Cloudflare quick tunnels
+ * do this) is given {@link FIRST_FRAME_MS}, then abandoned for polling, and
+ * tried again every {@link PROBE_MS}. `connected` is true in both live modes;
+ * an empty list while `offline` means "can't see", not "nothing is being built".
+ */
+export function useLiveAssembly(projectId: string | undefined, timing: LiveAssemblyTiming = {}) {
+  const firstFrameMs = timing.firstFrameMs ?? FIRST_FRAME_MS;
+  const pollMs = timing.pollMs ?? POLL_MS;
+  const probeMs = timing.probeMs ?? PROBE_MS;
   const [state, setState] = useState<LiveState>(EMPTY_LIVE_STATE);
-  const [connected, setConnected] = useState(false);
+  const [mode, setMode] = useState<LiveMode>('connecting');
 
   useEffect(() => {
     setState(EMPTY_LIVE_STATE);
     if (!projectId) {
-      setConnected(false);
+      setMode('offline');
       return undefined;
     }
-    const abort = new AbortController();
+    setMode('connecting');
+    const root = new AbortController();
+    let streamAbort: AbortController | undefined;
+    let streaming = false;
+    let polling = false;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let delay = RETRY_MIN_MS;
-    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    const base = () => `${apiBase()}/twin/projects/${projectId}/live`;
+    const headers = (): Record<string, string> => {
+      const token = getAccessToken();
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    };
+
+    const stopPolling = () => {
+      polling = false;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+
+    const pollOnce = async (): Promise<void> => {
+      if (!polling || root.signal.aborted) return;
+      try {
+        const response = await fetch(`${base()}/state`, { headers: headers(), signal: root.signal });
+        if (!response.ok) throw new Error(`state answered ${response.status}`);
+        const body = (await response.json()) as LiveSnapshotWire;
+        if (polling && !streaming) {
+          setState(stateFromSnapshot(body));
+          setMode('polling');
+        }
+      } catch {
+        if (polling && !streaming && !root.signal.aborted) setMode('offline');
+      }
+      if (polling && !root.signal.aborted) pollTimer = setTimeout(() => void pollOnce(), pollMs);
+    };
+
+    const startPolling = () => {
+      if (polling || root.signal.aborted) return;
+      polling = true;
+      void pollOnce();
+    };
 
     const connect = async (): Promise<void> => {
-      const headers: Record<string, string> = {};
-      const token = getAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
+      if (root.signal.aborted) return;
+      const attempt = new AbortController();
+      streamAbort = attempt;
+      let gotFrame = false;
+      const onRootAbort = () => attempt.abort();
+      root.signal.addEventListener('abort', onRootAbort);
+      // A stream that sends headers and then nothing never rejects, so the
+      // wait for the first frame is a timer, not a catch.
+      const frameTimer = setTimeout(() => {
+        if (gotFrame) return;
+        attempt.abort();
+        startPolling();
+      }, firstFrameMs);
       try {
-        await streamSse(`${apiBase()}/twin/projects/${projectId}/live`, {
-          headers,
-          signal: abort.signal,
+        await streamSse(base(), {
+          headers: headers(),
+          signal: attempt.signal,
           onMessage: (message) => {
             let body: unknown;
             try {
@@ -143,8 +222,12 @@ export function useLiveAssembly(projectId: string | undefined) {
               return;
             }
             if (message.event === 'live.snapshot') {
-              setConnected(true);
+              gotFrame = true;
+              streaming = true;
               delay = RETRY_MIN_MS;
+              clearTimeout(frameTimer);
+              stopPolling();
+              setMode('stream');
               setState(stateFromSnapshot(body as LiveSnapshotWire));
             } else if (message.event === 'live.event') {
               setState((current) => applyLiveEvent(current, body as LiveEventWire));
@@ -152,21 +235,29 @@ export function useLiveAssembly(projectId: string | undefined) {
           },
         });
       } catch {
-        // Fall through to the retry below. An abort is not an error.
+        // Fall through. An abort is not an error.
       }
-      if (abort.signal.aborted) return;
-      setConnected(false);
-      retry = setTimeout(() => void connect(), delay);
-      delay = Math.min(delay * 2, RETRY_MAX_MS);
+      clearTimeout(frameTimer);
+      root.signal.removeEventListener('abort', onRootAbort);
+      if (root.signal.aborted) return;
+      const wasStreaming = streaming;
+      streaming = false;
+      startPolling();
+      // A stream that was working is retried quickly; one that never opened is
+      // only probed now and then.
+      const wait = wasStreaming ? delay : probeMs;
+      if (wasStreaming) delay = Math.min(delay * 2, RETRY_MAX_MS);
+      retryTimer = setTimeout(() => void connect(), wait);
     };
 
     void connect();
     return () => {
-      abort.abort();
-      if (retry) clearTimeout(retry);
-      setConnected(false);
+      root.abort();
+      streamAbort?.abort();
+      stopPolling();
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [projectId]);
+  }, [projectId, firstFrameMs, pollMs, probeMs]);
 
-  return { state, connected };
+  return { state, mode, connected: mode === 'stream' || mode === 'polling' };
 }

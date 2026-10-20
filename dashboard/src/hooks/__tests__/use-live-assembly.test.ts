@@ -107,3 +107,87 @@ describe('useLiveAssembly', () => {
     expect(result.current.connected).toBe(false);
   });
 });
+
+// A stream response that sends headers and never a frame, like a Cloudflare quick tunnel,
+// and that honours abort, as a real fetch does.
+function stalledStream(signal: AbortSignal | undefined): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal?.addEventListener('abort', () =>
+          controller.error(new DOMException('Aborted', 'AbortError')),
+        );
+      },
+    }),
+    { status: 200 },
+  );
+}
+
+const SNAPSHOT = {
+  seq: 3,
+  assemblies: [{ name: 'Pi5', parts: [{ node_id: 'a', name: 'Base', seq: 3 }] }],
+};
+const FAST = { firstFrameMs: 40, pollMs: 25, probeMs: 60 };
+
+describe('useLiveAssembly fallback to polling', () => {
+  it('falls back to polling the state when the stream never sends a frame', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push(url);
+        if (url.endsWith('/live/state')) return new Response(JSON.stringify(SNAPSHOT), { status: 200 });
+        return stalledStream(init?.signal ?? undefined);
+      }),
+    );
+    const { result } = renderHook(() => useLiveAssembly('p1', FAST));
+    expect(result.current.mode).toBe('connecting');
+    await waitFor(() => expect(result.current.mode).toBe('polling'));
+    await waitFor(() => expect(result.current.state.assemblies[0]?.parts).toHaveLength(1));
+    expect(result.current.connected).toBe(true);
+    expect(calls.some((u) => u.endsWith('/live/state'))).toBe(true);
+  });
+
+  it('picks up a change on the next poll', async () => {
+    let state: unknown = SNAPSHOT;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) =>
+        url.endsWith('/live/state')
+          ? new Response(JSON.stringify(state), { status: 200 })
+          : stalledStream(init?.signal ?? undefined),
+      ),
+    );
+    const { result } = renderHook(() => useLiveAssembly('p1', FAST));
+    await waitFor(() => expect(result.current.state.assemblies[0]?.parts).toHaveLength(1));
+    state = {
+      seq: 4,
+      assemblies: [{ name: 'Pi5', parts: [...SNAPSHOT.assemblies[0]!.parts, { node_id: 'b', name: 'Lid', seq: 4 }] }],
+    };
+    await waitFor(() => expect(result.current.state.assemblies[0]?.parts).toHaveLength(2));
+  });
+
+  it('is offline when neither the stream nor a plain request works', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('no', { status: 502 })));
+    const { result } = renderHook(() => useLiveAssembly('p1', FAST));
+    await waitFor(() => expect(result.current.mode).toBe('offline'));
+    expect(result.current.connected).toBe(false);
+  });
+
+  it('goes back to the stream when a later probe connects', async () => {
+    let streamCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/live/state')) return new Response(JSON.stringify(SNAPSHOT), { status: 200 });
+        streamCalls += 1;
+        if (streamCalls === 1) return stalledStream(init?.signal ?? undefined);
+        return sseResponse([`id: 3\nevent: live.snapshot\ndata: ${JSON.stringify(SNAPSHOT)}\n\n`]);
+      }),
+    );
+    const { result } = renderHook(() => useLiveAssembly('p1', FAST));
+    await waitFor(() => expect(result.current.mode).toBe('polling'));
+    await waitFor(() => expect(result.current.mode).toBe('stream'));
+    expect(streamCalls).toBeGreaterThanOrEqual(2);
+  });
+});
