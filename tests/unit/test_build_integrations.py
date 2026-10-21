@@ -751,3 +751,105 @@ def test_the_profile_setting_names_every_profile() -> None:
     text = plugin["userConfig"]["tool_profile"]["description"]
     for name in [*PROFILES, "all"]:
         assert re.search(rf"\b{name}\b", text), f"profile {name} missing from the description"
+
+
+# ---------------------------------------------------------------------------
+# The plugin is versioned by its content (FORGE-657)
+# ---------------------------------------------------------------------------
+
+
+class TestPluginVersion:
+    """The version was a literal 0.1.0 that nothing bumped, so installed
+    plugins never saw a change. Claude Code updates by comparing the string."""
+
+    MANIFESTS = (
+        "claude-code/.claude-plugin/plugin.json",
+        "claude-code-local/.claude-plugin/plugin.json",
+        "codex/.codex-plugin/plugin.json",
+        "codex/plugin.json",
+    )
+
+    def test_every_manifest_carries_the_locked_version(self) -> None:
+        from scripts.build_integrations import read_version_lock
+
+        locked = read_version_lock()["version"]
+        for rel in self.MANIFESTS:
+            found = json.loads((REPO / "integrations" / rel).read_text())["version"]
+            assert found == locked, f"{rel} is {found}, the lock says {locked}"
+
+    def test_the_version_is_semver(self) -> None:
+        from scripts.build_integrations import read_version_lock
+
+        assert re.fullmatch(r"\d+\.\d+\.\d+", read_version_lock()["version"])
+
+    def test_content_changed_without_a_bump_fails(self) -> None:
+        """Regenerate from the sources, then compare with what the lock was
+        cut for. A skill, PLUGIN.md or tool-list change that was not followed
+        by `python scripts/build_integrations.py` lands here."""
+        from scripts.build_integrations import content_digest, read_version_lock
+
+        build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
+        build_claude_code_local()
+        build_codex(default_gateway_url=DEFAULT_GATEWAY_URL)
+        assert content_digest() == read_version_lock()["content_digest"], (
+            "plugin content changed but the version was not bumped: "
+            "run `python scripts/build_integrations.py` and commit the result"
+        )
+
+    def test_next_version_bumps_the_patch(self) -> None:
+        from scripts.build_integrations import next_version
+
+        assert next_version("0.2.0") == "0.2.1"
+        assert next_version("0.2.9") == "0.2.10"
+
+    def _tree(self, tmp_path: Path, *, digest: str, skill: str = "one") -> tuple[Path, Path]:
+        root = tmp_path / "integrations"
+        (root / "pkg" / ".claude-plugin").mkdir(parents=True)
+        (root / "pkg" / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "x", "version": "0.2.0"})
+        )
+        (root / "pkg" / "skill.md").write_text(skill)
+        lock = root / "plugin-version.json"
+        lock.write_text(json.dumps({"version": "0.2.0", "content_digest": digest}))
+        return root, lock
+
+    def test_unchanged_content_does_not_bump(self, tmp_path: Path) -> None:
+        from scripts.build_integrations import bump_if_changed, content_digest
+
+        root, lock = self._tree(tmp_path, digest="")
+        digest = content_digest(root, lock)
+        lock.write_text(json.dumps({"version": "0.2.0", "content_digest": digest}))
+        assert bump_if_changed(root, lock) is None
+        assert json.loads(lock.read_text())["version"] == "0.2.0"
+
+    def test_changed_content_bumps_and_records(self, tmp_path: Path) -> None:
+        from scripts.build_integrations import bump_if_changed, content_digest
+
+        root, lock = self._tree(tmp_path, digest="")
+        lock.write_text(
+            json.dumps({"version": "0.2.0", "content_digest": content_digest(root, lock)})
+        )
+        (root / "pkg" / "skill.md").write_text("two")
+        assert bump_if_changed(root, lock) == "0.2.1"
+        recorded = json.loads(lock.read_text())
+        assert recorded["version"] == "0.2.1"
+        assert recorded["content_digest"] == content_digest(root, lock)
+        # Settled: running it again changes nothing.
+        assert bump_if_changed(root, lock) is None
+
+    def test_the_version_field_itself_is_not_content(self, tmp_path: Path) -> None:
+        """Otherwise a bump would change the digest and never settle."""
+        from scripts.build_integrations import content_digest
+
+        root, lock = self._tree(tmp_path, digest="")
+        before = content_digest(root, lock)
+        manifest = root / "pkg" / ".claude-plugin" / "plugin.json"
+        manifest.write_text(json.dumps({"name": "x", "version": "9.9.9"}))
+        assert content_digest(root, lock) == before
+
+    def test_an_empty_digest_adopts_the_content_without_bumping(self, tmp_path: Path) -> None:
+        from scripts.build_integrations import bump_if_changed
+
+        root, lock = self._tree(tmp_path, digest="")
+        assert bump_if_changed(root, lock) == "0.2.0"
+        assert json.loads(lock.read_text())["content_digest"]

@@ -148,7 +148,9 @@ Grafana alert.
 **Generated files.** Everything under `integrations/` and
 `.claude-plugin/marketplace.json` is written by
 `scripts/build_integrations.py`. Edit the generator and re-run it; a
-hand-edit is overwritten on the next build. Likewise
+hand-edit is overwritten on the next build. Re-running also bumps the plugin
+version (`integrations/plugin-version.json`) when the plugin content changed,
+and a test fails if you changed the content and skipped that step. Likewise
 `docs/reference/openapi.json` comes from `python scripts/gen_openapi.py`.
 
 ## Security

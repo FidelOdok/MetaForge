@@ -207,6 +207,31 @@ python scripts/build_integrations.py
 claude plugin validate --strict integrations/claude-code
 ```
 
+#### The plugin version (FORGE-657)
+
+Claude Code decides whether an installed plugin needs updating by comparing the
+`version` in its `plugin.json`. A version that never changes means installed
+copies never see new skills, `PLUGIN.md` guidance or tool lists, with no error.
+So the generator versions the plugin by its content:
+
+- `integrations/plugin-version.json` holds the version and a digest of the
+  content that version was cut for. Every manifest (Claude Code, the local
+  package, both Codex manifests) takes its version from it.
+- When you run `python scripts/build_integrations.py` and the content changed,
+  the patch number goes up and the lock records the new digest. Run it again and
+  nothing changes. The version field is left out of the digest, so a bump does
+  not change the thing that triggered it.
+- A unit test regenerates the packages and fails if their content no longer
+  matches the lock, which means a source change that was not followed by the
+  generator cannot be merged.
+- Change the major or minor number by hand in the lock when a release deserves
+  it. The next run keeps it and counts patches from there.
+
+This is not the platform release number. The release tag is created by CI after
+a merge and is never committed back, so the source tree cannot carry it. A
+bundle built for a release is named after the plugin version, for example
+`metaforge-plugin-0.2.0.zip`.
+
 Skill frontmatter is generated from each skill's `definition.json` rather
 than written into the source `SKILL.md` files. Those files are read as raw
 body text and injected as procedural context, so frontmatter added there
