@@ -34,13 +34,13 @@
     {
       "name": "metaforge-cloud",
       "source": "./integrations/claude-code-cloud",
-      "description": "For claude.ai. The connector is already pointed at the hosted gateway, so there is no URL to enter: install it, choose Connect, and sign in once.",
+      "description": "For a hosted gateway. The same tools, skills, commands, agents and hooks as metaforge, but with no local default: you enter the hosted gateway's address, and sign in through /mcp.",
       "category": "engineering",
       "tags": [
         "hardware",
         "cad",
         "simulation",
-        "claude-ai"
+        "hosted"
       ]
     }
   ]
