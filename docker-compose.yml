@@ -51,6 +51,10 @@ services:
       - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
       # FORGE-628: Blender (GPL) runs only in blender-adapter's own image.
       - METAFORGE_ADAPTER_BLENDER_URL=http://blender-adapter:8202
+      # FORGE-557: OpenFOAM is only in openfoam-adapter's image, which runs under
+      # the `cfd` compose profile; without it a call says so rather than failing
+      # obscurely.
+      - METAFORGE_ADAPTER_OPENFOAM_URL=http://openfoam-adapter:8300
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -481,7 +485,7 @@ services:
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
-      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam
       --allow-twin-mutations
       --capture-sessions
     ports:
@@ -551,6 +555,10 @@ services:
       - METAFORGE_ADAPTER_SPICE_URL=http://spice-adapter:8104
       # FORGE-628: Blender (GPL) runs only in blender-adapter's own image.
       - METAFORGE_ADAPTER_BLENDER_URL=http://blender-adapter:8202
+      # FORGE-557: OpenFOAM is only in openfoam-adapter's image, which runs under
+      # the `cfd` compose profile; without it a call says so rather than failing
+      # obscurely.
+      - METAFORGE_ADAPTER_OPENFOAM_URL=http://openfoam-adapter:8300
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       # MET-495: same MinIO config as the gateway so twin.record_decision can
@@ -774,6 +782,46 @@ services:
           cpus: '4'
     healthcheck:
       test: ["CMD", "python3.12", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8202/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── OpenFOAM Adapter (FORGE-557: steady internal flow, OpenFOAM 11) ─
+  # Opt-in: the image is about 4 GB, so it only runs under the `cfd` profile
+  # (add `cfd` to COMPOSE_PROFILES). Built by CI, not on a shared host. It shares
+  # adapter-workspace with the CAD adapters, so an STL they export is read by path.
+  # Resource limits matter: a mesh and solve are CPU-bound and this box also runs
+  # the twin and its databases. The published port is loopback only; the gateway
+  # reaches the adapter over the compose network.
+  openfoam-adapter:
+    profiles: ["cfd"]
+    build:
+      context: .
+      dockerfile: tool_registry/tools/openfoam/Dockerfile
+    image: ghcr.io/fidelodok/metaforge-openfoam-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "127.0.0.1:8300:8300"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - OPENFOAM_WORK_DIR=/workspace
+      - OPENFOAM_HTTP_PORT=8300
+      - OPENFOAM_MAX_PROCS=${OPENFOAM_MAX_PROCS:-8}
+      - OPENFOAM_MAX_CELLS=${OPENFOAM_MAX_CELLS:-2000000}
+      - OPENFOAM_MAX_OPERATION_TIME=${OPENFOAM_MAX_OPERATION_TIME:-3600}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+          cpus: '8'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8300/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -389,6 +389,8 @@ PRODUCING: frozenset[str] = frozenset(
         "calculix.run_thermal",
         # FORGE-542: writes its deck and rawfile to the adapter workspace only.
         "spice.run_simulation",
+        # FORGE-557: writes its case directory to the adapter workspace only.
+        "openfoam.run_internal_flow",
         "gazebo.run_simulation",
         "isaac_sim.render_scene",
         "isaac_sim.run_physics",

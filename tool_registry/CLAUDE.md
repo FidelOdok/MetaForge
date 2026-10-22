@@ -22,6 +22,7 @@ MCP-based tool access layer. Manages containerized tool adapters (KiCad, FreeCAD
   - `freecad/` -- CAD operations (FreeCAD)
   - `kicad/` -- PCB/schematic validation (KiCad, read-only in Phase 1)
   - `spice/` -- Circuit simulation (ngspice)
+  - `openfoam/` -- Steady internal flow (OpenFOAM 11, FORGE-557). Opt-in `cfd` compose profile; the image is built on CI, never on a shared host. Parsers are tested against captured OpenFOAM output in `tests/unit/fixtures/openfoam/`; the solver is checked live against a straight pipe
   - `gazebo/` -- ROS-native physics/dynamics simulation (Gazebo Sim, opt-in)
   - `omniverse_usd/` -- GLB -> OpenUSD conversion (usd-core/trimesh, opt-in, pip-installable no GPU)
   - `blender/` -- Blender 5.2 LTS headless renders (FORGE-628). GPL boundary: only `bpy_scripts/` (GPL-3.0-or-later) imports `bpy`; the adapter runs Blender as a separate program and exchanges files. Never import `bpy` anywhere else (a test enforces it)
