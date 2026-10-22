@@ -47,7 +47,7 @@ def make_catalogue_reader() -> Any:
     """``flow.list`` — every launchable flow, as the gateway will run it."""
 
     async def read_catalogue() -> dict[str, Any]:
-        from api_gateway.design_flows.routes import list_design_flows
+        from api_gateway.design_flows.routes import list_design_flows, list_fragments
 
         listing = list_design_flows()
         return {
@@ -74,6 +74,18 @@ def make_catalogue_reader() -> Any:
                             # FORGE-539: the graph, so a caller can tailor it.
                             "depends_on": p.dependsOn,
                             "condition": p.condition,
+                            # Composable flows: set on fragment tasks only.
+                            **(
+                                {
+                                    "fragment": p.fragment,
+                                    "stage": p.stage,
+                                    "inputs": p.inputs,
+                                    "checks": p.checks,
+                                    "capabilities": p.capabilities,
+                                }
+                                if p.fragment
+                                else {}
+                            ),
                             "outcome": p.outcome,
                         }
                         for p in flow.phases
@@ -82,6 +94,9 @@ def make_catalogue_reader() -> Any:
                 }
                 for flow in listing.flows
             ],
+            # Composable flows: domain fragments a proposal can compose in
+            # with an `add_fragment` operation (value: the fragment id).
+            "fragments": [f.model_dump() for f in list_fragments().fragments],
         }
 
     return read_catalogue

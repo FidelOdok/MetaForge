@@ -85,6 +85,12 @@ cyclic dependencies, unreadable conditions); `deliverable-is-producible`
 follows real dependencies and ignores conditional producers; a conditional
 release gate does not count as a release gate.
 
+**Composed flows.** A flow composed from domain fragments adds gateless
+*task* phases whose dependencies are derived from the items they read and
+write, and its graph carries separate impact edges, so staleness and rework
+follow the data rather than stage ordering. See
+[Composable Design Flows](./composable-flows.md).
+
 **Execution.** On Temporal, a flow with any dependency or condition runs
 behind the `forge-539-graph` patch: independent phases run as parallel
 activities, gates are held one at a time in flow order, and the state query
@@ -141,7 +147,8 @@ unchanged.
 ## Selective repair and patches (`patch.py`)
 
 A gate's **rework** now re-runs the target and only what depends on it; for
-a straight line that is every later phase, as before. A rework target must
+a straight line that is every later phase, as before. In a composed flow,
+"depends on" means reads its outputs (`FlowGraph.affected`), not "runs after". A rework target must
 be a phase the current one depends on.
 
 A **patch** changes a running flow without starting it again: tailoring
@@ -197,7 +204,9 @@ repeats verbatim.
 ## Runtime limits
 
 Only the `ALL` join is supported; `ANY`, `QUORUM` and first-class loops are
-not (iteration is a bounded rework). One attempt per phase per wave. A run
+not (iteration is a bounded rework, or a coupled block whose iterations one
+agent attempt records and its gate judges; see
+[Composable Design Flows](./composable-flows.md#coupled-blocks)). One attempt per phase per wave. A run
 waits only at its gates (no pause), and there is no cancellation over MCP.
 Tool side effects carry no idempotency keys, so an uncertain external effect
 is not reconciled automatically.

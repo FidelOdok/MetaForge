@@ -1,0 +1,903 @@
+{
+ "design_v1": {
+  "content_hash": "ac660aa0c6798f89a825da7aaf060ac3456735f9214771673bff80ac8680d0ba",
+  "definition": {
+   "id": "design_v1",
+   "name": "Design vertical (Requirements -> Design -> Simulation)",
+   "phases": [
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "intent"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "System purpose stated",
+       "Primary stakeholder(s) identified",
+       "System boundary (in/out of scope) defined",
+       "Desired outcome stated"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Intent sign-off"
+     },
+     "id": "intent",
+     "model": null,
+     "objective": "Establish WHY this product is being built, before any requirements. From the stated goal, identify: the system's purpose, its primary stakeholder(s), the initial operating context, the system boundary (what's in scope vs out of scope), and the desired outcome. Record ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'), scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "intent"
+     ],
+     "slots": [],
+     "title": "Intent"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "stakeholder_need"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Stakeholder set identified",
+       "Each stakeholder's need captured in plain language",
+       "Needs trace to the recorded intent"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Needs sign-off"
+     },
+     "id": "needs",
+     "model": null,
+     "objective": "Identify the stakeholder needs this product must satisfy, tracing back to the recorded intent. For each stakeholder, capture their need in plain language -- avoid premature implementation detail (that's what requirements are for, next phase). Record each with the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's title], relation='motivates'), scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "stakeholder_need"
+     ],
+     "slots": [],
+     "title": "Stakeholder Needs"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "prd",
+      "constraint_set",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Functional requirements enumerated",
+       "Key constraints quantified",
+       "Primary load/use case defined",
+       "Parent traceability exists (requirements trace to a need)"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Requirements sign-off"
+     },
+     "id": "requirements",
+     "model": null,
+     "objective": "Establish the engineering requirements for the product from the stated goal. Capture functional requirements, key constraints (mass, envelope, load, power, cost as applicable), and the primary load/use cases. Record the requirements and the top design decisions into the digital twin (use the record-decision tool), scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Requirements"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Mass budget checked",
+       "Cost budget checked",
+       "Power/energy budget checked",
+       "First-order structural feasibility assessed",
+       "Actuator sizing assessed (where applicable)",
+       "Thermal plausibility assessed",
+       "Geometry feasibility assessed",
+       "Key technologies confirmed available",
+       "Major risks identified, each with an owner and mitigation"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G3",
+      "name": "Preliminary Feasibility Gate (G3)"
+     },
+     "id": "feasibility",
+     "model": null,
+     "objective": "Sanity-check feasibility before committing to detailed design. Check the requirement's mass, cost, and power/energy budgets against a first-order estimate; assess first-order structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility; confirm the key technologies involved are actually available; and identify the major risks to the project, each with an owner and a mitigation. Record a feasibility summary as a decision (record-decision tool), scoped to the project -- flag anything infeasible or high-risk explicitly rather than silently proceeding.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Preliminary Feasibility"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "mechanical"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "cad_model",
+      "schematic",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Critical subsystem geometry/schematic authored",
+       "Material + key dimensions chosen with rationale",
+       "Design traces to a requirement"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G6",
+      "name": "Design review (G6)"
+     },
+     "id": "design",
+     "model": null,
+     "objective": "Produce the detailed design that satisfies the approved requirements. Author the primary geometry / schematic for the load-bearing or functionally-critical subsystem using the available CAD/EDA tools, name every part meaningfully, and record the design rationale (material, dimensions, safety factor target) into the twin. If sizing derives a specific numeric spec, record it with `twin.record_constraint_set` and set `parent_refs` to the requirement it implements.",
+     "outcome": "",
+     "required_deliverables": [
+      "cad_model"
+     ],
+     "slots": [],
+     "title": "Detailed Design"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "simulation"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "simulation_result",
+      "test_result",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Analysis executed on the critical subsystem",
+       "Key result extracted",
+       "Verdict recorded against requirement"
+      ],
+      "enforce_constraints": true,
+      "gate_id": "G7",
+      "name": "V&V sign-off (G7)"
+     },
+     "id": "simulation",
+     "model": null,
+     "objective": "Validate the design against its requirements. Run the appropriate analysis (FEA stress for mechanical, ERC/DRC for electronics) on the critical subsystem, extract the key result (max stress / safety factor / violation count), and record a pass/fail verdict against the requirement into the twin.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Simulation & V&V"
+    }
+   ]
+  },
+  "version": "1.0.0"
+ },
+ "hardware_v1": {
+  "content_hash": "845764e0bbd6e97c1dacbfc36f2ae47bd4b7882db050e13296075e8199f4d2bd",
+  "definition": {
+   "id": "hardware_v1",
+   "name": "",
+   "phases": [
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "intent"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "System purpose stated",
+       "Primary stakeholder(s) identified",
+       "System boundary (in/out of scope) defined",
+       "Desired outcome stated"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Intent sign-off"
+     },
+     "id": "intent",
+     "model": null,
+     "objective": "Establish WHY this product is being built, before any requirements. From the stated goal, identify: the system's purpose, its primary stakeholder(s), the initial operating context, the system boundary (what's in scope vs out of scope), and the desired outcome. Record ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'), scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "intent"
+     ],
+     "slots": [],
+     "title": "Intent"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "stakeholder_need"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Stakeholder set identified",
+       "Each stakeholder's need captured in plain language",
+       "Needs trace to the recorded intent"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Needs sign-off"
+     },
+     "id": "needs",
+     "model": null,
+     "objective": "Identify the stakeholder needs this product must satisfy, tracing back to the recorded intent. For each stakeholder, capture their need in plain language -- avoid premature implementation detail (that's what requirements are for, next phase). Record each with the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's title], relation='motivates'), scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "stakeholder_need"
+     ],
+     "slots": [],
+     "title": "Stakeholder Needs"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "prd",
+      "constraint_set",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Functional requirements enumerated",
+       "Key constraints quantified (mass/power/DOF/cost as applicable)",
+       "Primary use / motion case defined",
+       "Parent traceability exists (requirements trace to a need)"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Requirements sign-off"
+     },
+     "id": "requirements",
+     "model": null,
+     "objective": "Establish the engineering requirements for the product from the stated goal. Capture functional requirements, the operating environment, and the key quantified constraints (mass, envelope, payload, degrees of freedom, power/energy budget, runtime, cost target). For a robot, capture the motion/task envelope: degrees of freedom, reach, speed, and payload. Record the requirements and the top decisions into the digital twin (record-decision tool), scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision",
+      "constraint_set"
+     ],
+     "slots": [],
+     "title": "Requirements"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Mass budget checked",
+       "Cost budget checked",
+       "Power/energy budget checked",
+       "First-order structural feasibility assessed",
+       "Actuator sizing assessed (where applicable)",
+       "Thermal plausibility assessed",
+       "Geometry feasibility assessed",
+       "Key technologies confirmed available",
+       "Major risks identified, each with an owner and mitigation"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G3",
+      "name": "Preliminary Feasibility Gate (G3)"
+     },
+     "id": "feasibility",
+     "model": null,
+     "objective": "Sanity-check feasibility before committing to detailed design. Check the requirement's mass, cost, and power/energy budgets against a first-order estimate; assess first-order structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility; confirm the key technologies involved are actually available; and identify the major risks to the project, each with an owner and a mitigation. Record a feasibility summary as a decision (record-decision tool), scoped to the project -- flag anything infeasible or high-risk explicitly rather than silently proceeding.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Preliminary Feasibility"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Critical requirements allocated to subsystems",
+       "Subsystems and interfaces defined",
+       "Mass / power / compute / cost budgets allocated",
+       "Actuation, sensing, compute, power selected with rationale",
+       "No unowned safety-critical requirement",
+       "Architecture satisfies major constraints"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G4",
+      "name": "Architecture Gate (G4)"
+     },
+     "id": "architecture",
+     "model": null,
+     "objective": "Define the system architecture that satisfies the requirements. Decompose the product into subsystems (structure, actuation, sensing, compute, power), define their interfaces, and allocate budgets (mass, power, compute, cost) across them. Select the actuator class, sensor suite, compute platform, and power source with rationale, checking each against its budget. Record the architecture and the selection decisions into the twin. Whenever you quantify a subsystem-level requirement derived from a system-level one (e.g. this subsystem's mass/power allocation), record it with `twin.record_constraint_set` and set `parent_refs` to the system-level requirement it implements, so the chain from intent down to this allocation stays traceable.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "System Architecture"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Viable concept(s) proposed",
+       "Trade study performed (alternatives considered and recorded)",
+       "Rationale captured",
+       "Selected concept linked to requirements/objectives"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G5",
+      "name": "Concept Selection Gate (G5)"
+     },
+     "id": "concept_selection",
+     "model": null,
+     "objective": "Run a trade study for the product concept, now that its system architecture is decided. Propose 2-3 distinct concepts/approaches that could satisfy that architecture (different actuation mechanisms, structural topologies, or component-level approaches -- whichever varies meaningfully for this product), select the one that best satisfies the requirements, and record the decision with the alternatives considered and why each was rejected (the record-decision tool's `alternatives` field), linked back to the architecture decision via `parent_refs`.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Concept Selection"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "industrial_design"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision",
+      "constraint_set"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Form factor envelope defined from sized contents, clearance and wall, each sourced",
+       "Envelope recorded as a constraint for mechanical design",
+       "Ergonomics checked against sourced limits for the stated users, or recorded as not applicable with the reason",
+       "Finishes chosen per visible part and compatible with its material, or the open items listed",
+       "Unknown and assumed values named"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Industrial design review"
+     },
+     "id": "industrial_design",
+     "model": null,
+     "objective": "Decide the product's form factor, check that people can use it, and choose finishes that suit how its parts are made, before mechanical design draws the housing. (1) Form factor: list the contents the product must hold (from the architecture and the selected concept: boards, batteries, actuators, bought parts), each with its size and how it is known, and run form_factor_envelope with the internal clearance and the wall thickness (the chosen process's minimum wall, from library.process_limits or library.machine_limits, when a process is chosen), checked against the maximum envelope the requirements state. Record the resulting envelope with twin.record_constraint_set, parent_refs set to the requirement it serves, so mechanical design works to it. (2) Ergonomics: if people hold, press, reach or lift the product, take the intended users from the requirements (ask the person if no requirement says), find a sourced limit for each human-contact feature (an anthropometric dataset or ergonomics guidance, cited with its table and percentile) and run check_ergonomics. If nobody handles it, record that, with the reason, instead. Never supply a body measurement from memory. (3) Colour, material and finish: the look is the person's choice; ask for it if it was not stated. Choose a library appearance per visible part (library.list_appearances; a new one is registered with library.register_appearance, held for the person's approval, with its colour code and a sourced screen value), and run check_cmf_compatibility against each part's material. Record one decision with twin.record_decision covering the envelope, the ergonomics verdict and the finishes, naming every unknown and every assumed value.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Industrial Design"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "mechanical"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "cad_model",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Critical geometry authored and committed to the twin",
+       "Material and key dimensions chosen with rationale",
+       "Design traces to a requirement"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G6",
+      "name": "Mechanical design review (G6)"
+     },
+     "id": "design",
+     "model": null,
+     "objective": "Produce the mechanical design for the load-bearing / motion-critical structure (chassis and mounts; for a robot, a representative link, joint, or leg). Author the geometry with the CAD tools, name every part meaningfully, choose material and key dimensions against a safety-factor target, and PERSIST the geometry with the commit-geometry tool so it becomes a viewable cad_model in the twin \u2014 a described-but-uncommitted model does NOT count. Record the design rationale. If you quantify a component-level spec derived from a system/subsystem requirement (e.g. this part's load capacity or safety factor), record it with `twin.record_constraint_set` and set `parent_refs` to the requirement it implements.",
+     "outcome": "",
+     "required_deliverables": [
+      "cad_model"
+     ],
+     "slots": [],
+     "title": "Mechanical Design"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "electronics"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "schematic",
+      "pcb_layout",
+      "bom",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Power budget closed",
+       "Schematic topology defined for compute / drivers / sensors / power",
+       "Key components selected; ERC clean where applicable"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Electronics review"
+     },
+     "id": "electronics",
+     "model": null,
+     "objective": "Design the electronics. Close the power budget (sources, rails, worst-case draw), define the schematic topology for the main board (compute, motor drivers, sensors, power), and select the key components. Run ERC on any available schematic. Record the power budget, topology, and part decisions into the twin. (Phase-1 KiCad is read-only, so capture the schematic plan as decisions.)",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Electronics Design"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "firmware"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "firmware_source",
+      "pinmap",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Control approach defined",
+       "Task structure and pin map specified",
+       "Drivers for each actuator / sensor identified"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Firmware review"
+     },
+     "id": "firmware",
+     "model": null,
+     "objective": "Define the firmware and control architecture. Specify the control loop (for a robot: actuator control and state-estimation approach), the task/RTOS structure, and the pin map / driver list tying the compute platform to the actuators and sensors. Record the firmware architecture and pinmap decisions into the twin.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Firmware & Control"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "simulation"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "simulation_result",
+      "test_result",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Analysis executed on the critical subsystem",
+       "Key results extracted (stress / safety factor / torque / violations)",
+       "Pass/fail verdict recorded against each requirement"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G7",
+      "name": "V&V sign-off (G7)"
+     },
+     "id": "simulation",
+     "model": null,
+     "objective": "Validate the design against its requirements. Run structural FEA on the load-bearing part (max stress / safety factor); for a robot, sanity-check the kinematics \u2014 reach, and joint torque against the motion requirements; run ERC/DRC/thermal where applicable. Record a pass/fail verdict against each key requirement into the twin.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Simulation & V&V"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "supply_chain",
+      "compliance"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "bom",
+      "gerber",
+      "pick_and_place",
+      "manufacturing_file",
+      "test_plan",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "BOM complete and costed",
+       "Fabrication outputs identified",
+       "Assembly and bring-up plan written",
+       "Waivers approved",
+       "Build/manufacturing release approved"
+      ],
+      "enforce_constraints": true,
+      "gate_id": "G8",
+      "name": "Manufacturing readiness / Release Gate (G8)"
+     },
+     "id": "manufacturing",
+     "model": null,
+     "objective": "Prepare the design for manufacture. Consolidate the BOM with sourceable parts and a cost roll-up, identify the fabrication outputs (gerbers and pick-and-place for the PCB, STEP/drawings for machined or printed parts), and write the assembly and bring-up plan. Record the manufacturing plan and BOM decisions into the twin. (Phase-1 exports read from existing EDA, so capture the plan and BOM as decisions.)",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Manufacturing Prep"
+    }
+   ]
+  },
+  "version": "1.1.0"
+ },
+ "mech_v1": {
+  "content_hash": "52a13880ed28784c144c3d796efaa9ee8f79010a9389394916b6c8b5f901827d",
+  "definition": {
+   "id": "mech_v1",
+   "name": "Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven",
+   "phases": [
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "intent"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "System purpose stated",
+       "Primary stakeholder(s) identified",
+       "System boundary (in/out of scope) defined",
+       "Desired outcome stated"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Intent sign-off"
+     },
+     "id": "intent",
+     "model": null,
+     "objective": "Establish WHY this product is being built, before any requirements. From the stated goal, identify: the system's purpose, its primary stakeholder(s), the initial operating context, the system boundary (what's in scope vs out of scope), and the desired outcome. Record ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'), scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "intent"
+     ],
+     "slots": [],
+     "title": "Intent"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "stakeholder_need"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Stakeholder set identified",
+       "Each stakeholder's need captured in plain language",
+       "Needs trace to the recorded intent"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Needs sign-off"
+     },
+     "id": "needs",
+     "model": null,
+     "objective": "Identify the stakeholder needs this product must satisfy, tracing back to the recorded intent. For each stakeholder, capture their need in plain language -- avoid premature implementation detail (that's what requirements are for, next phase). Record each with the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's title], relation='motivates'), scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "stakeholder_need"
+     ],
+     "slots": [],
+     "title": "Stakeholder Needs"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Load case quantified (magnitude + location)",
+       "Material class and safety-factor target stated",
+       "Mass / envelope budget stated",
+       "Parent traceability exists (requirements trace to a need)"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Requirements sign-off"
+     },
+     "id": "requirements",
+     "model": null,
+     "objective": "Establish the mechanical requirements from the goal. Quantify the load case (magnitude and where it acts / moment arm), the material class, the safety-factor target, and the mass/envelope budget. Record the requirements and load case as a design decision, scoped to the project.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Requirements"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Mass budget checked",
+       "Cost budget checked",
+       "Power/energy budget checked",
+       "First-order structural feasibility assessed",
+       "Actuator sizing assessed (where applicable)",
+       "Thermal plausibility assessed",
+       "Geometry feasibility assessed",
+       "Key technologies confirmed available",
+       "Major risks identified, each with an owner and mitigation"
+      ],
+      "enforce_constraints": false,
+      "gate_id": "G3",
+      "name": "Preliminary Feasibility Gate (G3)"
+     },
+     "id": "feasibility",
+     "model": null,
+     "objective": "Sanity-check feasibility before committing to detailed design. Check the requirement's mass, cost, and power/energy budgets against a first-order estimate; assess first-order structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility; confirm the key technologies involved are actually available; and identify the major risks to the project, each with an owner and a mitigation. Record a feasibility summary as a decision (record-decision tool), scoped to the project -- flag anything infeasible or high-risk explicitly rather than silently proceeding.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Preliminary Feasibility"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "manufacturing"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision",
+      "constraint_set"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Candidate processes compared on fit, availability and cost at quantity",
+       "Capability values sourced, not assumed",
+       "Chosen process and material recorded, with its limits as constraints"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Manufacturing route and process decision"
+     },
+     "id": "route_selection",
+     "model": null,
+     "objective": "Before any detailed design, choose how the part will be made, from what is available. Read the manufacturing context in this brief (route, machines, stock, quantity, budget); ask the person for anything missing rather than assume it. Pick 2 to 4 candidate processes the route allows, source each one's capability limits and costs as design values with their sources, and rank them with the rank_manufacturing_processes skill. Record a decision (record-decision tool) scoped to the project with manufacturing_route (the recommended route 'in_house' or 'vendor', process and material_class) and process_ranking (the candidates with their reasons); a process the person already stated is a one-candidate ranking. Record the chosen process's limits as a constraint set so the design is held to them. If the person cannot decide yet, pass manufacturing_route with deferred: true and their reason. The gate shows the ranking: approving accepts the recommendation; a retry naming another process records that one instead. A decision without manufacturing_route, or a chosen route without process_ranking, leaves the gate not ready.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Manufacturing Route & Process Selection"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "industrial_design"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision",
+      "constraint_set"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Form factor envelope defined from sized contents, clearance and wall, each sourced",
+       "Envelope recorded as a constraint for mechanical design",
+       "Ergonomics checked against sourced limits for the stated users, or recorded as not applicable with the reason",
+       "Finishes chosen per visible part and compatible with its material, or the open items listed",
+       "Unknown and assumed values named"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Industrial design review"
+     },
+     "id": "industrial_design",
+     "model": null,
+     "objective": "Decide the product's form factor, check that people can use it, and choose finishes that suit how its parts are made, before mechanical design draws the housing. (1) Form factor: list the contents the product must hold (from the architecture and the selected concept: boards, batteries, actuators, bought parts), each with its size and how it is known, and run form_factor_envelope with the internal clearance and the wall thickness (the chosen process's minimum wall, from library.process_limits or library.machine_limits, when a process is chosen), checked against the maximum envelope the requirements state. Record the resulting envelope with twin.record_constraint_set, parent_refs set to the requirement it serves, so mechanical design works to it. (2) Ergonomics: if people hold, press, reach or lift the product, take the intended users from the requirements (ask the person if no requirement says), find a sourced limit for each human-contact feature (an anthropometric dataset or ergonomics guidance, cited with its table and percentile) and run check_ergonomics. If nobody handles it, record that, with the reason, instead. Never supply a body measurement from memory. (3) Colour, material and finish: the look is the person's choice; ask for it if it was not stated. Choose a library appearance per visible part (library.list_appearances; a new one is registered with library.register_appearance, held for the person's approval, with its colour code and a sourced screen value), and run check_cmf_compatibility against each part's material. Record one decision with twin.record_decision covering the envelope, the ergonomics verdict and the finishes, naming every unknown and every assumed value.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Industrial Design"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "mechanical"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "cad_model",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "The committed geometry is the part the goal asked for",
+       "Sized to the requirements; material chosen with rationale",
+       "Committed as a viewable cad_model"
+      ],
+      "enforce_constraints": true,
+      "gate_id": "G6",
+      "name": "Mechanical design review (G6)"
+     },
+     "id": "design",
+     "model": null,
+     "objective": "Design the part THE GOAL DESCRIBES \u2014 not a generic or example part. Author its geometry with the FreeCAD tools, sized to the requirements; name the part after what it actually is; use the process and material chosen at the route gate and design to that process's limits (the constraint set recorded there); then PERSIST it with the commit-geometry tool so it becomes a viewable cad_model (a described-but-uncommitted model does NOT count). Record the design rationale: the dimensions, the material, and how the section carries the load. If sizing this part derives a specific numeric spec (e.g. a section dimension driven by the load case), record it with `twin.record_constraint_set` and set `parent_refs` to the system requirement it implements.",
+     "outcome": "",
+     "required_deliverables": [
+      "cad_model"
+     ],
+     "slots": [],
+     "title": "Mechanical Design"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "manufacturing"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Design checked feature by feature against the chosen process",
+       "Each value's basis stated (measured, declared or stated)",
+       "Manufacturing plan with stock and operations in order"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "DFM review (manufacturability)"
+     },
+     "id": "dfm_review",
+     "model": null,
+     "objective": "Check the committed design against the process chosen at the route gate, with the check_manufacturability skill: each feature (wall thickness, holes, inside corner and bend radii, draft, overhang, envelope) against that process's sourced limits, pass, fail or unknown, saying for each value whether it was measured, declared when the part was authored, or stated. Record failing and unknown findings as evidence against the cad_model. Write the manufacturing plan: stock to buy, operations in order, quantity, and a unit cost only if every input is sourced. Record a decision (record-decision tool) scoped to the project with dfm_review (process, verdict, findings, unknowns, plan). A not_manufacturable verdict leaves the gate not ready: rework the design. An incomplete verdict passes with what could not be checked named; approving accepts it.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "DFM Review & Manufacturing Plan"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
+      "simulation"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "simulation_result",
+      "design_decision"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "FEA executed on the committed geometry",
+       "Max stress / safety factor extracted",
+       "Pass/fail verdict recorded against the requirement"
+      ],
+      "enforce_constraints": true,
+      "gate_id": "G7",
+      "name": "V&V sign-off (G7)"
+     },
+     "id": "simulation",
+     "model": null,
+     "objective": "Validate the part against its safety-factor requirement. Mesh the committed geometry and run CalculiX FEA under the load case; extract the max stress and safety factor; record a pass/fail verdict against the requirement. If FEA tooling is unavailable, say so explicitly \u2014 do NOT present a hand-calc as FEA.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Simulation & V&V"
+    }
+   ]
+  },
+  "version": "1.3.0"
+ }
+}

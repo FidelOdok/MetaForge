@@ -136,7 +136,7 @@ def plan_patch(
     else:
         hit: set[str] = set()
         for seed in seeds:
-            hit.update(graph.downstream(seed))
+            hit.update(graph.affected(seed))
         rerun = [p for p in graph.order if p in hit]
     done = [p for p in completed if p in after]
     preserved = tuple(p for p in done if p not in rerun)

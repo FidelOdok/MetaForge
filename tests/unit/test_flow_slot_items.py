@@ -225,8 +225,19 @@ class TestSlotsInTheFlow:
             row.pop("slots")
             if row.get("model") is None:
                 row.pop("model")
-            # FORGE-539 fields did not exist before slots either.
-            for key in ("depends_on", "condition", "outcome"):
+            # FORGE-539 fields did not exist before slots either, nor did the
+            # composable-flow task contract.
+            for key in (
+                "depends_on",
+                "condition",
+                "outcome",
+                "fragment",
+                "stage",
+                "inputs",
+                "checks",
+                "capabilities",
+                "coupling",
+            ):
                 row.pop(key)
             rows.append(row)
         legacy = hashlib.sha256(

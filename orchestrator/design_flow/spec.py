@@ -76,6 +76,50 @@ class DeliverableSlot:
 
 
 @dataclass(frozen=True)
+class Check:
+    """One deterministic acceptance criterion of a task (composable flows).
+
+    ``value`` names a design value (``design_value`` item ``name``); the check
+    holds when ``<recorded value> <op> <bound>``. The bound is ``limit`` when
+    set -- another design value, so an engineering limit comes from a sourced
+    record (a requirement, a datasheet) rather than a number written into a
+    fragment -- else the literal ``threshold``. A value or limit that has not
+    been recorded is ``no_data``, which never passes. ``unit`` is shown to the
+    reviewer; values are compared as recorded.
+    """
+
+    id: str
+    value: str
+    op: str
+    threshold: float = 0.0
+    unit: str = ""
+    limit: str = ""
+
+    def describe(self) -> str:
+        if self.limit:
+            return f"{self.value} {self.op} {self.limit}"
+        unit = f" {self.unit}" if self.unit else ""
+        return f"{self.value} {self.op} {self.threshold:g}{unit}"
+
+
+@dataclass(frozen=True)
+class Coupling:
+    """A coupled block's convergence contract (composable flows).
+
+    A block phase stands for several mutually dependent tasks (``members``)
+    solved together until every ``solves_for`` design value changes by less
+    than ``tolerance`` (relative) between iterations. ``max_iterations``
+    bounds it; a block that does not converge raises an engineering decision
+    rather than loosening anything.
+    """
+
+    members: tuple[str, ...]
+    solves_for: tuple[str, ...]
+    tolerance: float
+    max_iterations: int
+
+
+@dataclass(frozen=True)
 class Phase:
     """One step of the design lifecycle.
 
@@ -116,6 +160,29 @@ class Phase:
     # FORGE-539: the intermediate outcome this phase establishes, in one line
     # ("drivetrain requirements established"). Outcomes come before tasks.
     outcome: str = ""
+    # Composable flows: a *task* is a gateless phase contributed by a domain
+    # fragment. ``fragment`` names it ("thermal_v1"), ``stage`` is the spine
+    # phase whose gate reviews it. Empty on spine phases and on every flow
+    # approved before fragments existed.
+    fragment: str = ""
+    stage: str = ""
+    # The twin items the task reads, as ``type:name``
+    # (``design_value:heat_load_w``). Its outputs are its ``slots``. Composition
+    # derives ``depends_on`` from inputs and outputs, so staleness and rework
+    # follow the data rather than flow order.
+    inputs: tuple[str, ...] = ()
+    # Deterministic acceptance criteria, evaluated at the stage gate.
+    checks: tuple[Check, ...] = ()
+    # Tool ids the task needs (``calculix.run_thermal``). Unresolved ones are
+    # capability gaps.
+    capabilities: tuple[str, ...] = ()
+    # Set on a block phase: the coupled tasks it solves and how convergence
+    # is judged. ``None`` on every other phase.
+    coupling: Coupling | None = None
+
+    @property
+    def is_task(self) -> bool:
+        return bool(self.fragment)
 
 
 @dataclass(frozen=True)
@@ -202,6 +269,17 @@ def get_flow(flow_id: str | None) -> FlowDefinition:
         raise KeyError(f"unknown flow '{flow_id}'; known flows: {sorted(FLOWS)}") from exc
 
 
+def _coupling_from(raw: object) -> Coupling | None:
+    if raw is None:
+        return None
+    return Coupling(
+        members=tuple(getattr(raw, "members", ())),
+        solves_for=tuple(getattr(raw, "solves_for", ())),
+        tolerance=float(getattr(raw, "tolerance", 0.01)),
+        max_iterations=int(getattr(raw, "max_iterations", 20)),
+    )
+
+
 def definition_from_frozen(frozen: FrozenFlow) -> FlowDefinition:
     """Rebuild a :class:`FlowDefinition` from a frozen, approved flow (FORGE-474).
 
@@ -227,6 +305,22 @@ def definition_from_frozen(frozen: FrozenFlow) -> FlowDefinition:
                 depends_on=None if p.depends_on is None else tuple(p.depends_on),
                 condition=p.condition or None,
                 outcome=p.outcome or "",
+                fragment=getattr(p, "fragment", "") or "",
+                stage=getattr(p, "stage", "") or "",
+                inputs=tuple(getattr(p, "inputs", ()) or ()),
+                checks=tuple(
+                    Check(
+                        id=c.id,
+                        value=c.value,
+                        op=c.op,
+                        threshold=c.threshold,
+                        unit=c.unit,
+                        limit=getattr(c, "limit", "") or "",
+                    )
+                    for c in (getattr(p, "checks", ()) or ())
+                ),
+                capabilities=tuple(getattr(p, "capabilities", ()) or ()),
+                coupling=_coupling_from(getattr(p, "coupling", None)),
                 slots=tuple(
                     DeliverableSlot(item_type=s.item_type, name=s.name, item_key=s.item_key)
                     for s in p.slots

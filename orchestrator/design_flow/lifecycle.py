@@ -200,6 +200,8 @@ class LifecycleView:
 
 
 _TERMINAL_FAILED = {"failed"}
+#: Phase entry statuses whose gate did not pass the phase.
+_UNREVIEWED = {"failed", "exhausted", "ungrounded", "incomplete"}
 _TERMINAL_STOPPED = {"rejected", "canceled", "cancelled"}
 
 
@@ -260,7 +262,7 @@ def lifecycle_view(
     for phase_id in graph.order:
         if validity[phase_id] is Validity.VALID and any(
             validity[u] in (Validity.STALE, Validity.POTENTIALLY_INVALID)
-            for u in graph.upstream(phase_id)
+            for u in graph.impacted_by(phase_id)
         ):
             validity[phase_id] = Validity.POTENTIALLY_INVALID
 
@@ -315,6 +317,16 @@ def lifecycle_view(
         elif execution is ExecutionStatus.SUCCEEDED and has_gate:
             objective = ObjectiveStatus.SATISFIED
             approved.add(pid)
+        elif execution is ExecutionStatus.SUCCEEDED and bool(getattr(phase, "fragment", None)):
+            # Composable flows: a task has no gate of its own; the gate of the
+            # stage it belongs to reviews its outputs and checks.
+            approved.add(pid)
+            stage = str(getattr(phase, "stage", "") or "")
+            if completed.get(stage) is not None and completed[stage] not in _UNREVIEWED:
+                objective = ObjectiveStatus.SATISFIED
+            else:
+                objective = ObjectiveStatus.NOT_EVALUATED
+                reasons.append(f"waiting for the '{stage}' gate to review it")
         elif execution is ExecutionStatus.SUCCEEDED:
             objective = ObjectiveStatus.INCONCLUSIVE
             reasons.append("no gate reviews this phase, so its objective was not assessed")

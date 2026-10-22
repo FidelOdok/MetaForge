@@ -808,6 +808,8 @@ and a dedicated `forge design` CLI wrapper.
 |--------|------|
 | `orchestrator/design_flow/spec.py` | `Phase` / `Gate` / `FlowDefinition` / `DeliverableSlot`, built-in flows |
 | `orchestrator/design_flow/slots.py` | Deliverable slots: default slots, key binding, write-to-slot matching (FORGE-524) |
+| `orchestrator/design_flow/{contract,fragments,compose,checks,coupling}.py` | Composable flows: task contract, domain fragments, composition, stage-gate checks, coupled blocks ([Composable Design Flows](./composable-flows.md)) |
+| `orchestrator/design_flow/templates/spine/spine_v1.yaml` | The shared spine the templates `extends` |
 | `orchestrator/design_flow/executor.py` | `DesignFlowExecutor`, `GateCoordinator`, `PhaseBrain` |
 | `api_gateway/runs/flow_brain.py` | `ReActPhaseBrain` fallback; keeps the phase summary on the run record (FORGE-527) |
 | `api_gateway/runs/{req,arch,mech,elec,fw,vv,mfg}_handlers.py` | Goal-driven deterministic phase handlers |

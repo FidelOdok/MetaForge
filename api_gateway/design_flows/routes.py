@@ -103,6 +103,81 @@ class PhaseView(BaseModel):
     dependsOn: list[str] | None = None  # noqa: N815
     condition: str | None = None
     outcome: str = ""
+    #: Composable flows: set on a task contributed by a domain fragment. The
+    #: stage is the spine phase whose gate reviews it; inputs are the items it
+    #: reads (``type:name``); checks are its acceptance criteria; capabilities
+    #: the tools it needs. Empty on spine phases.
+    fragment: str = ""
+    stage: str = ""
+    inputs: list[str] = Field(default_factory=list)
+    checks: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    #: Set on a block phase: the coupled tasks it solves to convergence.
+    coupling: dict[str, Any] | None = None
+
+
+class FragmentTaskView(BaseModel):
+    id: str
+    title: str
+    stage: str
+    inputs: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
+    checks: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class FragmentBlockView(BaseModel):
+    id: str
+    stage: str
+    members: list[str] = Field(default_factory=list)
+    solvesFor: list[str] = Field(default_factory=list)  # noqa: N815
+    tolerance: float
+    maxIterations: int  # noqa: N815
+
+
+class FragmentView(BaseModel):
+    """A domain fragment: one domain's tasks, composable into any flow."""
+
+    id: str
+    version: str
+    domain: str
+    label: str
+    description: str
+    spine: str
+    requires: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    tasks: list[FragmentTaskView] = Field(default_factory=list)
+    blocks: list[FragmentBlockView] = Field(default_factory=list)
+
+
+class FragmentListResponse(BaseModel):
+    fragments: list[FragmentView]
+
+
+def _fragment_view(fragment: Any) -> FragmentView:
+    data = fragment.as_dict()
+    return FragmentView(
+        id=data["id"],
+        version=data["version"],
+        domain=data["domain"],
+        label=data["label"],
+        description=data["description"],
+        spine=data["spine"],
+        requires=data["requires"],
+        keywords=data["keywords"],
+        tasks=[FragmentTaskView(**t) for t in data["tasks"]],
+        blocks=[
+            FragmentBlockView(
+                id=b["id"],
+                stage=b["stage"],
+                members=b["members"],
+                solvesFor=b["solves_for"],
+                tolerance=b["tolerance"],
+                maxIterations=b["max_iterations"],
+            )
+            for b in data["blocks"]
+        ],
+    )
 
 
 class DesignFlowView(BaseModel):
@@ -188,6 +263,21 @@ def _phase_view(phase: object) -> PhaseView:
         ),
         condition=getattr(phase, "condition", None) or None,
         outcome=str(getattr(phase, "outcome", "") or ""),
+        fragment=str(getattr(phase, "fragment", "") or ""),
+        stage=str(getattr(phase, "stage", "") or ""),
+        inputs=list(getattr(phase, "inputs", ()) or ()),
+        checks=[c.describe() for c in getattr(phase, "checks", ()) or ()],
+        capabilities=list(getattr(phase, "capabilities", ()) or ()),
+        coupling=(
+            None
+            if getattr(phase, "coupling", None) is None
+            else {
+                "members": list(phase.coupling.members),  # type: ignore[attr-defined]
+                "solves_for": list(phase.coupling.solves_for),  # type: ignore[attr-defined]
+                "tolerance": phase.coupling.tolerance,  # type: ignore[attr-defined]
+                "max_iterations": phase.coupling.max_iterations,  # type: ignore[attr-defined]
+            }
+        ),
         gate=(
             None
             if gate is None
@@ -214,6 +304,21 @@ def list_design_flows() -> DesignFlowListResponse:
         invalid=[f.id for f in flows if not f.valid],
     )
     return DesignFlowListResponse(flows=flows, defaultFlowId=DEFAULT_FLOW_ID)
+
+
+@router.get("/fragments", response_model=FragmentListResponse)
+def list_fragments() -> FragmentListResponse:
+    """Every domain fragment a proposal can compose in with ``add_fragment``.
+
+    Registered before ``/{flow_id}`` so it is not read as a flow id.
+    """
+    from orchestrator.design_flow.fragments import load_fragments
+
+    with tracer.start_as_current_span("design_flows.fragments") as span:
+        fragments = [_fragment_view(f) for _, f in sorted(load_fragments().items())]
+        span.set_attribute("design_flows.fragment_count", len(fragments))
+    logger.info("design_flow_fragments_listed", count=len(fragments))
+    return FragmentListResponse(fragments=fragments)
 
 
 @router.get("/{flow_id}", response_model=DesignFlowView)
@@ -578,6 +683,10 @@ class FlowProposalView(BaseModel):
     #: FORGE-539: whether the tools exist to do it: per-phase coverage and
     #: the gap register, with a READY / READY_WITH_WARNINGS / BLOCKED status.
     capabilities: dict[str, Any] | None = None
+    #: Composable flows: the fragments composed in, the inputs no task writes
+    #: (to be recorded with a source before the tasks that read them) and
+    #: each task's derived dependencies. Null for a flow with no fragments.
+    composition: dict[str, Any] | None = None
 
 
 def _generated_by(proposal: FlowProposal) -> dict[str, str | None] | None:
@@ -635,6 +744,7 @@ def _proposal_view(proposal: FlowProposal, approval_id: str, version_id: str) ->
             phases=[_phase_view(phase) for phase in definition.phases],
             graph=_graph_dict(definition),
         ),
+        composition=proposal.composition.as_dict() if proposal.composition else None,
     )
 
 

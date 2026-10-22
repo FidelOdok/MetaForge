@@ -83,6 +83,13 @@ class FlowGraph:
     parents: Mapping[str, tuple[str, ...]]
     children: Mapping[str, tuple[str, ...]]
     conditions: Mapping[str, str]
+    #: Composable flows: what a change to each phase invalidates. In a flow
+    #: without tasks this is ``children``. With tasks, the ordering edge that
+    #: makes a task wait for the stage before it carries no data, so it is
+    #: not followed; a task's outputs reach the tasks that read them and the
+    #: stage gate that reviews it, and a stage reaches the next stage.
+    #: ``None`` means "same as children".
+    impact: Mapping[str, tuple[str, ...]] | None = None
 
     # -- shape ---------------------------------------------------------------
 
@@ -162,6 +169,41 @@ class FlowGraph:
                     stack.append(child)
         return [p for p in self.order if p in seen]
 
+    def affected(self, phase_id: str) -> list[str]:
+        """``phase_id`` and everything a change to it invalidates, transitively.
+
+        The set a rework to ``phase_id`` re-runs and a replan from it
+        resets. Follows data and review edges (:attr:`impact`); equal to
+        :meth:`downstream` for a flow without tasks.
+        """
+        self._require(phase_id)
+        edges = self.impact if self.impact is not None else self.children
+        seen = {phase_id}
+        stack = [phase_id]
+        while stack:
+            for child in edges[stack.pop()]:
+                if child not in seen:
+                    seen.add(child)
+                    stack.append(child)
+        return [p for p in self.order if p in seen]
+
+    def impacted_by(self, phase_id: str) -> list[str]:
+        """Every phase whose change would invalidate ``phase_id`` (not itself)."""
+        self._require(phase_id)
+        edges = self.impact if self.impact is not None else self.children
+        reverse: dict[str, list[str]] = {p: [] for p in self.order}
+        for source, targets in edges.items():
+            for target in targets:
+                reverse[target].append(source)
+        seen: set[str] = set()
+        stack = list(reverse[phase_id])
+        while stack:
+            current = stack.pop()
+            if current not in seen:
+                seen.add(current)
+                stack.extend(reverse[current])
+        return [p for p in self.order if p in seen]
+
     def upstream(self, phase_id: str) -> list[str]:
         """Every phase ``phase_id`` depends on, transitively (not itself)."""
         self._require(phase_id)
@@ -228,11 +270,66 @@ def build_graph(phases: Sequence[Any]) -> FlowGraph:
         parents=parents,
         children={p: tuple(c) for p, c in children.items()},
         conditions=conditions,
+        impact=_impact_edges(phases, order, children),
     )
     if len(graph.topological()) != len(order):
         cyclic = sorted(set(order) - set(graph.topological()))
         raise GraphError(f"dependency cycle among phases: {', '.join(cyclic)}")
     return graph
+
+
+def _item(item_type: str, name: str) -> tuple[str, str]:
+    """An item's identity for matching a reference to the slot that writes it.
+
+    The same normalisation an item key applies (case and separators), done
+    here without importing the item registry, because this module runs in
+    the Temporal sandbox.
+    """
+    return item_type, "-".join(re.findall(r"[a-z0-9]+", name.lower()))
+
+
+def _reads(phase: Any) -> set[tuple[str, str]]:
+    """The items a task reads: its inputs and the design values its checks compare to."""
+    out: set[tuple[str, str]] = set()
+    for ref in getattr(phase, "inputs", ()) or ():
+        item_type, _, name = str(ref).partition(":")
+        out.add(_item(item_type, name))
+    for check in getattr(phase, "checks", ()) or ():
+        limit = getattr(check, "limit", "")
+        if limit:
+            out.add(_item("design_value", str(limit)))
+    return out
+
+
+def _impact_edges(
+    phases: Sequence[Any],
+    order: tuple[str, ...],
+    children: Mapping[str, list[str]],
+) -> dict[str, tuple[str, ...]] | None:
+    """Data and review edges for a composed flow; ``None`` when it has no tasks."""
+    tasks = {str(p.id) for p in phases if getattr(p, "fragment", "")}
+    if not tasks:
+        return None
+    writes: dict[tuple[str, str], set[str]] = {}
+    for phase in phases:
+        for slot in getattr(phase, "slots", ()) or ():
+            writes.setdefault(_item(str(slot.item_type), str(slot.name)), set()).add(str(phase.id))
+    impact: dict[str, set[str]] = {p: set() for p in order}
+    for phase in phases:
+        pid = str(phase.id)
+        for item in _reads(phase):
+            for writer in writes.get(item, ()):
+                if writer != pid:
+                    impact[writer].add(pid)
+        if pid in tasks:
+            stage = str(getattr(phase, "stage", "") or "")
+            if stage in impact:
+                impact[pid].add(stage)  # the gate that reviews it
+        else:
+            # A stage invalidates the stages after it; tasks that only wait
+            # for it are reached through the data they read, if any.
+            impact[pid].update(c for c in children[pid] if c not in tasks)
+    return {p: tuple(c for c in order if c in impact[p]) for p in order}
 
 
 def rework_candidates(graph: FlowGraph, phase_id: str) -> list[str]:

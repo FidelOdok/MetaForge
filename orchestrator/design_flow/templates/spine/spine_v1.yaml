@@ -1,0 +1,261 @@
+# The shared spine (composable flows).
+#
+# The gated stages every product goes through, defined once:
+# intent -> needs -> requirements -> feasibility -> (architecture ->
+# concept selection -> industrial design) -> design -> V&V -> manufacturing /
+# release. A flow template `extends: spine_v1` and pulls a stage with
+# `- use: <id>`, overriding only the keys it needs to. Domain fragments
+# (templates/fragments/) attach their tasks to these stages.
+#
+# Bump `version` when a stage's objective, deliverables or gate change: every
+# template that uses the stage changes with it.
+id: spine_v1
+version: 1.0.0
+phases:
+- id: intent
+  title: Intent
+  objective: >-
+    Establish WHY this product is being built, before any requirements. From the stated goal,
+    identify: the system's purpose, its primary stakeholder(s), the initial operating context,
+    the system boundary (what's in scope vs out of scope), and the desired outcome. Record
+    ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'),
+    scoped to the project.
+  expected_artifacts:
+  - intent
+  required_deliverables:
+  - intent
+  gate:
+    name: Intent sign-off
+    criteria:
+    - System purpose stated
+    - Primary stakeholder(s) identified
+    - System boundary (in/out of scope) defined
+    - Desired outcome stated
+- id: needs
+  title: Stakeholder Needs
+  objective: >-
+    Identify the stakeholder needs this product must satisfy, tracing back to the recorded
+    intent. For each stakeholder, capture their need in plain language -- avoid premature
+    implementation detail (that's what requirements are for, next phase). Record each with
+    the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's
+    title], relation='motivates'), scoped to the project.
+  expected_artifacts:
+  - stakeholder_need
+  required_deliverables:
+  - stakeholder_need
+  gate:
+    name: Needs sign-off
+    criteria:
+    - Stakeholder set identified
+    - Each stakeholder's need captured in plain language
+    - Needs trace to the recorded intent
+- id: requirements
+  title: Requirements
+  objective: >-
+    Establish the engineering requirements for the product from the stated goal. Capture functional
+    requirements, key constraints (mass, envelope, load, power, cost as applicable), and the
+    primary load/use cases. Record the requirements and the top design decisions into the
+    digital twin (use the record-decision tool), scoped to the project.
+  expected_artifacts:
+  - prd
+  - constraint_set
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Requirements sign-off
+    criteria:
+    - Functional requirements enumerated
+    - Key constraints quantified
+    - Primary load/use case defined
+    - Parent traceability exists (requirements trace to a need)
+- id: feasibility
+  title: Preliminary Feasibility
+  objective: >-
+    Sanity-check feasibility before committing to detailed design. Check the requirement's
+    mass, cost, and power/energy budgets against a first-order estimate; assess first-order
+    structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility;
+    confirm the key technologies involved are actually available; and identify the major risks
+    to the project, each with an owner and a mitigation. Record a feasibility summary as a
+    decision (record-decision tool), scoped to the project -- flag anything infeasible or
+    high-risk explicitly rather than silently proceeding.
+  expected_artifacts:
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Preliminary Feasibility Gate (G3)
+    criteria:
+    - Mass budget checked
+    - Cost budget checked
+    - Power/energy budget checked
+    - First-order structural feasibility assessed
+    - Actuator sizing assessed (where applicable)
+    - Thermal plausibility assessed
+    - Geometry feasibility assessed
+    - Key technologies confirmed available
+    - Major risks identified, each with an owner and mitigation
+    gate_id: G3
+- id: architecture
+  title: System Architecture
+  objective: >-
+    Define the system architecture that satisfies the requirements. Decompose the product
+    into subsystems (structure, actuation, sensing, compute, power), define their interfaces,
+    and allocate budgets (mass, power, compute, cost) across them. Select the actuator class,
+    sensor suite, compute platform, and power source with rationale, checking each against
+    its budget. Record the architecture and the selection decisions into the twin. Whenever
+    you quantify a subsystem-level requirement derived from a system-level one (e.g. this
+    subsystem's mass/power allocation), record it with `twin.record_constraint_set` and set
+    `parent_refs` to the system-level requirement it implements, so the chain from intent
+    down to this allocation stays traceable.
+  expected_artifacts:
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Architecture Gate (G4)
+    criteria:
+    - Critical requirements allocated to subsystems
+    - Subsystems and interfaces defined
+    - Mass / power / compute / cost budgets allocated
+    - Actuation, sensing, compute, power selected with rationale
+    - No unowned safety-critical requirement
+    - Architecture satisfies major constraints
+    gate_id: G4
+- id: concept_selection
+  title: Concept Selection
+  objective: >-
+    Run a trade study for the product concept, now that its system architecture is decided.
+    Propose 2-3 distinct concepts/approaches that could satisfy that architecture (different
+    actuation mechanisms, structural topologies, or component-level approaches -- whichever
+    varies meaningfully for this product), select the one that best satisfies the requirements,
+    and record the decision with the alternatives considered and why each was rejected (the
+    record-decision tool's `alternatives` field), linked back to the architecture decision
+    via `parent_refs`.
+  expected_artifacts:
+  - design_decision
+  required_deliverables:
+  - design_decision
+  gate:
+    name: Concept Selection Gate (G5)
+    criteria:
+    - Viable concept(s) proposed
+    - Trade study performed (alternatives considered and recorded)
+    - Rationale captured
+    - Selected concept linked to requirements/objectives
+    gate_id: G5
+- id: industrial_design
+  title: Industrial Design
+  objective: >-
+    Decide the product's form factor, check that people can use it, and choose finishes that
+    suit how its parts are made, before mechanical design draws the housing. (1) Form factor:
+    list the contents the product must hold (from the architecture and the selected concept:
+    boards, batteries, actuators, bought parts), each with its size and how it is known, and run
+    form_factor_envelope with the internal clearance and the wall thickness (the chosen
+    process's minimum wall, from library.process_limits or library.machine_limits, when a
+    process is chosen), checked against the maximum envelope the requirements state. Record the
+    resulting envelope with twin.record_constraint_set, parent_refs set to the requirement it
+    serves, so mechanical design works to it. (2) Ergonomics: if people hold, press, reach or
+    lift the product, take the intended users from the requirements (ask the person if no
+    requirement says), find a sourced limit for each human-contact feature (an anthropometric
+    dataset or ergonomics guidance, cited with its table and percentile) and run
+    check_ergonomics. If nobody handles it, record that, with the reason, instead. Never supply
+    a body measurement from memory. (3) Colour, material and finish: the look is the person's
+    choice; ask for it if it was not stated. Choose a library appearance per visible part
+    (library.list_appearances; a new one is registered with library.register_appearance, held
+    for the person's approval, with its colour code and a sourced screen value), and run
+    check_cmf_compatibility against each part's material. Record one decision with
+    twin.record_decision covering the envelope, the ergonomics verdict and the finishes, naming
+    every unknown and every assumed value.
+  expected_artifacts:
+  - design_decision
+  - constraint_set
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - industrial_design
+  gate:
+    name: Industrial design review
+    criteria:
+    - Form factor envelope defined from sized contents, clearance and wall, each sourced
+    - Envelope recorded as a constraint for mechanical design
+    - Ergonomics checked against sourced limits for the stated users, or recorded as not applicable with the reason
+    - Finishes chosen per visible part and compatible with its material, or the open items listed
+    - Unknown and assumed values named
+- id: design
+  title: Detailed Design
+  objective: >-
+    Produce the detailed design that satisfies the approved requirements. Author the primary
+    geometry / schematic for the load-bearing or functionally-critical subsystem using the
+    available CAD/EDA tools, name every part meaningfully, and record the design rationale
+    (material, dimensions, safety factor target) into the twin. If sizing derives a specific
+    numeric spec, record it with `twin.record_constraint_set` and set `parent_refs` to the
+    requirement it implements.
+  expected_artifacts:
+  - cad_model
+  - schematic
+  - design_decision
+  required_deliverables:
+  - cad_model
+  disciplines:
+  - mechanical
+  gate:
+    name: Design review (G6)
+    criteria:
+    - Critical subsystem geometry/schematic authored
+    - Material + key dimensions chosen with rationale
+    - Design traces to a requirement
+    gate_id: G6
+- id: simulation
+  title: Simulation & V&V
+  objective: >-
+    Validate the design against its requirements. Run the appropriate analysis (FEA stress
+    for mechanical, ERC/DRC for electronics) on the critical subsystem, extract the key result
+    (max stress / safety factor / violation count), and record a pass/fail verdict against
+    the requirement into the twin.
+  expected_artifacts:
+  - simulation_result
+  - test_result
+  - design_decision
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - simulation
+  gate:
+    name: V&V sign-off (G7)
+    criteria:
+    - Analysis executed on the critical subsystem
+    - Key result extracted
+    - Verdict recorded against requirement
+    enforce_constraints: true
+    gate_id: G7
+- id: manufacturing
+  title: Manufacturing Prep
+  objective: >-
+    Prepare the design for manufacture. Consolidate the BOM with sourceable parts and a cost
+    roll-up, identify the fabrication outputs (gerbers and pick-and-place for the PCB, STEP/drawings
+    for machined or printed parts), and write the assembly and bring-up plan. Record the manufacturing
+    plan and BOM decisions into the twin. (Phase-1 exports read from existing EDA, so capture
+    the plan and BOM as decisions.)
+  expected_artifacts:
+  - bom
+  - gerber
+  - pick_and_place
+  - manufacturing_file
+  - test_plan
+  - design_decision
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - supply_chain
+  - compliance
+  gate:
+    name: Manufacturing readiness / Release Gate (G8)
+    criteria:
+    - BOM complete and costed
+    - Fabrication outputs identified
+    - Assembly and bring-up plan written
+    - Waivers approved
+    - Build/manufacturing release approved
+    enforce_constraints: true
+    gate_id: G8

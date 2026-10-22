@@ -36,6 +36,7 @@ from typing import Any
 
 import structlog
 
+from orchestrator.design_flow.contract import task_fields_from
 from orchestrator.design_flow.frozen import FrozenFlow, freeze_flow
 from orchestrator.design_flow.invariants import validate_flow
 from orchestrator.design_flow.slots import bind_slots, effective_slots
@@ -221,6 +222,8 @@ def _definition_from_dict(data: dict[str, Any]) -> FlowDefinition:
                 depends_on=(None if p.get("depends_on") is None else tuple(p["depends_on"])),
                 condition=p.get("condition") or None,
                 outcome=str(p.get("outcome") or ""),
+                # Composable flows: absent in rows written before fragments.
+                **task_fields_from(p),
             )
         )
     return FlowDefinition(id=data["id"], name=data["name"], phases=tuple(phases))

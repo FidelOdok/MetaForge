@@ -1,56 +1,24 @@
 # mech_v1 flow template (FORGE-397).
 #
-# Generated, not hand-edited -- regenerate via the snippet in
-# tests/unit/test_flow_templates.py rather than editing the YAML by hand.
-# (Hand-editing produced a broken file once already: `name` is a folded
-# multi-line scalar, and an inserted key landed inside it.)
+# Stages shared with every flow come from the spine
+# (templates/spine/spine_v1.yaml), pulled with `- use: <id>` plus any keys
+# this flow overrides; only this flow's own phases are written out here.
+# tests/unit/test_task_contract.py pins the compiled result against a golden
+# snapshot. Edit with care: `name` may be a folded multi-line scalar, and an
+# inserted key once landed inside it.
 #
 # `version` is recorded on every run started from this template. Bump it
 # when the phases or gates change, so a completed run can still say what
 # it actually ran.
 id: mech_v1
 version: 1.3.0
+extends: spine_v1
 name: Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven
 label: Mechanical design
 description: A focused flow for a load-bearing part or mechanical subsystem.
 phases:
-- id: intent
-  title: Intent
-  objective: >-
-    Establish WHY this product is being built, before any requirements. From the stated goal,
-    identify: the system's purpose, its primary stakeholder(s), the initial operating context,
-    the system boundary (what's in scope vs out of scope), and the desired outcome. Record
-    ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'),
-    scoped to the project.
-  expected_artifacts:
-  - intent
-  required_deliverables:
-  - intent
-  gate:
-    name: Intent sign-off
-    criteria:
-    - System purpose stated
-    - Primary stakeholder(s) identified
-    - System boundary (in/out of scope) defined
-    - Desired outcome stated
-- id: needs
-  title: Stakeholder Needs
-  objective: >-
-    Identify the stakeholder needs this product must satisfy, tracing back to the recorded
-    intent. For each stakeholder, capture their need in plain language -- avoid premature
-    implementation detail (that's what requirements are for, next phase). Record each with
-    the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's
-    title], relation='motivates'), scoped to the project.
-  expected_artifacts:
-  - stakeholder_need
-  required_deliverables:
-  - stakeholder_need
-  gate:
-    name: Needs sign-off
-    criteria:
-    - Stakeholder set identified
-    - Each stakeholder's need captured in plain language
-    - Needs trace to the recorded intent
+- use: intent
+- use: needs
 - id: requirements
   title: Requirements
   objective: >-
@@ -69,33 +37,7 @@ phases:
     - Material class and safety-factor target stated
     - Mass / envelope budget stated
     - Parent traceability exists (requirements trace to a need)
-- id: feasibility
-  title: Preliminary Feasibility
-  objective: >-
-    Sanity-check feasibility before committing to detailed design. Check the requirement's
-    mass, cost, and power/energy budgets against a first-order estimate; assess first-order
-    structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility;
-    confirm the key technologies involved are actually available; and identify the major risks
-    to the project, each with an owner and a mitigation. Record a feasibility summary as a
-    decision (record-decision tool), scoped to the project -- flag anything infeasible or
-    high-risk explicitly rather than silently proceeding.
-  expected_artifacts:
-  - design_decision
-  required_deliverables:
-  - design_decision
-  gate:
-    name: Preliminary Feasibility Gate (G3)
-    criteria:
-    - Mass budget checked
-    - Cost budget checked
-    - Power/energy budget checked
-    - First-order structural feasibility assessed
-    - Actuator sizing assessed (where applicable)
-    - Thermal plausibility assessed
-    - Geometry feasibility assessed
-    - Key technologies confirmed available
-    - Major risks identified, each with an owner and mitigation
-    gate_id: G3
+- use: feasibility
 - id: route_selection
   title: Manufacturing Route & Process Selection
   objective: >-
@@ -125,44 +67,7 @@ phases:
     - Candidate processes compared on fit, availability and cost at quantity
     - Capability values sourced, not assumed
     - Chosen process and material recorded, with its limits as constraints
-- id: industrial_design
-  title: Industrial Design
-  objective: >-
-    Decide the product's form factor, check that people can use it, and choose finishes that
-    suit how its parts are made, before mechanical design draws the housing. (1) Form factor:
-    list the contents the product must hold (from the architecture and the selected concept:
-    boards, batteries, actuators, bought parts), each with its size and how it is known, and run
-    form_factor_envelope with the internal clearance and the wall thickness (the chosen
-    process's minimum wall, from library.process_limits or library.machine_limits, when a
-    process is chosen), checked against the maximum envelope the requirements state. Record the
-    resulting envelope with twin.record_constraint_set, parent_refs set to the requirement it
-    serves, so mechanical design works to it. (2) Ergonomics: if people hold, press, reach or
-    lift the product, take the intended users from the requirements (ask the person if no
-    requirement says), find a sourced limit for each human-contact feature (an anthropometric
-    dataset or ergonomics guidance, cited with its table and percentile) and run
-    check_ergonomics. If nobody handles it, record that, with the reason, instead. Never supply
-    a body measurement from memory. (3) Colour, material and finish: the look is the person's
-    choice; ask for it if it was not stated. Choose a library appearance per visible part
-    (library.list_appearances; a new one is registered with library.register_appearance, held
-    for the person's approval, with its colour code and a sourced screen value), and run
-    check_cmf_compatibility against each part's material. Record one decision with
-    twin.record_decision covering the envelope, the ergonomics verdict and the finishes, naming
-    every unknown and every assumed value.
-  expected_artifacts:
-  - design_decision
-  - constraint_set
-  required_deliverables:
-  - design_decision
-  disciplines:
-  - industrial_design
-  gate:
-    name: Industrial design review
-    criteria:
-    - Form factor envelope defined from sized contents, clearance and wall, each sourced
-    - Envelope recorded as a constraint for mechanical design
-    - Ergonomics checked against sourced limits for the stated users, or recorded as not applicable with the reason
-    - Finishes chosen per visible part and compatible with its material, or the open items listed
-    - Unknown and assumed values named
+- use: industrial_design
 - id: design
   title: Mechanical Design
   objective: >-

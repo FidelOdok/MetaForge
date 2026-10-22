@@ -633,3 +633,45 @@ class TwinConsistencyGateChecker:
             status=evaluation.status.value,
         )
         return ConsistencyGateReport(checked=True, evaluation=evaluation)
+
+
+class TwinDesignValueReader:
+    """`DesignValueReader` over the twin's ``design_value`` entities (composable flows).
+
+    A design value is recorded with ``name``, ``value``, ``unit`` and a
+    ``source`` (FORGE-586); each changed value is a new record. ``values``
+    returns the latest record per name; ``history`` every record per name,
+    oldest first, which is what a coupled block's iterations leave behind.
+
+    Fails loudly rather than open: the caller turns a failed read into
+    no_data for every check, which blocks the gate.
+    """
+
+    def __init__(self, twin: object) -> None:
+        self._twin = twin
+
+    async def _records(self, project_id: str | None) -> dict[str, list[tuple[float, int, object]]]:
+        lister = getattr(self._twin, "list_engineering_entities", None)
+        if lister is None or project_id is None:
+            return {}
+        entities = await lister(project_id=UUID(str(project_id)), entity_type="design_value")
+        by_name: dict[str, list[tuple[float, int, object]]] = {}
+        for index, entity in enumerate(entities):
+            meta = getattr(entity, "metadata", None) or {}
+            name = str(meta.get("name") or "").strip()
+            if not name or "value" not in meta:
+                continue
+            when = _to_epoch(getattr(entity, "created_at", None)) or 0.0
+            by_name.setdefault(name, []).append((when, index, meta.get("value")))
+        for rows in by_name.values():
+            rows.sort(key=lambda r: (r[0], r[1]))
+        return by_name
+
+    async def values(self, project_id: str | None) -> dict[str, object]:
+        records = await self._records(project_id)
+        logger.info("gate_design_values_read", project_id=project_id, count=len(records))
+        return {name: rows[-1][2] for name, rows in records.items() if rows}
+
+    async def history(self, project_id: str | None, names: list[str]) -> dict[str, list[object]]:
+        records = await self._records(project_id)
+        return {name: [r[2] for r in records.get(name, [])] for name in names}

@@ -26,6 +26,14 @@ from typing import Protocol, runtime_checkable
 import structlog
 
 from observability.tracing import get_tracer
+from orchestrator.design_flow.checks import (
+    DesignValueReader,
+    StageCheckReport,
+    attached_tasks,
+    evaluate_stage,
+    history_names,
+    value_names,
+)
 from orchestrator.design_flow.context import (
     DFM_REVIEW_PHASE_ID,
     dfm_review_gap,
@@ -117,6 +125,9 @@ class FlowContext:
     #: FORGE-573: each phase's not-ready findings, one entry per verdict,
     #: kept across retries and reworks, cleared when its gate passes.
     gate_history: dict[str, list[tuple[str, ...]]] = field(default_factory=dict)
+    #: Composable flows: when each phase's latest attempt started, so a stage
+    #: gate can ask whether the tasks it reviews recorded their deliverables.
+    started: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -402,8 +413,12 @@ class DesignFlowExecutor:
         consistency_gate_checker: ConsistencyGateChecker | None = None,
         phase_scope: PhaseScope | None = None,
         revision_notes: RevisionNotesProvider | None = None,
+        value_reader: DesignValueReader | None = None,
     ) -> None:
         self._store = store
+        # Composable flows: reads design values for the task checks a stage
+        # gate evaluates. Without one, declared checks are no_data (blocking).
+        self._value_reader = value_reader
         self._phase_scope = phase_scope
         # FORGE-530: reads the drafts a gate just turned down, so a retried or
         # reworked phase is told which revision failed, why, and what changed.
@@ -571,7 +586,7 @@ class DesignFlowExecutor:
                 ctx.attempt = attempt
             if jump is not None:
                 cycles += 1
-                rerun = set(graph.downstream(jump.to_phase)) | {phase.id}
+                rerun = set(graph.affected(jump.to_phase)) | {phase.id}
                 ctx.completed = [(p, o) for p, o in ctx.completed if p.id not in rerun]
                 done = [d for d in done if d not in rerun]
                 ctx.skipped = [s for s in ctx.skipped if s not in rerun]
@@ -633,6 +648,7 @@ class DesignFlowExecutor:
         sent the run back to an earlier phase (FORGE-500). Each attempt is logged.
         """
         phase_start = time.time()
+        ctx.started[phase.id] = phase_start
         logger.info("design_flow_phase_start", run_id=run_id, phase=phase.id, attempt=attempt)
         scope = (
             self._phase_scope(run_id, phase.id, ctx.project_id)
@@ -673,6 +689,21 @@ class DesignFlowExecutor:
             # FORGE-590: whoever did the phase said its objective was not met.
             findings.append(
                 f"phase '{phase.id}' reported its objective was not met (outcome incomplete)"
+            )
+        # Composable flows: a stage gate also reviews the tasks attached to it:
+        # their deliverables, their checks, and any coupled block's convergence.
+        tasks = attached_tasks(flow.phases, phase.id)
+        if tasks:
+            findings.extend(await self._task_readiness(tasks, ctx))
+            stage_report = await self._stage_checks(phase.id, tasks, ctx)
+            findings.extend(stage_report.findings)
+            logger.info(
+                "design_flow_stage_checks",
+                run_id=run_id,
+                stage=phase.id,
+                tasks=len(tasks),
+                checks=len(stage_report.results),
+                blocking=stage_report.blocking,
             )
 
         # MET-583 constraint-as-gate-criteria: evaluate the project's
@@ -857,6 +888,39 @@ class DesignFlowExecutor:
             missing=missing,
             checked=True,
         )
+
+    async def _task_readiness(self, tasks: list[Phase], ctx: FlowContext) -> list[str]:
+        """Findings for attached tasks that did not record their deliverables."""
+        if self._evaluator is None:
+            return []
+        since = min((ctx.started.get(t.id, 0.0) for t in tasks), default=0.0)
+        try:
+            present = await self._evaluator.present_types(ctx.project_id, since)
+        except Exception as exc:  # noqa: BLE001 - readiness must not crash the run
+            logger.warning("design_flow_task_readiness_error", error=str(exc))
+            return []
+        out: list[str] = []
+        for task in tasks:
+            missing = sorted(set(task.required_deliverables) - present)
+            if missing:
+                out.append(f"task '{task.id}' did not record required deliverables {missing}")
+        return out
+
+    async def _stage_checks(
+        self, stage_id: str, tasks: list[Phase], ctx: FlowContext
+    ) -> StageCheckReport:
+        """Read the values the tasks' checks compare and evaluate them."""
+        names = value_names(tasks)
+        coupled = history_names(tasks)
+        if self._value_reader is None or not (names or coupled):
+            return evaluate_stage(stage_id, tasks, None if names or coupled else {})
+        try:
+            values = await self._value_reader.values(ctx.project_id)
+            history = await self._value_reader.history(ctx.project_id, coupled) if coupled else {}
+        except Exception as exc:  # noqa: BLE001 - an unread value is no_data, not a crash
+            logger.warning("design_flow_value_read_error", stage=stage_id, error=str(exc))
+            return evaluate_stage(stage_id, tasks, None)
+        return evaluate_stage(stage_id, tasks, values, history)
 
     async def _constraints(self, ctx: FlowContext, *, since_ts: float = 0.0) -> ConstraintReport:
         """Evaluate the project's constraints for gate review (best-effort)."""

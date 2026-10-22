@@ -24,6 +24,8 @@ import json
 from dataclasses import asdict, dataclass, field
 
 __all__ = [
+    "FrozenCheck",
+    "FrozenCoupling",
     "FrozenFlow",
     "FrozenGate",
     "FrozenPhase",
@@ -53,6 +55,28 @@ class FrozenSlot:
 
 
 @dataclass
+class FrozenCheck:
+    """A task's acceptance check (composable flows)."""
+
+    id: str
+    value: str
+    op: str
+    threshold: float = 0.0
+    unit: str = ""
+    limit: str = ""
+
+
+@dataclass
+class FrozenCoupling:
+    """A block phase's convergence contract (composable flows)."""
+
+    members: list[str] = field(default_factory=list)
+    solves_for: list[str] = field(default_factory=list)
+    tolerance: float = 0.01
+    max_iterations: int = 20
+
+
+@dataclass
 class FrozenPhase:
     """A phase, as the workflow sees it."""
 
@@ -75,6 +99,31 @@ class FrozenPhase:
     depends_on: list[str] | None = None
     condition: str | None = None
     outcome: str = ""
+    #: Composable flows: the task contract. All absent from the hash when
+    #: unset, so every flow approved before fragments existed still verifies.
+    fragment: str = ""
+    stage: str = ""
+    inputs: list[str] = field(default_factory=list)
+    checks: list[FrozenCheck] = field(default_factory=list)
+    capabilities: list[str] = field(default_factory=list)
+    coupling: FrozenCoupling | None = None
+
+
+#: FrozenPhase fields left out of the hash when falsy, so versions approved
+#: before a field existed keep the hash they were approved with.
+_OPTIONAL_HASH_FIELDS = (
+    "model",
+    "slots",
+    "depends_on",
+    "condition",
+    "outcome",
+    "fragment",
+    "stage",
+    "inputs",
+    "checks",
+    "capabilities",
+    "coupling",
+)
 
 
 @dataclass
@@ -109,20 +158,16 @@ class FrozenFlow:
         rows = []
         for p in self.phases:
             row = asdict(p)
-            # Absent when unset, so flows frozen before FORGE-477 keep the
-            # hash they were approved with.
-            if row.get("model") is None:
-                row.pop("model", None)
-            # Same for FORGE-524 slots: absent when empty.
-            if not row.get("slots"):
-                row.pop("slots", None)
-            # FORGE-539 fields: absent when unset.
-            if row.get("depends_on") is None:
-                row.pop("depends_on", None)
-            if not row.get("condition"):
-                row.pop("condition", None)
-            if not row.get("outcome"):
-                row.pop("outcome", None)
+            # Absent when unset (FORGE-477 model, FORGE-524 slots, FORGE-539
+            # graph fields, the composable-flow task contract), so flows frozen
+            # before each field keep the hash they were approved with. An
+            # explicit empty ``depends_on`` is a root and stays in the hash.
+            for name in _OPTIONAL_HASH_FIELDS:
+                if name == "depends_on":
+                    if row.get(name) is None:
+                        row.pop(name, None)
+                elif not row.get(name):
+                    row.pop(name, None)
             rows.append(row)
         # Absent when empty, so flows frozen before FORGE-491 keep their hash.
         body: object = {"phases": rows, "context": self.context} if self.context else rows
@@ -145,6 +190,17 @@ class FrozenFlow:
                 f"approved with (approved {self.content_hash[:12]}, got {actual[:12]}). "
                 "Something edited the flow after approval."
             )
+
+
+def _freeze_coupling(coupling: object) -> FrozenCoupling | None:
+    if coupling is None:
+        return None
+    return FrozenCoupling(
+        members=[str(m) for m in getattr(coupling, "members", ())],
+        solves_for=[str(v) for v in getattr(coupling, "solves_for", ())],
+        tolerance=float(getattr(coupling, "tolerance", 0.01)),
+        max_iterations=int(getattr(coupling, "max_iterations", 20)),
+    )
 
 
 def freeze_flow(
@@ -180,6 +236,22 @@ def freeze_flow(
                 ),
                 condition=getattr(phase, "condition", None) or None,
                 outcome=str(getattr(phase, "outcome", "") or ""),
+                fragment=str(getattr(phase, "fragment", "") or ""),
+                stage=str(getattr(phase, "stage", "") or ""),
+                inputs=[str(i) for i in (getattr(phase, "inputs", ()) or ())],
+                checks=[
+                    FrozenCheck(
+                        id=str(c.id),
+                        value=str(c.value),
+                        op=str(c.op),
+                        threshold=float(c.threshold),
+                        unit=str(getattr(c, "unit", "") or ""),
+                        limit=str(getattr(c, "limit", "") or ""),
+                    )
+                    for c in (getattr(phase, "checks", ()) or ())
+                ],
+                capabilities=[str(c) for c in (getattr(phase, "capabilities", ()) or ())],
+                coupling=_freeze_coupling(getattr(phase, "coupling", None)),
                 slots=[
                     FrozenSlot(
                         item_type=str(slot.item_type),
