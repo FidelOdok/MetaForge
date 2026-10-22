@@ -1,56 +1,24 @@
 # mech_v1 flow template (FORGE-397).
 #
-# Generated, not hand-edited -- regenerate via the snippet in
-# tests/unit/test_flow_templates.py rather than editing the YAML by hand.
-# (Hand-editing produced a broken file once already: `name` is a folded
-# multi-line scalar, and an inserted key landed inside it.)
+# Stages shared with every flow come from the spine
+# (templates/spine/spine_v1.yaml), pulled with `- use: <id>` plus any keys
+# this flow overrides; only this flow's own phases are written out here.
+# tests/unit/test_task_contract.py pins the compiled result against a golden
+# snapshot. Edit with care: `name` may be a folded multi-line scalar, and an
+# inserted key once landed inside it.
 #
 # `version` is recorded on every run started from this template. Bump it
 # when the phases or gates change, so a completed run can still say what
 # it actually ran.
 id: mech_v1
 version: 1.2.0
+extends: spine_v1
 name: Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven
 label: Mechanical design
 description: A focused flow for a load-bearing part or mechanical subsystem.
 phases:
-- id: intent
-  title: Intent
-  objective: >-
-    Establish WHY this product is being built, before any requirements. From the stated goal,
-    identify: the system's purpose, its primary stakeholder(s), the initial operating context,
-    the system boundary (what's in scope vs out of scope), and the desired outcome. Record
-    ONE intent entity capturing this with the record-engineering-entity tool (entity_type='intent'),
-    scoped to the project.
-  expected_artifacts:
-  - intent
-  required_deliverables:
-  - intent
-  gate:
-    name: Intent sign-off
-    criteria:
-    - System purpose stated
-    - Primary stakeholder(s) identified
-    - System boundary (in/out of scope) defined
-    - Desired outcome stated
-- id: needs
-  title: Stakeholder Needs
-  objective: >-
-    Identify the stakeholder needs this product must satisfy, tracing back to the recorded
-    intent. For each stakeholder, capture their need in plain language -- avoid premature
-    implementation detail (that's what requirements are for, next phase). Record each with
-    the record-engineering-entity tool (entity_type='stakeholder_need', parent_refs=[the intent's
-    title], relation='motivates'), scoped to the project.
-  expected_artifacts:
-  - stakeholder_need
-  required_deliverables:
-  - stakeholder_need
-  gate:
-    name: Needs sign-off
-    criteria:
-    - Stakeholder set identified
-    - Each stakeholder's need captured in plain language
-    - Needs trace to the recorded intent
+- use: intent
+- use: needs
 - id: requirements
   title: Requirements
   objective: >-
@@ -69,33 +37,7 @@ phases:
     - Material class and safety-factor target stated
     - Mass / envelope budget stated
     - Parent traceability exists (requirements trace to a need)
-- id: feasibility
-  title: Preliminary Feasibility
-  objective: >-
-    Sanity-check feasibility before committing to detailed design. Check the requirement's
-    mass, cost, and power/energy budgets against a first-order estimate; assess first-order
-    structural feasibility, actuator sizing, thermal plausibility, and geometry feasibility;
-    confirm the key technologies involved are actually available; and identify the major risks
-    to the project, each with an owner and a mitigation. Record a feasibility summary as a
-    decision (record-decision tool), scoped to the project -- flag anything infeasible or
-    high-risk explicitly rather than silently proceeding.
-  expected_artifacts:
-  - design_decision
-  required_deliverables:
-  - design_decision
-  gate:
-    name: Preliminary Feasibility Gate (G3)
-    criteria:
-    - Mass budget checked
-    - Cost budget checked
-    - Power/energy budget checked
-    - First-order structural feasibility assessed
-    - Actuator sizing assessed (where applicable)
-    - Thermal plausibility assessed
-    - Geometry feasibility assessed
-    - Key technologies confirmed available
-    - Major risks identified, each with an owner and mitigation
-    gate_id: G3
+- use: feasibility
 - id: route_selection
   title: Manufacturing Route & Process Selection
   objective: >-

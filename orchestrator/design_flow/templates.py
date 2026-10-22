@@ -21,6 +21,7 @@ nobody would find for months, and the difference that matters — a dropped
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -29,13 +30,18 @@ from typing import Any
 import structlog
 import yaml
 
+from orchestrator.design_flow.contract import task_fields_from, task_fields_to
 from orchestrator.design_flow.spec import DeliverableSlot, FlowDefinition, Gate, Phase
 
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "SPINE_DIR",
     "TEMPLATE_DIR",
+    "LoadedSpine",
     "LoadedTemplate",
+    "expand_spine",
+    "load_spine",
     "load_template",
     "load_templates",
     "template_path",
@@ -43,6 +49,12 @@ __all__ = [
 ]
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
+
+#: The shared spine (composable flows): the gated stages every product goes
+#: through, defined once. A template ``extends`` a spine and pulls its stage
+#: phases with ``- use: <phase id>`` (plus any keys it overrides), so the same
+#: intent, needs and feasibility phases are not restated in every template.
+SPINE_DIR = TEMPLATE_DIR / "spine"
 
 
 @dataclass(frozen=True)
@@ -62,9 +74,86 @@ class LoadedTemplate:
     #: the drift rather than removed it.
     label: str = ""
     description: str = ""
+    #: The spine this template extends and that spine's version, or empty for
+    #: a template that restates every phase itself.
+    spine: str = ""
+    spine_version: str = ""
 
     def display_label(self) -> str:
         return self.label or self.definition.name
+
+
+@dataclass(frozen=True)
+class LoadedSpine:
+    """The shared stage phases, as raw template mappings keyed by phase id."""
+
+    id: str
+    version: str
+    phases: dict[str, dict[str, Any]]
+    source: Path
+
+
+@lru_cache(maxsize=8)
+def load_spine(spine_id: str) -> LoadedSpine:
+    """Read ``templates/spine/<spine_id>.yaml``."""
+    path = SPINE_DIR / f"{spine_id}.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"no spine at {path}")
+    raw = yaml.safe_load(path.read_text())
+    if not isinstance(raw, dict) or raw.get("id") != spine_id:
+        raise ValueError(f"{path} must be a mapping declaring id {spine_id!r}")
+    version = str(raw.get("version") or "").strip()
+    if not version:
+        raise ValueError(f"{path} has no 'version'")
+    phases: dict[str, dict[str, Any]] = {}
+    for entry in raw.get("phases") or ():
+        pid = entry.get("id") if isinstance(entry, dict) else None
+        if not pid:
+            raise ValueError(f"{path}: every spine phase needs an 'id'")
+        if pid in phases:
+            raise ValueError(f"{path}: duplicate spine phase {pid!r}")
+        phases[pid] = entry
+    return LoadedSpine(id=spine_id, version=version, phases=phases, source=path)
+
+
+def expand_spine(raw: dict[str, Any]) -> dict[str, Any]:
+    """``raw`` with every ``- use: <id>`` entry replaced by that spine phase.
+
+    Keys beside ``use`` override the spine phase's (a whole key at a time: an
+    overridden ``gate`` replaces the spine gate). A key set to ``null`` removes
+    it. A template with no ``extends`` is returned unchanged, and one that uses
+    a phase without extending a spine is refused.
+    """
+    spine_id = str(raw.get("extends") or "").strip()
+    entries = raw.get("phases") or []
+    if not spine_id:
+        if any(isinstance(e, dict) and "use" in e for e in entries):
+            raise ValueError(f"template {raw.get('id')!r} uses spine phases but extends no spine")
+        return raw
+    spine = load_spine(spine_id)
+    phases: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or "use" not in entry:
+            phases.append(entry)
+            continue
+        use = str(entry["use"])
+        if use not in spine.phases:
+            raise ValueError(
+                f"template {raw.get('id')!r} uses unknown spine phase {use!r}; "
+                f"{spine_id} has {', '.join(spine.phases)}"
+            )
+        if "id" in entry and entry["id"] != use:
+            raise ValueError(f"template {raw.get('id')!r}: a used phase keeps its id ({use!r})")
+        merged = {**copy.deepcopy(spine.phases[use])}
+        for key, value in entry.items():
+            if key == "use":
+                continue
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = copy.deepcopy(value)
+        phases.append(merged)
+    return {**raw, "phases": phases}
 
 
 def template_path(flow_id: str) -> Path:
@@ -124,6 +213,7 @@ def _phase_from(raw: dict[str, Any]) -> Phase:
         ),
         condition=str(raw["condition"]) if raw.get("condition") else None,
         outcome=str(raw.get("outcome") or ""),
+        **task_fields_from(raw),
     )
 
 
@@ -172,6 +262,7 @@ def to_mapping(
             entry["depends_on"] = list(phase.depends_on)
         if phase.condition:
             entry["condition"] = phase.condition
+        entry.update(task_fields_to(phase))
         if phase.slots:
             entry["slots"] = [
                 {"type": s.item_type, "name": s.name, **({"key": s.item_key} if s.item_key else {})}
@@ -217,12 +308,16 @@ def load_template(flow_id: str) -> LoadedTemplate:
         raise ValueError(f"{path} has no 'version'")
     if raw.get("id") != flow_id:
         raise ValueError(f"{path} declares id {raw.get('id')!r}, expected {flow_id!r}")
+    spine_id = str(raw.get("extends") or "").strip()
+    expanded = expand_spine(raw)
     return LoadedTemplate(
-        definition=from_mapping(raw),
+        definition=from_mapping(expanded),
         version=version,
         source=path,
         label=str(raw.get("label") or "").strip(),
         description=str(raw.get("description") or "").strip(),
+        spine=spine_id,
+        spine_version=load_spine(spine_id).version if spine_id else "",
     )
 
 

@@ -34,6 +34,7 @@ from orchestrator.design_flow.spec import (
 )
 from orchestrator.design_flow.templates import (
     TEMPLATE_DIR,
+    expand_spine,
     from_mapping,
     load_template,
     load_templates,
@@ -72,7 +73,9 @@ class TestTheTemplatesAreTheFlows:
         gate, and no longer checks anything -- so the flow keeps passing and
         the gate becomes decoration.
         """
-        raw = yaml.safe_load((TEMPLATE_DIR / f"{flow_id}.yaml").read_text())
+        # Composable flows: spine stages are pulled with `use:`; expand them,
+        # as the loader does, before reading what is on disk.
+        raw = expand_spine(yaml.safe_load((TEMPLATE_DIR / f"{flow_id}.yaml").read_text()))
         on_disk = {p["id"]: sorted(p.get("required_deliverables") or []) for p in raw["phases"]}
         in_memory = {p.id: sorted(p.required_deliverables) for p in get_flow(flow_id).phases}
         assert on_disk == in_memory

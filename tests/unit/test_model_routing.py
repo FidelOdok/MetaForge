@@ -195,7 +195,20 @@ def test_unset_phase_model_keeps_frozen_hash_stable() -> None:
     flow = freeze_flow(FLOWS[DEFAULT_FLOW_ID])
     # Neither ``model`` (FORGE-477), ``slots`` (FORGE-524) nor the graph fields
     # (FORGE-539) existed then.
-    absent = ("model", "slots", "depends_on", "condition", "outcome")
+    # Nor the composable-flow task contract.
+    absent = (
+        "model",
+        "slots",
+        "depends_on",
+        "condition",
+        "outcome",
+        "fragment",
+        "stage",
+        "inputs",
+        "checks",
+        "capabilities",
+        "coupling",
+    )
     legacy = [{k: v for k, v in asdict(p).items() if k not in absent} for p in flow.phases]
     payload = json.dumps(legacy, sort_keys=True, separators=(",", ":"))
     # The hash a flow frozen before FORGE-477 was approved with.
