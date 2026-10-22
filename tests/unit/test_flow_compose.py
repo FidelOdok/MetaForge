@@ -434,3 +434,17 @@ async def test_rework_to_a_task_reruns_only_what_reads_its_outputs() -> None:
     assert brain.calls.count("housing.structural") == 1
     assert brain.calls.count("housing.wall") == 1
     assert store.get(run.id).status is RunStatus.COMPLETED
+
+
+def test_a_task_is_satisfied_once_its_stage_gate_reviewed_it() -> None:
+    from orchestrator.design_flow.lifecycle import ObjectiveStatus
+
+    flow = _appearance_flow()
+    done = [p.id for p in flow.phases if p.id not in {"simulation"}]
+    view = lifecycle_view(
+        flow.phases,
+        {"status": "running", "completed": [{"phase": p} for p in done]},
+    )
+    objective = {n.id: n.objective_status for n in view.nodes}
+    assert objective["housing.finish"] is ObjectiveStatus.SATISFIED  # design gate passed
+    assert objective["housing.render"] is ObjectiveStatus.NOT_EVALUATED  # V&V gate pending
