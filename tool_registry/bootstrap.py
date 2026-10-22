@@ -85,6 +85,16 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.spice.config",
         "config_class": "SpiceConfig",
     },
+    # FORGE-557: OpenFOAM 11 flow solver. Registers so tools/list is stable; a
+    # call needs the openfoam-adapter container
+    # (METAFORGE_ADAPTER_OPENFOAM_URL), since the gateway and sidecar images
+    # have no OpenFOAM and raise OpenFoamNotAvailableError in-process.
+    "openfoam": {
+        "module": "tool_registry.tools.openfoam.adapter",
+        "class": "OpenFoamServer",
+        "config_module": "tool_registry.tools.openfoam.config",
+        "config_class": "OpenFoamConfig",
+    },
     # MET-633: opt-in like freecad/kicad above -- needs a real `gz` binary
     # (Gazebo Sim) in the container/host PATH to execute; the adapter
     # registers regardless so tools/list is stable, but handlers raise

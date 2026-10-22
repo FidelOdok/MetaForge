@@ -10,7 +10,12 @@ published to GitHub Container Registry and signed (FORGE-593):
 | Image | Published by |
 |---|---|
 | `metaforge-gateway` (also runs the MCP server and both workers) | `release.yml`, every push to `main` |
-| `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter` | `adapter-images.yml`, when their code changes |
+| `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter`, `-openfoam-adapter` | `adapter-images.yml`, when their code changes |
+
+The OpenFOAM adapter (FORGE-557) is opt-in. Its image is about 4 GB, so it runs only
+under the `cfd` compose profile: add `cfd` to `COMPOSE_PROFILES` in the host's `.env`
+to have the update pull and start it. Until then the gateway lists
+`openfoam.run_internal_flow` but a call says the adapter is not running.
 | `metaforge-occt`, `metaforge-dashboard` | `adapter-images.yml`, when their code changes |
 | `metaforge-seaweedfs` (the object store) | `mirror-images.yml`: the signed upstream release, copied and re-signed as ours |
 

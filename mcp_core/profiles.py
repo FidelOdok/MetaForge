@@ -205,6 +205,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "gazebo.extract_results",
         "gazebo.run_simulation",
         "gazebo.validate_world",
+        # FORGE-557: steady internal flow (pressure drop, flow rate).
+        "openfoam.run_internal_flow",
         # FORGE-542: circuit simulation is prediction too.
         "spice.run_simulation",
         "twin.evaluate_metric",

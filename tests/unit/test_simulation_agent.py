@@ -311,6 +311,48 @@ class TestRunCfd:
         assert result.skill_results[0]["max_temperature_c"] == 58.0
         assert calls[0] == {"analysis_mode": "steady_state", **CONDUCTION}
 
+    async def test_internal_flow_case_reaches_openfoam(
+        self, mock_twin: AsyncMock, mcp_bridge: InMemoryMcpBridge
+    ):
+        """FORGE-557: a flow case goes to openfoam.run_internal_flow, and the
+        pressure drop and convergence come back in the task result."""
+        mcp_bridge.register_tool("openfoam.run_internal_flow", "flow_simulation")
+        mcp_bridge.register_tool_response(
+            "openfoam.run_internal_flow",
+            {
+                "completed": True,
+                "converged": True,
+                "solution_stable": True,
+                "pressure_drop_pa": 0.0097,
+                "inlet": {"volumetric_flow_m3_s": 7.7e-06},
+                "mesh": {"cells": 13784},
+                "case_dir": "/workspace/openfoam/x/case",
+            },
+        )
+        agent = SimulationAgent(twin=mock_twin, mcp=mcp_bridge)
+        flow = {
+            "inlet_stl": "pipe/inlet.stl",
+            "outlet_stl": "pipe/outlet.stl",
+            "wall_stls": ["pipe/wall.stl"],
+            "stl_units": "m",
+            "inside_point": [0.2, 0.0, 0.0],
+            "fluid": {"density_kg_m3": 1.2, "kinematic_viscosity_m2_s": 1e-5},
+            "inlet_velocity_m_s": 0.025,
+            "turbulence": "laminar",
+        }
+        result = await agent.run_task(
+            TaskRequest(
+                task_type="run_cfd", work_product_id=uuid4(), parameters={"internal_flow": flow}
+            )
+        )
+
+        assert result.success is True
+        out = result.skill_results[0]
+        assert out["analysis"] == "internal_flow"
+        assert out["pressure_drop_pa"] == 0.0097
+        assert out["converged"] is True and out["mesh_cells"] == 13784
+        assert out["solver"] == "openfoam.run_internal_flow"
+
     async def test_flow_quantities_are_refused(self, agent: SimulationAgent):
         request = TaskRequest(
             task_type="run_cfd",
@@ -323,13 +365,13 @@ class TestRunCfd:
         result = await agent.run_task(request)
 
         assert result.success is False
-        assert any("no flow solver" in e for e in result.errors)
+        assert any("internal_flow" in e for e in result.errors)
 
     async def test_no_case_is_refused(self, agent: SimulationAgent):
         result = await agent.run_task(TaskRequest(task_type="run_cfd", work_product_id=uuid4()))
 
         assert result.success is False
-        assert any("no flow solver" in e for e in result.errors)
+        assert any("Pass one analysis" in e for e in result.errors)
 
 
 # --- Full simulation ---

@@ -92,13 +92,13 @@ class TestBootstrapToolRegistry:
         freecad/kicad) for 8. FORGE-544 added the in-process power budget
         adapter for 9, FORGE-542 the ngspice adapter for 10, and FORGE-615 the
         in-process cost estimate adapter for 11, and FORGE-628 the Blender
-        render adapter for 12.
+        render adapter for 12, and FORGE-557 the OpenFOAM flow adapter for 13.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 12
+        assert len(adapters) == 13
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -113,6 +113,7 @@ class TestBootstrapToolRegistry:
             "spice",
             "cost",
             "blender",
+            "openfoam",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -120,7 +121,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 12
+        assert len(registry.list_adapters()) == 13
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -230,11 +231,12 @@ class TestBootstrapToolRegistry:
         power.check_budget for 86. FORGE-542 adds spice.run_simulation
         for 87. FORGE-615 adds cost.estimate_manufacturing for 88. FORGE-628 adds
         blender.render and blender.export_blend for 90.
+        FORGE-557 adds openfoam.run_internal_flow for 91.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 90
+        assert len(tools) == 91
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

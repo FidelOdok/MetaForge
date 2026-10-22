@@ -1298,6 +1298,25 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 ---
 
+### OpenFOAM Adapter (`tool_registry/tools/openfoam/`)
+
+| Property | Details |
+|----------|---------|
+| Docker Image | `ghcr.io/fidelodok/metaforge-openfoam-adapter`, published by CI (FORGE-557; `tool_registry/tools/openfoam/Dockerfile`) |
+| Base Image | `openfoam/openfoam11-paraview510` (OpenFOAM Foundation, Ubuntu 20.04), pinned by digest; Python 3.11 added with `uv` |
+| Transport | HTTP JSON-RPC on port 8300 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_OPENFOAM_URL` |
+| Workspace | Shares `adapter-workspace` with the CAD adapters; surfaces are read by path and cases are written under `openfoam/<run id>/case` |
+| Compose | Opt-in under the `cfd` profile; limited to 8 CPUs and 12 GB, one run at a time |
+| Tools | `openfoam.run_internal_flow` |
+
+**Tools provided** (FORGE-557):
+
+| Tool ID | Capability | Description |
+|---------|-----------|-------------|
+| `openfoam.run_internal_flow` | `flow_simulation` | Steady incompressible internal flow through a domain bounded by `inlet_stl`, `outlet_stl` and `wall_stls` (units `stl_units`, a point `inside_point` in the fluid). Requires the `fluid` (density and kinematic viscosity), `inlet_velocity_m_s` and `turbulence` (`laminar`, or `kOmegaSST` with `turbulence_intensity` and `turbulence_length_scale_m`). Runs `blockMesh`, `snappyHexMesh`, `checkMesh` and `foamRun` (decomposed under `mpirun` when `solver.n_procs` is above 1). Returns `pressure_drop_pa`, inlet and outlet flow, mesh quality, residuals, `converged`, `solution_stable`, `y_plus` and warnings; a failed run returns `completed: false` with `stage_failed`, OpenFOAM's reason and a log tail. Invalid input is a JSON-RPC error. |
+
+---
+
 ## 11. Container Isolation Model
 
 All tool adapters run in Docker containers with strict security controls.
