@@ -260,7 +260,7 @@ def lifecycle_view(
     for phase_id in graph.order:
         if validity[phase_id] is Validity.VALID and any(
             validity[u] in (Validity.STALE, Validity.POTENTIALLY_INVALID)
-            for u in graph.upstream(phase_id)
+            for u in graph.impacted_by(phase_id)
         ):
             validity[phase_id] = Validity.POTENTIALLY_INVALID
 

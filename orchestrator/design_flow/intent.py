@@ -26,7 +26,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+import structlog
+
 from orchestrator.design_flow.context import ClarifyingQuestion, FlowContext
+
+logger = structlog.get_logger(__name__)
 
 __all__ = [
     "ConstraintCategory",
@@ -36,6 +40,7 @@ __all__ = [
     "SuccessCriterion",
     "Unknown",
     "WorkflowScope",
+    "suggest_fragments",
     "compile_intent",
 ]
 
@@ -356,6 +361,10 @@ class IntentModel:
     unknowns: tuple[Unknown, ...] = ()
     success_criteria: tuple[SuccessCriterion, ...] = ()
     disciplines: tuple[str, ...] = ()
+    #: Composable flows: fragments whose domain words the intent uses, with
+    #: the fragments they require. A suggestion for ``add_fragment``, never
+    #: applied by itself.
+    suggested_fragments: tuple[str, ...] = ()
     scope: WorkflowScope = WorkflowScope.SMALL
     #: How each part was established: ``stated`` (said outright),
     #: ``matched`` (a known verb/unit/word was found) or ``unknown``.
@@ -385,6 +394,7 @@ class IntentModel:
             "unknowns": [u.as_dict() for u in self.unknowns],
             "success_criteria": [s.as_dict() for s in self.success_criteria],
             "disciplines": list(self.disciplines),
+            "suggested_fragments": list(self.suggested_fragments),
             "scope": self.scope.value,
             "ready_to_plan": self.ready_to_plan,
             "confidence": dict(self.confidence),
@@ -475,6 +485,41 @@ def _scan_spans(clause: str) -> list[tuple[float, str, str, int]]:
         value = float(match.group("value").replace(",", ""))
         found.append((value, unit, _operator(clause, match.start()), match.start("value")))
     return found
+
+
+def suggest_fragments(intent: str) -> tuple[str, ...]:
+    """Fragment ids whose keywords appear in ``intent``, plus what they require.
+
+    Whole-word matches only (``_keyword_hit``), so "heat" does not fire on
+    "theatre". Ordered so a required fragment comes before the one needing it.
+    A broken fragment registry suggests nothing rather than failing intent
+    compilation: suggestions are advisory.
+    """
+    try:
+        from orchestrator.design_flow.fragments import load_fragments
+
+        fragments = load_fragments()
+    except Exception as exc:  # noqa: BLE001 - suggestions must not break compile_intent
+        logger.warning("intent_fragment_suggestions_unavailable", error=str(exc))
+        return ()
+    lowered = intent.lower()
+    hits = [
+        fid
+        for fid, fragment in sorted(fragments.items())
+        if any(_keyword_hit(lowered, k) for k in fragment.keywords)
+    ]
+    ordered: list[str] = []
+
+    def add(fid: str) -> None:
+        if fid in ordered or fid not in fragments:
+            return
+        for required in fragments[fid].requires:
+            add(required)
+        ordered.append(fid)
+
+    for fid in hits:
+        add(fid)
+    return tuple(ordered)
 
 
 def _keyword_hit(lowered: str, word: str) -> bool:
@@ -693,6 +738,7 @@ def compile_intent(
         unknowns=tuple(unknowns),
         success_criteria=tuple(criteria),
         disciplines=disciplines,
+        suggested_fragments=suggest_fragments(intent),
         scope=scope,
         confidence={
             "goal_type": "matched" if verb_matched else "unknown",

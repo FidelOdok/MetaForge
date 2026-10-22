@@ -119,8 +119,21 @@ class _Gateway:
 # ── flow.* ────────────────────────────────────────────────────────────────
 
 
-def _catalogue(listing: dict[str, Any]) -> dict[str, Any]:
-    """``GET /v1/design-flows`` → the ``flow.list`` shape."""
+def _task_fields(p: dict[str, Any]) -> dict[str, Any]:
+    """Composable flows: the task contract, on fragment tasks only."""
+    if not p.get("fragment"):
+        return {}
+    return {
+        "fragment": p.get("fragment"),
+        "stage": p.get("stage", ""),
+        "inputs": p.get("inputs", []),
+        "checks": p.get("checks", []),
+        "capabilities": p.get("capabilities", []),
+    }
+
+
+def _catalogue(listing: dict[str, Any], fragments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """``GET /v1/design-flows`` (+ ``/fragments``) → the ``flow.list`` shape."""
     return {
         "default_flow_id": listing.get("defaultFlowId"),
         "flows": [
@@ -141,6 +154,7 @@ def _catalogue(listing: dict[str, Any]) -> dict[str, Any]:
                         "disciplines": p.get("disciplines", []),
                         "depends_on": p.get("dependsOn"),
                         "condition": p.get("condition"),
+                        **_task_fields(p),
                         "outcome": p.get("outcome", ""),
                     }
                     for p in flow.get("phases", [])
@@ -149,6 +163,7 @@ def _catalogue(listing: dict[str, Any]) -> dict[str, Any]:
             }
             for flow in listing.get("flows", [])
         ],
+        "fragments": list((fragments or {}).get("fragments", [])),
     }
 
 
@@ -373,7 +388,8 @@ def build_remote_flow_bindings(
     async def read_catalogue() -> dict[str, Any]:
         with tracer.start_as_current_span("remote_flows.catalogue"):
             listing = await gateway.request("GET", "/v1/design-flows")
-        return _catalogue(listing)
+            fragments = await gateway.request("GET", "/v1/design-flows/fragments")
+        return _catalogue(listing, fragments)
 
     async def propose(
         *,

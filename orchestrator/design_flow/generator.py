@@ -20,6 +20,10 @@ What a model *can* do:
 * **declare items**: the parts a phase writes, by name (FORGE-524), so two
   brackets are two items with keys fixed before the run, not whatever the
   model happens to call them on the day
+* **add a fragment**: compose a domain's tasks (thermal, electronics) into
+  the flow (composable flows). The model picks a fragment by id from the
+  registry; it cannot write tasks, and composition is server-side and
+  validated (:mod:`orchestrator.design_flow.compose`)
 
 Every operation carries a rationale, because a flow that differs from its
 template and cannot say why is a flow nobody can review.
@@ -35,7 +39,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -43,6 +47,9 @@ from orchestrator.design_flow.context import DFM_REVIEW_PHASE_ID as _DFM_REVIEW_
 from orchestrator.design_flow.context import ClarifyingQuestion, FlowContext, ManufacturingRoute
 from orchestrator.design_flow.invariants import ValidationResult, validate_flow
 from orchestrator.design_flow.spec import DeliverableSlot, FlowDefinition, Gate, Phase
+
+if TYPE_CHECKING:
+    from orchestrator.design_flow.compose import ComposedFlow
 
 logger = structlog.get_logger(__name__)
 
@@ -80,6 +87,10 @@ class OperationKind(StrEnum):
     SET_CONDITION = "set_condition"
     #: FORGE-539: the intermediate outcome the phase establishes (value: one line).
     SET_OUTCOME = "set_outcome"
+    #: Composable flows: compose a domain fragment's tasks into the flow
+    #: (value: fragment id). Takes no phase; the fragment says where its
+    #: tasks attach.
+    ADD_FRAGMENT = "add_fragment"
     #: Server-only (FORGE-463): inserted when the manufacturing route is
     #: "undecided", so the route becomes a gated decision rather than a guess.
     #: Not in :data:`MODEL_OPERATIONS` -- a model cannot add phases.
@@ -97,6 +108,7 @@ MODEL_OPERATIONS: frozenset[OperationKind] = frozenset(
         OperationKind.SET_DEPENDENCIES,
         OperationKind.SET_CONDITION,
         OperationKind.SET_OUTCOME,
+        OperationKind.ADD_FRAGMENT,
     }
 )
 
@@ -249,6 +261,8 @@ class Operation:
             return f"run phase '{self.phase_id}' only when {self.value}"
         if self.kind is OperationKind.SET_OUTCOME:
             return f"phase '{self.phase_id}' establishes: {self.value}"
+        if self.kind is OperationKind.ADD_FRAGMENT:
+            return f"compose fragment '{self.value}' into the flow"
         return f"assign {self.value} to phase '{self.phase_id}'"
 
 
@@ -307,6 +321,9 @@ class FlowProposal:
     generated_by: ModelProvenance | None = None
     #: Set instead of ``generated_by`` when the caller supplied the operations.
     proposed_by: CallerProvenance | None = None
+    #: Composable flows: the fragments composed in and the inputs no task
+    #: writes (to be recorded, with a source, before the tasks that read them).
+    composition: ComposedFlow | None = None
 
     @property
     def valid(self) -> bool:
@@ -347,7 +364,9 @@ def parse_operations(raw: Any) -> list[Operation]:
             logger.info("flow_generator_unknown_operation", op=kind_raw)
             continue
         phase_id = str(entry.get("phase") or entry.get("phase_id") or "").strip()
-        if not phase_id:
+        if not phase_id and kind is not OperationKind.ADD_FRAGMENT:
+            continue
+        if kind is OperationKind.ADD_FRAGMENT and not str(entry.get("value") or "").strip():
             continue
         rationale = str(entry.get("rationale") or entry.get("reason") or "").strip()
         if not rationale:
@@ -393,6 +412,9 @@ def parse_caller_operations(raw: Any, base: FlowDefinition) -> list[Operation]:
             kind = None
         if kind is None or kind not in MODEL_OPERATIONS:
             raise TailoringError(f"{where}: unknown operation '{kind_raw}'; allowed: {allowed}")
+        if kind is OperationKind.ADD_FRAGMENT:
+            operations.append(_caller_fragment_op(entry, where))
+            continue
         phase_id = str(entry.get("phase") or entry.get("phase_id") or "").strip()
         if phase_id not in phase_ids:
             raise TailoringError(
@@ -441,7 +463,45 @@ def parse_caller_operations(raw: Any, base: FlowDefinition) -> list[Operation]:
         if kind is OperationKind.SET_OUTCOME and not str(value or "").strip():
             raise TailoringError(f"{where}: set_outcome needs a one-line 'value'")
         operations.append(Operation(kind=kind, phase_id=phase_id, rationale=rationale, value=value))
+    _check_composable(base, operations)
     return operations
+
+
+def _caller_fragment_op(entry: dict[str, Any], where: str) -> Operation:
+    from orchestrator.design_flow.fragments import load_fragments
+
+    fragment_id = str(entry.get("value") or "").strip()
+    known = load_fragments()
+    if fragment_id not in known:
+        raise TailoringError(
+            f"{where}: add_fragment value '{fragment_id}' is not a fragment; "
+            f"fragments: {', '.join(sorted(known)) or 'none'}"
+        )
+    rationale = str(entry.get("rationale") or entry.get("reason") or "").strip()
+    if not rationale:
+        raise TailoringError(f"{where} (add_fragment {fragment_id}): a rationale is required")
+    return Operation(
+        kind=OperationKind.ADD_FRAGMENT, phase_id="", rationale=rationale, value=fragment_id
+    )
+
+
+def _check_composable(base: FlowDefinition, operations: list[Operation]) -> None:
+    """Refuse a caller's fragments that cannot compose into ``base``, naming why."""
+    from orchestrator.design_flow.compose import CompositionError, compose
+    from orchestrator.design_flow.fragments import load_fragments
+
+    wanted = [str(op.value) for op in operations if op.kind is OperationKind.ADD_FRAGMENT]
+    if not wanted:
+        return
+    dropped = {op.phase_id for op in operations if op.kind is OperationKind.DROP_PHASE}
+    trial = FlowDefinition(
+        id=base.id, name=base.name, phases=tuple(p for p in base.phases if p.id not in dropped)
+    )
+    known = load_fragments()
+    try:
+        compose(trial, [known[f] for f in dict.fromkeys(wanted)])
+    except (CompositionError, KeyError) as exc:
+        raise TailoringError(f"add_fragment: {exc}") from exc
 
 
 def _phase_definition_types(phase: Phase) -> tuple[str, ...]:
@@ -512,7 +572,11 @@ def apply_operations(
     applied: list[Operation] = []
     add_route_selection = False
 
+    fragment_ops: list[Operation] = []
     for op in operations:
+        if op.kind is OperationKind.ADD_FRAGMENT:
+            fragment_ops.append(op)
+            continue
         if op.kind is OperationKind.ADD_ROUTE_SELECTION:
             if ROUTE_SELECTION_PHASE_ID not in by_id and not add_route_selection:
                 add_route_selection = True
@@ -688,7 +752,52 @@ def apply_operations(
         phases.insert(max(len(phases) - 1, 0), route_phase)
 
     tailored = FlowDefinition(id=base.id, name=base.name, phases=tuple(phases))
-    return tailored, applied
+    tailored, composed_ops = _compose_fragments(tailored, fragment_ops)
+    return tailored, [*applied, *composed_ops]
+
+
+def _compose_fragments(
+    flow: FlowDefinition, ops: list[Operation]
+) -> tuple[FlowDefinition, list[Operation]]:
+    """Compose the requested fragments one at a time, keeping each that fits.
+
+    Lenient like the rest of :func:`apply_operations`: a fragment that does
+    not compose (unknown, a stage that was dropped, a duplicate writer) is
+    skipped and logged, and is absent from the diff. A caller's request was
+    already checked strictly by :func:`parse_caller_operations`.
+    """
+    if not ops:
+        return flow, []
+    from orchestrator.design_flow.compose import CompositionError, compose
+    from orchestrator.design_flow.fragments import load_fragments
+
+    known = load_fragments()
+    applied: list[Operation] = []
+    seen: set[str] = set()
+    pending = list(ops)
+    # Two passes, so a fragment listed before the one it requires still fits.
+    for _ in range(2):
+        retry: list[Operation] = []
+        for op in pending:
+            fragment_id = str(op.value or "").strip()
+            if fragment_id in seen:
+                continue
+            fragment = known.get(fragment_id)
+            if fragment is None:
+                logger.info("flow_generator_unknown_fragment", fragment=fragment_id)
+                continue
+            try:
+                flow = compose(flow, [fragment]).definition
+            except CompositionError as exc:
+                retry.append(op)
+                logger.info(
+                    "flow_generator_fragment_skipped", fragment=fragment_id, reason=str(exc)
+                )
+                continue
+            seen.add(fragment_id)
+            applied.append(op)
+        pending = retry
+    return flow, applied
 
 
 #: Evidence that shows a physical part carries its stated loads.
@@ -786,6 +895,37 @@ def _reuse_current_items(
     return out
 
 
+def composition_of(flow: FlowDefinition) -> ComposedFlow | None:
+    """The composition summary of an already-composed flow, or ``None``.
+
+    Recomposes the flow's stages with the fragments it names, which
+    recomputes the external inputs and the derived task dependencies.
+    """
+    from orchestrator.design_flow.compose import CompositionError, compose, fragment_ids
+    from orchestrator.design_flow.fragments import load_fragments
+
+    names = fragment_ids(flow)
+    if not names:
+        return None
+    tasks = {p.id for p in flow.phases if p.is_task}
+    stages_only = FlowDefinition(
+        id=flow.id,
+        name=flow.name,
+        phases=tuple(
+            p
+            if p.depends_on is None
+            else replace(p, depends_on=tuple(d for d in p.depends_on if d not in tasks))
+            for p in flow.phases
+            if not p.is_task
+        ),
+    )
+    known = load_fragments()
+    try:
+        return compose(stages_only, [known[f] for f in names if f in known])
+    except CompositionError:
+        return None
+
+
 def build_proposal(
     base: FlowDefinition,
     *,
@@ -825,6 +965,14 @@ def build_proposal(
     tailored, applied = apply_operations(base, ops)
     validation = validate_flow(tailored, context=context)
     notes = list(assumptions or [])
+    composition = composition_of(tailored)
+    if composition is not None:
+        for external in composition.external_inputs:
+            notes.append(
+                f"input '{external.ref}' is written by no task: record it with its source "
+                f"before {', '.join(external.consumers)} (a check reading it is no_data "
+                "until then)"
+            )
     if context is None or context.requirements_pending:
         notes.insert(
             0,
@@ -845,6 +993,7 @@ def build_proposal(
         open_questions=list(open_questions or []),
         generated_by=generated_by,
         proposed_by=proposed_by,
+        composition=composition,
     )
     logger.info(
         "flow_proposal_built",

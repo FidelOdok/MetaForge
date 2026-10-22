@@ -1,0 +1,94 @@
+# thermal_v1 domain fragment (composable flows).
+#
+# Heat-load estimation -> cooling architecture -> heat-transfer analysis ->
+# temperature verification. Each task declares the twin items it reads and
+# writes; composition derives the task graph from them, so a changed power
+# dissipation makes exactly these tasks stale and nothing else.
+#
+# Limits are inputs, never numbers written here: the allowed junction
+# temperature and the ambient come from the requirements or a datasheet,
+# recorded as sourced design values. A limit nobody recorded is no_data, and
+# no_data never passes a check.
+#
+# Bump `version` when a task, its contract or a check changes.
+id: thermal_v1
+version: 1.0.0
+domain: thermal
+label: Thermal system
+description: Heat load, cooling architecture, heat-transfer analysis and temperature verification.
+keywords: [thermal, heat, cooling, temperature, heatsink, overheating, dissipation]
+disciplines: [simulation]
+tasks:
+- id: heat_load
+  stage: design
+  title: Heat-load estimation
+  objective: >-
+    Estimate the steady-state heat load the cooling system must remove. Sum the power
+    dissipated by every heat source from the recorded power dissipation, and record the
+    total as the design value `heat_load_w` (W) with its source (the dissipation values it
+    was summed from). Do not assume a dissipation that was not recorded; if one is missing,
+    say so and stop.
+  inputs:
+  - design_value:power_dissipation_w
+  outputs:
+  - design_value:heat_load_w
+  checks:
+  - heat_load_w >= 0 W
+  capabilities: [twin.record_engineering_entity]
+  outcome: heat load the cooling must remove established
+- id: cooling_architecture
+  stage: design
+  title: Cooling architecture
+  objective: >-
+    Choose how the heat is removed (natural convection, forced air, heatsink, conduction to
+    the enclosure) for the recorded heat load, maximum ambient temperature and allowed
+    junction temperature. Record the thermal-resistance budget junction-to-ambient as the
+    design value `thermal_resistance_budget_c_per_w` (degC/W), computed as
+    (max allowed junction temperature - max ambient) / heat load, and the choice as a
+    design decision with the alternatives considered.
+  inputs:
+  - design_value:heat_load_w
+  - design_value:max_ambient_temp_c
+  - design_value:max_allowed_junction_temp_c
+  outputs:
+  - design_value:thermal_resistance_budget_c_per_w
+  records: [design_decision]
+  checks:
+  - thermal_resistance_budget_c_per_w > 0 degC/W
+  capabilities: [twin.record_engineering_entity, twin.record_decision]
+  outcome: cooling approach and its thermal-resistance budget chosen
+- id: heat_transfer
+  stage: simulation
+  title: Heat-transfer analysis
+  objective: >-
+    Run a steady-state thermal analysis of the cooled assembly with the recorded heat load
+    and maximum ambient as boundary conditions. Mesh the committed geometry, run the thermal
+    solver, and record the peak temperature at the hottest heat source as the design value
+    `max_junction_temp_c` (degC), sourced to the simulation result.
+  inputs:
+  - design_value:heat_load_w
+  - design_value:max_ambient_temp_c
+  - design_value:thermal_resistance_budget_c_per_w
+  outputs:
+  - design_value:max_junction_temp_c
+  records: [simulation_result]
+  checks:
+  - max_junction_temp_c <= max_allowed_junction_temp_c
+  capabilities: [calculix.run_thermal]
+  outcome: peak operating temperature predicted by analysis
+- id: temperature_verification
+  stage: simulation
+  title: Temperature verification
+  objective: >-
+    Verify the predicted peak temperature against the allowed junction temperature. Record
+    the margin (allowed minus predicted) as the design value `thermal_margin_c` (degC),
+    sourced to the analysis, and say whether the thermal requirement is met.
+  inputs:
+  - design_value:max_junction_temp_c
+  - design_value:max_allowed_junction_temp_c
+  outputs:
+  - design_value:thermal_margin_c
+  checks:
+  - thermal_margin_c >= 0 degC
+  capabilities: [twin.record_engineering_entity]
+  outcome: thermal requirement verified with a stated margin

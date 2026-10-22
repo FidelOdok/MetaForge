@@ -231,6 +231,55 @@ def assess_capabilities(
                     unserved=unserved,
                 )
             )
+        # Composable flows: a task names the tools it needs outright. Each one
+        # missing, down or unserved is a gap that blocks the task: its
+        # objective is written for that tool.
+        for tool in getattr(phase, "capabilities", ()) or ():
+            if (
+                tool in registered_set
+                and (reachable_set is None or tool in reachable_set)
+                and (served_set is None or tool in served_set)
+            ):
+                rows.append(_row(f"tool:{tool}", Coverage.FULL, True))
+                continue
+            if tool not in registered_set:
+                severity = GapSeverity.REQUIRES_NEW_CAPABILITY
+                consequence = f"task needs {tool}, which no adapter registers"
+            elif reachable_set is not None and tool not in reachable_set:
+                severity = GapSeverity.REQUIRES_USER_ACTION
+                consequence = f"task needs {tool}; its adapter did not answer a health check"
+            else:
+                severity = GapSeverity.REQUIRES_USER_ACTION
+                consequence = f"task needs {tool}, not served on this connection's profile"
+            if conditional:
+                consequence += " (the phase is conditional, so it may not run at all)"
+            rows.append(_row(f"tool:{tool}", Coverage.UNAVAILABLE, True))
+            worst = max(worst, Coverage.UNAVAILABLE, key=_RANK.__getitem__)
+            gaps.append(
+                Gap(
+                    phase_id=phase.id,
+                    capability=f"tool:{tool}",
+                    severity=severity,
+                    blocking=True,
+                    consequence=consequence,
+                    missing_tools=(tool,) if tool not in registered_set else (),
+                    unreachable_tools=(
+                        (tool,)
+                        if tool in registered_set
+                        and reachable_set is not None
+                        and tool not in reachable_set
+                        else ()
+                    ),
+                    unserved_tools=(
+                        (tool,)
+                        if tool in registered_set
+                        and (reachable_set is None or tool in reachable_set)
+                        and served_set is not None
+                        and tool not in served_set
+                        else ()
+                    ),
+                )
+            )
         nodes.append(NodeCoverage(phase_id=phase.id, coverage=worst, deliverables=tuple(rows)))
     return CapabilityReport(nodes=tuple(nodes), gaps=tuple(gaps), limits=tuple(limits))
 

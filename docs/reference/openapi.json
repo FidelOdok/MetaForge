@@ -4478,6 +4478,18 @@
             "title": "Changes",
             "type": "array"
           },
+          "composition": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composition"
+          },
           "flow": {
             "$ref": "#/components/schemas/DesignFlowView"
           },
@@ -4826,6 +4838,182 @@
           "valid"
         ],
         "title": "FlowVersionView",
+        "type": "object"
+      },
+      "FragmentBlockView": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "maxIterations": {
+            "title": "Maxiterations",
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "solvesFor": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Solvesfor",
+            "type": "array"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "tolerance": {
+            "title": "Tolerance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "stage",
+          "tolerance",
+          "maxIterations"
+        ],
+        "title": "FragmentBlockView",
+        "type": "object"
+      },
+      "FragmentListResponse": {
+        "properties": {
+          "fragments": {
+            "items": {
+              "$ref": "#/components/schemas/FragmentView"
+            },
+            "title": "Fragments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fragments"
+        ],
+        "title": "FragmentListResponse",
+        "type": "object"
+      },
+      "FragmentTaskView": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "checks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "outputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "stage"
+        ],
+        "title": "FragmentTaskView",
+        "type": "object"
+      },
+      "FragmentView": {
+        "description": "A domain fragment: one domain's tasks, composable into any flow.",
+        "properties": {
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/FragmentBlockView"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keywords",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "requires": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requires",
+            "type": "array"
+          },
+          "spine": {
+            "title": "Spine",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/FragmentTaskView"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "domain",
+          "label",
+          "description",
+          "spine"
+        ],
+        "title": "FragmentView",
         "type": "object"
       },
       "FromTextRequest": {
@@ -8848,6 +9036,20 @@
       },
       "PhaseView": {
         "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "checks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
           "condition": {
             "anyOf": [
               {
@@ -8858,6 +9060,18 @@
               }
             ],
             "title": "Condition"
+          },
+          "coupling": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coupling"
           },
           "dependsOn": {
             "anyOf": [
@@ -8892,6 +9106,11 @@
             "title": "Expectedartifacts",
             "type": "array"
           },
+          "fragment": {
+            "default": "",
+            "title": "Fragment",
+            "type": "string"
+          },
           "gate": {
             "anyOf": [
               {
@@ -8905,6 +9124,13 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inputs",
+            "type": "array"
           },
           "model": {
             "anyOf": [
@@ -8939,6 +9165,11 @@
             },
             "title": "Slots",
             "type": "array"
+          },
+          "stage": {
+            "default": "",
+            "title": "Stage",
+            "type": "string"
           },
           "title": {
             "title": "Title",
@@ -17498,6 +17729,28 @@
           }
         },
         "summary": "List Design Flows",
+        "tags": [
+          "design-flows"
+        ]
+      }
+    },
+    "/v1/design-flows/fragments": {
+      "get": {
+        "description": "Every domain fragment a proposal can compose in with ``add_fragment``.\n\nRegistered before ``/{flow_id}`` so it is not read as a flow id.",
+        "operationId": "list_fragments_v1_design_flows_fragments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FragmentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Fragments",
         "tags": [
           "design-flows"
         ]

@@ -20,9 +20,13 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from orchestrator.design_flow.spec import Check, Coupling, DeliverableSlot, Phase
+if TYPE_CHECKING:
+    # Imported lazily at run time: ``spec`` loads the flow templates when it
+    # is imported, and the template loader uses this module, so a top-level
+    # import would be a cycle whenever this module is imported first.
+    from orchestrator.design_flow.spec import Check, DeliverableSlot, Phase
 
 __all__ = [
     "CHECK_OPS",
@@ -83,6 +87,8 @@ def ref_key(ref: str) -> str:
 
 def slots_from_outputs(outputs: Iterable[str]) -> tuple[DeliverableSlot, ...]:
     """One keyed deliverable slot per output reference, duplicates refused."""
+    from orchestrator.design_flow.spec import DeliverableSlot
+
     slots: list[DeliverableSlot] = []
     seen: set[str] = set()
     for ref in outputs:
@@ -107,6 +113,8 @@ def check_from(raw: Any) -> Check:
     ``"max_temp_c <= max_allowed_temp_c"`` (another design value). Mapping:
     ``{id, value, op, threshold | limit, unit}``.
     """
+    from orchestrator.design_flow.spec import Check
+
     if isinstance(raw, str):
         match = _CHECK_TEXT.match(raw)
         if match is None:
@@ -188,6 +196,8 @@ def task_fields_from(raw: Mapping[str, Any]) -> dict[str, Any]:
     one reads back identically through the other. Inputs are validated as
     references; an empty mapping yields the defaults (a plain phase).
     """
+    from orchestrator.design_flow.spec import Coupling
+
     inputs = tuple(str(r).strip() for r in raw.get("inputs") or ())
     for ref in inputs:
         parse_ref(ref)

@@ -190,6 +190,12 @@ class GateCheck:
     constraints_checked: bool = False
     violations: list[str] = field(default_factory=list)
     reason: str = ""
+    #: Composable flows: blocking findings from the tasks this stage reviews
+    #: (missing deliverables, failed or no-data checks, an unconverged block),
+    #: and every check result for the reviewer. Empty for a gate with no
+    #: attached tasks, and absent from results recorded before fragments.
+    check_findings: list[str] = field(default_factory=list)
+    check_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -560,7 +566,7 @@ class DesignFlowWorkflow:
                     if self._rework_to is not None:
                         target = self._rework_to
                         self._rework_to = None
-                        rerun = set(graph.downstream(target)) | {phase.id}
+                        rerun = set(graph.affected(target)) | {phase.id}
                         self._completed = [c for c in self._completed if c["phase"] not in rerun]
                         done = [d for d in done if d not in rerun]
                         self._skipped = [s for s in self._skipped if s not in rerun]
@@ -662,14 +668,21 @@ class DesignFlowWorkflow:
         gate = phase.gate
         assert gate is not None  # only called when there is one
 
+        payload: dict[str, Any] = {
+            "run_id": inp.run_id,
+            "project_id": inp.project_id,
+            "phase": phase,
+            "gate": gate,
+        }
+        # Composable flows: the tasks this stage reviews travel with the gate
+        # so the activity can check them. Only set when there are any, so the
+        # payload of every flow without fragments is unchanged.
+        attached = [p for p in inp.flow.phases if p.fragment and p.stage == phase.id]
+        if attached:
+            payload["tasks"] = attached
         check: GateCheck = await workflow.execute_activity(
             "evaluate_gate",
-            {
-                "run_id": inp.run_id,
-                "project_id": inp.project_id,
-                "phase": phase,
-                "gate": gate,
-            },
+            payload,
             start_to_close_timeout=_CHECK_TIMEOUT,
             retry_policy=RetryPolicy(maximum_attempts=3),
             result_type=GateCheck,
@@ -908,6 +921,11 @@ class DesignFlowWorkflow:
                 f"{len(check.violations)} constraint violation(s): "
                 f"{'; '.join(check.violations[:10])}"
             )
+        # Composable flows: the attached tasks' findings always block; a failed
+        # or unmeasured check is not something approving can accept.
+        if check.check_findings:
+            blocking = True
+            findings.extend(check.check_findings)
         return findings, blocking
 
     def _legacy_not_ready(

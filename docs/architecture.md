@@ -342,6 +342,7 @@ policy somebody has to observe.
 
 | Endpoint | Purpose |
 | --- | --- |
+| `GET /v1/design-flows/fragments` | the domain fragments a proposal can compose in with `add_fragment` ([Composable Design Flows](architecture/composable-flows.md)) |
 | `POST /v1/design-flows/validate` | check an edit **without saving it** |
 | `POST /v1/design-flows/versions` | save an edit as a new version, held for approval |
 | `GET /v1/design-flows/versions/{id}` | fetch a stored version |

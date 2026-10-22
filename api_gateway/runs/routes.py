@@ -542,12 +542,48 @@ from orchestrator.design_flow.generator import ROUTE_SELECTION_PHASE_ID  # noqa:
 class _GateCheckers:
     """The three gate evaluations, in one place for both engines."""
 
-    def __init__(self, evaluator: Any, constraints: Any, consistency: Any) -> None:
+    def __init__(
+        self, evaluator: Any, constraints: Any, consistency: Any, values: Any = None
+    ) -> None:
         self._evaluator = evaluator
         self._constraints = constraints
         self._consistency = consistency
+        self._values = values
 
-    async def evaluate(self, phase: Any, project_id: str | None) -> Any:
+    async def _task_findings(
+        self, stage_id: str, tasks: list[Any], project_id: str, present: set[str]
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        """Composable flows: what the stage's attached tasks left undone."""
+        from orchestrator.design_flow.checks import evaluate_stage, history_names, value_names
+
+        def field_of(obj: Any, name: str) -> Any:
+            return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+        findings: list[str] = []
+        for task in tasks:
+            missing = [d for d in field_of(task, "required_deliverables") or [] if d not in present]
+            if missing:
+                findings.append(
+                    f"task '{field_of(task, 'id')}' did not record required deliverables {missing}"
+                )
+        names = value_names(tasks)
+        coupled = history_names(tasks)
+        values: Any = {} if not (names or coupled) else None
+        history: Any = {}
+        if self._values is not None and (names or coupled):
+            try:
+                values = await self._values.values(project_id)
+                history = await self._values.history(project_id, coupled) if coupled else {}
+            except Exception as exc:  # noqa: BLE001 - unread values are no_data, not a crash
+                logger.warning("gate_task_values_unread", stage=stage_id, error=str(exc))
+                values = None
+        report = evaluate_stage(stage_id, tasks, values, history)
+        findings.extend(report.findings)
+        return findings, [r.as_dict() for r in report.results]
+
+    async def evaluate(
+        self, phase: Any, project_id: str | None, *, tasks: list[Any] | None = None
+    ) -> Any:
         from orchestrator.design_flow.temporal_flow import GateCheck
 
         if project_id is None:
@@ -595,7 +631,15 @@ class _GateCheckers:
                 route_note = f"; {review.summary()}{accepts}"
 
         constraints = await self._constraints.check(project_id)
+        check_findings: list[str] = []
+        check_results: list[dict[str, Any]] = []
+        if tasks:
+            check_findings, check_results = await self._task_findings(
+                phase_id, list(tasks), project_id, set(present)
+            )
         return GateCheck(
+            check_findings=check_findings,
+            check_results=check_results,
             ready=not missing,
             checked=bool(required),
             missing=missing,
@@ -626,6 +670,7 @@ async def build_gate_checkers() -> _GateCheckers | None:
         ProjectGateEvaluator,
         TwinConsistencyGateChecker,
         TwinConstraintChecker,
+        TwinDesignValueReader,
     )
     from api_gateway.twin.routes import get_twin
 
@@ -637,6 +682,7 @@ async def build_gate_checkers() -> _GateCheckers | None:
         ProjectGateEvaluator(backend, twin=twin),
         TwinConstraintChecker(twin, backend),
         TwinConsistencyGateChecker(twin),
+        TwinDesignValueReader(twin),
     )
 
 
@@ -728,6 +774,7 @@ def _build_in_process_executor(brain: Any, project_backend: Any) -> DesignFlowEx
         ProjectGateEvaluator,
         TwinConsistencyGateChecker,
         TwinConstraintChecker,
+        TwinDesignValueReader,
     )
     from api_gateway.twin.routes import get_twin
 
@@ -749,6 +796,8 @@ def _build_in_process_executor(brain: Any, project_backend: Any) -> DesignFlowEx
         phase_scope=run_change_sets.phase_scope,
         # FORGE-530: a retried or reworked phase is told what its gate turned down.
         revision_notes=run_change_sets.revision_notes,
+        # Composable flows: the design values a stage gate's task checks read.
+        value_reader=TwinDesignValueReader(get_twin()),
     )
 
 

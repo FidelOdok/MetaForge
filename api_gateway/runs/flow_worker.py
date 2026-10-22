@@ -413,7 +413,9 @@ async def _check_gate(payload: dict[str, Any]) -> GateCheck:
     if checkers is None:
         return GateCheck(checked=False, constraints_checked=False, reason="no evaluators wired")
 
-    return await checkers.evaluate(payload.get("phase"), payload.get("project_id"))
+    return await checkers.evaluate(
+        payload.get("phase"), payload.get("project_id"), tasks=payload.get("tasks")
+    )
 
 
 def build_activities() -> DesignFlowActivities:

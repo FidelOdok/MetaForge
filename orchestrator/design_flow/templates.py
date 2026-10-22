@@ -30,7 +30,6 @@ from typing import Any
 import structlog
 import yaml
 
-from orchestrator.design_flow.contract import task_fields_from, task_fields_to
 from orchestrator.design_flow.spec import DeliverableSlot, FlowDefinition, Gate, Phase
 
 logger = structlog.get_logger(__name__)
@@ -192,6 +191,11 @@ def slots_from(raw: Any) -> tuple[DeliverableSlot, ...]:
 
 
 def _phase_from(raw: dict[str, Any]) -> Phase:
+    # Imported here: ``contract`` imports ``spec``, which loads the templates
+    # at import time, so a module-level import is a cycle whenever
+    # ``contract`` happens to be imported first.
+    from orchestrator.design_flow.contract import task_fields_from
+
     return Phase(
         id=raw["id"],
         title=raw["title"],
@@ -239,6 +243,8 @@ def to_mapping(
     the round-trip test. Keeping both directions here means the generator and
     the loader cannot drift apart.
     """
+    from orchestrator.design_flow.contract import task_fields_to
+
     phases: list[dict[str, Any]] = []
     for phase in definition.phases:
         entry: dict[str, Any] = {

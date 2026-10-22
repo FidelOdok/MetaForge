@@ -269,6 +269,17 @@ def get_flow(flow_id: str | None) -> FlowDefinition:
         raise KeyError(f"unknown flow '{flow_id}'; known flows: {sorted(FLOWS)}") from exc
 
 
+def _coupling_from(raw: object) -> Coupling | None:
+    if raw is None:
+        return None
+    return Coupling(
+        members=tuple(getattr(raw, "members", ())),
+        solves_for=tuple(getattr(raw, "solves_for", ())),
+        tolerance=float(getattr(raw, "tolerance", 0.01)),
+        max_iterations=int(getattr(raw, "max_iterations", 20)),
+    )
+
+
 def definition_from_frozen(frozen: FrozenFlow) -> FlowDefinition:
     """Rebuild a :class:`FlowDefinition` from a frozen, approved flow (FORGE-474).
 
@@ -309,16 +320,7 @@ def definition_from_frozen(frozen: FrozenFlow) -> FlowDefinition:
                     for c in (getattr(p, "checks", ()) or ())
                 ),
                 capabilities=tuple(getattr(p, "capabilities", ()) or ()),
-                coupling=(
-                    None
-                    if getattr(p, "coupling", None) is None
-                    else Coupling(
-                        members=tuple(p.coupling.members),
-                        solves_for=tuple(p.coupling.solves_for),
-                        tolerance=float(p.coupling.tolerance),
-                        max_iterations=int(p.coupling.max_iterations),
-                    )
-                ),
+                coupling=_coupling_from(getattr(p, "coupling", None)),
                 slots=tuple(
                     DeliverableSlot(item_type=s.item_type, name=s.name, item_key=s.item_key)
                     for s in p.slots
