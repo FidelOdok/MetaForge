@@ -13,6 +13,8 @@ Claude Code asks for your gateway URL on first enable. The default suits a gatew
 
 ### On claude.ai
 
+Install `metaforge-cloud` instead: it has the hosted gateway's address already filled in, so there is nothing to edit. The rest of this section is for pointing this package at your own gateway.
+
 The same marketplace works from **Customize → Plugins → Add → Add marketplace**, and the skills and commands load straight away.
 
 The bundled connector does not. Its URL is written as `${user_config.gateway_url}`, and per-user configuration prompts are a Claude Code feature — claude.ai shows the template literally and asks you to replace it. That is the web app behaving as designed, not a broken plugin.

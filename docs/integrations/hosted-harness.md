@@ -149,9 +149,30 @@ So the honest summary is per-mechanism, not per-product: a connector is tools
 and prompts; a bundle is tools, prompts and skills; only Claude Code's own
 plugin format carries agents and hooks as well.
 
-### The plugin's connector needs editing on claude.ai
+### On claude.ai, install `metaforge-cloud` (FORGE-658)
 
-Install the plugin from **Customize → Plugins → Add → Add marketplace** with
+The marketplace carries a package for claude.ai whose connector is already
+pointed at the hosted gateway, so there is no URL to find and nothing to edit.
+
+1. **Customize → Plugins → Add → Add marketplace**, and enter `FidelOdok/MetaForge`.
+2. Install `metaforge-cloud`.
+3. Choose **Connect** on its connector. claude.ai follows the gateway's 401 into
+   OAuth and opens the sign-in page. Enter the access secret once; claude.ai
+   keeps the token.
+
+It carries the same skills and commands as `metaforge`, and no hooks or agents,
+because claude.ai does not run them. Install one MetaForge package, not
+several: the manifest has no way to switch a connector off, so two would offer
+every tool twice.
+
+The address is a constant in `scripts/build_integrations.py`
+(`HOSTED_GATEWAY_URL`), so moving the hosted gateway means regenerating the
+package and publishing a new version, which the content versioning handles.
+
+### Pointing `metaforge` at your own gateway on claude.ai
+
+Use this when the gateway is yours rather than the hosted one. Install the
+plugin from **Customize → Plugins → Add → Add marketplace** with
 `FidelOdok/MetaForge` and its skills and commands work immediately. Its bundled
 connector does not.
 
@@ -172,11 +193,12 @@ Clear any `Authorization` field still showing a `${...}` template. A literal
 rejects less helpfully than no credential at all — and claude.ai cannot send a
 static token regardless, since it runs OAuth off your gateway's 401.
 
-**No manifest change fixes this.** Every user runs their own gateway, so there
-is no literal URL a published plugin could carry that is right for the next
-person who installs it. Other plugins connect on install because they point at
-one hosted service. A single address becomes possible here only once a broker
-routes each account to its own gateway.
+**No manifest change fixes this for `metaforge` itself.** Every user runs their
+own gateway, so there is no literal URL it could carry that is right for the
+next person who installs it. That is why the hosted address lives in its own
+package, `metaforge-cloud`, rather than in this one. A single address for
+everyone becomes possible only once a broker routes each account to its own
+gateway.
 
 ## Things that will bite you
 
