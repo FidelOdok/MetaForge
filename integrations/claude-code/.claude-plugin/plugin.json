@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "metaforge",
   "displayName": "MetaForge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Engineer hardware against a digital twin: requirements, CAD, simulation and evidence, with writes held for human approval.",
   "author": {
     "name": "MetaForge",

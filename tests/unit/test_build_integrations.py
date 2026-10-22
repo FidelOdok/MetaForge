@@ -434,11 +434,11 @@ class TestMarketplace:
         assert catalog["owner"]["name"]
         assert catalog["plugins"]
 
-    def test_it_lists_both_packages(self) -> None:
-        from scripts.build_integrations import LOCAL_PLUGIN_NAME, PLUGIN_NAME
+    def test_it_lists_every_package(self) -> None:
+        from scripts.build_integrations import CLOUD_PLUGIN_NAME, LOCAL_PLUGIN_NAME, PLUGIN_NAME
 
         names = {p["name"] for p in self._catalog()["plugins"]}
-        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME}
+        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME, CLOUD_PLUGIN_NAME}
 
     def test_each_source_is_a_relative_path_that_exists(self) -> None:
         """A relative source resolves from the marketplace root, and must
@@ -765,6 +765,7 @@ class TestPluginVersion:
     MANIFESTS = (
         "claude-code/.claude-plugin/plugin.json",
         "claude-code-local/.claude-plugin/plugin.json",
+        "claude-code-cloud/.claude-plugin/plugin.json",
         "codex/.codex-plugin/plugin.json",
         "codex/plugin.json",
     )
@@ -786,10 +787,15 @@ class TestPluginVersion:
         """Regenerate from the sources, then compare with what the lock was
         cut for. A skill, PLUGIN.md or tool-list change that was not followed
         by `python scripts/build_integrations.py` lands here."""
-        from scripts.build_integrations import content_digest, read_version_lock
+        from scripts.build_integrations import (
+            build_claude_code_cloud,
+            content_digest,
+            read_version_lock,
+        )
 
         build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
         build_claude_code_local()
+        build_claude_code_cloud()
         build_codex(default_gateway_url=DEFAULT_GATEWAY_URL)
         assert content_digest() == read_version_lock()["content_digest"], (
             "plugin content changed but the version was not bumped: "
@@ -853,3 +859,64 @@ class TestPluginVersion:
         root, lock = self._tree(tmp_path, digest="")
         assert bump_if_changed(root, lock) == "0.2.0"
         assert json.loads(lock.read_text())["content_digest"]
+
+
+# ---------------------------------------------------------------------------
+# The claude.ai package with a pre-filled connector (FORGE-658)
+# ---------------------------------------------------------------------------
+
+
+class TestCloudPackage:
+    """On claude.ai the main plugin's connector is a template the web app cannot
+    fill in, so it keeps asking to connect. This package carries a literal URL."""
+
+    @pytest.fixture(scope="class")
+    def root(self) -> Path:
+        from scripts.build_integrations import build_claude_code_cloud
+
+        return build_claude_code_cloud()
+
+    @pytest.fixture(scope="class")
+    def manifest(self, root: Path) -> dict:
+        return json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+
+    def test_the_connector_is_a_literal_url(self, manifest: dict) -> None:
+        from scripts.build_integrations import HOSTED_GATEWAY_URL
+
+        url = manifest["mcpServers"]["metaforge"]["url"]
+        assert url.startswith(HOSTED_GATEWAY_URL)
+        # Nothing for claude.ai to fill in or show as literal text.
+        assert "${" not in json.dumps(manifest["mcpServers"])
+
+    def test_there_is_nothing_to_configure_and_no_static_token(self, manifest: dict) -> None:
+        """claude.ai cannot prompt for user config or send a bearer header; it
+        runs OAuth off the gateway's 401. A leftover template reads as a
+        malformed credential."""
+        assert "userConfig" not in manifest
+        assert "headers" not in manifest["mcpServers"]["metaforge"]
+
+    def test_it_installs_alongside_the_others(self, manifest: dict) -> None:
+        from scripts.build_integrations import LOCAL_PLUGIN_NAME, PLUGIN_NAME
+
+        assert manifest["name"] not in {PLUGIN_NAME, LOCAL_PLUGIN_NAME}
+
+    def test_it_carries_the_same_skills_and_commands(self, root: Path) -> None:
+        main = build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
+        assert sorted(p.name for p in (root / "skills").iterdir()) == sorted(
+            p.name for p in (main / "skills").iterdir()
+        )
+        assert sorted(p.name for p in (root / "commands").iterdir()) == sorted(
+            p.name for p in (main / "commands").iterdir()
+        )
+
+    def test_it_ships_no_hooks_or_agents(self, root: Path) -> None:
+        """claude.ai does not run them, and the hooks need Python on the PATH."""
+        assert not (root / "hooks").exists()
+        assert not (root / "agents").exists()
+
+    def test_the_readme_says_how_to_install_it(self, root: Path) -> None:
+        from scripts.build_integrations import CLOUD_PLUGIN_NAME
+
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        assert f"install `{CLOUD_PLUGIN_NAME}`" in readme
+        assert "FidelOdok/MetaForge" in readme
