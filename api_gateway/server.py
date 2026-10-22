@@ -80,12 +80,15 @@ from api_gateway.twin.harness_estimate_routes import router as harness_estimate_
 from api_gateway.twin.hierarchy_routes import router as hierarchy_router
 from api_gateway.twin.item_migration_routes import router as twin_item_migration_router
 from api_gateway.twin.item_routes import router as twin_items_router
+from api_gateway.twin.live_routes import publish_local as _publish_live_local
+from api_gateway.twin.live_routes import router as twin_live_router
 from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
 from api_gateway.vendors.routes import router as vendors_router
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
+from mcp_core.live_events import set_live_event_publisher
 from observability.bootstrap import init_observability, shutdown_observability
 from observability.config import ObservabilityConfig, OtlpExporterConfig
 from observability.logging import configure_logging
@@ -931,6 +934,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
         evidence_recorder=evidence_recorder_fn,
         mcp_bridge=overhang_evaluator_bridge,
     )
+    # FORGE-630: twin.render_work_product -- the model converted to GLB and
+    # rendered by blender.render over the same lazy-bridge seam.
+    from api_gateway.twin.render_recorder import make_work_product_renderer
+
+    work_product_renderer_bridge = _LazyBridge()
+    work_product_renderer_fn = make_work_product_renderer(
+        twin, project_backend, mcp_bridge=work_product_renderer_bridge
+    )
     # MET-618: hoisted so the SAME blob-stager instance (and its staged-file
     # cache) is reused by both twin.stage_work_product_file (below) and
     # manufacture_release_fn, same pattern FORGE-265 established for
@@ -1254,6 +1265,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         # overhang_evaluator_bridge is bound to the real active_bridge
         # below, once it exists.
         overhang_evaluator=overhang_evaluator_fn,
+        # FORGE-630: renders of a work product, bound to active_bridge below.
+        work_product_renderer=work_product_renderer_fn,
         # FORGE-316: automatic selective re-run of exactly what a
         # committed ECT's real revalidation_plan marked stale.
         revalidation_executor=revalidation_executor_fn,
@@ -1324,7 +1337,10 @@ async def _init_orchestrator(app: FastAPI) -> None:
     from api_gateway.design_flows.lifecycle_service import set_tool_registry
 
     set_tool_registry(tool_registry)
-    registry_bridge = RegistryMcpBridge(tool_registry)
+    # FORGE-446: material names become library figures before a tool runs.
+    from twin_core.library.material_resolver import fill_material_arguments
+
+    registry_bridge = RegistryMcpBridge(tool_registry, argument_filler=fill_material_arguments)
     logger.info(
         "tool_registry_bootstrapped",
         adapters=len(tool_registry.list_adapters()),
@@ -1356,6 +1372,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
     # FORGE-273: same for overhang_evaluator_bridge (twin.
     # evaluate_overhang_metric's freecad.list_named_faces call).
     overhang_evaluator_bridge.bridge = active_bridge
+    # FORGE-630: same for work_product_renderer_bridge (blender.render).
+    work_product_renderer_bridge.bridge = active_bridge
     # FORGE-294: same for manufacture_release_bridge (manufacture_release's
     # cadquery.export_geometry call).
     manufacture_release_bridge.bridge = active_bridge
@@ -1582,6 +1600,11 @@ async def _init_orchestrator(app: FastAPI) -> None:
         from twin_core.library.catalog import SqliteCatalog
 
         init_catalog(SqliteCatalog(str(default_machine_library_path())))
+        # FORGE-446: this process resolves material names against its own catalog.
+        from api_gateway.library.catalog_routes import get_catalog
+        from twin_core.library.material_resolver import catalog_source, install_material_source
+
+        install_material_source(catalog_source(get_catalog))
         # FORGE-427: quotes and orders must outlive a restart.
         from api_gateway.vendors.service import (
             SqliteVendorStore,
@@ -2159,6 +2182,10 @@ def create_app(
     app.include_router(robot_loads_router)
     app.include_router(compliance_router)
     app.include_router(twin_router)
+    app.include_router(twin_live_router)
+    # FORGE-647: tools running inside the gateway publish placements straight
+    # to the live stream; the sidecar installs an HTTP publisher instead.
+    set_live_event_publisher(_publish_live_local)
     app.include_router(twin_items_router)
     app.include_router(twin_item_migration_router)
     app.include_router(twin_prd_router)

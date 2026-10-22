@@ -97,7 +97,13 @@ class RemoteMachineLibrary:
 
     @staticmethod
     def _plural(kind: str) -> str:
-        return {"process": "processes", "material": "materials"}[kind]
+        return {
+            "process": "processes",
+            "material": "materials",
+            "component": "components",
+            "appearance": "appearances",
+            "ergonomic_limit": "ergonomic-limits",
+        }[kind]
 
     async def list_entries(self, kind: str, family: str | None) -> dict[str, Any]:
         query = f"?{urlencode({'family': family})}" if family else ""
@@ -134,3 +140,40 @@ class RemoteMachineLibrary:
             "GET", f"/v1/library/processes/{quote(ref, safe='')}/limits{query}"
         )
         return result
+
+    async def standard_part(
+        self, family: str, size: str, length_mm: float | None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"family": family, "size": size}
+        if length_mm is not None:
+            params["length_mm"] = length_mm
+        result: dict[str, Any] = await self._gateway.request(
+            "GET", f"/v1/library/components/standard?{urlencode(params)}"
+        )
+        return result
+
+
+def remote_material_source(gateway_url: str, *, client: httpx.AsyncClient | None = None) -> Any:
+    """A material source for this process that asks the gateway's library (FORGE-446)."""
+    from twin_core.library.material_resolver import MaterialResolutionError
+
+    base = gateway_url.rstrip("/")
+
+    async def resolve(name: str) -> dict[str, Any]:
+        owned = client is None
+        http = client or httpx.AsyncClient(timeout=DEFAULT_TIMEOUT_SECONDS)
+        try:
+            response = await http.get(f"{base}/v1/library/materials/resolve", params={"name": name})
+        finally:
+            if owned:
+                await http.aclose()
+        if response.status_code == 422:
+            detail = response.json().get("detail") or {}
+            raise MaterialResolutionError(
+                name, list(detail.get("candidates") or []), str(detail.get("message") or "")
+            )
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    return resolve

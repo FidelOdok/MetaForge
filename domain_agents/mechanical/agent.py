@@ -242,7 +242,7 @@ def _get_or_create_pydantic_agent() -> Any:
             constraints: List of stress constraints, each with
                 max_von_mises_mpa (float) and safety_factor (float).
             material_name: Material name for FEA elastic properties (e.g.
-                'steel', 'aluminum_6061').
+                'steel', 'aluminium_6061_t6').
             fixed_node_set: Mesh element set name to fully constrain (e.g.
                 'Surface1', gmsh's own per-STEP-face group).
             load_node_set: Mesh element set name to apply load_force_n to.
@@ -344,7 +344,7 @@ def _get_or_create_pydantic_agent() -> Any:
         ctx: RunContext[AgentDependencies],
         tolerances: list[dict[str, Any]],
         manufacturing_process: dict[str, Any],
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
     ) -> dict[str, Any]:
         """Check dimensional tolerances against manufacturing process capabilities.
 
@@ -395,7 +395,7 @@ def _get_or_create_pydantic_agent() -> Any:
         script: str = "",
         backend: str = "cadquery",
         constraints: dict[str, Any] | None = None,
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
     ) -> dict[str, Any]:
         """Generate a CAD script from a natural language description and execute it.
 
@@ -462,7 +462,7 @@ def _get_or_create_pydantic_agent() -> Any:
     async def generate_cad_ir(
         ctx: RunContext[AgentDependencies],
         entities: list[dict[str, Any]],
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
         name: str = "",
     ) -> dict[str, Any]:
         """Generate CAD geometry from a structured Design IR feature tree (FreeCAD).
@@ -824,7 +824,9 @@ class MechanicalAgent:
                     "mesh_file": skill_input_data["mesh_file_path"],
                     "load_case": skill_input_data["load_case"],
                     "analysis_type": "static_stress",
-                    "material": {"name": request.parameters.get("material_name", "aluminum_6061")},
+                    "material": {
+                        "name": request.parameters.get("material_name", "aluminium_6061_t6")
+                    },
                     "fixed_node_set": request.parameters.get("fixed_node_set", "Surface1"),
                     "load_node_set": request.parameters.get("load_node_set", "Surface2"),
                     "load_force_n": list(
@@ -925,7 +927,7 @@ class MechanicalAgent:
             work_product_id=request.work_product_id,
             tolerances=tolerances,
             manufacturing_process=process,
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=request.parameters.get("material", "aluminium_6061_t6"),
             check_stack_up=request.parameters.get("check_stack_up", False),
         )
 
@@ -1133,7 +1135,7 @@ class MechanicalAgent:
                 errors=["Missing required parameter: dimensions"],
             )
 
-        material = request.parameters.get("material", "aluminum_6061")
+        material = request.parameters.get("material", "aluminium_6061_t6")
         skill_input = GenerateCadInput(
             # FORGE-97: name is now required on the skill's own input; this
             # generic TaskRequest interface predates that, so fall back to
@@ -1236,7 +1238,7 @@ class MechanicalAgent:
             script=request.parameters.get("script", ""),
             backend=request.parameters.get("backend", "cadquery"),
             constraints=request.parameters.get("constraints", {}),
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=request.parameters.get("material", "aluminium_6061_t6"),
             output_format=request.parameters.get("output_format", "step"),
         )
 
@@ -1316,7 +1318,7 @@ class MechanicalAgent:
                 errors=["Missing required parameter: entities"],
             )
 
-        material = request.parameters.get("material", "aluminum_6061")
+        material = request.parameters.get("material", "aluminium_6061_t6")
         skill_input = GenerateCadIrInput(
             # FORGE-97/100: name is now required on the skill's own input;
             # this generic TaskRequest interface predates that, so fall back
@@ -1465,7 +1467,7 @@ class MechanicalAgent:
             branch=request.branch,
             shape_type=shape_type,
             dimensions=dimensions,
-            material=request.parameters.get("material", "aluminum_6061"),
+            material=request.parameters.get("material", "aluminium_6061_t6"),
             output_path=request.parameters.get("output_path", ""),
             element_size=request.parameters.get("element_size", 1.0),
             mesh_algorithm=request.parameters.get("mesh_algorithm", "netgen"),

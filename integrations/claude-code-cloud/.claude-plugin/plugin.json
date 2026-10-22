@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "metaforge-cloud",
+  "displayName": "MetaForge (cloud)",
+  "version": "0.2.5",
+  "description": "MetaForge on a hosted gateway: the same digital-twin tools, skills, commands, agents and hooks, connected with nothing to enter. Sign in once when asked.",
+  "author": {
+    "name": "MetaForge",
+    "url": "https://www.metaforge.uk"
+  },
+  "homepage": "https://fidelodok.github.io/MetaForge/",
+  "repository": "https://github.com/FidelOdok/MetaForge",
+  "license": "Apache-2.0",
+  "keywords": [
+    "hardware",
+    "cad",
+    "simulation",
+    "digital-twin",
+    "engineering"
+  ],
+  "mcpServers": {
+    "metaforge": {
+      "type": "http",
+      "url": "https://mcp.metaforge.uk/mcp"
+    }
+  }
+}

@@ -22,13 +22,25 @@
     {
       "name": "metaforge-local",
       "source": "./integrations/claude-code-local",
-      "description": "Runs MetaForge as a local process over stdio. No gateway, no account, no network. Needs `pip install metaforge`.",
+      "description": "Runs MetaForge as a local process over stdio. No gateway, no account, no network. Needs the `metaforge-mcp` command on your PATH; the package README gives the one line that installs it.",
       "category": "engineering",
       "tags": [
         "hardware",
         "cad",
         "simulation",
         "local-first"
+      ]
+    },
+    {
+      "name": "metaforge-cloud",
+      "source": "./integrations/claude-code-cloud",
+      "description": "For the hosted gateway. The same tools, skills, commands, agents and hooks as metaforge, with the address already written in: nothing to enter, sign in once.",
+      "category": "engineering",
+      "tags": [
+        "hardware",
+        "cad",
+        "simulation",
+        "hosted"
       ]
     }
   ]

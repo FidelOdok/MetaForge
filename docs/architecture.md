@@ -109,6 +109,20 @@ So the sidecar parks held calls in the gateway's ledger over HTTP
 (`POST /v1/chat/tool_approvals`), and polls for the decision. There is
 exactly **one** ledger.
 
+A decided hold is closed at the decision (FORGE-639). The decision, with the
+approver, its verification and the surface, is logged on the hold's
+`request` (`decisions`), which the ledger persists on every transition, and
+an approved hold moves straight to `completed`. Before this an approved hold
+stayed `running`, since nothing ever finished it; the heartbeat reaper then
+cancelled it as abandoned an hour later, and the approver, kept only on the
+run object and not in the ledger, was lost at the next restart, so every
+approval read as `canceled` on the Approvals page. The approvals view also
+shows a hold that carries a logged decision as that decision even if it was
+later cancelled, which recovers the approvals reaped before the fix that
+were decided through `/v1/approvals`; ones answered in a client's prompt
+before the fix logged nothing and still read `canceled`. Waiters take
+`running` and `completed` alike as approved.
+
 A hold is closed by whichever side stops waiting (FORGE-466). The sidecar
 calls `POST /v1/chat/tool_approvals/{id}/resolve` with `timed_out` when its
 window closes and `canceled` when the call is cancelled; the in-process wait
@@ -313,8 +327,8 @@ the shape), and every status reads `unknown`.
 
 Known gaps, stated rather than papered over:
 
-- **The activity lane does not yet show tool calls, decisions, evidence or
-  token cost.** Those come from session capture and twin commits, which the
+- **The activity lane shows tool calls (FORGE-645) but not yet decisions,
+  evidence or token cost.** Those come from session capture and twin commits, which the
   workflow's event log does not carry. The panel names what is missing instead
   of rendering empty headings — an empty "Tool calls" section reads as "this
   phase made none".
@@ -324,6 +338,118 @@ Known gaps, stated rather than papered over:
   into that stream is its own change. A poll is honest about being a poll; an
   SSE subscription that silently only updated on status changes would look
   live and not be.
+
+#### Tool progress on the run stream (FORGE-643, FORGE-644)
+
+`GET /v1/runs/{id}/events` now carries a second event, `tool.progress`, next to
+`run.status`. Each one is a tool call edge: `started`, then `finished` or
+`failed`, with the tool name, the phase and the duration. It carries no
+arguments and no result, because anyone who can open the run can read the
+stream and arguments can hold another project's data.
+
+Where the event comes from depends on where the phase runs. `HarnessRuntime.call_tool`
+reports every call through a scope opened around the phase
+(`orchestrator/harness/tool_events.py`). Inside the gateway the scope's sink
+publishes straight into the run stream. The Temporal worker is a separate
+process with no stream, so its sink posts each event to
+`POST /v1/runs/{id}/tool-events`, using the same gateway address and key as the
+gate announcer. The route answers 404 for a run that does not exist.
+
+The stream is built so a slow or dropped client cannot hurt the gateway:
+
+- Each event has an `id:` line. A client that reconnects with `Last-Event-ID`
+  is sent the events it missed, from the last 200 kept per run.
+- A subscriber's queue holds at most 256 events. When it is full the oldest
+  tool event is dropped, never a `run.status`.
+- Only a `run.status` that is terminal ends the stream. Progress never does.
+- An idle stream sends a `: keep-alive` comment every 15 seconds, and the
+  response asks proxies not to buffer or rewrite it (`Cache-Control: no-cache,
+  no-transform`, `X-Accel-Buffering: no`). A phase can think for a minute
+  between tool calls, and a proxy that sees silence closes the connection.
+- Reporting is best effort. A sink that fails or stalls never changes what the
+  tool call does or returns, and an event is lost rather than retried.
+
+Events are a view, not the record: the 2s `flow-state` poll stays the source of
+truth, and a missed event costs a viewer a moment, not correctness.
+
+The run page draws them (FORGE-645). The browser's `EventSource` cannot send an
+`Authorization` header, so `useRunToolEvents` reads the stream with `fetch`
+(`dashboard/src/lib/sse.ts`), which can. It asks for `Last-Event-ID: 0` on
+first connect so a viewer that opens a run already underway gets the history
+the gateway still holds, reconnects with backoff, and keeps at most 200 calls.
+`PhaseActivity` lists the selected phase's calls with their status and
+duration. When the stream is not connected the section says so: "no calls shown"
+and "none made" must not read the same. Client-intelligence runs
+make no harness tool calls in the gateway, so they emit none. Tools that run
+inside one call, such as a CadQuery script or a CalculiX solve, show `started`
+and `finished` only.
+
+**Why a CalculiX solve shows no percentage (FORGE-646 spike).** A real linear
+static solve on the sandbox leaves a `.sta` with a single increment line
+(`STEP 1, INC 1, total time 1.0`) and a `.cvg` with headers and no rows. CalculiX
+writes those files per increment, and a linear static or modal analysis has one,
+so there is no fraction to read: the file goes from absent to complete. Only a
+nonlinear or multi-increment step would give a real fraction, and nothing in
+this system runs one today. Inventing a percentage from elapsed time would be a
+guess shown as a measurement, so the run page shows the call as running with
+its elapsed time instead. If a nonlinear step is added, the adapter can tail
+`.sta` where it lives (the `calculix-adapter` container) and forward each
+increment through a gateway callback, as the worker does for tool events; the
+adapter has no gateway address or key today, and the call's `run_id` would
+come from the request headers.
+
+### Watching an assembly come together (FORGE-647)
+
+An agent can put a committed assembly together in front of a person.
+`twin.place_part` takes one committed part, an assembly name, a position (mm)
+and a rotation (degrees), checks the part exists, is a `cad_model` and belongs
+to the project, and publishes a placement. The twin viewer's Live assembly
+panel draws each part as it arrives.
+
+The geometry is not rebuilt per step. A committed part already has a cached
+GLB (`/v1/twin/nodes/{id}/model`), so the panel loads it and applies the
+transform. A step costs the event's trip, not a STEP to GLB conversion. A part
+that has never been viewed pays one conversion the first time.
+
+Where the event goes depends on the process, because the stream lives in the
+gateway. A tool running in the gateway publishes straight to the hub
+(`api_gateway/twin/live.py`). The `mcp-http` sidecar, which also serves
+plugin clients, is a separate process: it installs an HTTP publisher
+(`metaforge/mcp/live_publisher.py`) that posts to
+`POST /v1/twin/projects/{id}/live-events` with the gateway key
+(`METAFORGE_GATEWAY_API_KEY`, now passed to the sidecar in compose). The seam
+is `mcp_core/live_events.py`: the tool calls `publish_live_event`, and each
+process installs the publisher that fits it. A build driven from the Claude
+Code plugin therefore shows in the dashboard the same as one driven from a flow.
+
+`GET /v1/twin/projects/{id}/live` streams it. Its first frame is
+`live.snapshot`, the whole in-progress picture, so a viewer that opens late or
+reconnects is correct without replaying anything. Each change after it is one
+`live.event` with an `id:`. The stream sends a 2 KB padding comment first and
+a heartbeat comment when idle, with the same no-buffer headers as the run
+stream. Those guard against ordinary proxies that buffer or time out an idle
+response. They do not make a Cloudflare quick tunnel work: it relays the
+response headers and never the body (measured with and without the padding:
+HTTP 200, no body for 8 to 10 s), while the same stream through the dashboard's
+nginx delivers the snapshot at once. Quick tunnels do not carry server-sent
+events at all. The live panel copes with that: it waits 4 seconds for the stream's
+first frame, then abandons it and re-reads `GET /v1/twin/projects/{id}/live/state`
+every 1.5 seconds, probing the stream again every 30 seconds and returning to it
+if it connects. It says which it is doing: no banner while streaming, a banner
+saying the view is polling and a second or two behind, a "connecting" line before
+anything has answered, and the "not connected" message only when neither works,
+so a view that cannot see never reads as an empty assembly. The run page's tool
+calls have no state route to poll and are still stream-only: behind a quick
+tunnel they report "not connected". The hub
+keeps the picture in the gateway's memory:
+a restart drops it, and nothing else, because the committed assembly is still
+made by `cadquery.create_assembly` and `twin.commit_geometry`.
+
+What this does not show: a part being *modelled*. A CadQuery script is one
+blocking call, and the FreeCAD session tools run in their own container and
+return only session object ids, so neither has a part in the twin to draw
+until it is committed. The panel says when it is not connected, because a view
+that cannot see and an assembly with no parts must not read the same.
 
 ### Editing a flow, and where an edited flow lives (FORGE-399)
 
@@ -535,6 +661,27 @@ the envelope, volume and mass (`twin.get_node`, `freecad.measure`) and the
 3D-printing overhang (`twin.evaluate_overhang_metric`). The `hardware_v1`
 `manufacturing` phase (electronics, G8) is unchanged.
 
+**Industrial design before mechanical design (FORGE-634).** `hardware_v1`
+(template 1.1.0) and `mech_v1` (template 1.3.0) have an `industrial_design`
+phase, with the `industrial_design` discipline (its tool profile and skill
+cards), placed where the Planner puts the discipline: before mechanical
+design, which depends on the form factor it fixes. In `hardware_v1` it
+follows `concept_selection`; in `mech_v1` it follows `route_selection`, so
+the chosen process's minimum wall is known.
+
+The phase works through the three skills: `form_factor_envelope` from the
+sized contents, clearance and wall (the envelope is recorded with
+`twin.record_constraint_set` for mechanical design to work to);
+`check_ergonomics` against sourced limits for the users the requirements
+state, or a recorded reason that nobody handles the product; and a library
+appearance per visible part checked with `check_cmf_compatibility` (the look
+is the person's choice). Its required deliverable is one `design_decision`
+naming the envelope, the ergonomics verdict, the finishes and every unknown
+or assumed value; the gate (Industrial design review) reads it like any
+other required deliverable. There is no product-type fact yet, so the phase
+runs on every `mech_v1` run as well; a part nobody handles records that, and
+tailoring can drop the phase.
+
 **Vendor connectors (FORGE-427).** Quotes and orders from outside vendors
 go through connectors on the gateway (`api_gateway/vendors/`). Every
 connector is built on one base that guarantees typed failures (never an
@@ -588,6 +735,144 @@ what was stated (processes by the stated processes and the library machines'
 processes, materials by the stated stock names), or failing that the
 library's entries up to fifteen, and says which of the three it did. A
 library with no entries leaves the context text as it was.
+
+**Blender renders, and the GPL boundary (FORGE-627, FORGE-628).** Industrial
+design reviews need to see a product, so MetaForge renders models with
+Blender 5.2.2 LTS in its own container (`blender-adapter`, port 8202):
+`blender.render` returns studio PNGs (named views and a turntable, Cycles on
+the CPU, headless) and `blender.export_blend` returns the staged scene.
+
+Blender is GPL (version 2 or later; binaries are distributed under GPL
+version 3), and blender.org states that scripts using its Python API must be
+GPL when published. So the boundary is drawn in code:
+
+- everything that runs inside Blender is `tool_registry/tools/blender/
+  bpy_scripts/`, licensed GPL-3.0-or-later with its own `LICENSE`;
+- the adapter (MetaForge code) never imports `bpy`; it starts Blender as a
+  separate program (`blender --background --python ... -- job.json`) and
+  they exchange only files: a mesh and a job JSON in, PNGs, a .blend and a
+  result JSON out;
+- a test fails if any MetaForge module outside `bpy_scripts/` imports `bpy`
+  or `mathutils`;
+- the image installs the unmodified blender.org build, checked against its
+  published SHA-256, keeps Blender's licence files, and names the matching
+  source (`tool_registry/tools/blender/BLENDER_NOTICE.md`).
+
+Renders and .blend files are the user's ("What you create with Blender is
+your sole property", blender.org). Models are meshes: a STEP is converted to
+GLB first (the OCCT converter), and OBJ, STL and PLY are read Z-up, the CAD
+convention.
+
+`twin.render_work_product` (FORGE-630) renders a work product in the twin:
+it resolves the stored model, converts a STEP with the same OCCT converter
+the dashboard viewer uses, calls `blender.render` over MCP, and keeps the
+PNGs as a `render` work product linked to the model (`GENERATED_FROM`, with
+the model's content hash). The tool is wired in both the gateway and the MCP
+sidecar (`api_gateway/twin/render_recorder.py`). The sidecar's standard
+`tools/call` reply turns any `images[].png_base64` in a result into MCP image
+content, so a harness such as Claude Code or Codex shows the renders in chat
+instead of reading base64 as text (FORGE-373); the gateway's own bridge uses
+the legacy dialect and still receives the base64.
+
+A render can show parts in their library appearances (FORGE-632):
+`appearances` maps a part name to an appearance, which the renderer reads with
+`library.get_appearance` over the same bridge. The appearance's screen colour
+(sRGB, converted to Blender's scene-linear values in the GPL script) and its
+render roughness and metallic set the part's surface, and the render node
+records the appearance and its version, so a render made before the
+appearance changed is recognisably stale.
+
+**Mechanical components (FORGE-449).** The library also holds mechanical
+parts, in the pattern CAD tools use for them. A *standard* part is built from
+its standard's dimension table (`twin_core/library/standard_parts.py`: ISO
+4762 socket head cap screws, ISO 4032 hex nuts, ISO 7089 plain washers, deep
+groove ball bearings by designation); its specs cite the table row and its
+geometry is a generator with parameters, so CAD is made on demand rather
+than stored per size. A *purchased* part carries a supplier's STEP (with its
+licence) and part numbers. The tables are bd_warehouse's, vendored unmodified
+under Apache-2.0 with its licence and a NOTICE (`twin_core/library/data/
+bd_warehouse`). bd_warehouse itself is not a dependency: it needs build123d,
+whose OCCT build conflicts with CadQuery's in the CAD adapter. A seed of 69
+common parts (26 screws, 6 nuts, 6 washers, 31 bearings) builds from the
+tables.
+
+**Appearances: colour, material and finish (FORGE-627, FORGE-631).** A fourth
+library kind holds what an industrial designer specifies for a surface: the
+finish (as made, painted, powder coated, anodised, plated, moulded-in colour,
+printed, textured, polished, brushed, bead blasted), the colour, a texture
+reference, measurable surface properties (`gloss_gu_60`,
+`coating_thickness_um`, `surface_roughness_ra_um`), two render parameters
+(`render_roughness`, `render_metallic`, 0 to 1) and the library materials and
+processes it applies to. A colour is named in its colour system (`ral`,
+`pantone`, `ncs`, a `supplier` code, or `custom`) and carries the sRGB used to
+draw it on screen as `srgb_hex`, with its own source: a screen value for a
+RAL or Pantone code is an approximation, so it is sourced like any other
+figure and an assumed one is flagged for review. Entries follow the
+library's rules (fixed units, a source on every value, every change
+versioned) and are filtered by finish. No colours ship built in.
+
+**Plugin geometry always carries part colours (FORGE-637).** The 3D viewer
+shows only the colours written into a model's STEP (MET-537), and headless
+FreeCAD and CadQuery write none unless told, so a table designed through the
+Claude Code plugin arrived grey. Now a `twin.commit_geometry` call from an
+external MCP client (a harness plugin: stdio, HTTP, or a client-mode phase
+task) is refused while any part is uncoloured, and the refusal names the
+parts. The MCP server decides this, not the client: it sets a reserved
+argument on the call (`REQUIRE_PART_COLOURS_ARG`, stripped from whatever the
+client sends, like the approver key). The design-flow worker and in-app
+chat are not held to it yet. Colours are chosen, not invented: the commit
+takes `part_colours` {part name: `#RRGGBB`, typically a library appearance's
+`srgb_hex`} or `color` for the whole model and writes them into the STEP
+before storing it, so every CAD route (FreeCAD session, stateless FreeCAD or
+CadQuery tools, a file path) can be coloured where it enters the twin; a
+part name the STEP does not have is refused rather than skipped.
+`freecad.export_model` takes the same `part_colours` and reports
+`uncoloured_parts`. The CAD plugin skills tell the agent to take each part's
+finish from the library (the `colour-material-finish` skill) and to ask the
+person when none is chosen.
+
+**Ergonomic limits (FORGE-635).** A fifth kind holds design limits for the
+features people touch, press, reach or lift, in `check_ergonomics`' own
+vocabulary and units (grip diameter and width, handle length, finger
+clearance, button size, operating height, reach in mm; actuation force in
+N; product mass in kg). Each entry names what it applies to (a fingertip
+push button, a one-hand bar handle), the population it describes, and its
+source; `family` filters by feature kind, and `check_ergonomics` accepts an
+entry as it is, citing its name and version. A seed of 30 limits from
+MIL-STD-1472H (2020; US Government work, approved for public release) is in
+`twin_core/library/data/ergonomic_limits/`: push button sizes and forces
+(Figure 14), toggle switches (Figure 16), bar handle clearance and grip
+length and minimum handle diameter by item weight (Figure 101), joystick
+grips, work surface heights and control panel reach depth, each read from
+the standard and cited to its clause or figure. Its population is US
+military users (the central 90 percent of males and of females), so
+`check_ergonomics` reports it as a mismatch for other users rather than
+applying it silently. Paywalled standards (ISO 7250, EN 894) are not
+seeded; ANSUR II body measurements are measurements, not limits, and are
+not seeded either.
+
+**Material figures come only from the library (FORGE-446, FORGE-457).** The
+hard-coded material tables are gone (they held sixteen generic names with no
+sources, and an unknown material silently got the density of water). Every
+material name a tool call carries is resolved against the library before the
+tool runs, by `twin_core.library.material_resolver.fill_material_arguments`
+at both dispatch points (the MCP server and the gateway's registry bridge):
+each `material` string, each `{"name": ...}` material object and each
+`candidate_materials` list gets the entry's figures, with their sources,
+beside it. The adapter base server takes them out of the arguments before
+any schema sees them and holds them for the call
+(`tool_registry.material_context`), so the CAD and FEA containers, which
+cannot read the library, still compute with library figures. Inside the
+gateway the resolver reads the catalog; the MCP sidecar asks the gateway
+(`GET /v1/library/materials/resolve`). Code called outside a tool call
+(the design loop, item diffs, evals) resolves through
+`api_gateway.library.material_figures.with_materials`.
+
+A name resolves only to an entry it names exactly (identifier, title or
+designation). A generic name such as "steel" or "pla" is refused with the
+closest entries, so a grade is never picked silently; a missing property is
+refused naming the entry and the fix (record it with its source, or pass the
+figure explicitly). An explicit figure from the caller always wins.
 
 **The machine library (FORGE-451).** Process ranking and DFM need a
 machine's real limits, so machines are recorded once, outside any project,
@@ -935,6 +1220,7 @@ graph TB
         ELEC["Electronics Agent"]
         FW["Firmware Agent"]
         SIM["Simulation Agent"]
+        ID["Industrial Design Agent"]
         MORE["... (1 per discipline)"]
     end
 
@@ -975,8 +1261,8 @@ graph TB
     TEMP --> DAG
     TEMP --> SCHED
     TEMP --> ITER
-    SCHED --> MECH & ELEC & FW & SIM & MORE
-    MECH & ELEC & FW & SIM --> REG
+    SCHED --> MECH & ELEC & FW & SIM & ID & MORE
+    MECH & ELEC & FW & SIM & ID --> REG
     REG --> LOAD
     REG --> SCHEMA
     REG --> BRIDGE
@@ -984,7 +1270,7 @@ graph TB
     CLIENT --> PROTO
     PROTO --> TREG
     TREG --> CALC & FCAD & KICAD & SPICE
-    MECH & ELEC & FW & SIM --> NEO
+    MECH & ELEC & FW & SIM & ID --> NEO
     NEO --> VER
     NEO --> CONST
     GW -.-> KAFKA
@@ -1097,6 +1383,32 @@ Each agent is a specialist for exactly one engineering discipline (1:1 ratio). A
 | Tools | Skills registered as PydanticAI tools via the Skill Registry |
 | State | Stateless — all persistent state lives in the Digital Twin |
 | Communication | Via Temporal workflows (agent-to-agent) and Kafka events |
+
+**Industrial design (FORGE-627, FORGE-633).** The Planner's discipline #2
+(form factor, ergonomics, DFM-aware aesthetics), scheduled there for Phase 2,
+now has its agent: `domain_agents/industrial_design/`. Its three skills are
+deterministic and carry no built-in data:
+
+- `form_factor_envelope`: the smallest outer envelope for the product's
+  contents (component boxes, positioned or stacked), adding the internal
+  clearance and the wall, with volumes, fill ratio and overlaps, checked in
+  any orientation against a sourced maximum envelope;
+- `check_ergonomics`: grip diameter and width, handle length, finger
+  clearance, button size, actuation force, operating height, reach and
+  hand-held mass against limits that each name their population and source
+  (a cited anthropometric dataset or ergonomics guidance); a limit for a
+  different population than the intended users is reported;
+- `check_cmf_compatibility`: each part's library appearance against its
+  material, using only the materials the appearance records, with the
+  finishing processes the choices need and any assumed values to review.
+
+A missing value or limit is `unknown`, never a pass. The `industrial_design`
+tool profile (and `DISCIPLINE_PROFILES` entry) gives a phase the renders,
+appearances, materials, processes and machine limits, model measurement and
+value sourcing; chat exposes the three skills beside mechanical's, and a
+project whose description speaks of form factor, ergonomics or finishes (or
+that holds renders) is scoped to the discipline. Flow templates do not yet
+include an industrial design phase.
 
 ### 5.4 Skill System (Layer 3)
 

@@ -26,7 +26,7 @@ This is the structured path FR-1 describes (agents emit Design IR, never adapter
 - `work_product_id` -- UUID of the CAD model work_product in the Digital Twin (optional)
 - `entities` -- list of Design IR entities (requirements doc §6.2), typed as a real discriminated union on `op` (`twin_core.design_ir.IREntity`) -- the exact required fields per op are part of this skill's own MCP `input_schema`, not just prose here (FORGE-222); rejected with a clear error if malformed, not a crash
 - `adapter` -- `"freecad"` (default, full v1 op coverage) or `"cadquery"` (real compiler, narrower v1 op subset -- see `cadquery_lowering.py`'s module docstring)
-- `material` -- material name for metadata (default: aluminum_6061)
+- `material` -- material name for metadata (default: aluminium_6061_t6)
 - `project_id` -- optional project UUID to link the committed work product to
 - `commit` -- persist into the Twin immediately (default `true`)
 - `parameters` -- optional dict of the caller-supplied values that drove this generation (FORGE-270, gap G-D2), e.g. `{"thickness_mm": 2.0}`. Threaded straight through to `twin.commit_geometry`'s own `parameters` argument, landing in the committed node's `metadata.geometry_features.parameters` -- lets `generate_parametric_feature` (and any future typed-parameter caller) record what value produced this geometry, so a later call with a changed value is recognized as an edit of the same part (a new `SUPERSEDES`-linked version) rather than an untraceable sibling

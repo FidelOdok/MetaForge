@@ -15,10 +15,10 @@ persistence lands in Phase 4. Domain errors map to clean HTTP status:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Literal
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -32,7 +32,12 @@ from api_gateway.runs.schemas import (
     RunResponse,
     filter_by_project,
 )
-from api_gateway.runs.streaming import RunStreamManager, run_event_stream, run_ws_loop
+from api_gateway.runs.streaming import (
+    SSE_HEADERS,
+    RunStreamManager,
+    run_event_stream,
+    run_ws_loop,
+)
 from api_gateway.twin.baseline import create_item_baseline
 from mcp_core.guardrails import Approver
 from observability.metrics import MetricsCollector
@@ -846,7 +851,13 @@ async def _launch_flow(run_id: str) -> None:
 
         hybrid: Any = ClientPhaseBrain(run_id, LocalTaskChannel(get_client_task_store))
     else:
-        hybrid = await build_phase_brain(run_id, run.request.get("flow"))
+        from api_gateway.runs.tool_events import ScopedPhaseBrain, local_tool_event_sink
+
+        hybrid = ScopedPhaseBrain(
+            await build_phase_brain(run_id, run.request.get("flow")),
+            run_id,
+            local_tool_event_sink(),
+        )
     executor = _build_in_process_executor(hybrid, project_backend)
     logger.info(
         "design_flow_started_in_process",
@@ -1286,16 +1297,83 @@ async def get_flow_state(run_id: str) -> FlowRunState:
 
 
 @router.get("/{run_id}/events")
-def stream_run_events(run_id: str) -> StreamingResponse:
-    """SSE stream of a run's status transitions until it reaches a terminal state."""
+def stream_run_events(
+    run_id: str,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    """SSE stream of a run: status transitions plus tool progress (FORGE-644).
+
+    ``run.status`` frames carry the run's state and end the stream when the run
+    is terminal. ``tool.progress`` frames (FORGE-643) carry an ``id:`` so a
+    client that reconnects with ``Last-Event-ID`` is sent the ones it missed.
+    """
     try:
         snapshot = _store.get(run_id)
     except RunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    resume_from: int | None = None
+    if last_event_id is not None and last_event_id.strip().isdigit():
+        resume_from = int(last_event_id)
     return StreamingResponse(
-        run_event_stream(run_id, snapshot, _stream_manager),
+        run_event_stream(run_id, snapshot, _stream_manager, resume_from),
         media_type="text/event-stream",
+        headers=SSE_HEADERS,
     )
+
+
+class ToolEventRequest(BaseModel):
+    """One tool call edge reported by a process that has no stream of its own."""
+
+    call_id: str = Field(min_length=1, max_length=64)
+    tool: str = Field(min_length=1, max_length=200)
+    phase: str = Field(default="", max_length=200)
+    status: Literal["started", "finished", "failed"]
+    duration_ms: int | None = Field(default=None, ge=0)
+
+
+def publish_tool_event(
+    run_id: str,
+    *,
+    call_id: str,
+    tool: str,
+    phase: str,
+    status: str,
+    duration_ms: int | None = None,
+) -> None:
+    """Put a tool event on a run's stream. For callers inside the gateway process."""
+    _stream_manager.publish_tool(
+        run_id,
+        call_id=call_id,
+        tool=tool,
+        phase=phase,
+        status=status,
+        duration_ms=duration_ms,
+    )
+
+
+@router.post("/{run_id}/tool-events", status_code=202)
+def ingest_tool_event(run_id: str, body: ToolEventRequest) -> dict[str, bool]:
+    """Accept a tool event from the design-flow worker or the MCP sidecar (FORGE-643).
+
+    Those run in their own processes and cannot reach the gateway's stream, so
+    they post here. The route needs the same gateway key as every other route,
+    and it takes no arguments or results, only the tool's name, phase, status
+    and duration. An unknown run is a 404, so the stream cannot be filled for a
+    run that does not exist.
+    """
+    try:
+        _store.get(run_id)
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' not found") from exc
+    publish_tool_event(
+        run_id,
+        call_id=body.call_id,
+        tool=body.tool,
+        phase=body.phase,
+        status=body.status,
+        duration_ms=body.duration_ms,
+    )
+    return {"accepted": True}
 
 
 @router.websocket("/{run_id}/ws")

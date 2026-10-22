@@ -85,7 +85,7 @@ Neo4j properties must be primitives or lists of primitives. Complex fields are h
 ### Prerequisites
 
 1. Neo4j 5.x+ instance running and accessible
-2. `neo4j` Python package installed (`pip install metaforge[neo4j]`)
+2. `neo4j` Python package installed (`pip install "metaforge-hw[neo4j]"`)
 
 ### Migration Steps
 

@@ -85,6 +85,16 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.spice.config",
         "config_class": "SpiceConfig",
     },
+    # FORGE-557: OpenFOAM 11 flow solver. Registers so tools/list is stable; a
+    # call needs the openfoam-adapter container
+    # (METAFORGE_ADAPTER_OPENFOAM_URL), since the gateway and sidecar images
+    # have no OpenFOAM and raise OpenFoamNotAvailableError in-process.
+    "openfoam": {
+        "module": "tool_registry.tools.openfoam.adapter",
+        "class": "OpenFoamServer",
+        "config_module": "tool_registry.tools.openfoam.config",
+        "config_class": "OpenFoamConfig",
+    },
     # MET-633: opt-in like freecad/kicad above -- needs a real `gz` binary
     # (Gazebo Sim) in the container/host PATH to execute; the adapter
     # registers regardless so tools/list is stable, but handlers raise
@@ -95,6 +105,16 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "class": "GazeboServer",
         "config_module": "tool_registry.tools.gazebo.config",
         "config_class": "GazeboConfig",
+    },
+    # FORGE-628: Blender 5.2 LTS renders. Registers regardless so tools/list
+    # is stable; without METAFORGE_ADAPTER_BLENDER_URL (the blender-adapter
+    # container) the handlers say Blender is not installed here. Blender is
+    # GPL: this process never imports bpy (see tools/blender/BLENDER_NOTICE.md).
+    "blender": {
+        "module": "tool_registry.tools.blender.adapter",
+        "class": "BlenderServer",
+        "config_module": "tool_registry.tools.blender.config",
+        "config_class": "BlenderConfig",
     },
     # MET-634: opt-in like freecad/kicad above -- needs the 'omniverse-usd'
     # extra (usd-core, trimesh, scipy; plain PyPI wheels, no GPU/conda).
@@ -297,6 +317,7 @@ async def bootstrap_tool_registry(
     metric_evaluator: Any = None,
     thermal_evaluator: Any = None,
     overhang_evaluator: Any = None,
+    work_product_renderer: Any = None,
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
@@ -444,6 +465,11 @@ async def bootstrap_tool_registry(
             Evidence, single-tier (no hand-calc-gated escalation like
             metric_evaluator). ``None`` skips registration (same pattern
             as ``document_recorder``).
+        work_product_renderer: Optional async ``render(...)``
+            (make_work_product_renderer, FORGE-630). When supplied,
+            registers ``twin.render_work_product``: a STEP or mesh work
+            product rendered by ``blender.render`` and stored as a
+            ``render`` work product. ``None`` skips registration.
         overhang_evaluator: Optional async ``evaluate_overhang(...)``
             (make_overhang_evidence_recorder, FORGE-273). When supplied,
             registers ``twin.evaluate_overhang_metric`` -- runs a real
@@ -747,6 +773,7 @@ async def bootstrap_tool_registry(
                     metric_evaluator=metric_evaluator,
                     thermal_evaluator=thermal_evaluator,
                     overhang_evaluator=overhang_evaluator,
+                    work_product_renderer=work_product_renderer,
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,
                     promotion_attempter=promotion_attempter,

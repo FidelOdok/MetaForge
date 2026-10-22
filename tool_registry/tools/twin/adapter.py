@@ -23,9 +23,11 @@ import structlog
 from mcp_core.context import current_context
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
+    REQUIRE_PART_COLOURS_ARG,
     HumanAuthorityRequiredError,
     reject_caller_supplied_approver,
 )
+from mcp_core.live_events import publish_live_event
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import (
     ResourceLimits,
@@ -193,6 +195,7 @@ class TwinServer(McpToolServer):
         metric_evaluator: Any = None,
         thermal_evaluator: Any = None,
         overhang_evaluator: Any = None,
+        work_product_renderer: Any = None,
         revalidation_executor: Any = None,
         sensitivity_ranker: Any = None,
         promotion_attempter: Any = None,
@@ -383,6 +386,10 @@ class TwinServer(McpToolServer):
         # injection seam as every recorder above; None keeps tool_registry
         # free of api_gateway imports.
         self._overhang_evaluator = overhang_evaluator
+        # FORGE-630: an injected async ``render(*, work_product_id, ...)``
+        # (make_work_product_renderer) -- a work product rendered by
+        # blender.render over MCP and kept as a ``render`` work product.
+        self._work_product_renderer = work_product_renderer
         # FORGE-316: an injected async ``execute(ect_id) -> dict``
         # (make_revalidation_executor) -- re-runs exactly the Evidence a
         # committed ECT's real revalidation_plan marked stale, for any
@@ -500,6 +507,7 @@ class TwinServer(McpToolServer):
         # item logic lives in twin_core.items, which this layer can't import.
         self._item_history_reader = item_history_reader
         self._register_tools()
+        self._register_place_part()
         self._register_thread_questions()
         if decision_recorder is not None:
             self._register_record_decision()
@@ -552,6 +560,8 @@ class TwinServer(McpToolServer):
             self._register_evaluate_thermal_metric()
         if overhang_evaluator is not None:
             self._register_evaluate_overhang_metric()
+        if work_product_renderer is not None:
+            self._register_render_work_product()
         if revalidation_executor is not None:
             self._register_execute_revalidation_plan()
         if sensitivity_ranker is not None:
@@ -2558,7 +2568,12 @@ class TwinServer(McpToolServer):
                     "works and needs neither id nor file_path — but when it "
                     "names an export the server already holds, the server's "
                     "copy is used, because a copied 30,000-character blob can "
-                    "only be equal or damaged.)"
+                    "only be equal or damaged.) COLOURS (FORGE-637): the viewer "
+                    "shows only colours written in the STEP, and a call from a "
+                    "harness plugin is refused while any part is uncoloured. Pass "
+                    "part_colours {part name: '#RRGGBB'} (each part's library "
+                    "appearance srgb_hex) or color for the whole model, and they are "
+                    "written into the STEP here; a part name the STEP lacks is refused."
                 ),
                 capability="twin_geometry",
                 input_schema={
@@ -2585,6 +2600,16 @@ class TwinServer(McpToolServer):
                                 "the server substitutes its own copy of that export "
                                 "anyway (MET-684)."
                             ),
+                        },
+                        "part_colours": {
+                            "type": "object",
+                            "description": (
+                                "Part (STEP product) name -> '#RRGGBB' or [r, g, b]; "
+                                "written into the STEP before it is stored."
+                            ),
+                        },
+                        "color": {
+                            "description": "One colour for every part: '#RRGGBB' or [r, g, b].",
                         },
                         "file_path": {
                             "type": "string",
@@ -2786,6 +2811,65 @@ class TwinServer(McpToolServer):
             )
         if not name or not isinstance(name, str):
             raise ValueError("twin.commit_geometry: 'name' is required (non-empty string)")
+        # FORGE-637: a harness plugin's geometry must carry a colour for every
+        # part. The viewer shows only the colours written in the STEP, so an
+        # uncoloured part arrives grey. The MCP server sets the reserved flag
+        # for external clients (never the client itself); nothing is coloured
+        # here, because a colour has to be chosen, not invented.
+        part_colours = arguments.get("part_colours")
+        whole_colour = arguments.get("color")
+        if part_colours or whole_colour is not None:
+            # FORGE-637: colour at commit, so every CAD route (a stateless
+            # CadQuery or FreeCAD tool writes no colour) can be coloured where
+            # it enters the twin. A part name the STEP does not have is refused
+            # rather than skipped, which would leave that part grey unnoticed.
+            from tool_registry.tools.freecad.materials_appearance import (
+                apply_step_colours,
+                resolve_rgb,
+                step_part_names,
+            )
+
+            if part_colours is not None and not isinstance(part_colours, dict):
+                raise ValueError(
+                    "twin.commit_geometry: part_colours must map a part name to "
+                    "'#RRGGBB' or [r, g, b]"
+                )
+            step_bytes = base64.b64decode(step_base64)
+            known = step_part_names(step_bytes)
+            unknown = sorted(set(part_colours or {}) - set(known))
+            if unknown:
+                raise ValueError(
+                    f"twin.commit_geometry: part_colours names {', '.join(unknown)}, which this "
+                    f"STEP does not have; its parts are: {', '.join(known) or '(none named)'}"
+                )
+            try:
+                part_rgb = {str(k): resolve_rgb(v) for k, v in (part_colours or {}).items()}
+                default_rgb = resolve_rgb(whole_colour) if whole_colour is not None else None
+            except ValueError as exc:
+                raise ValueError(f"twin.commit_geometry: {exc}") from exc
+            step_base64 = base64.b64encode(
+                apply_step_colours(step_bytes, default_rgb, part_rgb)
+            ).decode("ascii")
+            extra_colours = {"part_colours": part_colours or {}, "color": whole_colour}
+            logger.info("commit_geometry_coloured", name=name, **extra_colours)
+        if arguments.get(REQUIRE_PART_COLOURS_ARG):
+            from tool_registry.tools.freecad.materials_appearance import uncoloured_products
+
+            try:
+                step_bytes = base64.b64decode(step_base64, validate=False)
+            except (ValueError, TypeError) as exc:
+                raise ValueError("twin.commit_geometry: step_base64 is not valid base64") from exc
+            if uncoloured := uncoloured_products(step_bytes):
+                logger.warning("commit_geometry_uncoloured_refused", name=name, parts=uncoloured)
+                raise ValueError(
+                    "twin.commit_geometry: every part must carry a colour, and these do not: "
+                    + ", ".join(uncoloured)
+                    + ". Choose each part's finish (library.list_appearances / "
+                    "library.get_appearance, the colour-material-finish skill) and export "
+                    "again with freecad.export_model part_colours {part Label: the "
+                    "appearance's srgb_hex}, or pass part_colours (or color for the whole "
+                    "model) to this commit, which writes them into the STEP."
+                )
         project_id = arguments.get("project_id")
         session_id = arguments.get("session_id")
         domain = arguments.get("domain")
@@ -3694,6 +3778,134 @@ class TwinServer(McpToolServer):
             project_id=project_id if isinstance(project_id, str) else None,
             **({"domain": domain} if isinstance(domain, str) and domain else {}),
         )
+
+    # ------------------------------------------------------------------
+    # twin.place_part (FORGE-647)
+    # ------------------------------------------------------------------
+
+    def _register_place_part(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.place_part",
+                adapter_id="twin",
+                name="Place Part In Live Assembly",
+                description=(
+                    "Place, move or remove one committed part (a cad_model node) in an "
+                    "assembly that is being put together, and show it in the twin viewer "
+                    "as it happens. Call it once per part: the viewer composes each "
+                    "part's stored model at the given position (mm) and rotation (degrees "
+                    "about x, y, z), so a person watching sees the assembly come together. "
+                    "Calling it again for the same part moves it; remove=true takes it "
+                    "out. This is the live picture only. It does not create the "
+                    "assembly: when the layout is final, build it with "
+                    "cadquery.create_assembly and commit it with twin.commit_geometry "
+                    "(parts=[...]). 'live' in the result says whether anything could "
+                    "show the placement."
+                ),
+                capability="twin_write",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {
+                            "type": "string",
+                            "description": "The part's cad_model node UUID.",
+                        },
+                        "assembly": {
+                            "type": "string",
+                            "description": "Name of the assembly being built.",
+                        },
+                        "position": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "x, y, z in mm. Default 0, 0, 0.",
+                        },
+                        "rotation": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "description": "Rotation about x, y, z in degrees. Default 0, 0, 0.",
+                        },
+                        "remove": {
+                            "type": "boolean",
+                            "description": "Take the part out of the live assembly.",
+                        },
+                        "project_id": {
+                            "type": "string",
+                            "description": "Defaults to the call's project.",
+                        },
+                    },
+                    "required": ["node_id", "assembly"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "assembly": {"type": "string"},
+                        "node_id": {"type": "string"},
+                        "action": {"type": "string"},
+                        "live": {"type": "boolean"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=128, max_cpu_seconds=10),
+            ),
+            handler=self.place_part,
+        )
+
+    async def place_part(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        raw_id = str(arguments.get("node_id") or "").strip()
+        assembly = str(arguments.get("assembly") or "").strip()
+        if not raw_id or not assembly:
+            raise ValueError("twin.place_part: 'node_id' and 'assembly' are required")
+        try:
+            node_id = UUID(raw_id)
+        except ValueError as exc:
+            raise ValueError(f"twin.place_part: node_id {raw_id!r} is not a UUID") from exc
+
+        project_id = arguments.get("project_id")
+        if not project_id:
+            ctx_project = current_context().project_id
+            project_id = str(ctx_project) if ctx_project else None
+        if not project_id:
+            raise ValueError(
+                "twin.place_part: no project. Pass project_id or run inside a project."
+            )
+
+        position = _vec3(arguments.get("position"), "position")
+        rotation = _vec3(arguments.get("rotation"), "rotation")
+
+        node = await self._twin.get_work_product(node_id)
+        if node is None:
+            raise ValueError(f"twin.place_part: part {raw_id} does not exist in the twin")
+        node_type = getattr(node.type, "value", node.type)
+        if str(node_type) != "cad_model":
+            raise ValueError(f"twin.place_part: part {raw_id} is a {node_type}, not a cad_model")
+        node_project = getattr(node, "project_id", None)
+        if node_project is not None and str(node_project) != str(project_id):
+            raise ValueError(f"twin.place_part: part {raw_id} belongs to a different project")
+
+        remove = bool(arguments.get("remove"))
+        action = "removed" if remove else "placed"
+        live = await publish_live_event(
+            str(project_id),
+            {
+                "type": "assembly.part_removed" if remove else "assembly.part_placed",
+                "assembly": assembly,
+                "part": {"node_id": str(node_id), "name": node.name},
+                "position": position,
+                "rotation": rotation,
+            },
+        )
+        return {
+            "assembly": assembly,
+            "node_id": str(node_id),
+            "action": action,
+            "position": position,
+            "rotation": rotation,
+            "live": live,
+        }
 
     def _register_stage_work_product_file(self) -> None:
         self.register_tool(
@@ -4721,7 +4933,7 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "object",
                             "description": (
-                                "{'name': <materials.py name>} or explicit "
+                                "{'name': <material library name>} or explicit "
                                 "{'thermal_conductivity_w_mk': ...} (SI W/(m*K))."
                             ),
                         },
@@ -4933,6 +5145,141 @@ class TwinServer(McpToolServer):
             build_axis=[float(v) for v in build_axis] if build_axis is not None else None,
             threshold_deg=float(threshold_deg) if isinstance(threshold_deg, (int, float)) else None,
         )
+
+    # ------------------------------------------------------------------
+    # twin.render_work_product (FORGE-630)
+    # ------------------------------------------------------------------
+
+    def _register_render_work_product(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.render_work_product",
+                adapter_id="twin",
+                name="Render Work Product",
+                description=(
+                    "Studio renders of a work product in the twin (a STEP part or "
+                    "assembly, or a mesh) by blender.render: the STEP is converted to "
+                    "GLB the same way the dashboard viewer does, so colours and part "
+                    "names come from the model. Stores the PNGs as a 'render' work "
+                    "product linked to the model (GENERATED_FROM) and returns them as "
+                    "images. Views: iso, front, back, left, right, top, bottom, "
+                    "turntable. store=false renders without recording anything."
+                ),
+                capability="twin_render",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_id": {
+                            "type": "string",
+                            "description": "The work product to render (STEP, GLB, STL, OBJ, PLY).",
+                        },
+                        "views": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "iso",
+                                    "front",
+                                    "back",
+                                    "left",
+                                    "right",
+                                    "top",
+                                    "bottom",
+                                    "turntable",
+                                ],
+                            },
+                            "description": "Default ['iso'].",
+                        },
+                        "turntable_frames": {"type": "integer", "minimum": 1, "maximum": 36},
+                        "resolution": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 64},
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "description": "[width, height]. Default [1280, 960].",
+                        },
+                        "samples": {"type": "integer", "minimum": 1, "maximum": 1024},
+                        "projection": {"type": "string", "enum": ["perspective", "orthographic"]},
+                        "transparent": {"type": "boolean"},
+                        "background": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 3,
+                            "maxItems": 3,
+                        },
+                        "colours": {
+                            "type": "object",
+                            "description": (
+                                "Override part colours for this render only: {part-name "
+                                "substring: [r, g, b, a]} in 0..1. The model is unchanged."
+                            ),
+                        },
+                        "appearances": {
+                            "type": "object",
+                            "description": (
+                                "Show parts in library appearances (FORGE-632): {part-name "
+                                "substring: appearance name or id}. The appearance's "
+                                "colour, roughness and metallic are used, and the render "
+                                "records which appearance and version. A part may have a "
+                                "colour or an appearance, not both."
+                            ),
+                        },
+                        "store": {
+                            "type": "boolean",
+                            "description": "Record the images in the twin. Default true.",
+                        },
+                        "name": {"type": "string", "description": "Name of the render node."},
+                        "project_id": {
+                            "type": "string",
+                            "description": "Default: the rendered work product's project.",
+                        },
+                    },
+                    "required": ["work_product_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "stored": {"type": "boolean"},
+                        "images": {"type": "array"},
+                        "files": {"type": "array"},
+                        "source_work_product_id": {"type": "string"},
+                        "source_content_hash": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=900),
+            ),
+            handler=self.render_work_product,
+        )
+
+    async def render_work_product(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        work_product_id = arguments.get("work_product_id")
+        if not work_product_id or not isinstance(work_product_id, str):
+            raise ValueError("twin.render_work_product: 'work_product_id' is required")
+        options = {
+            key: arguments[key]
+            for key in (
+                "views",
+                "turntable_frames",
+                "resolution",
+                "samples",
+                "projection",
+                "transparent",
+                "background",
+                "colours",
+                "appearances",
+                "name",
+                "project_id",
+            )
+            if arguments.get(key) is not None
+        }
+        result: dict[str, Any] = await self._work_product_renderer(
+            work_product_id=work_product_id,
+            store=arguments.get("store") is not False,
+            **options,
+        )
+        return result
 
     # ------------------------------------------------------------------
     # twin.create_release_package (FORGE-299)
@@ -5512,8 +5859,8 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "Baseline material name (tool_registry.tools.cadquery."
-                                "materials, e.g. 'aluminum_6061'). Default 'aluminum_6061'."
+                                "Baseline material library name (library.list_materials), "
+                                "e.g. 'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
                             ),
                         },
                         "load_n": {
@@ -5532,8 +5879,8 @@ class TwinServer(McpToolServer):
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Materials to rank against for metric='mass'. Default "
-                                "['aluminum_6061', 'steel', 'titanium', 'carbon_fiber']."
+                                "Library materials to rank against for metric='mass' "
+                                "(library.list_materials); required for that metric."
                             ),
                         },
                         "delta_fraction": {
@@ -5574,7 +5921,7 @@ class TwinServer(McpToolServer):
         if not isinstance(wall_thickness_mm, (int, float)):
             raise ValueError("twin.rank_sensitivity: 'wall_thickness_mm' is required (number)")
         project_id = arguments.get("project_id")
-        material = arguments.get("material", "aluminum_6061")
+        material = arguments.get("material", "aluminium_6061_t6")
         load_n = arguments.get("load_n")
         deflection_limit_mm = arguments.get("deflection_limit_mm")
         mass_limit_kg = arguments.get("mass_limit_kg")
@@ -5585,7 +5932,7 @@ class TwinServer(McpToolServer):
             work_product_id=work_product_id,
             wall_thickness_mm=float(wall_thickness_mm),
             project_id=project_id if isinstance(project_id, str) else None,
-            material=material if isinstance(material, str) else "aluminum_6061",
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
             load_n=float(load_n) if isinstance(load_n, (int, float)) else None,
             deflection_limit_mm=(
                 float(deflection_limit_mm)
@@ -5960,8 +6307,8 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "tool_registry.tools.cadquery.materials name, e.g. "
-                                "'aluminum_6061'. Default 'aluminum_6061'."
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
                             ),
                         },
                         "wall_min_mm": {
@@ -6029,7 +6376,7 @@ class TwinServer(McpToolServer):
         if not isinstance(deflection_limit_mm, (int, float)):
             raise ValueError("twin.optimize_parameter: 'deflection_limit_mm' is required (number)")
         sf_limit = arguments.get("sf_limit", 2.0)
-        material = arguments.get("material", "aluminum_6061")
+        material = arguments.get("material", "aluminium_6061_t6")
         wall_min_mm = arguments.get("wall_min_mm", 0.5)
         wall_max_mm = arguments.get("wall_max_mm")
         project_id = arguments.get("project_id")
@@ -6041,7 +6388,7 @@ class TwinServer(McpToolServer):
             load_n=float(load_n),
             deflection_limit_mm=float(deflection_limit_mm),
             sf_limit=float(sf_limit),
-            material=material if isinstance(material, str) else "aluminum_6061",
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
             wall_min_mm=float(wall_min_mm),
             wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
             max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
@@ -6089,8 +6436,8 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "tool_registry.tools.cadquery.materials name, e.g. "
-                                "'aluminum_6061'. Default 'aluminum_6061'."
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
                             ),
                         },
                         "wall_min_mm": {
@@ -6157,7 +6504,7 @@ class TwinServer(McpToolServer):
         if not isinstance(deflection_limit_mm, (int, float)):
             raise ValueError("twin.start_design_loop: 'deflection_limit_mm' is required (number)")
         sf_limit = arguments.get("sf_limit", 2.0)
-        material = arguments.get("material", "aluminum_6061")
+        material = arguments.get("material", "aluminium_6061_t6")
         wall_min_mm = arguments.get("wall_min_mm", 0.5)
         wall_max_mm = arguments.get("wall_max_mm")
         project_id = arguments.get("project_id")
@@ -6168,7 +6515,7 @@ class TwinServer(McpToolServer):
             load_n=float(load_n),
             deflection_limit_mm=float(deflection_limit_mm),
             sf_limit=float(sf_limit),
-            material=material if isinstance(material, str) else "aluminum_6061",
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
             wall_min_mm=float(wall_min_mm),
             wall_max_mm=float(wall_max_mm) if isinstance(wall_max_mm, (int, float)) else None,
             max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
@@ -6219,8 +6566,8 @@ class TwinServer(McpToolServer):
                         "material": {
                             "type": "string",
                             "description": (
-                                "tool_registry.tools.cadquery.materials name, e.g. "
-                                "'aluminum_6061'. Default 'aluminum_6061'."
+                                "Material library name (library.list_materials), e.g. "
+                                "'aluminium_6061_t6'. Default 'aluminium_6061_t6'."
                             ),
                         },
                         "height_min_mm": {
@@ -6296,7 +6643,7 @@ class TwinServer(McpToolServer):
                 "twin.start_tube_height_design_loop: 'deflection_limit_mm' is required (number)"
             )
         sf_limit = arguments.get("sf_limit", 2.0)
-        material = arguments.get("material", "aluminum_6061")
+        material = arguments.get("material", "aluminium_6061_t6")
         height_min_mm = arguments.get("height_min_mm", 1.0)
         height_max_mm = arguments.get("height_max_mm")
         project_id = arguments.get("project_id")
@@ -6308,7 +6655,7 @@ class TwinServer(McpToolServer):
             load_n=float(load_n),
             deflection_limit_mm=float(deflection_limit_mm),
             sf_limit=float(sf_limit),
-            material=material if isinstance(material, str) else "aluminum_6061",
+            material=material if isinstance(material, str) else "aluminium_6061_t6",
             height_min_mm=float(height_min_mm),
             height_max_mm=float(height_max_mm) if isinstance(height_max_mm, (int, float)) else None,
             max_iterations=int(max_iterations) if isinstance(max_iterations, (int, float)) else 60,
@@ -6858,3 +7205,15 @@ class TwinServer(McpToolServer):
             ),
             predicted_tier=int(arguments.get("predicted_tier", 0)),
         )
+
+
+def _vec3(value: Any, label: str) -> list[float]:
+    """A three-number vector, ``[0, 0, 0]`` when none is given."""
+    if value is None:
+        return [0.0, 0.0, 0.0]
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"twin.place_part: {label} must be three numbers [x, y, z]")
+    try:
+        return [float(v) for v in value]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"twin.place_part: {label} must be three numbers [x, y, z]") from exc

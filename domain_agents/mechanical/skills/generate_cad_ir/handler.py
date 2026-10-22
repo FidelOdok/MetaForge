@@ -26,7 +26,6 @@ from domain_agents.shared.freecad_lowering import (
 )
 from observability.tracing import get_tracer
 from skill_registry.skill_base import SkillBase
-from tool_registry.tools.cadquery.materials import resolve_density_kg_m3
 from twin_core.design_ir import DesignIR
 
 from .schema import BoundingBox, GenerateCadIrInput, GenerateCadIrOutput
@@ -161,8 +160,16 @@ class GenerateCadIrHandler(SkillBase[GenerateCadIrInput, GenerateCadIrOutput]):
                     "bbox_mm": result.bounding_box,
                 }
                 if input_data.material:
-                    density = resolve_density_kg_m3(input_data.material)
+                    # FORGE-446: the library's density for this material.
+                    from twin_core.library.material_resolver import resolve_material
+
+                    block = await resolve_material(input_data.material)
+                    density = float(block["properties"]["density_kg_m3"]["value"])
                     extra_metadata["mass_kg"] = round(result.volume_mm3 * 1e-9 * density, 6)
+                    extra_metadata["density_source"] = (
+                        f"library {block['name']}: "
+                        f"{block['properties']['density_kg_m3'].get('source_ref', '')}"
+                    )
 
                 (
                     committed,

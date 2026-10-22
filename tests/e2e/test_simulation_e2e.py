@@ -330,7 +330,7 @@ class TestCfdSimulationE2E:
         )
 
         assert result.success is False
-        assert any("no flow solver" in e for e in result.errors)
+        assert any("internal_flow" in e for e in result.errors)
 
     async def test_result_without_a_temperature_fails(self):
         twin = InMemoryTwinAPI.create()

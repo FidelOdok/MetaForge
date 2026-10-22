@@ -41,7 +41,7 @@ CADQUERY_CREATE_RESULT = {
         "max_z": 2.5,
     },
     "parameters_used": {"length": 50.0, "width": 30.0, "thickness": 5.0},
-    "material": "aluminum_6061",
+    "material": "aluminium_6061_t6",
 }
 
 CADQUERY_SCRIPT_RESULT = {
@@ -244,7 +244,7 @@ class TestAgentCadGenerationE2E:
                 parameters={
                     "shape_type": "bracket",
                     "dimensions": {"length": 50.0, "width": 30.0, "thickness": 5.0},
-                    "material": "aluminum_6061",
+                    "material": "aluminium_6061_t6",
                     "backend": "cadquery",
                 },
             )
@@ -257,7 +257,7 @@ class TestAgentCadGenerationE2E:
         assert skill["skill"] == "generate_cad"
         assert skill["cad_file"] == "output/bracket.step"
         assert skill["volume_mm3"] == 12500.0
-        assert skill["material"] == "aluminum_6061"
+        assert skill["material"] == "aluminium_6061_t6"
 
     async def test_generate_cad_default_backend_is_cadquery(
         self,
@@ -329,7 +329,7 @@ class TestAgentCadGenerationE2E:
                 parameters={
                     "description": "A rectangular mounting bracket 50x30x20mm with 4 corner holes",
                     "constraints": {"length": 50.0, "width": 30.0, "height": 20.0},
-                    "material": "aluminum_6061",
+                    "material": "aluminium_6061_t6",
                 },
             )
         )
@@ -479,7 +479,7 @@ class TestProjectScopedCadGeneration:
                 parameters={
                     "shape_type": "bracket",
                     "dimensions": {"length": 50.0, "width": 30.0, "thickness": 5.0},
-                    "material": "aluminum_6061",
+                    "material": "aluminium_6061_t6",
                 },
             )
         )
@@ -555,7 +555,7 @@ class TestProjectScopedCadGeneration:
                 work_product_id=created_wp.id,
                 parameters={
                     "description": "A bracket 50x30x20mm",
-                    "material": "aluminum_6061",
+                    "material": "aluminium_6061_t6",
                 },
             )
         )

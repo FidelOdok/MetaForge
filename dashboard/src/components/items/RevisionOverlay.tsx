@@ -1,4 +1,5 @@
 import { Suspense, useMemo } from 'react';
+import { VIEWER_GPU_PREFERENCE } from '../viewer/viewerColor';
 import { Canvas } from '@react-three/fiber';
 import { Bounds, OrbitControls, useGLTF } from '@react-three/drei';
 import { useQuery } from '@tanstack/react-query';
@@ -77,7 +78,8 @@ export function RevisionOverlay({
           Loading both revisions...
         </div>
       ) : (
-        <Canvas camera={{ position: [2, 2, 2], fov: 45 }} style={{ height: 240, background: 'var(--mf-c-191b22)', borderRadius: 6 }}>
+        <Canvas
+            gl={{ ...VIEWER_GPU_PREFERENCE }} camera={{ position: [2, 2, 2], fov: 45 }} style={{ height: 240, background: 'var(--mf-c-191b22)', borderRadius: 6 }}>
           <ambientLight intensity={0.7} />
           <directionalLight position={[5, 5, 5]} intensity={0.9} />
           <Suspense fallback={null}>

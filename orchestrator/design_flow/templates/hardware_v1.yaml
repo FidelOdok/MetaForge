@@ -11,7 +11,7 @@
 # when the phases or gates change, so a completed run can still say what
 # it actually ran.
 id: hardware_v1
-version: 1.0.0
+version: 1.1.0
 extends: spine_v1
 name: ''
 label: Hardware & robotics
@@ -45,6 +45,7 @@ phases:
 - use: feasibility
 - use: architecture
 - use: concept_selection
+- use: industrial_design
 - id: design
   title: Mechanical Design
   objective: >-

@@ -148,6 +148,23 @@ material), and what was not checked: interference and any rotation the user
 wanted. Record a placement choice a reviewer could question with
 `twin.record_decision` (`title`, `rationale`, `alternatives`).
 
+## Colours (required)
+
+Every part you commit must carry a colour. The viewer shows only the colours
+written in the STEP, and `twin.commit_geometry` refuses a plugin's model while
+any part is uncoloured, naming the parts. A part's colour is its finish, and
+the finish is the person's choice:
+
+1. Find each part's finish with the `colour-material-finish` skill
+   (`library.list_appearances`, `library.get_appearance`). If the person has
+   not chosen one, ask; never invent a colour.
+2. Pass `part_colours` = {part name (the STEP product, i.e. the FreeCAD
+   Label or the name you gave the part): the appearance's `srgb_hex`} to
+   `twin.commit_geometry`, which writes them into the STEP. `color` colours a
+   one-part model. On the FreeCAD session path `freecad.export_model` takes
+   the same `part_colours`.
+3. If the commit is refused, colour the parts it names and commit again.
+
 ## Checks before you report
 
 - [ ] Every part was a committed `cad_model`, staged from the twin
@@ -169,6 +186,25 @@ wanted. Record a placement choice a reviewer could question with
 | Commit held for approval | Writes need a person | Tell the user where it waits; do not retry or reword. |
 | `cadquery.create_assembly` not in your list | Wrong profile | Ask for `?profile=mechanical` or `?profile=robotics`. |
 
+## Letting the person watch it come together
+
+The assembly this skill commits appears all at once, at the end. When the
+person wants to watch it being put together, place each committed part as you
+go with `twin.place_part` (`node_id` of the part's `cad_model`, `assembly`
+name, `position` in mm, `rotation` in degrees about x, y, z). The twin viewer's
+"Live assembly" panel draws each part at that placement within about a second.
+
+- Call it once per part, in the order you would assemble them. Calling it
+  again for the same part moves it; `remove: true` takes it out.
+- The result's `live` says whether anything could show the placement. If it is
+  `false`, say so; do not tell the person they can watch.
+- It shows the layout only. It makes no assembly and records nothing in the
+  twin. When the layout is final, build and commit the real one with the steps
+  above, using the same positions.
+- `twin.place_part` takes `position` and `rotation` as two lists. The skill's
+  `location` is one object (`x, y, z, rx, ry, rz`). Use the same numbers, and
+  check the committed assembly sits where the person watched it go.
+
 ## Limits
 
 - **No real interference check.** The result's `interference_check_passed`
@@ -179,6 +215,7 @@ wanted. Record a placement choice a reviewer could question with
   the user when a requested rotation was not applied.
 - No joints or kinematics in this route; the FreeCAD session route records
   joints but needs a no-profile connection.
-- No colours: CadQuery re-imports each part as bare geometry, so any colour
-  the part files carried is not kept, and none is added.
+- CadQuery re-imports each part as bare geometry, so any colour the part
+  files carried is not kept: colour the assembly at commit with
+  `part_colours` (each part's chosen finish).
 - Mass, when given, is the summed volume times one material's density.

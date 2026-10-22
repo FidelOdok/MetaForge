@@ -199,6 +199,9 @@ def test_the_success_message_gives_the_url_to_paste() -> None:
     assert "gateway URL" in text
 
 
-def test_an_authed_gateway_is_told_it_needs_a_token() -> None:
+def test_an_authed_gateway_is_told_to_sign_in_not_to_set_a_token() -> None:
+    # FORGE-659: the plugin has no token field any more; the sign-in is OAuth, in /mcp.
     found = GatewayProbe("http://x/mcp", True, False, requires_auth=True)
-    assert "api_token" in describe(found, [found])
+    text = describe(found, [found])
+    assert "/mcp" in text
+    assert "api_token" not in text

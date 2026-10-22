@@ -49,11 +49,13 @@ class TestRegistryMcpBridge:
         FORGE-283 adds calculix.compute_joint_loads for 84. FORGE-282 adds
         calculix.cross_check_thermal_steady_state for 85. FORGE-544 adds
         power.check_budget for 86. FORGE-542 adds spice.run_simulation
-        for 87. FORGE-615 adds cost.estimate_manufacturing for 88.
+        for 87. FORGE-615 adds cost.estimate_manufacturing for 88. FORGE-628 adds
+        blender.render and blender.export_blend for 90.
+        FORGE-557 adds openfoam.run_internal_flow for 91.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 88
+        assert len(tools) == 91
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

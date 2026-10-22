@@ -34,11 +34,17 @@ its place.
 
 ```bash
 # latest release, auto-detects your OS/arch
-curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | bash -s -- --cli-only
 
 # or a specific version
-curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | sh -s v0.1.0
+curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/install.sh | bash -s -- --cli-only --version v0.1.0
 ```
+
+`install.sh` is the whole installer now, not just the binary fetcher
+(FORGE-648) — without `--cli-only` it goes on to set up Docker, the stack and
+your first project. It needs `bash`, not `sh`. The older `| sh -s v0.1.0`
+form still does the right thing: a bare version argument is read as
+`--cli-only --version`.
 
 This drops `forge` into `~/.local/bin` (override with `FORGE_BIN_DIR`) and, if
 that directory isn't already on your `PATH`, adds it to your shell profile

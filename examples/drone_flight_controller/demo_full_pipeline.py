@@ -315,7 +315,7 @@ async def run_pipeline() -> dict[str, Any]:
                 "mesh_file": "models/motor_mount_bracket.inp",
                 "load_cases": [{"name": "hover_3g", "force_n": 30.0}],
                 "analysis_type": "static",
-                "material": "aluminum_6061",
+                "material": "aluminium_6061_t6",
             },
         )
     )

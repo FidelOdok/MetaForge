@@ -125,6 +125,19 @@ async def list_materials(family: str | None = None) -> dict[str, Any]:
     return _list("material", family)
 
 
+@router.get("/materials/resolve")
+async def resolve_material(name: str) -> dict[str, Any]:
+    """The figures a tool call carries for ``name`` (FORGE-446); 422 with candidates."""
+    from twin_core.library.material_resolver import MaterialResolutionError, block, match
+
+    try:
+        return block(match(get_catalog().list("material"), name))
+    except MaterialResolutionError as exc:
+        raise HTTPException(
+            status_code=422, detail={"message": str(exc), "candidates": exc.candidates}
+        ) from exc
+
+
 @router.get("/materials/{ref}")
 async def get_material(ref: str) -> dict[str, Any]:
     return _get("material", ref)
@@ -138,3 +151,79 @@ async def register_material(body: dict[str, Any], request: Request) -> dict[str,
 @router.patch("/materials/{ref}")
 async def update_material(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
     return _update("material", ref, body, request)
+
+
+@router.get("/components")
+async def list_components(family: str | None = None) -> dict[str, Any]:
+    """Mechanical components (FORGE-449): standard and purchased parts."""
+    return _list("component", family)
+
+
+@router.get("/components/standard")
+async def standard_part(family: str, size: str, length_mm: float | None = None) -> dict[str, Any]:
+    """A standard part built from its standard's table; stores nothing."""
+    from twin_core.library.standard_parts import StandardPartError, build_standard_part
+
+    try:
+        return {"entry": build_standard_part(family, size, length_mm)}
+    except StandardPartError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/components/{ref}")
+async def get_component(ref: str) -> dict[str, Any]:
+    return _get("component", ref)
+
+
+@router.post("/components", status_code=201)
+async def register_component(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    return _register("component", body, request)
+
+
+@router.patch("/components/{ref}")
+async def update_component(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
+    return _update("component", ref, body, request)
+
+
+@router.get("/appearances")
+async def list_appearances(family: str | None = None) -> dict[str, Any]:
+    """Appearances (FORGE-631): colour, material and finish; family is the finish."""
+    return _list("appearance", family)
+
+
+@router.get("/appearances/{ref}")
+async def get_appearance(ref: str) -> dict[str, Any]:
+    return _get("appearance", ref)
+
+
+@router.post("/appearances", status_code=201)
+async def register_appearance(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    return _register("appearance", body, request)
+
+
+@router.patch("/appearances/{ref}")
+async def update_appearance(ref: str, body: UpdateEntryRequest, request: Request) -> dict[str, Any]:
+    return _update("appearance", ref, body, request)
+
+
+@router.get("/ergonomic-limits")
+async def list_ergonomic_limits(family: str | None = None) -> dict[str, Any]:
+    """Ergonomic design limits (FORGE-635); family is the feature kind they bound."""
+    return _list("ergonomic_limit", family)
+
+
+@router.get("/ergonomic-limits/{ref}")
+async def get_ergonomic_limit(ref: str) -> dict[str, Any]:
+    return _get("ergonomic_limit", ref)
+
+
+@router.post("/ergonomic-limits", status_code=201)
+async def register_ergonomic_limit(body: dict[str, Any], request: Request) -> dict[str, Any]:
+    return _register("ergonomic_limit", body, request)
+
+
+@router.patch("/ergonomic-limits/{ref}")
+async def update_ergonomic_limit(
+    ref: str, body: UpdateEntryRequest, request: Request
+) -> dict[str, Any]:
+    return _update("ergonomic_limit", ref, body, request)

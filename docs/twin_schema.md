@@ -195,6 +195,16 @@ class WorkProductType(StrEnum):
     DOCUMENTATION = "documentation"
 ```
 
+The enum has grown since this list was written; `twin_core/models/enums.py`
+is the full set. One of the later additions is `RENDER = "render"`
+(FORGE-630): studio renders of a model from `twin.render_work_product`. The
+first view is the node's primary blob (`format` is `png`) and the others are
+named blobs in `metadata.image_files` (served by
+`GET /v1/twin/nodes/{id}/files/{filename}`). A `GENERATED_FROM` edge points
+at the rendered model, and `metadata.source_content_hash` records which
+revision of it was rendered, so a render of an older revision can be told
+apart from a current one.
+
 **Pydantic Model**:
 
 ```python
@@ -717,7 +727,7 @@ class SensitivityRanking(BaseModel):
     rankings: list[ParameterSensitivity]   # sorted by |sensitivity| descending
 ```
 
-`metric="tip_deflection"` ranks `wall_thickness_mm` and `length_mm` against a new rectangular-hollow-tube deflection formula (`twin_core/prediction/evaluator.py`'s `hollow_tube_tip_deflection_mm`, `I = (W H^3 - (W-2t)(H-2t)^3)/12`) -- FORGE-315's own solid-beam model (`cantilever_tip_deflection_mm`) has no wall-thickness concept at all, so this is a real, scoped extension, not free. `metric="mass"` ranks `wall_thickness_mm` (continuous, `hollow_tube_mass_kg`) and a caller-supplied (default: aluminum/steel/titanium/carbon_fiber) set of candidate materials (categorical -- the actual margin delta from swapping material, not a derivative, since "per unit of what" means nothing for a discrete choice). Material density/elastic-modulus lookups reuse `tool_registry.tools.cadquery.materials`' existing `resolve_density_kg_m3`/`resolve_elastic_properties` (FORGE-234's own table) -- not a second material list.
+`metric="tip_deflection"` ranks `wall_thickness_mm` and `length_mm` against a new rectangular-hollow-tube deflection formula (`twin_core/prediction/evaluator.py`'s `hollow_tube_tip_deflection_mm`, `I = (W H^3 - (W-2t)(H-2t)^3)/12`) -- FORGE-315's own solid-beam model (`cantilever_tip_deflection_mm`) has no wall-thickness concept at all, so this is a real, scoped extension, not free. `metric="mass"` ranks `wall_thickness_mm` (continuous, `hollow_tube_mass_kg`) and a caller-supplied set of candidate materials (required since FORGE-446: library names, no default set) (categorical -- the actual margin delta from swapping material, not a derivative, since "per unit of what" means nothing for a discrete choice). Material density and elastic modulus come from the material library through `resolve_density_kg_m3`/`resolve_elastic_properties` (FORGE-446 retired FORGE-234's table) -- not a second material list.
 
 Every ranking is recorded as `twin.record_evidence` (`evidence_type="calculation"`), `valid_against` the work product it was computed from.
 
@@ -850,7 +860,7 @@ Every search is recorded as Evidence, `valid_against` the work product (FORGE-31
 
 **Deliberately out of scope**: proposing the winning wall thickness as an actual geometry change via ECT (`ControlledEntityKind` only supports `constraint`/`engineering_entity` today, not `work_product` -- a nontrivial, separate widening of the transaction engine itself, not a quick follow-up, same honesty precedent as FORGE-316 deferring `Constraint.dependencies`); regenerating/committing the optimised geometry (no parametrized re-authoring script exists for the real arm part -- its original `cadquery.execute_script` source was never persisted with a substitutable `wall_thickness_mm` variable); any dashboard UI (no UI surface named in this ticket's own Scope, same precedent as FORGE-315/316/317/319).
 
-*Source: `twin_core/prediction/optimizer.py`, `api_gateway/twin/optimizer.py`, `tool_registry/tools/cadquery/materials.py`, `tool_registry/tools/twin/adapter.py`*
+*Source: `twin_core/prediction/optimizer.py`, `api_gateway/twin/optimizer.py`, `tool_registry/tools/cadquery/materials.py` (library figures since FORGE-446), `tool_registry/tools/twin/adapter.py`*
 
 ### 2.18 Realise + Learn: Device Instances, Measurements + Calibration (FORGE-321)
 

@@ -17,6 +17,7 @@ from tool_registry.tools.distributors.base import (
     PartDetail,
     PartSearchResult,
     PricingBreak,
+    parse_price,
 )
 from tool_registry.tools.distributors.rate_limiter import TokenBucketRateLimiter
 from tool_registry.tools.nexar.queries import PART_DETAILS_QUERY, SEARCH_PARTS_QUERY
@@ -237,19 +238,25 @@ class NexarAdapter(DistributorAdapter):
         for seller in part.get("sellers", []):
             for offer in seller.get("offers", []):
                 for price in offer.get("prices", []):
+                    value = parse_price(price.get("price"))
+                    currency = str(price.get("currency") or "").strip().upper()
+                    if value is None or not currency:
+                        continue  # unknown, never 0.0 or an assumed currency
                     breaks.append(
                         PricingBreak(
                             quantity=price.get("quantity", 1),
-                            unit_price=price.get("price", 0.0),
-                            currency=price.get("currency", "USD"),
+                            unit_price=value,
+                            currency=currency,
                         )
                     )
-        # De-duplicate by quantity, keeping the lowest price
-        by_qty: dict[int, PricingBreak] = {}
+        # De-duplicate by (currency, quantity), keeping the lowest price: a GBP
+        # and a USD figure are not comparable, so neither replaces the other.
+        best: dict[tuple[str, int], PricingBreak] = {}
         for b in breaks:
-            if b.quantity not in by_qty or b.unit_price < by_qty[b.quantity].unit_price:
-                by_qty[b.quantity] = b
-        return sorted(by_qty.values(), key=lambda x: x.quantity)
+            key = (b.currency, b.quantity)
+            if key not in best or b.unit_price < best[key].unit_price:
+                best[key] = b
+        return sorted(best.values(), key=lambda x: (x.currency, x.quantity))
 
     def _map_availability(self, data: dict[str, Any]) -> AvailabilityInfo | None:
         search = data.get("supSearchMpn", {})

@@ -18,6 +18,7 @@ Verify with ``claude plugin validate integrations/claude-code``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -42,8 +43,98 @@ DEFAULT_GATEWAY_URL = "http://localhost:8765/mcp"
 #: needs its own name -- components are namespaced under it.
 LOCAL_PLUGIN_NAME = "metaforge-local"
 
+# FORGE-658, FORGE-660, FORGE-661. The package for a *hosted* gateway.
+#
+# FORGE-661 is an experiment. FORGE-660 removed the hosted address so nothing of
+# ours was in the public repo, but then claude.ai chat ignores the connector (it
+# ignores any URL with a `${user_config.*}` reference), and a custom connector at
+# the same address showed Connected while the plugin's own row did not recognise
+# it. The literal address is back to see whether claude.ai matches a plugin
+# connector to a connector on the account by URL. If it does not help, revert to
+# the FORGE-660 form (address from user config, no literal).
+CLOUD_PLUGIN_NAME = "metaforge-cloud"
+#: The bare URL, no query string: the connector claude.ai signed in to had none,
+#: and an earlier plugin build with `?profile=all` stayed at "Not added".
+HOSTED_GATEWAY_URL = "https://mcp.metaforge.uk/mcp"
+
+# FORGE-648. Both of these READMEs used to say `pip install metaforge`, and
+# `metaforge` on PyPI is an unrelated job-shop scheduling library by someone
+# else -- so the documented first step installed a stranger's package and
+# left `metaforge-mcp` nowhere on PATH. The distribution is `metaforge-hw`;
+# until it is published, installing from the repository is the command that
+# actually works, so that is the command the READMEs give.
+DISTRIBUTION_NAME = "metaforge-hw"
+LOCAL_INSTALL_COMMAND = 'pipx install "git+https://github.com/FidelOdok/MetaForge.git"'
+
+
 PLUGIN_NAME = "metaforge"
-VERSION = "0.1.0"
+
+# FORGE-657. The version was a literal "0.1.0" that nothing ever changed. Claude
+# Code decides whether to update an installed plugin by comparing this string,
+# so skills, PLUGIN.md and tool lists changed for weeks and no installed copy
+# saw any of it. The version now lives in a committed lock beside the output,
+# next to a digest of the content it was cut for. The generator bumps the patch
+# when (and only when) the content digest moves, and a test fails when content
+# changed without the bump, so "changed but not versioned" cannot be merged.
+#
+# It is not the platform release number: that tag is created by CI after merge
+# and never committed back, so the source tree cannot carry it.
+VERSION_LOCK = OUT / "plugin-version.json"
+
+
+def read_version_lock(lock: Path = VERSION_LOCK) -> dict:
+    return json.loads(lock.read_text(encoding="utf-8"))
+
+
+VERSION = read_version_lock()["version"]
+
+
+def content_digest(root: Path = OUT, lock: Path = VERSION_LOCK) -> str:
+    """Hash everything the plugins ship, ignoring the version they carry.
+
+    A version field is dropped before hashing, otherwise bumping the version
+    would itself change the digest and the bump would never settle.
+    """
+    h = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path == lock:
+            continue
+        data = path.read_bytes()
+        if path.name == "plugin.json":
+            manifest = json.loads(data)
+            manifest.pop("version", None)
+            data = json.dumps(manifest, sort_keys=True).encode()
+        h.update(path.relative_to(root).as_posix().encode())
+        h.update(b"\0")
+        h.update(data)
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def next_version(version: str) -> str:
+    major, minor, patch = version.split(".")
+    return f"{major}.{minor}.{int(patch) + 1}"
+
+
+def bump_if_changed(root: Path = OUT, lock: Path = VERSION_LOCK) -> str | None:
+    """Record the content digest, bumping the patch if it moved.
+
+    Returns the new version when the lock changed, else None. An empty recorded
+    digest adopts the current content at the version already written, which is
+    how the lock is first created without inventing a bump.
+    """
+    recorded = read_version_lock(lock)
+    digest = content_digest(root, lock)
+    if digest == recorded["content_digest"]:
+        return None
+    version = (
+        recorded["version"] if not recorded["content_digest"] else next_version(recorded["version"])
+    )
+    lock.write_text(
+        json.dumps({"version": version, "content_digest": digest}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return version
 
 
 def stdio_plugin_manifest() -> dict:
@@ -92,6 +183,27 @@ def stdio_plugin_manifest() -> dict:
     return manifest
 
 
+def cloud_plugin_manifest() -> dict:
+    """The hosted-gateway package (FORGE-658, FORGE-661).
+
+    A literal connector URL and no ``userConfig`` anywhere in ``mcpServers``, so
+    claude.ai chat does not ignore it. No bearer header either; the sign-in is
+    OAuth (FORGE-659): claude.ai follows the gateway's 401, and Claude Code
+    signs in through ``/mcp``.
+    """
+    manifest = plugin_manifest(default_gateway_url=DEFAULT_GATEWAY_URL)
+    manifest["name"] = CLOUD_PLUGIN_NAME
+    manifest["displayName"] = "MetaForge (cloud)"
+    manifest["description"] = (
+        "MetaForge on a hosted gateway: the same digital-twin tools, skills, "
+        "commands, agents and hooks, connected with nothing to enter. Sign in "
+        "once when asked."
+    )
+    manifest.pop("userConfig", None)
+    manifest["mcpServers"] = {"metaforge": {"type": "http", "url": HOSTED_GATEWAY_URL}}
+    return manifest
+
+
 def plugin_manifest(*, default_gateway_url: str) -> dict:
     return {
         "$schema": "https://json.schemastore.org/claude-code-plugin.json",
@@ -121,15 +233,11 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 "default": default_gateway_url,
                 "required": True,
             },
-            "api_token": {
-                "type": "string",
-                "title": "API token",
-                "description": (
-                    "Only needed for a gateway that requires one. A local "
-                    "gateway started with no auth configured does not."
-                ),
-                "sensitive": True,
-            },
+            # FORGE-659: there is no token field. A configured Authorization
+            # header that the server rejects is reported as a failed connection
+            # and never falls back to OAuth, so a bearer header here would stop
+            # Claude Code ever offering the sign-in. Without one, a gateway that
+            # answers 401 is flagged in /mcp and the person signs in there.
             # FORGE-410: the deployment plugins connect to serves every tool it
             # has -- 108 at the last count -- because it runs with no
             # `--profile`. Claude Code copes by loading tools lazily; a harness
@@ -152,7 +260,9 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                     "reads the machine library), mechanical (stateless CAD), "
                     "mechanical_product (CAD authored in a FreeCAD session), "
                     "manufacturing (process selection and DFM review; reads the "
-                    "machine library), simulation, electronics or robotics, "
+                    "machine library), industrial_design (form factor, "
+                    "ergonomics and finishes; renders and the appearance "
+                    "library), simulation, electronics or robotics, "
                     "each 25-40 tools. Registering, discovering or sending a "
                     "job to a machine needs all. Every set includes "
                     "health.check so /metaforge:doctor always works."
@@ -171,7 +281,6 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 # sees no profile and serves everything, which is the previous
                 # behaviour rather than a failure.
                 "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}",
-                "headers": {"Authorization": "Bearer ${user_config.api_token}"},
             }
         },
     }
@@ -401,28 +510,27 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
         "Claude Code asks for your gateway URL on first enable. The default "
         "suits a gateway running on your own machine; a team or hosted gateway "
         "is the same package with a different URL.\n\n"
-        "### On claude.ai\n\n"
-        "The same marketplace works from **Customize \u2192 Plugins \u2192 Add \u2192 "
-        "Add marketplace**, and the skills and commands load straight away.\n\n"
-        "The bundled connector does not. Its URL is written as "
-        "`${user_config.gateway_url}`, and per-user configuration prompts are a "
-        "Claude Code feature \u2014 claude.ai shows the template literally and asks "
-        "you to replace it. That is the web app behaving as designed, not a "
-        "broken plugin.\n\n"
-        "Open the plugin's **Connectors** tab and replace the whole URL with your "
-        "own gateway, keeping the profile:\n\n"
+        "### Signing in\n\n"
+        "There is no token field. When the gateway needs a login it answers 401, "
+        "Claude Code flags `metaforge` in `/mcp`, and you sign in there with OAuth "
+        "(run `/mcp`, choose `metaforge`, and follow the browser prompt). A gateway "
+        "with no auth configured needs nothing.\n\n"
+        "The gateway has to offer OAuth: set `METAFORGE_OAUTH_LOGIN_SECRET` on it. "
+        "A gateway with only `METAFORGE_MCP_API_KEY` has no sign-in to offer. "
+        "Claude Code will not fall back to OAuth after a rejected static header, "
+        "so for a key-only gateway skip this plugin's connector and add the server "
+        "yourself with a header:\n\n"
         "```\n"
-        "https://your-gateway.example.com/mcp?profile=core\n"
+        "claude mcp add --transport http metaforge https://your-gateway.example.com/mcp "
+        '--header "Authorization: Bearer $METAFORGE_MCP_API_KEY"\n'
         "```\n\n"
-        "If an `Authorization` field also shows a `${...}` template, clear it: a "
-        "literal `Bearer ${user_config.api_token}` is a malformed credential, "
-        "which a gateway rejects less helpfully than no credential at all. "
-        "claude.ai cannot send a static token anyway \u2014 it runs OAuth, and your "
-        "gateway advertises that in its 401.\n\n"
-        "There is no URL this package could carry instead. Every user runs their "
-        "own gateway, so no literal is correct for the next installer; a single "
-        "address only becomes possible once a broker routes to each account's "
-        "gateway.\n\n"
+        "### On claude.ai\n\n"
+        "claude.ai ignores a connector whose URL contains a `${user_config.*}` "
+        "reference, so this package's connector never appears there. For the "
+        f"hosted gateway install `{CLOUD_PLUGIN_NAME}`, whose address is written "
+        "in. For your own gateway, install this package for the skills and "
+        "commands, and add a custom connector with your gateway's address "
+        "under **Customize \u2192 Connectors** for the tools.\n\n"
         "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
         f"## Skills\n\n{len(skills)} skills are bundled: the engineering skills "
         "MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), "
@@ -489,10 +597,23 @@ def build_marketplace() -> Path:
                 "source": "./integrations/claude-code-local",
                 "description": (
                     "Runs MetaForge as a local process over stdio. No gateway, no "
-                    "account, no network. Needs `pip install metaforge`."
+                    "account, no network. Needs the `metaforge-mcp` command on "
+                    "your PATH; the package README gives the one line that "
+                    "installs it."
                 ),
                 "category": "engineering",
                 "tags": ["hardware", "cad", "simulation", "local-first"],
+            },
+            {
+                "name": CLOUD_PLUGIN_NAME,
+                "source": "./integrations/claude-code-cloud",
+                "description": (
+                    "For the hosted gateway. The same tools, skills, commands, agents "
+                    "and hooks as metaforge, with the address already written in: "
+                    "nothing to enter, sign in once."
+                ),
+                "category": "engineering",
+                "tags": ["hardware", "cad", "simulation", "hosted"],
             },
         ],
     }
@@ -524,11 +645,17 @@ def build_claude_code_local() -> Path:
         "The same plugin as `claude-code/`, run as a local process instead of "
         "reached over HTTP. No gateway to start, no URL, no token, no network.\n\n"
         "## Install\n\n"
-        "```\npip install metaforge\n"
+        f"```\n{LOCAL_INSTALL_COMMAND}\n"
         "/plugin marketplace add FidelOdok/MetaForge\n"
         f"/plugin install {LOCAL_PLUGIN_NAME}\n```\n\n"
-        "`pip install` first: the plugin launches `metaforge-mcp` as a "
-        "subprocess, so it has to be on your PATH.\n\n"
+        "Install the package first: the plugin launches `metaforge-mcp` as "
+        "a subprocess, so it has to be on your PATH.\n\n"
+        f"The distribution is `{DISTRIBUTION_NAME}`, not `metaforge` — that "
+        "name on PyPI belongs to an unrelated project. Until it is "
+        "published there, install from this repository with the line "
+        "above. `pip install` works too; pipx is suggested because it "
+        "keeps the CLI in its own environment and still puts "
+        "`metaforge-mcp` on your PATH.\n\n"
         "## Which package\n\n"
         "Install **one**. The manifest format has no way to switch a server "
         "entry off, so a package that declared both an HTTP and a stdio "
@@ -536,7 +663,7 @@ def build_claude_code_local() -> Path:
         "| | `metaforge` | `metaforge-local` |\n"
         "|---|---|---|\n"
         "| Reaches | a gateway over HTTP | a process on this machine |\n"
-        "| Needs | a gateway running, and its URL | `pip install metaforge` |\n"
+        "| Needs | a gateway running, and its URL | `metaforge-mcp` on your PATH |\n"
         "| Suits | a team or hosted gateway | working on your own |\n\n"
         "## What runs locally\n\n"
         "Everything the gateway package exposes. The server starts with no "
@@ -554,6 +681,71 @@ def build_claude_code_local() -> Path:
         "writes run without being held — unless your client supports MCP "
         "elicitation, in which case it asks you inline. Either way the rule "
         "is enforced server-side, not by the client.\n"
+    )
+    return root
+
+
+def build_claude_code_cloud() -> Path:
+    """The hosted-gateway package (FORGE-658, FORGE-661).
+
+    The full set, like ``claude-code/``: skills, commands, agents and hooks. The
+    only difference is the connector, which has the hosted address as a literal.
+    """
+    root = OUT / "claude-code-cloud"
+    if root.exists():
+        shutil.rmtree(root)
+    (root / ".claude-plugin").mkdir(parents=True)
+
+    manifest = cloud_plugin_manifest()
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    commands = write_commands(root)
+    skills = write_skills(root)
+    hooks = write_hooks(root)
+    agents = write_agents(root)
+    print(
+        f"  {len(skills)} skill(s), {len(commands)} command(s), "
+        f"{len(hooks)} hook event(s), {len(agents)} agent(s)"
+    )
+
+    (root / "README.md").write_text(
+        "# MetaForge for a hosted gateway\n\n"
+        "**Generated by `scripts/build_integrations.py` — do not edit by hand.**\n\n"
+        "The same skills, commands, agents and hooks as `claude-code/`, with the "
+        f"connector already pointing at the hosted gateway (`{HOSTED_GATEWAY_URL}`). "
+        "There is nothing to enter. This is an experiment (FORGE-661): the address "
+        "is a literal so claude.ai does not ignore the connector, and so it can "
+        "match a connector you added with the same address.\n\n"
+        "## Install\n\n"
+        "```\n/plugin marketplace add FidelOdok/MetaForge\n"
+        f"/plugin install {CLOUD_PLUGIN_NAME}\n```\n\n"
+        "Then run `/mcp`, choose `metaforge`, and sign in with the access secret "
+        "your administrator gave you. There is no token field: the gateway answers "
+        "401 and Claude Code runs OAuth. The gateway needs "
+        "`METAFORGE_OAUTH_LOGIN_SECRET` set.\n\n"
+        "### On claude.ai\n\n"
+        "Open the plugin's **Connectors** tab. Adding a plugin does not add or sign "
+        "in its connector: **Add** it, then **Connect**. If it cannot be added, add "
+        "a custom connector under **Customize → Connectors** with the same address, "
+        "typed with no punctuation after it. Chat ignores agents and hooks; Cowork "
+        "loads agents.\n\n"
+        "## Which package\n\n"
+        "| | `metaforge-cloud` | `metaforge` | `metaforge-local` |\n"
+        "|---|---|---|---|\n"
+        "| For | the hosted gateway | any gateway, local by default | no gateway |\n"
+        "| Address | written in | you enter it, local default | none |\n\n"
+        "Install **one**. The manifest has no way to switch a server entry off, so "
+        "two packages would offer every tool twice.\n\n"
+        "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
+        f"## Skills\n\n{len(skills)} skills are bundled.\n\n"
+        "## Agents\n\n" + "\n".join(f"- `{a}`" for a in agents) + "\n\n"
+        "## Hooks\n\n"
+        f"{', '.join(hooks)}: the working rules at session start, and a reminder when a "
+        "flow proposal or patch is held for a person. Python 3 on the PATH; "
+        "`METAFORGE_PLUGIN_HOOKS=off` disables them.\n\n"
+        "## Writes wait for a human\n\n"
+        "A tool that writes is held for approval, because the hosted gateway sees "
+        "you as a remote caller. Held calls appear on the dashboard's Approvals "
+        "page.\n"
     )
     return root
 
@@ -834,15 +1026,34 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    for build in (build_claude_code, build_codex):
-        root = build(default_gateway_url=args.gateway_url)
-        print(f"wrote {root.relative_to(REPO)}")
-    # FORGE-374: takes no gateway URL, deliberately -- it has nothing to
-    # point at, and offering the option would imply otherwise.
-    local = build_claude_code_local()
-    print(f"wrote {local.relative_to(REPO)}")
-    catalog = build_marketplace()
-    print(f"wrote {catalog.relative_to(REPO)}")
+    def build_all() -> None:
+        for build in (build_claude_code, build_codex):
+            root = build(default_gateway_url=args.gateway_url)
+            print(f"wrote {root.relative_to(REPO)}")
+        # FORGE-374: takes no gateway URL, deliberately -- it has nothing to
+        # point at, and offering the option would imply otherwise.
+        local = build_claude_code_local()
+        print(f"wrote {local.relative_to(REPO)}")
+        # FORGE-658: takes no gateway URL either -- the hosted address is a constant.
+        cloud = build_claude_code_cloud()
+        print(f"wrote {cloud.relative_to(REPO)}")
+        catalog = build_marketplace()
+        print(f"wrote {catalog.relative_to(REPO)}")
+
+    global VERSION
+    build_all()
+    if args.gateway_url == DEFAULT_GATEWAY_URL:
+        # FORGE-657: version the content. Manifests are written before the
+        # digest is taken, and again if it moved, so they carry the new number.
+        bumped = bump_if_changed()
+        if bumped is not None and bumped != VERSION:
+            print(f"plugin version {VERSION} -> {bumped}")
+            VERSION = bumped
+            build_all()
+        else:
+            print(f"plugin version {VERSION}")
+    else:
+        print("custom --gateway-url: version not recorded; this tree is not the committed output")
     print(
         "verify: claude plugin validate --strict . integrations/claude-code "
         "integrations/claude-code-local"

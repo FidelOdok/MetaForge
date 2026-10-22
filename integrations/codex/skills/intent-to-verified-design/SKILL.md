@@ -255,7 +255,9 @@ Do each phase's work with the domain skills for that discipline (for example
 - **Name every part.** A CAD part's name becomes its STEP product name and its
   twin item name. Never `Part_1`, `Body`, `Box`.
 - **Commit geometry by reference.** After `freecad.export_model`, call
-  `twin.commit_geometry` with the same `session_id` and `obj_id` plus `name`.
+  `twin.commit_geometry` with the same `session_id` and `obj_id` plus `name`. Every part
+  must carry a colour (its chosen finish, as `part_colours` by part name):
+  the commit refuses an uncoloured model.
   For stateless tools (`cadquery.create_parametric`,
   `cadquery.execute_script`, `freecad.create_parametric`), pass their returned
   `cad_file` as `file_path`. Do not paste base64 when a reference works.

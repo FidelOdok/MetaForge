@@ -1238,7 +1238,11 @@ async def _build_context(
     native_tools = native_tools + [make_read_tool_result_tool(runtime_cell)]
     if chat_skills_enabled() and twin is not None and mcp_bridge is not None:
         native_tools = native_tools + await skill_tools_from_registry(
-            twin=twin, mcp_bridge=mcp_bridge, session_id=session_id
+            twin=twin,
+            mcp_bridge=mcp_bridge,
+            session_id=session_id,
+            # FORGE-633: industrial design's three checks beside mechanical's.
+            domain=("mechanical", "industrial_design"),
         )
     ctx = build_agent_runtime(
         provider_config_from_env(provider=provider, model=model, metrics=metrics),

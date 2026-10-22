@@ -11,7 +11,7 @@
 # when the phases or gates change, so a completed run can still say what
 # it actually ran.
 id: mech_v1
-version: 1.2.0
+version: 1.3.0
 extends: spine_v1
 name: Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven
 label: Mechanical design
@@ -67,6 +67,7 @@ phases:
     - Candidate processes compared on fit, availability and cost at quantity
     - Capability values sourced, not assumed
     - Chosen process and material recorded, with its limits as constraints
+- use: industrial_design
 - id: design
   title: Mechanical Design
   objective: >-

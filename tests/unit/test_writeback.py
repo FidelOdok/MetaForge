@@ -51,7 +51,7 @@ class TestWritebackCad:
                 "max_z": 5,
             },
             "parameters_used": {"width": 10, "height": 10},
-            "material": "aluminum_6061",
+            "material": "aluminium_6061_t6",
         }
 
         wp = await writeback_cad(twin, session_id, "main", skill_output)

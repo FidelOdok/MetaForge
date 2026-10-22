@@ -73,7 +73,7 @@ async def score_design_loop_run(
     load_n: float,
     deflection_limit_mm: float,
     sf_limit: float = 2.0,
-    material: str = "aluminum_6061",
+    material: str = "aluminium_6061_t6",
 ) -> dict[str, Any]:
     """Run the real orchestration and grade it against an independent
     direct call to the pure bisection math -- an outcome check, not a
@@ -102,9 +102,12 @@ async def score_design_loop_run(
     wp = await twin.get_work_product(UUID(work_product_id))
     assert wp is not None  # optimize() above already proved this work product exists
     length_mm, width_mm, height_mm = bounding_box_extents_mm(wp.metadata)
-    youngs_modulus_mpa, _poissons_ratio = resolve_elastic_properties(material)
-    density_kg_m3 = resolve_density_kg_m3(material)
-    yield_mpa = resolve_yield_mpa(material)
+    from api_gateway.library.material_figures import with_materials
+
+    async with with_materials([material]):
+        youngs_modulus_mpa, _poissons_ratio = resolve_elastic_properties(material)
+        density_kg_m3 = resolve_density_kg_m3(material)
+        yield_mpa = resolve_yield_mpa(material)
     expected = optimize_wall_thickness(
         length_mm=length_mm,
         width_mm=width_mm,

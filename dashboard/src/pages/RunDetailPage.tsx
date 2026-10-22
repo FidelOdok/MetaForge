@@ -10,6 +10,7 @@ import { PhaseActivity } from '../components/runs/PhaseActivity';
 import { RunChangesPanel } from '../components/items/RunChangesPanel';
 import { useDesignFlows } from '../hooks/use-design-flows';
 import { useFlowState } from '../hooks/use-flow-state';
+import { useRunToolEvents } from '../hooks/use-run-tool-events';
 import { useApproval } from '../hooks/use-approvals';
 import { useRun } from '../hooks/use-runs';
 
@@ -30,6 +31,7 @@ export function RunDetailPage() {
     String(runQuery.data?.status ?? ''),
   );
   const flowState = useFlowState(id, runActive);
+  const toolStream = useRunToolEvents(id, runActive);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const run = runQuery.data;
   const awaiting = run?.status === 'awaiting_approval';
@@ -145,6 +147,8 @@ export function RunDetailPage() {
             }
             events={flowState.data.events}
             live={flowState.data.live}
+            toolCalls={toolStream.calls}
+            toolStreamConnected={toolStream.connected}
           />
         </div>
       )}

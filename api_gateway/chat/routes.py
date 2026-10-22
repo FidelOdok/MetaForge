@@ -322,6 +322,8 @@ _WORK_PRODUCT_TYPE_DOMAINS: dict[str, str] = {
     "firmware_source": "firmware",
     "pinmap": "firmware",
     "simulation_result": "simulation",
+    # FORGE-633: renders are made for industrial design review.
+    "render": "industrial_design",
 }
 
 # A brand-new project has no work products yet -- exactly when the tool cap
@@ -377,6 +379,22 @@ _DESCRIPTION_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
         "fea",
         "stress analysis",
         "finite element",
+    ),
+    # FORGE-633: form factor, ergonomics and finishes.
+    "industrial_design": (
+        "industrial design",
+        "form factor",
+        "ergonomic",
+        "handheld",
+        "hand-held",
+        "colour, material",
+        "color, material",
+        "cmf",
+        "anodised",
+        "anodized",
+        "powder coat",
+        "surface finish",
+        "render",
     ),
 }
 

@@ -110,7 +110,7 @@ def workflow_params() -> DesignWorkflowParams:
         branch="main",
         shape_type="bracket",
         dimensions={"width": 100.0, "height": 50.0, "thickness": 10.0},
-        material="aluminum_6061",
+        material="aluminium_6061_t6",
         element_size=1.0,
         mesh_algorithm="netgen",
         output_format="inp",
@@ -357,7 +357,7 @@ class TestDesignWorkflowViaAgent:
             parameters={
                 "shape_type": "bracket",
                 "dimensions": {"width": 100.0, "height": 50.0, "thickness": 10.0},
-                "material": "aluminum_6061",
+                "material": "aluminium_6061_t6",
                 "stress_constraints": [
                     {"max_von_mises_mpa": 250.0, "safety_factor": 1.5},
                 ],
@@ -465,7 +465,7 @@ class TestWorkflowModels:
         )
         assert params.branch == "main"
         assert params.shape_type == "bracket"
-        assert params.material == "aluminum_6061"
+        assert params.material == "aluminium_6061_t6"
         assert params.element_size == 1.0
         assert params.mesh_algorithm == "netgen"
         assert params.output_format == "inp"

@@ -272,6 +272,14 @@ _DISCIPLINE_WORDS: dict[str, tuple[str, ...]] = {
     "firmware": ("firmware", "software", "controller code", "rtos"),
     "power": ("battery", "power supply", "charger"),
     "actuation": ("motor", "actuator", "servo", "gearbox", "drive"),
+    # FORGE-634: form factor, ergonomics and finishes.
+    "industrial_design": (
+        "industrial design",
+        "form factor",
+        "ergonomic",
+        "handheld",
+        "hand-held",
+    ),
 }
 
 

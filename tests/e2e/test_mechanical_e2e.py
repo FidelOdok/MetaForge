@@ -156,7 +156,7 @@ class TestMechanicalAgentE2E:
                             "material": "Al6061-T6",
                         }
                     ],
-                    "material_name": "aluminum_6061",
+                    "material_name": "aluminium_6061_t6",
                     "fixed_node_set": "Surface1",
                     "load_node_set": "Surface2",
                     "load_force_n": [0.0, 0.0, -100.0],
@@ -193,7 +193,7 @@ class TestMechanicalAgentE2E:
                             "material": "Al6061-T6",
                         }
                     ],
-                    "material_name": "aluminum_6061",
+                    "material_name": "aluminium_6061_t6",
                     "fixed_node_set": "Surface1",
                     "load_node_set": "Surface2",
                     "load_force_n": [0.0, 0.0, -100.0],
@@ -240,7 +240,7 @@ class TestMechanicalAgentE2E:
                             "material": "Al6061-T6",
                         }
                     ],
-                    "material_name": "aluminum_6061",
+                    "material_name": "aluminium_6061_t6",
                     "fixed_node_set": "Surface1",
                     "load_node_set": "Surface2",
                     "load_force_n": [0.0, 0.0, -100.0],
@@ -313,7 +313,7 @@ class TestValidateStressSkillE2E:
                         material="Al6061-T6",
                     )
                 ],
-                material_name="aluminum_6061",
+                material_name="aluminium_6061_t6",
                 fixed_node_set="Surface1",
                 load_node_set="Surface2",
                 load_force_n=(0.0, 0.0, -100.0),
@@ -348,7 +348,7 @@ class TestValidateStressSkillE2E:
                         material="Al6061-T6",
                     )
                 ],
-                material_name="aluminum_6061",
+                material_name="aluminium_6061_t6",
                 fixed_node_set="Surface1",
                 load_node_set="Surface2",
                 load_force_n=(0.0, 0.0, -100.0),
@@ -375,7 +375,7 @@ class TestValidateStressSkillE2E:
                         material="Al6061-T6",
                     )
                 ],
-                material_name="aluminum_6061",
+                material_name="aluminium_6061_t6",
                 fixed_node_set="Surface1",
                 load_node_set="Surface2",
                 load_force_n=(0.0, 0.0, -100.0),
@@ -396,7 +396,7 @@ class TestValidateStressSkillE2E:
                 mesh_file_path="models/missing.inp",
                 load_case="lc1",
                 constraints=[StressConstraint(max_von_mises_mpa=276.0, material="Al6061-T6")],
-                material_name="aluminum_6061",
+                material_name="aluminium_6061_t6",
                 fixed_node_set="Surface1",
                 load_node_set="Surface2",
                 load_force_n=(0.0, 0.0, -100.0),
@@ -510,7 +510,7 @@ class TestTwinIntegrationE2E:
                             "material": "Al6061-T6",
                         }
                     ],
-                    "material_name": "aluminum_6061",
+                    "material_name": "aluminium_6061_t6",
                     "fixed_node_set": "Surface1",
                     "load_node_set": "Surface2",
                     "load_force_n": [0.0, 0.0, -100.0],
@@ -566,7 +566,7 @@ class TestTwinIntegrationE2E:
                             "material": "Al6061-T6",
                         }
                     ],
-                    "material_name": "aluminum_6061",
+                    "material_name": "aluminium_6061_t6",
                     "fixed_node_set": "Surface1",
                     "load_node_set": "Surface2",
                     "load_force_n": [0.0, 0.0, -100.0],
@@ -969,7 +969,7 @@ class TestGenerateCadE2E:
                 parameters={
                     "shape_type": "bracket",
                     "dimensions": {"width": 50.0, "height": 30.0, "thickness": 5.0},
-                    "material": "aluminum_6061",
+                    "material": "aluminium_6061_t6",
                 },
             )
         )
@@ -984,7 +984,7 @@ class TestGenerateCadE2E:
         assert cad_result["volume_mm3"] == 12500.0
         assert cad_result["surface_area_mm2"] == 8400.0
         assert cad_result["shape_type"] == "bracket"
-        assert cad_result["material"] == "aluminum_6061"
+        assert cad_result["material"] == "aluminium_6061_t6"
         assert cad_result["bounding_box"]["max_x"] == 50.0
 
     async def test_generate_plate(self, stack):

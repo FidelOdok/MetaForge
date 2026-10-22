@@ -55,10 +55,15 @@ class TestTheConnectionIsAsked_Not_Assumed:
         # ...and still not into the server config.
         assert manifest["mcpServers"]["metaforge"]["url"].startswith("${user_config.gateway_url}")
 
-    def test_the_token_is_marked_sensitive(self) -> None:
-        # Otherwise it lands in settings.json in the clear.
+    def test_there_is_no_static_token_so_oauth_can_run(self) -> None:
+        """FORGE-659. Claude Code does not fall back to OAuth once a configured
+        Authorization header is rejected, so a bearer header here would stop the
+        sign-in ever being offered. No header and no token field: the gateway's
+        401 flags the server in /mcp and the person signs in there."""
         manifest = plugin_manifest(default_gateway_url=DEFAULT_GATEWAY_URL)
-        assert manifest["userConfig"]["api_token"]["sensitive"] is True
+        assert "api_token" not in manifest["userConfig"]
+        assert "headers" not in manifest["mcpServers"]["metaforge"]
+        assert "Authorization" not in json.dumps(manifest)
 
 
 class TestGeneratedPackage:
@@ -434,11 +439,11 @@ class TestMarketplace:
         assert catalog["owner"]["name"]
         assert catalog["plugins"]
 
-    def test_it_lists_both_packages(self) -> None:
-        from scripts.build_integrations import LOCAL_PLUGIN_NAME, PLUGIN_NAME
+    def test_it_lists_every_package(self) -> None:
+        from scripts.build_integrations import CLOUD_PLUGIN_NAME, LOCAL_PLUGIN_NAME, PLUGIN_NAME
 
         names = {p["name"] for p in self._catalog()["plugins"]}
-        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME}
+        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME, CLOUD_PLUGIN_NAME}
 
     def test_each_source_is_a_relative_path_that_exists(self) -> None:
         """A relative source resolves from the marketplace root, and must
@@ -699,17 +704,13 @@ class TestHookScript:
 
 
 class TestClaudeAiConnectorIsDocumented:
-    """claude.ai does not substitute `${user_config.*}` (FORGE-591).
+    """claude.ai ignores a connector whose URL has `${user_config.*}` in it.
 
-    Per-user configuration prompts are a Claude Code feature. On claude.ai the
-    plugin's bundled connector therefore shows its URL template literally, and
-    the user has to replace it by hand. That looks exactly like a broken
-    plugin, and the generated README used to say only "Claude Code asks for
-    your gateway URL on first enable" -- true there, false on the web.
-
-    No manifest change fixes it: every user runs their own gateway, so no
-    literal URL is correct for the next installer. Documentation is the fix,
-    which makes it the kind that rots silently -- hence this test.
+    FORGE-591 documented this as the template being shown literally for the user
+    to edit. Anthropic's plugin support table says otherwise: in chat such a
+    server is ignored outright, so there is nothing to edit (FORGE-659). The
+    README has to say what actually happens and send claude.ai users to the
+    package that works, or it reads as a broken plugin.
     """
 
     @staticmethod
@@ -723,22 +724,29 @@ class TestClaudeAiConnectorIsDocumented:
     def test_the_readme_names_claude_ai_at_all(self) -> None:
         assert "claude.ai" in self._readme()
 
-    def test_it_says_the_template_is_shown_literally(self) -> None:
+    def test_it_says_the_connector_is_ignored_and_points_at_the_cloud_package(self) -> None:
         """The specific surprise. Without this a user reads 'Claude Code asks
         for your gateway URL' and concludes the plugin is broken."""
+        from scripts.build_integrations import CLOUD_PLUGIN_NAME
+
         text = self._readme()
-        assert "${user_config.gateway_url}" in text
-        assert "literal" in text.lower()
+        assert "${user_config.*}" in text
+        assert "ignores" in text
+        assert f"`{CLOUD_PLUGIN_NAME}`" in text
 
-    def test_it_shows_what_to_paste_instead(self) -> None:
-        """Naming the problem without the replacement is half a fix."""
-        assert "?profile=core" in self._readme()
+    def test_it_explains_how_to_sign_in_and_what_the_gateway_needs(self) -> None:
+        """No token field, so the sign-in has to be written down, and so does the
+        server side: OAuth exists only when a login secret is set."""
+        text = self._readme()
+        assert "/mcp" in text
+        assert "METAFORGE_OAUTH_LOGIN_SECRET" in text
 
-    def test_it_warns_about_the_authorization_template(self) -> None:
-        """A literal `Bearer ${...}` is a malformed credential, which reads
-        worse than sending none -- the same reasoning the codex config.toml
-        already applies to an empty bearer."""
-        assert "Bearer ${user_config.api_token}" in self._readme()
+    def test_it_gives_a_key_only_gateway_a_way_in(self) -> None:
+        """Claude Code will not fall back to OAuth after a rejected header, so a
+        gateway with only an API key needs the server added by hand."""
+        text = self._readme()
+        assert "claude mcp add" in text
+        assert "--header" in text
 
 
 def test_the_profile_setting_names_every_profile() -> None:
@@ -751,3 +759,192 @@ def test_the_profile_setting_names_every_profile() -> None:
     text = plugin["userConfig"]["tool_profile"]["description"]
     for name in [*PROFILES, "all"]:
         assert re.search(rf"\b{name}\b", text), f"profile {name} missing from the description"
+
+
+# ---------------------------------------------------------------------------
+# The plugin is versioned by its content (FORGE-657)
+# ---------------------------------------------------------------------------
+
+
+class TestPluginVersion:
+    """The version was a literal 0.1.0 that nothing bumped, so installed
+    plugins never saw a change. Claude Code updates by comparing the string."""
+
+    MANIFESTS = (
+        "claude-code/.claude-plugin/plugin.json",
+        "claude-code-local/.claude-plugin/plugin.json",
+        "claude-code-cloud/.claude-plugin/plugin.json",
+        "codex/.codex-plugin/plugin.json",
+        "codex/plugin.json",
+    )
+
+    def test_every_manifest_carries_the_locked_version(self) -> None:
+        from scripts.build_integrations import read_version_lock
+
+        locked = read_version_lock()["version"]
+        for rel in self.MANIFESTS:
+            found = json.loads((REPO / "integrations" / rel).read_text())["version"]
+            assert found == locked, f"{rel} is {found}, the lock says {locked}"
+
+    def test_the_version_is_semver(self) -> None:
+        from scripts.build_integrations import read_version_lock
+
+        assert re.fullmatch(r"\d+\.\d+\.\d+", read_version_lock()["version"])
+
+    def test_content_changed_without_a_bump_fails(self) -> None:
+        """Regenerate from the sources, then compare with what the lock was
+        cut for. A skill, PLUGIN.md or tool-list change that was not followed
+        by `python scripts/build_integrations.py` lands here."""
+        from scripts.build_integrations import (
+            build_claude_code_cloud,
+            content_digest,
+            read_version_lock,
+        )
+
+        build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
+        build_claude_code_local()
+        build_claude_code_cloud()
+        build_codex(default_gateway_url=DEFAULT_GATEWAY_URL)
+        assert content_digest() == read_version_lock()["content_digest"], (
+            "plugin content changed but the version was not bumped: "
+            "run `python scripts/build_integrations.py` and commit the result"
+        )
+
+    def test_next_version_bumps_the_patch(self) -> None:
+        from scripts.build_integrations import next_version
+
+        assert next_version("0.2.0") == "0.2.1"
+        assert next_version("0.2.9") == "0.2.10"
+
+    def _tree(self, tmp_path: Path, *, digest: str, skill: str = "one") -> tuple[Path, Path]:
+        root = tmp_path / "integrations"
+        (root / "pkg" / ".claude-plugin").mkdir(parents=True)
+        (root / "pkg" / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "x", "version": "0.2.0"})
+        )
+        (root / "pkg" / "skill.md").write_text(skill)
+        lock = root / "plugin-version.json"
+        lock.write_text(json.dumps({"version": "0.2.0", "content_digest": digest}))
+        return root, lock
+
+    def test_unchanged_content_does_not_bump(self, tmp_path: Path) -> None:
+        from scripts.build_integrations import bump_if_changed, content_digest
+
+        root, lock = self._tree(tmp_path, digest="")
+        digest = content_digest(root, lock)
+        lock.write_text(json.dumps({"version": "0.2.0", "content_digest": digest}))
+        assert bump_if_changed(root, lock) is None
+        assert json.loads(lock.read_text())["version"] == "0.2.0"
+
+    def test_changed_content_bumps_and_records(self, tmp_path: Path) -> None:
+        from scripts.build_integrations import bump_if_changed, content_digest
+
+        root, lock = self._tree(tmp_path, digest="")
+        lock.write_text(
+            json.dumps({"version": "0.2.0", "content_digest": content_digest(root, lock)})
+        )
+        (root / "pkg" / "skill.md").write_text("two")
+        assert bump_if_changed(root, lock) == "0.2.1"
+        recorded = json.loads(lock.read_text())
+        assert recorded["version"] == "0.2.1"
+        assert recorded["content_digest"] == content_digest(root, lock)
+        # Settled: running it again changes nothing.
+        assert bump_if_changed(root, lock) is None
+
+    def test_the_version_field_itself_is_not_content(self, tmp_path: Path) -> None:
+        """Otherwise a bump would change the digest and never settle."""
+        from scripts.build_integrations import content_digest
+
+        root, lock = self._tree(tmp_path, digest="")
+        before = content_digest(root, lock)
+        manifest = root / "pkg" / ".claude-plugin" / "plugin.json"
+        manifest.write_text(json.dumps({"name": "x", "version": "9.9.9"}))
+        assert content_digest(root, lock) == before
+
+    def test_an_empty_digest_adopts_the_content_without_bumping(self, tmp_path: Path) -> None:
+        from scripts.build_integrations import bump_if_changed
+
+        root, lock = self._tree(tmp_path, digest="")
+        assert bump_if_changed(root, lock) == "0.2.0"
+        assert json.loads(lock.read_text())["content_digest"]
+
+
+# ---------------------------------------------------------------------------
+# The hosted-gateway package: literal address, an experiment (FORGE-658, FORGE-661)
+# ---------------------------------------------------------------------------
+
+
+class TestCloudPackage:
+    """The hosted address is written in so claude.ai does not ignore the connector
+    (it ignores any URL with a `${user_config.*}` reference), and so it can match a
+    connector added on the account with the same address. FORGE-661 is an
+    experiment: if it does not help, revert to the FORGE-660 form."""
+
+    @pytest.fixture(scope="class")
+    def root(self) -> Path:
+        from scripts.build_integrations import build_claude_code_cloud
+
+        return build_claude_code_cloud()
+
+    @pytest.fixture(scope="class")
+    def manifest(self, root: Path) -> dict:
+        return json.loads((root / ".claude-plugin" / "plugin.json").read_text())
+
+    def test_the_connector_is_the_bare_literal_address(self, manifest: dict) -> None:
+        from scripts.build_integrations import HOSTED_GATEWAY_URL
+
+        url = manifest["mcpServers"]["metaforge"]["url"]
+        # Exactly the bare URL: the connector claude.ai signed in to had no query
+        # string, and an earlier plugin build with `?profile=all` stayed at "Not added".
+        assert url == HOSTED_GATEWAY_URL
+        assert "?" not in url
+        # Nothing for claude.ai to ignore.
+        assert "${" not in json.dumps(manifest["mcpServers"])
+
+    def test_there_is_nothing_to_configure_and_no_static_token(self, manifest: dict) -> None:
+        """No user_config anywhere in the connector, and no bearer header: a
+        header would stop Claude Code ever offering the sign-in (FORGE-659)."""
+        assert "userConfig" not in manifest
+        assert "headers" not in manifest["mcpServers"]["metaforge"]
+
+    def test_it_installs_alongside_the_others(self, manifest: dict) -> None:
+        from scripts.build_integrations import LOCAL_PLUGIN_NAME, PLUGIN_NAME
+
+        assert manifest["name"] not in {PLUGIN_NAME, LOCAL_PLUGIN_NAME}
+
+    def test_it_carries_the_same_skills_and_commands(self, root: Path) -> None:
+        main = build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
+        assert sorted(p.name for p in (root / "skills").iterdir()) == sorted(
+            p.name for p in (main / "skills").iterdir()
+        )
+        assert sorted(p.name for p in (root / "commands").iterdir()) == sorted(
+            p.name for p in (main / "commands").iterdir()
+        )
+
+    def test_it_ships_agents_and_hooks_like_the_main_package(self, root: Path) -> None:
+        main = build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
+        for folder in ("agents", "hooks"):
+            assert list((root / folder).iterdir()), folder
+            assert sorted(p.name for p in (root / folder).iterdir()) == sorted(
+                p.name for p in (main / folder).iterdir()
+            )
+        assert (root / "hooks" / "hooks.json").read_text() == (
+            main / "hooks" / "hooks.json"
+        ).read_text()
+
+    def test_the_readme_says_how_to_install_and_sign_in(self, root: Path) -> None:
+        from scripts.build_integrations import CLOUD_PLUGIN_NAME
+
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        assert f"/plugin install {CLOUD_PLUGIN_NAME}" in readme
+        assert "FidelOdok/MetaForge" in readme
+        assert "/mcp" in readme
+        assert "METAFORGE_OAUTH_LOGIN_SECRET" in readme
+
+    def test_the_readme_explains_claude_ai(self, root: Path) -> None:
+        """Adding a plugin does not add or sign in its connector, and a custom
+        connector with the same address is the fallback."""
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        assert "**Add** it, then **Connect**" in readme
+        assert "custom connector" in readme
+        assert "FORGE-661" in readme

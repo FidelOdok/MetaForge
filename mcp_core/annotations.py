@@ -117,6 +117,10 @@ READ_ONLY: frozenset[str] = frozenset(
         "web.search",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
+        # FORGE-628: renders and a staged .blend are returned inline and the
+        # scratch directory removed; nothing is left behind.
+        "blender.render",
+        "blender.export_blend",
         # FORGE-615: arithmetic over the caller's figures.
         "cost.estimate_manufacturing",
         # FORGE-451: machine library reads.
@@ -129,6 +133,17 @@ READ_ONLY: frozenset[str] = frozenset(
         "library.process_limits",
         "library.list_materials",
         "library.get_material",
+        # FORGE-449: mechanical component reads, and building a standard part
+        # from its table (stores nothing).
+        "library.list_components",
+        "library.get_component",
+        "library.standard_part",
+        # FORGE-631: appearance (colour, material, finish) reads.
+        "library.list_appearances",
+        "library.get_appearance",
+        # FORGE-635: ergonomic limit reads.
+        "library.list_ergonomic_limits",
+        "library.get_ergonomic_limit",
         # FORGE-451 step 3: reads the printer's controller; registers nothing.
         "library.discover_machine",
         # FORGE-451 step 4: asks the machine about a job; writes nothing.
@@ -271,6 +286,8 @@ ADDITIVE: frozenset[str] = frozenset(
         "twin.commit_design_sketch",
         "twin.commit_engineering_change",
         "twin.commit_geometry",
+        # FORGE-647: a live-view placement, see guardrails.BOOKKEEPING.
+        "twin.place_part",
         "twin.commit_hazard_analysis",
         "twin.commit_procurement_record",
         "twin.commit_system_architecture",
@@ -297,6 +314,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # metadata -- a pure append, never overwrites the source work
         # product or its joints.
         "twin.create_firmware_scaffold",
+        # FORGE-630: adds a render node linked to the model it shows; the
+        # model itself is never touched. With store=false it records nothing.
+        "twin.render_work_product",
         "twin.optimize_parameter",
         "twin.propose_change",
         "twin.propose_engineering_change",
@@ -338,6 +358,12 @@ ADDITIVE: frozenset[str] = frozenset(
         "library.update_process",
         "library.register_material",
         "library.update_material",
+        "library.register_component",
+        "library.update_component",
+        "library.register_appearance",
+        "library.update_appearance",
+        "library.register_ergonomic_limit",
+        "library.update_ergonomic_limit",
         # Records one evidence entity from the machine's own report.
         "library.record_job_result",
         # FORGE-427: a quote is recorded in the twin; nothing is bought.
@@ -363,6 +389,8 @@ PRODUCING: frozenset[str] = frozenset(
         "calculix.run_thermal",
         # FORGE-542: writes its deck and rawfile to the adapter workspace only.
         "spice.run_simulation",
+        # FORGE-557: writes its case directory to the adapter workspace only.
+        "openfoam.run_internal_flow",
         "gazebo.run_simulation",
         "isaac_sim.render_scene",
         "isaac_sim.run_physics",

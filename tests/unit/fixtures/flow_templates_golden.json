@@ -202,7 +202,7 @@
   "version": "1.0.0"
  },
  "hardware_v1": {
-  "content_hash": "400b2ed1b2d8f2ab58573058e1e8fa132f52acf8fd53df74ca438bbd2872a149",
+  "content_hash": "845764e0bbd6e97c1dacbfc36f2ae47bd4b7882db050e13296075e8199f4d2bd",
   "definition": {
    "id": "hardware_v1",
    "name": "",
@@ -400,6 +400,40 @@
      "condition": null,
      "depends_on": null,
      "disciplines": [
+      "industrial_design"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision",
+      "constraint_set"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Form factor envelope defined from sized contents, clearance and wall, each sourced",
+       "Envelope recorded as a constraint for mechanical design",
+       "Ergonomics checked against sourced limits for the stated users, or recorded as not applicable with the reason",
+       "Finishes chosen per visible part and compatible with its material, or the open items listed",
+       "Unknown and assumed values named"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Industrial design review"
+     },
+     "id": "industrial_design",
+     "model": null,
+     "objective": "Decide the product's form factor, check that people can use it, and choose finishes that suit how its parts are made, before mechanical design draws the housing. (1) Form factor: list the contents the product must hold (from the architecture and the selected concept: boards, batteries, actuators, bought parts), each with its size and how it is known, and run form_factor_envelope with the internal clearance and the wall thickness (the chosen process's minimum wall, from library.process_limits or library.machine_limits, when a process is chosen), checked against the maximum envelope the requirements state. Record the resulting envelope with twin.record_constraint_set, parent_refs set to the requirement it serves, so mechanical design works to it. (2) Ergonomics: if people hold, press, reach or lift the product, take the intended users from the requirements (ask the person if no requirement says), find a sourced limit for each human-contact feature (an anthropometric dataset or ergonomics guidance, cited with its table and percentile) and run check_ergonomics. If nobody handles it, record that, with the reason, instead. Never supply a body measurement from memory. (3) Colour, material and finish: the look is the person's choice; ask for it if it was not stated. Choose a library appearance per visible part (library.list_appearances; a new one is registered with library.register_appearance, held for the person's approval, with its colour code and a sourced screen value), and run check_cmf_compatibility against each part's material. Record one decision with twin.record_decision covering the envelope, the ergonomics verdict and the finishes, naming every unknown and every assumed value.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Industrial Design"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
       "mechanical"
      ],
      "enforce_deliverables": true,
@@ -569,10 +603,10 @@
     }
    ]
   },
-  "version": "1.0.0"
+  "version": "1.1.0"
  },
  "mech_v1": {
-  "content_hash": "c6971ac40bb1b414f93fd58b219b1fce7badb91d0318902cf94253a63f2fea46",
+  "content_hash": "52a13880ed28784c144c3d796efaa9ee8f79010a9389394916b6c8b5f901827d",
   "definition": {
    "id": "mech_v1",
    "name": "Mechanical vertical (Requirements -> Mechanical Design -> V&V), goal-driven",
@@ -737,6 +771,40 @@
      "condition": null,
      "depends_on": null,
      "disciplines": [
+      "industrial_design"
+     ],
+     "enforce_deliverables": true,
+     "expected_artifacts": [
+      "design_decision",
+      "constraint_set"
+     ],
+     "gate": {
+      "auto_approve": false,
+      "criteria": [
+       "Form factor envelope defined from sized contents, clearance and wall, each sourced",
+       "Envelope recorded as a constraint for mechanical design",
+       "Ergonomics checked against sourced limits for the stated users, or recorded as not applicable with the reason",
+       "Finishes chosen per visible part and compatible with its material, or the open items listed",
+       "Unknown and assumed values named"
+      ],
+      "enforce_constraints": false,
+      "gate_id": null,
+      "name": "Industrial design review"
+     },
+     "id": "industrial_design",
+     "model": null,
+     "objective": "Decide the product's form factor, check that people can use it, and choose finishes that suit how its parts are made, before mechanical design draws the housing. (1) Form factor: list the contents the product must hold (from the architecture and the selected concept: boards, batteries, actuators, bought parts), each with its size and how it is known, and run form_factor_envelope with the internal clearance and the wall thickness (the chosen process's minimum wall, from library.process_limits or library.machine_limits, when a process is chosen), checked against the maximum envelope the requirements state. Record the resulting envelope with twin.record_constraint_set, parent_refs set to the requirement it serves, so mechanical design works to it. (2) Ergonomics: if people hold, press, reach or lift the product, take the intended users from the requirements (ask the person if no requirement says), find a sourced limit for each human-contact feature (an anthropometric dataset or ergonomics guidance, cited with its table and percentile) and run check_ergonomics. If nobody handles it, record that, with the reason, instead. Never supply a body measurement from memory. (3) Colour, material and finish: the look is the person's choice; ask for it if it was not stated. Choose a library appearance per visible part (library.list_appearances; a new one is registered with library.register_appearance, held for the person's approval, with its colour code and a sourced screen value), and run check_cmf_compatibility against each part's material. Record one decision with twin.record_decision covering the envelope, the ergonomics verdict and the finishes, naming every unknown and every assumed value.",
+     "outcome": "",
+     "required_deliverables": [
+      "design_decision"
+     ],
+     "slots": [],
+     "title": "Industrial Design"
+    },
+    {
+     "condition": null,
+     "depends_on": null,
+     "disciplines": [
       "mechanical"
      ],
      "enforce_deliverables": true,
@@ -830,6 +898,6 @@
     }
    ]
   },
-  "version": "1.2.0"
+  "version": "1.3.0"
  }
 }

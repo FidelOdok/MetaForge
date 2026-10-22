@@ -196,7 +196,10 @@ class TestTheSidecarListsTheTools:
         """Starting a flow is a core action; the default plugin install is core."""
         server = await _boot("--profile", "core")
         listed = await _listed(server)
-        missing = sorted(t for t in FLOW_TOOLS if _wire(t) not in listed and t not in listed)
+        # FORGE-630: run.get_status gave its core place to
+        # twin.render_work_product; flow.status reports a run's state there.
+        wanted = FLOW_TOOLS - {"run.get_status"}
+        missing = sorted(t for t in wanted if _wire(t) not in listed and t not in listed)
         assert not missing, f"core profile is missing {missing}"
 
     @pytest.mark.usefixtures("sidecar_env")

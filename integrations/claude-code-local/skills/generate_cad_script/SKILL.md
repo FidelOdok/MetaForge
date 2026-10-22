@@ -62,7 +62,7 @@ Ask the user for anything missing. Do not fill these in with defaults or
 | Every dimension, in mm | The script hard-codes them; a guessed one is an invented design | "legs 40 and 30 mm, 3 mm thick" |
 | Hole sizes and positions | Clearance vs tapped vs press fit changes the number | "two M4 clearance, 4.5 mm, 10 mm from each end" |
 | Datum and orientation | Which face sits on XY, where the origin is; FEA and assembly later rely on it | "mounting face on XY, origin at the corner" |
-| Material | Recorded with the part; on the FreeCAD path it is written into the STEP so the viewer colours it | `aluminum_6061`, `PETG` |
+| Material | Recorded with the part; on the FreeCAD path it is written into the STEP so the viewer colours it | `aluminium_6061_t6`, `PETG` |
 | Project | The commit links the part to it | the project name or id |
 | Dialect, if the user cares | CadQuery is the default; FreeCAD when they want a session they can keep editing | `cadquery` |
 
@@ -165,9 +165,9 @@ false` means the part exists but is not on the project; say so.
    script (no `exportStep`, no `Part.export`); step 5 below does it properly.
 3. Read `obj_id` from the reply. Call `freecad.measure` with `session_id` and
    `obj_id`, and run the checks from step 4 on its volume and bounding box.
-4. Call `freecad.export_model` with `session_id`, `obj_id`, and `material`
-   only if the user named one (an unknown material stays uncoloured; do not
-   substitute a colour). It preserves the Label as the STEP PRODUCT name.
+4. Call `freecad.export_model` with `session_id`, `obj_id` and `part_colours`
+   from each part's chosen finish (see Colours; never substitute a colour).
+   It preserves the Label as the STEP PRODUCT name.
 5. Call `twin.commit_geometry` with the **same** `session_id` and `obj_id`,
    plus `name`, `project_id`, `script_source` (the code) and `parameters`.
    Both ids are required together on every call, including a retry.
@@ -181,6 +181,23 @@ false` means the part exists but is not on the project; say so.
 - Report: part name, `node_id`, `model_url`, measured volume and bounding box
   against the requested dimensions, the dialect used, and anything not done.
 
+## Colours (required)
+
+Every part you commit must carry a colour. The viewer shows only the colours
+written in the STEP, and `twin.commit_geometry` refuses a plugin's model while
+any part is uncoloured, naming the parts. A part's colour is its finish, and
+the finish is the person's choice:
+
+1. Find each part's finish with the `colour-material-finish` skill
+   (`library.list_appearances`, `library.get_appearance`). If the person has
+   not chosen one, ask; never invent a colour.
+2. Pass `part_colours` = {part name (the STEP product, i.e. the FreeCAD
+   Label or the name you gave the part): the appearance's `srgb_hex`} to
+   `twin.commit_geometry`, which writes them into the STEP. `color` colours a
+   one-part model. On the FreeCAD session path `freecad.export_model` takes
+   the same `part_colours`.
+3. If the commit is refused, colour the parts it names and commit again.
+
 ## Checks before you report
 
 - [ ] Every dimension in the script came from the user or a cited document
@@ -188,7 +205,7 @@ false` means the part exists but is not on the project; say so.
 - [ ] Volume is positive and the bounding box matches the requested extents
 - [ ] Committed by reference (`file_path`, or `session_id` + `obj_id`), not pasted base64
 - [ ] `properties` passed, so constraints on this part can be evaluated
-- [ ] No colour was invented; colour only from a material the user named
+- [ ] Every part coloured from its chosen finish; no colour invented
 - [ ] FreeCAD session closed
 
 ## Failure handling

@@ -64,7 +64,7 @@ fit the part it is meant to bolt to.
 | `bolt_pattern`: `plate_length_mm`, `plate_width_mm`, `plate_thickness_mm` | Plate size | 60, 60, 5 |
 | `bolt_pattern`: `hole_diameter_mm`, `hole_count`, `pattern_radius_mm` | The pattern itself; from the mating part's datasheet | 3.4, 4, 20 |
 | `rib`: `length_mm`, `height_mm`, `thickness_mm` | Base, rise and extrusion of the triangle | 30, 20, 3 |
-| Material | Written into the STEP so the viewer colours it; recorded with the part | `aluminum_6061` |
+| Material | Written into the STEP so the viewer colours it; recorded with the part | `aluminium_6061_t6` |
 
 Before building, check the bolt pattern is physically possible and, if not,
 tell the user which rule fails and ask for new numbers (do not adjust them):
@@ -160,6 +160,23 @@ changed value. The commit links the new node to the one it replaces as its
 next revision. Without `project_id` no link is made and you get an unrelated
 duplicate. If `twin.item_history` is in your list, use it to show the user
 the revisions; otherwise report the new and previous `node_id`.
+
+## Colours (required)
+
+Every part you commit must carry a colour. The viewer shows only the colours
+written in the STEP, and `twin.commit_geometry` refuses a plugin's model while
+any part is uncoloured, naming the parts. A part's colour is its finish, and
+the finish is the person's choice:
+
+1. Find each part's finish with the `colour-material-finish` skill
+   (`library.list_appearances`, `library.get_appearance`). If the person has
+   not chosen one, ask; never invent a colour.
+2. Pass `part_colours` = {part name (the STEP product, i.e. the FreeCAD
+   Label or the name you gave the part): the appearance's `srgb_hex`} to
+   `twin.commit_geometry`, which writes them into the STEP. `color` colours a
+   one-part model. On the FreeCAD session path `freecad.export_model` takes
+   the same `part_colours`.
+3. If the commit is refused, colour the parts it names and commit again.
 
 ## Checks before you report
 

@@ -2,9 +2,9 @@
 #
 # The gated stages every product goes through, defined once:
 # intent -> needs -> requirements -> feasibility -> (architecture ->
-# concept selection) -> design -> V&V -> manufacturing / release.
-# A flow template `extends: spine_v1` and pulls a stage with `- use: <id>`,
-# overriding only the keys it needs to. Domain fragments
+# concept selection -> industrial design) -> design -> V&V -> manufacturing /
+# release. A flow template `extends: spine_v1` and pulls a stage with
+# `- use: <id>`, overriding only the keys it needs to. Domain fragments
 # (templates/fragments/) attach their tasks to these stages.
 #
 # Bump `version` when a stage's objective, deliverables or gate change: every
@@ -144,6 +144,44 @@ phases:
     - Rationale captured
     - Selected concept linked to requirements/objectives
     gate_id: G5
+- id: industrial_design
+  title: Industrial Design
+  objective: >-
+    Decide the product's form factor, check that people can use it, and choose finishes that
+    suit how its parts are made, before mechanical design draws the housing. (1) Form factor:
+    list the contents the product must hold (from the architecture and the selected concept:
+    boards, batteries, actuators, bought parts), each with its size and how it is known, and run
+    form_factor_envelope with the internal clearance and the wall thickness (the chosen
+    process's minimum wall, from library.process_limits or library.machine_limits, when a
+    process is chosen), checked against the maximum envelope the requirements state. Record the
+    resulting envelope with twin.record_constraint_set, parent_refs set to the requirement it
+    serves, so mechanical design works to it. (2) Ergonomics: if people hold, press, reach or
+    lift the product, take the intended users from the requirements (ask the person if no
+    requirement says), find a sourced limit for each human-contact feature (an anthropometric
+    dataset or ergonomics guidance, cited with its table and percentile) and run
+    check_ergonomics. If nobody handles it, record that, with the reason, instead. Never supply
+    a body measurement from memory. (3) Colour, material and finish: the look is the person's
+    choice; ask for it if it was not stated. Choose a library appearance per visible part
+    (library.list_appearances; a new one is registered with library.register_appearance, held
+    for the person's approval, with its colour code and a sourced screen value), and run
+    check_cmf_compatibility against each part's material. Record one decision with
+    twin.record_decision covering the envelope, the ergonomics verdict and the finishes, naming
+    every unknown and every assumed value.
+  expected_artifacts:
+  - design_decision
+  - constraint_set
+  required_deliverables:
+  - design_decision
+  disciplines:
+  - industrial_design
+  gate:
+    name: Industrial design review
+    criteria:
+    - Form factor envelope defined from sized contents, clearance and wall, each sourced
+    - Envelope recorded as a constraint for mechanical design
+    - Ergonomics checked against sourced limits for the stated users, or recorded as not applicable with the reason
+    - Finishes chosen per visible part and compatible with its material, or the open items listed
+    - Unknown and assumed values named
 - id: design
   title: Detailed Design
   objective: >-

@@ -100,9 +100,9 @@ class TestRankMassSensitivity:
             wall_thickness_mm=5,
             density_kg_m3=2700,  # aluminum
             limit_kg=4.5,
-            material_name="aluminum_6061",
+            material_name="aluminium_6061_t6",
             candidate_material_densities={
-                "aluminum_6061": 2700,
+                "aluminium_6061_t6": 2700,
                 "titanium": 4500,
                 "carbon_fiber": 1600,
             },
@@ -119,8 +119,8 @@ class TestRankMassSensitivity:
             wall_thickness_mm=5,
             density_kg_m3=2700,
             limit_kg=4.5,
-            material_name="aluminum_6061",
-            candidate_material_densities={"aluminum_6061": 2700, "carbon_fiber": 1600},
+            material_name="aluminium_6061_t6",
+            candidate_material_densities={"aluminium_6061_t6": 2700, "carbon_fiber": 1600},
         )
         by_param = {e.parameter: e for e in ranking.rankings}
         assert by_param["material=carbon_fiber"].sensitivity > 0
@@ -133,10 +133,10 @@ class TestRankMassSensitivity:
             wall_thickness_mm=5,
             density_kg_m3=2700,
             limit_kg=4.5,
-            material_name="aluminum_6061",
-            candidate_material_densities={"aluminum_6061": 2700, "titanium": 4500},
+            material_name="aluminium_6061_t6",
+            candidate_material_densities={"aluminium_6061_t6": 2700, "titanium": 4500},
         )
-        assert "material=aluminum_6061" not in {e.parameter for e in ranking.rankings}
+        assert "material=aluminium_6061_t6" not in {e.parameter for e in ranking.rankings}
 
     def test_thicker_wall_worsens_mass_margin(self) -> None:
         ranking = rank_mass_sensitivity(
@@ -146,7 +146,7 @@ class TestRankMassSensitivity:
             wall_thickness_mm=5,
             density_kg_m3=2700,
             limit_kg=4.5,
-            material_name="aluminum_6061",
+            material_name="aluminium_6061_t6",
         )
         by_param = {e.parameter: e for e in ranking.rankings}
         assert by_param["wall_thickness_mm"].sensitivity < 0

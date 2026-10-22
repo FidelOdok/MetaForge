@@ -23,6 +23,7 @@ from uuid import UUID
 
 import structlog
 
+from api_gateway.library.material_figures import with_materials
 from api_gateway.twin.metric_evaluator import bounding_box_extents_mm
 from observability.tracing import get_tracer
 from tool_registry.tools.cadquery.materials import (
@@ -44,7 +45,9 @@ _METRICS = frozenset({"tip_deflection", "mass"})
 # FORGE-234's table (a sensitivity ranking with 16 candidate materials is
 # noise; the ticket asks "ranked by wall thickness and material", i.e.
 # material as ONE more ranked axis, not "compare against everything").
-_DEFAULT_CANDIDATE_MATERIALS = ("aluminum_6061", "steel", "titanium", "carbon_fiber")
+#: FORGE-446: there is no default candidate set any more. It used to name four
+#: generic table entries; picking grades for the person is what the library
+#: refuses to do, so a mass ranking names its candidates.
 
 
 def make_sensitivity_ranker(twin: Any, *, evidence_recorder: Any = None) -> Any:
@@ -57,7 +60,7 @@ def make_sensitivity_ranker(twin: Any, *, evidence_recorder: Any = None) -> Any:
         work_product_id: str,
         wall_thickness_mm: float,
         project_id: str | None = None,
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
         load_n: float | None = None,
         deflection_limit_mm: float | None = None,
         mass_limit_kg: float | None = None,
@@ -79,7 +82,8 @@ def make_sensitivity_ranker(twin: Any, *, evidence_recorder: Any = None) -> Any:
                     "twin.rank_sensitivity: metric='tip_deflection' requires 'load_n' and "
                     "'deflection_limit_mm'"
                 )
-            youngs_modulus_mpa, _poissons_ratio = resolve_elastic_properties(material)
+            async with with_materials([material]):
+                youngs_modulus_mpa, _poissons_ratio = resolve_elastic_properties(material)
             ranking = rank_deflection_sensitivity(
                 length_mm=length_mm,
                 width_mm=width_mm,
@@ -93,9 +97,15 @@ def make_sensitivity_ranker(twin: Any, *, evidence_recorder: Any = None) -> Any:
         else:
             if mass_limit_kg is None:
                 raise ValueError("twin.rank_sensitivity: metric='mass' requires 'mass_limit_kg'")
-            density_kg_m3 = resolve_density_kg_m3(material)
-            candidates = candidate_materials or list(_DEFAULT_CANDIDATE_MATERIALS)
-            candidate_densities = {name: resolve_density_kg_m3(name) for name in candidates}
+            if not candidate_materials:
+                raise ValueError(
+                    "twin.rank_sensitivity: metric='mass' needs candidate_materials, the "
+                    "library materials to compare (library.list_materials)"
+                )
+            candidates = list(candidate_materials)
+            async with with_materials([material, *candidates]):
+                density_kg_m3 = resolve_density_kg_m3(material)
+                candidate_densities = {name: resolve_density_kg_m3(name) for name in candidates}
             ranking = rank_mass_sensitivity(
                 length_mm=length_mm,
                 width_mm=width_mm,

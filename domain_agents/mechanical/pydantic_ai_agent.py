@@ -232,7 +232,7 @@ def create_mechanical_agent(
             constraints: List of stress constraints, each with
                 max_von_mises_mpa (float) and safety_factor (float).
             material_name: Material name for FEA elastic properties (e.g.
-                'steel', 'aluminum_6061').
+                'steel', 'aluminium_6061_t6').
             fixed_node_set: Mesh element set name to fully constrain (e.g.
                 'Surface1', gmsh's own per-STEP-face group).
             load_node_set: Mesh element set name to apply load_force_n to.
@@ -410,7 +410,7 @@ def create_mechanical_agent(
         ctx: RunContext[MechanicalAgentDeps],
         tolerances: list[dict[str, Any]],
         manufacturing_process: dict[str, Any],
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
     ) -> dict[str, Any]:
         """Check dimensional tolerances against manufacturing process capabilities.
 
@@ -465,7 +465,7 @@ def create_mechanical_agent(
         shape_type: str,
         dimensions: dict[str, Any],
         name: str = "",
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
         output_path: str = "",
     ) -> dict[str, Any]:
         """Generate a CAD model from parametric specifications.
@@ -529,7 +529,7 @@ def create_mechanical_agent(
         script: str = "",
         backend: str = "cadquery",
         constraints: dict[str, Any] | None = None,
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
     ) -> dict[str, Any]:
         """Generate a CAD script from a natural language description and execute it.
 
@@ -607,7 +607,7 @@ def create_mechanical_agent(
     async def generate_cad_ir(
         ctx: RunContext[MechanicalAgentDeps],
         entities: list[dict[str, Any]],
-        material: str = "aluminum_6061",
+        material: str = "aluminium_6061_t6",
         name: str = "",
     ) -> dict[str, Any]:
         """Generate CAD geometry from a structured Design IR feature tree (FreeCAD).

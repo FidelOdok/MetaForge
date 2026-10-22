@@ -110,7 +110,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "flow.capabilities",
         "flow.lifecycle",
         "flow.patch",
-        "run.get_status",
+        # FORGE-630: run.get_status gave its place to twin.render_work_product;
+        # flow.status reports a run's state, and run.get_status stays in `all`.
         "run.start_design_flow",
         "twin.compute_hierarchy_rollup",
         "twin.evaluate_metric",
@@ -120,6 +121,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "twin.record_constraint_set",
         "twin.record_document",
         "twin.record_hierarchy_node",
+        # FORGE-630: see a part. The Codex plugin connects with `core`, so
+        # without it there a Codex user could not render anything.
+        "twin.render_work_product",
         "web.fetch",
         "web.search",
     },
@@ -143,6 +147,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "freecad.get_properties",
         "freecad.list_named_faces",
         "twin.commit_geometry",
+        # FORGE-630: see what was modelled.
+        "twin.render_work_product",
         "twin.stage_work_product_file",
     },
     # A mechanical product end to end (FORGE-479): the stateful FreeCAD session
@@ -199,6 +205,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "gazebo.extract_results",
         "gazebo.run_simulation",
         "gazebo.validate_world",
+        # FORGE-557: steady internal flow (pressure drop, flow rate).
+        "openfoam.run_internal_flow",
         # FORGE-542: circuit simulation is prediction too.
         "spice.run_simulation",
         "twin.evaluate_metric",
@@ -301,6 +309,38 @@ PROFILES: dict[str, frozenset[str]] = {
         # FORGE-615: a rough cost before any quote exists.
         "cost.estimate_manufacturing",
     },
+    # FORGE-633: industrial design (the Planner's discipline #2): form factor,
+    # ergonomics and DFM-aware finishes. Renders a design in its library
+    # appearances, reads materials, processes and machines for what a finish
+    # or a wall can be, measures the model, and sources ergonomic limits. No
+    # CAD authoring: the envelope it fixes is what mechanical design draws.
+    "industrial_design": _BASE
+    | {
+        "twin.render_work_product",
+        "library.list_appearances",
+        "library.get_appearance",
+        "library.register_appearance",
+        "library.update_appearance",
+        # FORGE-635: the sourced limits check_ergonomics reads.
+        "library.list_ergonomic_limits",
+        "library.get_ergonomic_limit",
+        "library.list_materials",
+        "library.get_material",
+        "library.process_limits",
+        "library.machine_limits",
+        "freecad.measure",
+        "freecad.describe_model",
+        "freecad.describe_step_file",
+        "knowledge.extract",
+        "memory.retrieve_similar_experience",
+        "web.fetch",
+        "web.search",
+        "twin.record_claim",
+        "twin.query_cypher",
+        "twin.record_constraint_set",
+        "twin.record_document",
+        "twin.record_engineering_entity",
+    },
     "client_run": _BASE
     | {
         "flow.list",
@@ -354,6 +394,7 @@ DISCIPLINE_PROFILES: dict[str, str] = {
     "supply_chain": "electronics",
     "robotics": "robotics",
     "manufacturing": "manufacturing",
+    "industrial_design": "industrial_design",
 }
 
 #: Slots a phase turn keeps back for the harness's own native tools
@@ -383,6 +424,8 @@ _CAD_AUTHORING: frozenset[str] = frozenset(
         "freecad.close_session",
         "twin.commit_geometry",
         "twin.stage_work_product_file",
+        # FORGE-647: shows committed parts coming together in the viewer.
+        "twin.place_part",
     }
 )
 
@@ -428,6 +471,8 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
             "twin.record_component_selection",
         }
     ),
+    # FORGE-630: studio renders of a model, kept in the twin.
+    "render": frozenset({"twin.render_work_product"}),
     "pinmap": frozenset({"twin.create_firmware_scaffold"}),
     "firmware_source": frozenset({"twin.create_firmware_scaffold"}),
 }

@@ -141,13 +141,16 @@ class TestRegistration:
     def test_registers_the_base_tools(self) -> None:
         # The set available with no injected providers. FORGE-357's two
         # thread questions are here because they need none -- they read
-        # `self._twin`, which every TwinServer has.
+        # `self._twin`, which every TwinServer has. So is FORGE-647's
+        # place_part: it reads the part from the twin and publishes through
+        # the process's live-event publisher, not an injected recorder.
         srv = TwinServer(twin=_FakeTwin())
         assert srv.adapter_id == "twin"
         assert sorted(srv.tool_ids) == [
             "twin.constraint_violations",
             "twin.find_by_property",
             "twin.get_node",
+            "twin.place_part",
             "twin.query_cypher",
             "twin.thread_for",
             "twin.what_verifies",

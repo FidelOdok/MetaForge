@@ -107,10 +107,13 @@ fixed_node_set, and for static_stress load_node_set and load_force_n [Fx, Fy, Fz
 (N); modal takes num_modes. Give a cited yield_strength_mpa for a safety factor.
 - **run_spice**: Run SPICE circuit simulation. Provide netlist_path, \
 analysis_type (dc/ac/transient), and optional params.
-- **run_cfd**: Steady conduction to a fixed-temperature sink (CalculiX). \
-Provide conduction (mesh_file, material, heat_source_node_set, \
-power_dissipation_w, sink_node_set, sink_temp_c). There is no flow solver: \
-velocity, pressure drop and convection cannot be computed.
+- **run_cfd**: One of two analyses per call. `conduction`: steady conduction to a \
+fixed-temperature sink (CalculiX; mesh_file, material, heat_source_node_set, \
+power_dissipation_w, sink_node_set, sink_temp_c). `internal_flow`: steady \
+incompressible flow through a bounded domain (OpenFOAM; inlet, outlet and wall STL \
+surfaces that close, stl_units, inside_point, fluid density and viscosity, \
+inlet_velocity_m_s, turbulence laminar or kOmegaSST). Convection, external flow and \
+compressible flow are not solved.
 
 Given a user request, determine which simulation tools to run. \
 Analyze convergence, safety factors, and key results. Provide clear \
@@ -262,18 +265,21 @@ def _get_or_create_pydantic_agent() -> Any:
     async def run_cfd(
         ctx: RunContext[AgentDependencies],
         conduction: dict[str, Any] | None = None,
+        internal_flow: dict[str, Any] | None = None,
         geometry_file: str | None = None,
         fluid_properties: dict[str, Any] | None = None,
         boundary_conditions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Steady conduction to a fixed-temperature sink; flow is refused (FORGE-543).
+        """Steady conduction (CalculiX) or steady internal flow (OpenFOAM, FORGE-557).
 
         Args:
             conduction: calculix.run_thermal's case: mesh_file, material,
                 heat_source_node_set, power_dissipation_w, sink_node_set, sink_temp_c.
+            internal_flow: openfoam.run_internal_flow's case: inlet_stl, outlet_stl,
+                wall_stls, stl_units, inside_point, fluid, inlet_velocity_m_s, turbulence.
             geometry_file: Geometry the case came from, for the record.
-            fluid_properties: Flow input; refused, there is no flow solver.
-            boundary_conditions: Flow input; refused, there is no flow solver.
+            fluid_properties: Free-form flow input; refused, use internal_flow.
+            boundary_conditions: Free-form flow input; refused, use internal_flow.
         """
         skill_ctx = SkillContext(
             twin=ctx.deps.twin,
@@ -289,6 +295,7 @@ def _get_or_create_pydantic_agent() -> Any:
             fluid_properties=fluid_properties or {},
             boundary_conditions=boundary_conditions or {},
             conduction=conduction,
+            internal_flow=internal_flow,
         )
 
         handler = RunCfdHandler(skill_ctx)
@@ -304,6 +311,12 @@ def _get_or_create_pydantic_agent() -> Any:
             "analysis": output.analysis,
             "max_temperature_c": output.max_temperature_c,
             "min_temperature_c": output.min_temperature_c,
+            "pressure_drop_pa": output.pressure_drop_pa,
+            "volumetric_flow_m3_s": output.volumetric_flow_m3_s,
+            "converged": output.converged,
+            "solution_stable": output.solution_stable,
+            "mesh_cells": output.mesh_cells,
+            "case_dir": output.case_dir,
             "warnings": output.warnings,
         }
 
@@ -613,12 +626,14 @@ class SimulationAgent:
         )
 
     async def _run_cfd(self, request: TaskRequest) -> TaskResult:
-        """Steady conduction to a fixed-temperature sink; flow is refused (FORGE-543)."""
+        """Steady conduction (CalculiX) or steady internal flow (OpenFOAM, FORGE-557)."""
         conduction = request.parameters.get("conduction")
+        internal_flow = request.parameters.get("internal_flow")
         self.logger.info(
-            "Thermal (conduction only) requested",
+            "run_cfd requested",
             geometry_file=request.parameters.get("geometry_file"),
             conduction=conduction is not None,
+            internal_flow=internal_flow is not None,
         )
 
         ctx = self._create_skill_context(request.branch)
@@ -629,6 +644,7 @@ class SimulationAgent:
                 fluid_properties=request.parameters.get("fluid_properties", {}),
                 boundary_conditions=request.parameters.get("boundary_conditions", {}),
                 conduction=conduction,
+                internal_flow=internal_flow,
             )
         except ValueError as exc:
             return TaskResult(
@@ -660,6 +676,12 @@ class SimulationAgent:
                     "analysis": output.analysis,
                     "max_temperature_c": output.max_temperature_c,
                     "min_temperature_c": output.min_temperature_c,
+                    "pressure_drop_pa": output.pressure_drop_pa,
+                    "volumetric_flow_m3_s": output.volumetric_flow_m3_s,
+                    "converged": output.converged,
+                    "solution_stable": output.solution_stable,
+                    "mesh_cells": output.mesh_cells,
+                    "case_dir": output.case_dir,
                     "solver": output.solver,
                 }
             ],

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "metaforge",
   "displayName": "MetaForge",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "description": "Engineer hardware against a digital twin: requirements, CAD, simulation and evidence, with writes held for human approval.",
   "author": {
     "name": "MetaForge",
@@ -26,26 +26,17 @@
       "default": "http://localhost:8765/mcp",
       "required": true
     },
-    "api_token": {
-      "type": "string",
-      "title": "API token",
-      "description": "Only needed for a gateway that requires one. A local gateway started with no auth configured does not.",
-      "sensitive": true
-    },
     "tool_profile": {
       "type": "string",
       "title": "Tool profile",
-      "description": "Which tool set to load. all (the default) loads every tool: Claude Code defers tools behind its tool search, and a client-mode run needs phase, gate, CAD, simulation and value-sourcing tools together, which no capped set holds. On a harness with a hard tool limit pick a capped set instead: core (project, twin reads, decisions, flows), client_run (drive a client-mode run and source values; reads the machine library), mechanical (stateless CAD), mechanical_product (CAD authored in a FreeCAD session), manufacturing (process selection and DFM review; reads the machine library), simulation, electronics or robotics, each 25-40 tools. Registering, discovering or sending a job to a machine needs all. Every set includes health.check so /metaforge:doctor always works.",
+      "description": "Which tool set to load. all (the default) loads every tool: Claude Code defers tools behind its tool search, and a client-mode run needs phase, gate, CAD, simulation and value-sourcing tools together, which no capped set holds. On a harness with a hard tool limit pick a capped set instead: core (project, twin reads, decisions, flows), client_run (drive a client-mode run and source values; reads the machine library), mechanical (stateless CAD), mechanical_product (CAD authored in a FreeCAD session), manufacturing (process selection and DFM review; reads the machine library), industrial_design (form factor, ergonomics and finishes; renders and the appearance library), simulation, electronics or robotics, each 25-40 tools. Registering, discovering or sending a job to a machine needs all. Every set includes health.check so /metaforge:doctor always works.",
       "default": "all"
     }
   },
   "mcpServers": {
     "metaforge": {
       "type": "http",
-      "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}",
-      "headers": {
-        "Authorization": "Bearer ${user_config.api_token}"
-      }
+      "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}"
     }
   }
 }

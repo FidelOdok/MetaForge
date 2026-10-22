@@ -31,6 +31,7 @@ def test_the_spine_holds_the_shared_stages() -> None:
         "feasibility",
         "architecture",
         "concept_selection",
+        "industrial_design",
         "design",
         "simulation",
         "manufacturing",

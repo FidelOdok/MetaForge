@@ -88,6 +88,11 @@ class ConversionService:
         glb = self._cache_path(file_hash, quality) / "model.glb"
         return glb if glb.exists() else None
 
+    def discard(self, file_hash: str, quality: str) -> None:
+        """Drop a cached conversion, e.g. the stub written while OCCT was down."""
+        shutil.rmtree(self._cache_path(file_hash, quality), ignore_errors=True)
+        logger.info("conversion_cache_discarded", hash=file_hash, quality=quality)
+
     def get_metadata(self, file_hash: str, quality: str) -> dict[str, Any] | None:
         """Return cached metadata dict, or None."""
         meta = self._cache_path(file_hash, quality) / "metadata.json"

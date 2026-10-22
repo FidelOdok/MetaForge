@@ -1824,6 +1824,13 @@ async def _bootstrap(
 
     entity_recorder = make_engineering_entity_recorder(twin, project_backend)
 
+    # FORGE-647: placements reach the viewer through the gateway, which holds
+    # the live stream; this process posts them there.
+    from mcp_core.live_events import set_live_event_publisher
+    from metaforge.mcp.live_publisher import http_live_publisher
+
+    set_live_event_publisher(http_live_publisher())
+
     # FORGE-462: flow.* and run.* registered in the gateway and never here, so
     # no harness plugin could list, propose or start a design flow.
     flow_bindings = _build_flow_bindings()
@@ -1876,8 +1883,11 @@ async def _bootstrap(
     # only exists now -- the same late binding the gateway does.
     if lazy_bridges and server.tool_registry is not None:
         from skill_registry.registry_bridge import RegistryMcpBridge
+        from twin_core.library.material_resolver import fill_material_arguments
 
-        registry_bridge = RegistryMcpBridge(server.tool_registry)
+        registry_bridge = RegistryMcpBridge(
+            server.tool_registry, argument_filler=fill_material_arguments
+        )
         for lazy in lazy_bridges:
             lazy.bridge = registry_bridge
     return server, twin, knowledge_service, memory_store, insight_store, component_catalog_store
@@ -1939,6 +1949,19 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
     ):
         factory = getattr(structured_document_recorder, f"make_{name}")
         _try(name, lambda f=factory: f(twin, project_backend))
+
+    # FORGE-630: twin.render_work_product, whose blender.render call goes
+    # through this server's own registry once it exists.
+    try:
+        from api_gateway.twin.render_recorder import make_work_product_renderer
+
+        render_bridge = _LateBridge()
+        bindings["work_product_renderer"] = make_work_product_renderer(
+            twin, project_backend, mcp_bridge=render_bridge
+        )
+        bridges.append(render_bridge)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="renderer", error=str(exc))
 
     try:
         from api_gateway.requirement_intelligence.promotion import attempt_promotion
@@ -2082,9 +2105,12 @@ def _build_machine_library() -> Any:
     """
     gateway_url = (os.environ.get("METAFORGE_GATEWAY_URL") or "").strip()
     if gateway_url:
-        from metaforge.mcp.remote_library import RemoteMachineLibrary
+        from metaforge.mcp.remote_library import RemoteMachineLibrary, remote_material_source
+        from twin_core.library.material_resolver import install_material_source
 
         logger.info("mcp_library_binding_remote", gateway=gateway_url)
+        # FORGE-446: material names resolve against the gateway's library too.
+        install_material_source(remote_material_source(gateway_url))
         return RemoteMachineLibrary(gateway_url)
     try:
         from api_gateway.library.mcp_bindings import make_machine_library

@@ -33,6 +33,11 @@ let capturedOnPointerMissed: (() => void) | undefined;
 // attach their listeners to.
 const fakeCamera = new THREE.PerspectiveCamera(45, 800 / 600, 0.1, 10000);
 const fakeScene = new THREE.Scene();
+// Shared, so a test can read back what the viewer did to the renderer.
+const fakeGl = {
+  domElement: null as unknown as HTMLCanvasElement,
+  shadowMap: { autoUpdate: true, needsUpdate: false },
+};
 const fakeCanvas = (() => {
   const el = document.createElement('canvas');
   Object.defineProperty(el, 'clientHeight', { value: 600 });
@@ -41,6 +46,7 @@ const fakeCanvas = (() => {
   el.releasePointerCapture = vi.fn();
   return el;
 })();
+fakeGl.domElement = fakeCanvas;
 
 // Mock @react-three/fiber Canvas — it requires WebGL which jsdom doesn't have
 vi.mock('@react-three/fiber', () => ({
@@ -58,12 +64,12 @@ vi.mock('@react-three/fiber', () => ({
   useFrame: vi.fn((cb: () => void) => {
     capturedFrame = cb;
   }),
-  useThree: vi.fn(() => ({
-    scene: fakeScene,
-    camera: fakeCamera,
-    gl: { domElement: fakeCanvas },
-    set: vi.fn(),
-  })),
+  // Selector-aware: components take slices (useThree((s) => s.gl)), and a
+  // mock that ignores the selector hands them the whole state object.
+  useThree: vi.fn((selector?: (s: unknown) => unknown) => {
+    const state = { scene: fakeScene, camera: fakeCamera, gl: fakeGl, set: vi.fn() };
+    return selector ? selector(state) : state;
+  }),
 }));
 
 let capturedFitToModel: (() => void) | undefined;
@@ -287,6 +293,131 @@ describe('R3FViewer — camera fits the loaded model (MET-620)', () => {
     const expected = (36 * 1.4) / Math.sin(THREE.MathUtils.degToRad(45) / 2);
     expect(fakeCamera.position.length()).toBeCloseTo(expected, 0);
     expect(fakeCamera.position.equals(before)).toBe(false);
+  });
+});
+
+// FORGE-623: the shadow map is a full extra depth pass at 2048x2048 over
+// every mesh, and three redraws it every frame by default. The geometry here
+// is still almost all of that time -- orbiting moves the camera, which a
+// directional light's shadow does not depend on -- so the viewer was paying
+// for it on frames that could not have changed. Measured: 19.8 fps against the
+// reference demo's 52.9.
+describe('R3FViewer — shadows redraw on change, not every frame (FORGE-623)', () => {
+  it('turns off per-frame shadow updates and asks for one redraw', () => {
+    fakeGl.shadowMap.autoUpdate = true;
+    fakeGl.shadowMap.needsUpdate = false;
+
+    vi.mocked(useViewerStore).mockImplementation((selector) =>
+      selector({
+        glbUrl: 'blob:fake',
+        manifest: { parts: [] },
+        selectedMeshName: null,
+        hiddenMeshes: new Set(),
+        explodeFactor: 0,
+        resetCamera: vi.fn(),
+        registerCameraReset: vi.fn(),
+        registerFocusPart: vi.fn(),
+        focusPart: vi.fn(),
+        modelBounds: { center: [0, 0, 0], radius: 100, groundY: 0 },
+        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+        registerOrbitControlsEnabledSetter: vi.fn(),
+      } as unknown as Parameters<typeof selector>[0]),
+    );
+
+    render(<R3FViewer />);
+
+    expect(fakeGl.shadowMap.autoUpdate).toBe(false);
+    // Stale shadows are the risk once auto-update is off, so a geometry
+    // change must still ask for one.
+    expect(fakeGl.shadowMap.needsUpdate).toBe(true);
+  });
+});
+
+// FORGE-623: near/far used to be pinned at 0.1/10000 on the Canvas. A model
+// framed ~3000 units away left three or four scroll-ticks before the whole
+// scene passed the far plane and vanished -- which is exactly what was
+// reported. The depth range has to scale with how far out the camera is.
+describe('R3FViewer — the depth range follows the camera (FORGE-623)', () => {
+  function framedWith(radius: number) {
+    vi.mocked(useViewerStore).mockImplementation((selector) =>
+      selector({
+        glbUrl: 'blob:fake',
+        manifest: { parts: [] },
+        selectedMeshName: null,
+        hiddenMeshes: new Set(),
+        explodeFactor: 0,
+        resetCamera: vi.fn(),
+        registerCameraReset: vi.fn(),
+        registerFocusPart: vi.fn(),
+        focusPart: vi.fn(),
+        modelBounds: { center: [0, 0, 0], radius, groundY: 0 },
+        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+        registerOrbitControlsEnabledSetter: vi.fn(),
+      } as unknown as Parameters<typeof selector>[0]),
+    );
+    render(<R3FViewer />);
+    settle();
+    return { far: fakeCamera.far, near: fakeCamera.near, dist: fakeCamera.position.length() };
+  }
+
+  it('puts the far plane well beyond the model it just framed', () => {
+    const { far, dist } = framedWith(100);
+
+    expect(far).toBeGreaterThan(dist * 2);
+  });
+
+  it('scales the range with the model, instead of a fixed 10000', () => {
+    const small = framedWith(100).far;
+    const large = framedWith(10_000).far;
+
+    // A model 100x bigger is framed 100x further out and needs the room.
+    expect(large).toBeGreaterThan(small * 50);
+    expect(large).toBeGreaterThan(10_000);
+  });
+
+  it('keeps the near plane proportional, which is what buys depth precision', () => {
+    const { near, dist } = framedWith(1000);
+
+    expect(near).toBeGreaterThan(0.01);
+    expect(near).toBeLessThan(dist / 100);
+  });
+});
+
+// FORGE-623: a visible grid plus a separate shadow catcher half a unit above
+// it is a z-fight, and which one wins flips as the camera moves -- seen as the
+// floor shimmering. MET-621 fixed this exact shape of bug by deleting a second
+// coplanar surface; FORGE-612 reintroduced it. One plane does both jobs.
+describe('R3FViewer — one ground plane, not two (FORGE-623)', () => {
+  it('draws a single workplane, and it is the surface the shadow lands on', () => {
+    vi.mocked(useViewerStore).mockImplementation((selector) =>
+      selector({
+        glbUrl: 'blob:fake',
+        manifest: { parts: [] },
+        selectedMeshName: null,
+        hiddenMeshes: new Set(),
+        explodeFactor: 0,
+        resetCamera: vi.fn(),
+        registerCameraReset: vi.fn(),
+        registerFocusPart: vi.fn(),
+        modelBounds: { center: [10, 5, -2], radius: 100, groundY: -3 },
+        booleanCut: { cutterGlbUrl: null, cutterManifest: null },
+        registerOrbitControlsEnabledSetter: vi.fn(),
+        focusPart: vi.fn(),
+      } as unknown as Parameters<typeof selector>[0]),
+    );
+
+    const { container } = render(<R3FViewer />);
+
+    const grounds = Array.from(container.querySelectorAll('mesh')).filter(
+      (m) => m.getAttribute('name') === 'ground-grid',
+    );
+    expect(grounds).toHaveLength(1);
+    // It carries a lit material, which is what lets a shadow land on it; the
+    // separate shadowMaterial catcher is gone, so nothing is coplanar with it.
+    // Lit (so a shadow can land on it), but not full PBR -- see FORGE-624.
+    expect(grounds[0]!.querySelector('meshLambertMaterial')).toBeTruthy();
+    expect(grounds[0]!.querySelector('meshStandardMaterial')).toBeNull();
+    expect(container.querySelectorAll('shadowMaterial')).toHaveLength(0);
   });
 });
 

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { VIEWER_GPU_PREFERENCE } from '../viewer/viewerColor';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -156,6 +157,7 @@ export function FacePickerViewer({
       }}
     >
       <Canvas
+            gl={{ ...VIEWER_GPU_PREFERENCE }}
         camera={{
           position: [
             center[0] + cameraDistance * 0.7,

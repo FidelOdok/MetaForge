@@ -1,15 +1,34 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway", "observability", "digital_twin", "metaforge"]
 
 [project]
-name = "metaforge"
+# Not "metaforge": that name on PyPI belongs to an unrelated job-shop
+# scheduling library (FORGE-648). The import packages are unchanged --
+# ``import metaforge`` still works -- this is only the distribution name
+# people type after ``pip install``.
+name = "metaforge-hw"
 version = "0.1.0"
 description = "Local-first control plane for hardware design"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "iDrone Images Ltd" }]
+keywords = ["hardware", "cad", "simulation", "digital-twin", "engineering", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "pydantic>=2.0",
     # ``pydantic-ai`` (the umbrella) pulls every provider's extras
@@ -75,6 +94,12 @@ dependencies = [
     # extension -- safe to add unconditionally.
     "pint>=0.24",
 ]
+
+[project.urls]
+Homepage = "https://www.metaforge.uk"
+Documentation = "https://fidelodok.github.io/MetaForge/"
+Repository = "https://github.com/FidelOdok/MetaForge"
+Issues = "https://github.com/FidelOdok/MetaForge/issues"
 
 [project.scripts]
 forge = "cli.forge_cli.main:main"
@@ -217,6 +242,7 @@ asyncio_mode = "auto"
 testpaths = ["tests", "domain_agents"]
 python_files = ["test_*.py", "*_test.py", "tests.py"]
 markers = [
+    "no_material_library: run without the test material library (FORGE-446)",
     "perf: opt-in latency/throughput baselines; not run in default CI (MET-477 Phase 6)",
 ]
 # Phase 6: exclude perf tests from the default `pytest` invocation. Opt in

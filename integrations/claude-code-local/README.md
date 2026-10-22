@@ -7,12 +7,14 @@ The same plugin as `claude-code/`, run as a local process instead of reached ove
 ## Install
 
 ```
-pip install metaforge
+pipx install "git+https://github.com/FidelOdok/MetaForge.git"
 /plugin marketplace add FidelOdok/MetaForge
 /plugin install metaforge-local
 ```
 
-`pip install` first: the plugin launches `metaforge-mcp` as a subprocess, so it has to be on your PATH.
+Install the package first: the plugin launches `metaforge-mcp` as a subprocess, so it has to be on your PATH.
+
+The distribution is `metaforge-hw`, not `metaforge` — that name on PyPI belongs to an unrelated project. Until it is published there, install from this repository with the line above. `pip install` works too; pipx is suggested because it keeps the CLI in its own environment and still puts `metaforge-mcp` on your PATH.
 
 ## Which package
 
@@ -21,7 +23,7 @@ Install **one**. The manifest format has no way to switch a server entry off, so
 | | `metaforge` | `metaforge-local` |
 |---|---|---|
 | Reaches | a gateway over HTTP | a process on this machine |
-| Needs | a gateway running, and its URL | `pip install metaforge` |
+| Needs | a gateway running, and its URL | `metaforge-mcp` on your PATH |
 | Suits | a team or hosted gateway | working on your own |
 
 ## What runs locally
@@ -46,7 +48,7 @@ Persistent stores (Neo4j, Postgres) are optional — without them the twin is in
 
 ## Skills
 
-38 engineering skills are bundled.
+43 engineering skills are bundled.
 
 ## Writes wait for a human
 

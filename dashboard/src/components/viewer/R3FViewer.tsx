@@ -1,4 +1,4 @@
-import { VIEWER_COLOR_MANAGEMENT } from './viewerColor';
+import { VIEWER_COLOR_MANAGEMENT, VIEWER_GPU_PREFERENCE } from './viewerColor';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -99,52 +99,6 @@ function LoadingFallback() {
 // camera/target so behavior is unchanged until real bounds are available.
 const DEFAULT_BOUNDS = { center: [0, 0, 0] as [number, number, number], radius: 36 };
 
-/**
- * MET-747: an invisible-except-for-its-shadow ground plane (a `shadowMaterial`
- * only ever renders the shadow cast onto it, never a visible surface of its
- * own) so the new shadow-casting directionalLight (below) has something real
- * to shadow onto -- previously there was no ground at all (the visible grid
- * stays disabled per MET-623's shimmer issue; this doesn't touch that).
- *
- * Positioned/sized from `modelBounds` when available (GLB path -- computed
- * once per load by SceneContents). The robot-description path never
- * computes modelBounds (RobotSceneContents has no equivalent), so this falls
- * back to a fixed offset guessed from the quadruped reference build's own
- * scale (~100mm legs) rather than a real per-robot bound -- an honest
- * approximation, not exact: worst case the catcher plane sits at a slightly
- * wrong height, which is cosmetic, not a functional bug.
- */
-function GroundShadowCatcher() {
-  const modelBounds = useViewerStore((s) => s.modelBounds);
-  const center = modelBounds?.center ?? DEFAULT_BOUNDS.center;
-  const radius = modelBounds?.radius ?? DEFAULT_BOUNDS.radius;
-  const groundY = modelBounds?.groundY ?? -100;
-  const size = Math.max(radius * 6, 200);
-
-  return (
-    <mesh position={[center[0], groundY, center[2]]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <planeGeometry args={[size, size]} />
-      <shadowMaterial opacity={0.28} />
-    </mesh>
-  );
-}
-
-/** One tile of the workplane, drawn once into a canvas and reused as a
- * repeating texture.
- *
- * The anti-aliasing is the entire point (FORGE-616). A mipmapped texture
- * averages the cell lines down as they recede, so a distant patch of floor
- * converges to a flat tint instead of a moire of half-hit lines crawling
- * about as the camera moves. The two approaches tried before had no such
- * averaging: drei's `Grid` evaluated its lines per fragment and anti-aliased
- * them with screen-space derivatives (FORGE-34), and bare `GridHelper`
- * segments are a `LineBasicMaterial` with no anti-aliasing at all
- * (FORGE-612). Both shimmered, for different reasons.
- *
- * Returns null where there is no 2D canvas context -- jsdom, mainly. The
- * caller then draws no floor, which is visibly wrong rather than quietly
- * wrong.
- */
 export function createWorkplaneTexture(
   minorColor: string,
   majorColor: string,
@@ -203,6 +157,58 @@ function useGridTexture(minorColor: string, majorColor: string): THREE.Texture |
 }
 
 /**
+ * Shadows are re-rendered only when the scene has actually moved (FORGE-623).
+ *
+ * The shadow map is a full extra depth pass over every mesh, at 2048x2048,
+ * and three redraws it on every single frame by default. In this viewer the
+ * geometry is still for almost all of that time -- orbiting moves the camera,
+ * which a directional light's shadow does not depend on -- so the pass was
+ * being paid for nothing on all but a handful of frames. Measured against the
+ * reference demo, the viewer was running at 19.8 fps to the demo's 52.9.
+ *
+ * Switching autoUpdate off makes staleness the risk instead of cost, so this
+ * re-renders on every store change that can move geometry. A change that
+ * somehow bypassed all of them would show a shadow that no longer matches the
+ * model, which is why the list is explicit rather than a guess.
+ */
+function ShadowUpdater() {
+  const gl = useThree((s) => s.gl);
+  const modelBounds = useViewerStore((s) => s.modelBounds);
+  const explodeFactor = useViewerStore((s) => s.explodeFactor);
+  const explodeDirection = useViewerStore((s) => s.explodeDirection);
+  const hiddenMeshes = useViewerStore((s) => s.hiddenMeshes);
+  const robotJointValues = useViewerStore((s) => s.robotJointValues);
+  const booleanCut = useViewerStore((s) => s.booleanCut);
+
+  useEffect(() => {
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
+    return () => {
+      gl.shadowMap.autoUpdate = true;
+    };
+  }, [gl]);
+
+  useEffect(() => {
+    // One redraw for this change; three clears the flag once it has done it.
+    gl.shadowMap.needsUpdate = true;
+  }, [gl, modelBounds, explodeFactor, explodeDirection, hiddenMeshes, robotJointValues, booleanCut]);
+
+  return null;
+}
+
+/**
+ * The workplane: one plane, carrying the grid and receiving the model's
+ * shadow (FORGE-623).
+ *
+ * It used to be two -- a visible grid and a separate invisible shadow catcher
+ * half a unit above it. Two near-coplanar planes at a few thousand units of
+ * depth range is a z-fight, and which one wins flips as the camera moves,
+ * which is seen as the floor shimmering. MET-621 fixed this exact shape of
+ * bug once before by deleting a second coplanar surface; FORGE-612
+ * reintroduced it. A material that both shows the grid and receives shadows
+ * needs only one surface, so there is nothing left to fight.
+ */
+/**
  * The visible workplane the model sits on, restored after FORGE-34/MET-623
  * hid it and re-done in FORGE-616 so it stops shimmering.
  *
@@ -223,15 +229,13 @@ function GroundGrid({ isDark }: { isDark: boolean }) {
   // Only the GLB path computes bounds. The robot-description path has none,
   // and a floor placed from a guess would cut straight through the robot, so
   // it keeps the no-grid behaviour it has always had rather than get a plane
-  // at an invented height. (GroundShadowCatcher can guess safely: an
-  // invisible plane at the wrong height costs a misplaced shadow, not a slab
-  // through the model.)
+  // at an invented height. The robot path keeps its own lighting; it simply
+  // gets no floor, which is honest rather than wrong.
   if (!modelBounds || !texture) return null;
 
   const { center, radius, groundY: modelGroundY } = modelBounds;
-  // Just below the shadow catcher, so a cast shadow reads on top of the grid
-  // rather than fighting it -- the same 0.5 offset the original grid used.
-  const groundY = (modelGroundY ?? 0) - 0.5;
+  // Exactly at the model's floor: there is no second surface to clear now.
+  const groundY = modelGroundY ?? 0;
 
   // Size scales with the model: a fixed 200-unit grid sat nowhere near a small
   // or off-center model, which is what made an orbit look like the grid was
@@ -248,13 +252,21 @@ function GroundGrid({ isDark }: { isDark: boolean }) {
       name="ground-grid"
       position={[center[0], groundY, center[2]]}
       rotation={[-Math.PI / 2, 0, 0]}
+      receiveShadow
     >
       <planeGeometry args={[size, size]} />
-      <meshBasicMaterial
+      {/* Lambert, not standard (FORGE-624): this plane still has to receive
+          the model's shadow now that the separate catcher is gone, but it
+          covers most of the screen, and a standard material pays full PBR
+          with the studio environment map on every one of those pixels.
+          Measured on the deployed viewer, that cost more than switching the
+          shadow map to on-demand saved: 19.8 fps before the merge, 13.3
+          after. Lambert is lit and shadow-receiving at a fraction of the
+          per-pixel work, which is all a floor needs. */}
+      <meshLambertMaterial
         map={texture}
         transparent
         opacity={0.9}
-        depthWrite={false}
         side={THREE.DoubleSide}
       />
     </mesh>
@@ -288,6 +300,9 @@ function CameraController() {
     const controls = new TinkercadControls(camera as THREE.PerspectiveCamera, gl.domElement, {
       upAxis: 'y',
     });
+    // Without a ceiling the wheel dollies to 1e6, far past anything the eye
+    // can resolve; fitToModel tightens this to the model it just framed.
+    controls.maxRadius = 1e5;
     controlsRef.current = controls;
     // Stand in for drei's `makeDefault` so GizmoHelper and anything else
     // reading `state.controls` finds these. The cast is the same one drei
@@ -303,7 +318,28 @@ function CameraController() {
   // The camera is derived state: nothing moves until update() rebuilds it from
   // the angles, and the damping eases toward whatever the last gesture asked
   // for. Priority -1 so this lands before anything that reads the camera.
-  useFrame(() => controlsRef.current?.update(), -1);
+  //
+  // FORGE-623: the depth range follows the dolly. near/far were fixed at
+  // 0.1/10000, and a model framed at ~3000 units away left only three or four
+  // scroll-ticks of headroom before the whole scene passed the far plane and
+  // vanished. Deriving both from the current radius keeps the model inside the
+  // frustum at any zoom, and keeps near as large as it can be, which is what
+  // buys depth precision.
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    controls.update();
+    const perspective = camera as THREE.PerspectiveCamera;
+    const far = Math.max(controls.radius * 20, 1000);
+    const near = Math.max(controls.radius / 1000, 0.01);
+    // Only touch the projection matrix when it actually moved: this runs every
+    // frame.
+    if (Math.abs(perspective.far - far) > far * 0.05 || Math.abs(perspective.near - near) > near * 0.5) {
+      perspective.far = far;
+      perspective.near = near;
+      perspective.updateProjectionMatrix();
+    }
+  }, -1);
 
   // FORGE-250: lets drag-to-pose suppress the camera the instant a joint drag
   // starts, same registration pattern as registerCameraReset below.
@@ -330,6 +366,9 @@ function CameraController() {
     // +/-radius would have a sphere sqrt(3) bigger, pushing the camera 73%
     // too far out, so size the box so its own sphere comes back to radius.
     const side = (2 * radius) / Math.sqrt(3);
+    // Keep the dolly within sight of the model: 40x its own radius is already
+    // far enough that it is a speck, and it leaves the far plane room.
+    controls.maxRadius = radius * 40;
     // Reset view goes home as well as re-framing, so it recovers a known
     // orientation and not just a known distance.
     controls.setView('home');
@@ -558,7 +597,14 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
     <div className="twin-canvas relative h-full w-full">
       <Canvas
         camera={{ position: [80, 60, 80], fov: 45, near: 0.1, far: 10000 }}
+        // FORGE-623: 1x on an ordinary screen, never beyond 2x on a dense
+        // one. Uncapped, a retina display renders 4x the pixels and a 4K one
+        // more again, which is most of why the viewer felt heavy.
+        dpr={[1, 2]}
         gl={{
+          ...VIEWER_GPU_PREFERENCE,
+          // Kept deliberately: TwinViewerPage exports the view with
+          // canvas.toDataURL, which reads blank without it.
           preserveDrawingBuffer: true,
           ...VIEWER_COLOR_MANAGEMENT,
         }}
@@ -639,8 +685,8 @@ export function R3FViewer({ onPartClick, onBooleanCutComplete }: R3FViewerProps)
             that forced the hiding cannot occur. The shadow-only catcher
             (MET-747) sits just above it and was never affected either -- a
             shadowMaterial has no lines to shimmer. */}
+        <ShadowUpdater />
         <GroundGrid isDark={isDark} />
-        <GroundShadowCatcher />
 
         <ambientLight intensity={0.4} />
         <directionalLight

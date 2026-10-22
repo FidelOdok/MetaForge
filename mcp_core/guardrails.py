@@ -148,6 +148,10 @@ BOOKKEEPING: frozenset[str] = frozenset(
         "session.start",
         "session.log_event",
         "session.complete",
+        # FORGE-647: shows a committed part in the live assembly view and
+        # records nothing in the twin. Holding each placement for approval
+        # would make the view a series of prompts instead of a build.
+        "twin.place_part",
     }
 )
 
@@ -259,9 +263,19 @@ APPROVED_BY_ARG = "__approved_by__"
 CALLER_SUPPLIED_APPROVER_ARGS: frozenset[str] = frozenset({"decided_by", "approver", "approved_by"})
 
 
+#: Reserved argument key (FORGE-637): the dispatcher sets it on
+#: ``twin.commit_geometry`` for a call from an external MCP client (a harness
+#: plugin), and the tool then refuses geometry with an uncoloured part. Taken
+#: from client-supplied arguments like ``APPROVED_BY_ARG``, so a client can
+#: neither set nor clear it.
+REQUIRE_PART_COLOURS_ARG = "__require_part_colours__"
+
+_RESERVED_ARGS = frozenset({APPROVED_BY_ARG, REQUIRE_PART_COLOURS_ARG})
+
+
 def strip_reserved_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
     """Remove dispatcher-reserved keys from whatever the client sent."""
-    return {k: v for k, v in arguments.items() if k != APPROVED_BY_ARG}
+    return {k: v for k, v in arguments.items() if k not in _RESERVED_ARGS}
 
 
 def reject_caller_supplied_approver(tool_id: str, arguments: dict[str, Any]) -> None:

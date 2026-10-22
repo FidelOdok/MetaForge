@@ -34,6 +34,7 @@ import { useActiveProject } from '../hooks/use-active-project';
 import { RevisionPicker } from '../components/items/RevisionPicker';
 import { ItemHistoryPanel } from '../components/items/ItemHistoryPanel';
 import { R3FViewer } from '../components/viewer/R3FViewer';
+import { LiveAssemblyPanel } from '../components/viewer/LiveAssemblyPanel';
 import { ComponentTree } from '../components/viewer/ComponentTree';
 import { AssemblyPartTree } from '../components/viewer/AssemblyPartTree';
 import { TwinGraphCanvas } from '../components/viewer/TwinGraphCanvas';
@@ -1044,6 +1045,8 @@ export function TwinViewerPage() {
   // pins the illustrative Drone FC workspace.
   const { activeProjectId: selectedProjectId, activeProject } = useActiveProject();
   const activeProjectId = sampleMode ? SAMPLE_PROJECT_ID : selectedProjectId;
+  // FORGE-647: watch an agent put an assembly together, part by part.
+  const [liveOpen, setLiveOpen] = useState(false);
   const projectName = sampleMode ? SAMPLE_PROJECT_NAME : activeProject?.name;
 
   // ── data ──
@@ -1324,7 +1327,18 @@ export function TwinViewerPage() {
         <Link to={`/runs/new${activeProjectId ? '?project=' + encodeURIComponent(activeProjectId) : ''}`}>
           Start design run ↗
         </Link>
+        {activeProjectId && !sampleMode && (
+          <button type="button" onClick={() => setLiveOpen((open) => !open)} aria-pressed={liveOpen}>
+            Live assembly
+          </button>
+        )}
       </section>
+
+      {liveOpen && activeProjectId && (
+        <div className="tw-live">
+          <LiveAssemblyPanel projectId={activeProjectId} onClose={() => setLiveOpen(false)} />
+        </div>
+      )}
 
       <section className="tw-view" aria-label="Twin model and graph">
         <div className="tw-render-area">

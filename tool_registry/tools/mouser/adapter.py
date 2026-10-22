@@ -16,6 +16,7 @@ from tool_registry.tools.distributors.base import (
     PartDetail,
     PartSearchResult,
     PricingBreak,
+    parse_price,
 )
 from tool_registry.tools.distributors.cache import ResponseCache
 from tool_registry.tools.distributors.rate_limiter import TokenBucketRateLimiter
@@ -201,16 +202,23 @@ class MouserAdapter(DistributorAdapter):
             return []
         breaks: list[PricingBreak] = []
         for bp in parts[0].get("PriceBreaks", []):
-            price_str = bp.get("Price", "0").replace("$", "").replace(",", "")
-            try:
-                price = float(price_str)
-            except (ValueError, TypeError):
-                price = 0.0
+            # Mouser prices in the key's currency ("£89.42", "$1.23"); a break
+            # whose price or currency cannot be read is dropped and logged,
+            # never kept as 0.0 or given a guessed currency.
+            price = parse_price(bp.get("Price"))
+            currency = str(bp.get("Currency") or "").strip().upper()
+            if price is None or not currency:
+                logger.warning(
+                    "mouser_price_unreadable",
+                    price=bp.get("Price"),
+                    currency=bp.get("Currency"),
+                )
+                continue
             breaks.append(
                 PricingBreak(
                     quantity=bp.get("Quantity", 1),
                     unit_price=price,
-                    currency=bp.get("Currency", "USD"),
+                    currency=currency,
                 )
             )
         return breaks

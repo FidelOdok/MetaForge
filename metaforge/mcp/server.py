@@ -54,6 +54,7 @@ from mcp_core.elicitation import (
 )
 from mcp_core.guardrails import (
     APPROVED_BY_ARG,
+    REQUIRE_PART_COLOURS_ARG,
     ApprovalAsk,
     ApprovalGateFn,
     ApprovalLedger,
@@ -1671,7 +1672,11 @@ class UnifiedMcpServer:
         # type with a JSON-serialised payload — the adapter outputs are
         # structured dicts, and clients can json.parse the text. If we
         # add binary outputs later we'll branch here on result shape.
-        content: list[dict[str, Any]] = [{"type": "text", "text": json.dumps(result)}]
+        # FORGE-630 / FORGE-373: rendered images go out as MCP image content,
+        # which a harness shows in chat, and not as base64 inside the JSON
+        # text, which a model would have to read as tokens.
+        result, images = split_image_content(result)
+        content: list[dict[str, Any]] = [{"type": "text", "text": json.dumps(result)}, *images]
         if held is not None:
             # A second block rather than text merged into the first: the first
             # is the tool's own output and belongs to its schema. But `_meta`
@@ -2532,6 +2537,36 @@ class UnifiedMcpServer:
             # The tool reads its deciding human from here and nowhere else.
             arguments[APPROVED_BY_ARG] = approver.label
 
+        # FORGE-446: every material the call names gets its library figures,
+        # here, because the adapter containers cannot read the library. An
+        # unresolved name fails the call with the closest library entries.
+        from twin_core.library.material_resolver import (
+            MaterialResolutionError,
+            fill_material_arguments,
+        )
+
+        try:
+            await fill_material_arguments(tool_id, arguments)
+        except MaterialResolutionError as exc:
+            # FORGE-638: an unresolved material is the caller's to fix (name a
+            # library material, or record it), so it is a tool error carrying
+            # the closest entries, not an exception that leaves the HTTP
+            # transport as a 500 with a traceback.
+            logger.info(
+                "mcp_tool_material_unresolved",
+                tool_id=tool_id,
+                material=exc.name,
+                candidates=exc.candidates,
+            )
+            raise ToolHandlerError(tool_id, str(exc)) from exc
+
+        # FORGE-637: geometry a harness plugin commits must carry a colour for
+        # every part, because the viewer shows only the colours in the STEP and
+        # an uncoloured model reads as unfinished. The design-flow worker
+        # (SERVICE) is not held to it here.
+        if tool_id == "twin.commit_geometry" and self._effective_caller() is not Caller.SERVICE:
+            arguments[REQUIRE_PART_COLOURS_ARG] = True
+
         # Commit-by-reference: fill a commit_geometry call's step_base64 from the
         # last export for this (session_id, obj_id) so agents needn't thread the
         # blob. Explicit step_base64 always wins.
@@ -3026,6 +3061,41 @@ def _effective_project(arguments: dict[str, Any]) -> str | None:
 _BOOTSTRAP_COLLABORATORS: frozenset[str] = frozenset(
     inspect.signature(bootstrap_tool_registry).parameters
 )
+
+
+def split_image_content(result: Any) -> tuple[Any, list[dict[str, Any]]]:
+    """Lift ``images[].png_base64`` out of a tool result as MCP image blocks.
+
+    Returns the result without the base64 (each image keeps its other fields
+    plus ``content_index``, its block's position in ``content``) and the
+    image blocks. Anything else comes back unchanged with no blocks. Only the
+    standard ``tools/call`` reply does this: the legacy ``tool/call`` dialect
+    the gateway's own bridge uses still gets the base64 in the result.
+    """
+    if not isinstance(result, dict):
+        return result, []
+    # The sidecar's tool result wraps the adapter's output as
+    # {tool_id, status, data}; the images are in data.
+    wrapped = result.get("data")
+    if isinstance(wrapped, dict) and isinstance(wrapped.get("images"), list):
+        lean, lifted = split_image_content(wrapped)
+        return ({**result, "data": lean}, lifted) if lifted else (result, [])
+    if not isinstance(result.get("images"), list):
+        return result, []
+    blocks: list[dict[str, Any]] = []
+    images: list[Any] = []
+    for image in result["images"]:
+        data = image.get("png_base64") if isinstance(image, dict) else None
+        if not isinstance(data, str) or not data:
+            images.append(image)
+            continue
+        blocks.append({"type": "image", "data": data, "mimeType": "image/png"})
+        rest = {k: v for k, v in image.items() if k != "png_base64"}
+        # Position 0 is the JSON text block.
+        images.append({**rest, "content_index": len(blocks)})
+    if not blocks:
+        return result, []
+    return {**result, "images": images}, blocks
 
 
 async def build_unified_server(

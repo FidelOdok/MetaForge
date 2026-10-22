@@ -1,0 +1,329 @@
+{
+  "source": {
+    "document": "MIL-STD-1472H, Department of Defense Design Criteria Standard: Human Engineering, 15 September 2020",
+    "url": "https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+    "licence": "US Government work, not subject to copyright in the US (17 U.S.C. 105); the standard states: DISTRIBUTION STATEMENT A. Approved for public release. Distribution is unlimited.",
+    "verified": "Each figure read in the standard: text clauses from the extracted text, Figures 14, 16 and 101 from the page text and page images (FORGE-635, 2026-10-15)."
+  },
+  "entries": [
+    {
+      "name": "mil1472h_pushbutton_fingertip_diameter",
+      "title": "Push button diameter, fingertip, bare hand",
+      "limit_kind": "button_size",
+      "applies_to": "finger-operated push button, bare hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.1.6, Figure 14 (Push button), p. 81; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 10,
+      "max": 25,
+      "notes": "Figure 14 does not apply to keyboards."
+    },
+    {
+      "name": "mil1472h_pushbutton_fingertip_gloved_diameter",
+      "title": "Push button diameter, fingertip, gloved hand",
+      "limit_kind": "button_size",
+      "applies_to": "finger-operated push button, gloved hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.1.6, Figure 14 (Push button), p. 81; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 19,
+      "notes": "No maximum given for gloved use."
+    },
+    {
+      "name": "mil1472h_pushbutton_thumb_diameter",
+      "title": "Push button diameter, thumb, bare hand",
+      "limit_kind": "button_size",
+      "applies_to": "thumb-operated push button, bare hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.1.6, Figure 14 (Push button), p. 81; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 19,
+      "max": 25
+    },
+    {
+      "name": "mil1472h_pushbutton_palm_diameter",
+      "title": "Push button diameter, palm, bare hand",
+      "limit_kind": "button_size",
+      "applies_to": "palm-operated push button, bare hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.1.6, Figure 14 (Push button), p. 81; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 40,
+      "max": 70
+    },
+    {
+      "name": "mil1472h_pushbutton_single_finger_force",
+      "title": "Push button resistance, single finger",
+      "limit_kind": "actuation_force",
+      "applies_to": "push button pressed by one finger",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.1.6, Figure 14 (Push button), p. 81; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 2.8,
+      "max": 11
+    },
+    {
+      "name": "mil1472h_pushbutton_different_fingers_force",
+      "title": "Push button resistance, different fingers actuated at the same time",
+      "limit_kind": "actuation_force",
+      "applies_to": "push buttons pressed together by different fingers",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.1.6, Figure 14 (Push button), p. 81; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 1.4,
+      "max": 5.6
+    },
+    {
+      "name": "mil1472h_pushbutton_thumb_palm_force",
+      "title": "Push button resistance, thumb or palm",
+      "limit_kind": "actuation_force",
+      "applies_to": "push button pressed by thumb or palm",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.1.6, Figure 14 (Push button), p. 81; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 2.8,
+      "max": 23
+    },
+    {
+      "name": "mil1472h_toggle_arm_length_bare",
+      "title": "Toggle switch arm length, bare finger",
+      "limit_kind": "handle_length",
+      "applies_to": "toggle switch lever arm, bare finger",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.4.3, Figure 16 (Toggle switches), p. 84; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 13,
+      "max": 50
+    },
+    {
+      "name": "mil1472h_toggle_arm_length_heavy_handwear",
+      "title": "Toggle switch arm length, heavy handwear",
+      "limit_kind": "handle_length",
+      "applies_to": "toggle switch lever arm, heavy handwear",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.4.3, Figure 16 (Toggle switches), p. 84; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 38,
+      "max": 50
+    },
+    {
+      "name": "mil1472h_toggle_tip_diameter",
+      "title": "Toggle switch control tip diameter",
+      "limit_kind": "button_size",
+      "applies_to": "toggle switch tip",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.4.3, Figure 16 (Toggle switches), p. 84; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 3,
+      "max": 25
+    },
+    {
+      "name": "mil1472h_toggle_small_force",
+      "title": "Toggle switch resistance, small switch",
+      "limit_kind": "actuation_force",
+      "applies_to": "small toggle switch",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.4.3, Figure 16 (Toggle switches), p. 84; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 2.8,
+      "max": 4.5
+    },
+    {
+      "name": "mil1472h_toggle_large_force",
+      "title": "Toggle switch resistance, large switch",
+      "limit_kind": "actuation_force",
+      "applies_to": "large toggle switch",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.4.2.1.4.3, Figure 16 (Toggle switches), p. 84; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 2.8,
+      "max": 11
+    },
+    {
+      "name": "mil1472h_one_hand_bar_clearance_bare",
+      "title": "One-hand bar handle finger clearance (X), bare hand",
+      "limit_kind": "finger_clearance",
+      "applies_to": "one-hand bar handle, bare hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 (Minimum handle dimensions), p. 433; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 48
+    },
+    {
+      "name": "mil1472h_one_hand_bar_clearance_gloved",
+      "title": "One-hand bar handle finger clearance (X), gloved hand",
+      "limit_kind": "finger_clearance",
+      "applies_to": "one-hand bar handle, gloved hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 (Minimum handle dimensions), p. 433; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 50
+    },
+    {
+      "name": "mil1472h_one_hand_bar_clearance_mittened",
+      "title": "One-hand bar handle finger clearance (X), mittened hand",
+      "limit_kind": "finger_clearance",
+      "applies_to": "one-hand bar handle, mittened hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 (Minimum handle dimensions), p. 433; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 75
+    },
+    {
+      "name": "mil1472h_one_hand_bar_length_bare",
+      "title": "One-hand bar handle grip length (Y), bare hand",
+      "limit_kind": "handle_length",
+      "applies_to": "one-hand bar handle, bare hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 (Minimum handle dimensions), p. 433; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 111
+    },
+    {
+      "name": "mil1472h_one_hand_bar_length_gloved",
+      "title": "One-hand bar handle grip length (Y), gloved hand",
+      "limit_kind": "handle_length",
+      "applies_to": "one-hand bar handle, gloved hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 (Minimum handle dimensions), p. 433; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 125
+    },
+    {
+      "name": "mil1472h_one_hand_bar_length_mittened",
+      "title": "One-hand bar handle grip length (Y), mittened hand",
+      "limit_kind": "handle_length",
+      "applies_to": "one-hand bar handle, mittened hand",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 (Minimum handle dimensions), p. 433; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 135
+    },
+    {
+      "name": "mil1472h_handle_diameter_up_to_6_8kg",
+      "title": "Handle minimum diameter, item up to 6.8 kg",
+      "limit_kind": "grip_diameter",
+      "applies_to": "handle of an item weighing up to 6.8 kg (15 lb)",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 continued (curvature of handle or edge), p. 434; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 6,
+      "notes": "Minimum only; the figure gives no maximum for carry handles."
+    },
+    {
+      "name": "mil1472h_handle_diameter_6_8_to_9kg",
+      "title": "Handle minimum diameter, item 6.8 to 9.0 kg",
+      "limit_kind": "grip_diameter",
+      "applies_to": "handle of an item weighing 6.8 to 9.0 kg (15 to 20 lb)",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 continued (curvature of handle or edge), p. 434; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 13
+    },
+    {
+      "name": "mil1472h_handle_diameter_9_to_18kg",
+      "title": "Handle minimum diameter, item 9.0 to 18 kg",
+      "limit_kind": "grip_diameter",
+      "applies_to": "handle of an item weighing 9.0 to 18 kg (20 to 40 lb)",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 continued (curvature of handle or edge), p. 434; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 19
+    },
+    {
+      "name": "mil1472h_handle_diameter_over_18kg",
+      "title": "Handle minimum diameter, item over 18 kg",
+      "limit_kind": "grip_diameter",
+      "applies_to": "handle of an item weighing over 18 kg (40 lb)",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.5, Figure 101 continued (curvature of handle or edge), p. 434; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 25
+    },
+    {
+      "name": "mil1472h_handle_obstruction_clearance",
+      "title": "Clearance around handles and grasp areas",
+      "limit_kind": "finger_clearance",
+      "applies_to": "handles, grasp areas or hoist points, clearance from obstructions during handling",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.20.7.2.1 (Clearance); https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 50
+    },
+    {
+      "name": "mil1472h_joystick_grip_diameter",
+      "title": "Joystick hand grip diameter",
+      "limit_kind": "grip_diameter",
+      "applies_to": "hand-operated joystick grip",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.3.5.2.5.2; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "max": 50
+    },
+    {
+      "name": "mil1472h_joystick_grip_length",
+      "title": "Joystick hand grip length",
+      "limit_kind": "handle_length",
+      "applies_to": "hand-operated joystick grip",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.1.3.5.2.5.1; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 110,
+      "max": 180
+    },
+    {
+      "name": "mil1472h_seated_work_surface_height",
+      "title": "Seated work surface height",
+      "limit_kind": "operating_height",
+      "applies_to": "work benches, desktops and writing tables, above the floor",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.10.3.9.2.2; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 740,
+      "max": 790
+    },
+    {
+      "name": "mil1472h_standing_document_surface_height",
+      "title": "Standing work surface height for documents",
+      "limit_kind": "operating_height",
+      "applies_to": "standing work surface for documents, above the standing surface",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.10.3.8.2.6.3; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 900,
+      "max": 930
+    },
+    {
+      "name": "mil1472h_standing_control_surface_height",
+      "title": "Standing work surface height for controls",
+      "limit_kind": "operating_height",
+      "applies_to": "standing surface for controls such as a joystick or keyboard, above the standing surface",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.10.3.8.2.6.4; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 1020,
+      "max": 1070
+    },
+    {
+      "name": "mil1472h_standing_precision_height_range",
+      "title": "Standing precision work height, adjustable range",
+      "limit_kind": "operating_height",
+      "applies_to": "adjustable surface for delicate, precision standing work (e.g. drawing) with the elbow supported, above the standing surface",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.10.3.8.2.6.2a, Figure 69; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "min": 952,
+      "max": 1231
+    },
+    {
+      "name": "mil1472h_control_panel_depth",
+      "title": "Control panel depth within reach",
+      "limit_kind": "reach_distance",
+      "applies_to": "depth of a control panel the standing user reaches",
+      "population": "US military users: central 90 percent (95 percent preferred) of males and of females (MIL-STD-1472H 5.1.1.1.1.1)",
+      "source_kind": "standard",
+      "source_ref": "MIL-STD-1472H (15 Sep 2020), 5.10.3.8.2.6.5; https://everyspec.com/MIL-STD/MIL-STD-1400-1499/download.php?spec=MIL-STD-1472H.057041.pdf",
+      "max": 400
+    }
+  ]
+}

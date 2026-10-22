@@ -4,20 +4,34 @@
  * The lane beside the flow graph. Selecting a phase shows its objective, the
  * events the workflow recorded for it, and what it committed.
  *
- * **On honesty about coverage.** The ticket asks this lane to show tool
- * calls, decisions, evidence, iterations and token cost as well. Those come
- * from session capture and twin commits, which the workflow's own event log
- * does not carry — so rather than render an empty "Tool calls" heading that
- * reads as "this phase made none", the panel names what is not wired and
- * why. An empty section and an unwired one look identical, and only one of
- * them is information.
+ * **Tool calls (FORGE-645).** They come from the run stream, not from the
+ * workflow's event log, so they are shown only while that stream is
+ * connected. When it is not, the section says so instead of rendering an
+ * empty list, which would read as "this phase made none".
+ *
+ * **On honesty about coverage.** The ticket asks this lane to show decisions,
+ * evidence, iterations and token cost as well. Those come from session
+ * capture and twin commits, which the workflow's own event log does not
+ * carry, so the panel names what is not wired and why. An empty section and
+ * an unwired one look identical, and only one of them is information.
  */
+import type { ToolCall } from '../../hooks/use-run-tool-events';
 import type { FlowPhaseState, FlowRunEvent } from '../../types/run-flow';
 
 export interface PhaseActivityProps {
   phase: FlowPhaseState | null;
   events: FlowRunEvent[];
   live: boolean;
+  /** Tool calls from the run stream. Omitted where nothing streams them. */
+  toolCalls?: ToolCall[];
+  /** Whether the run stream is open right now. */
+  toolStreamConnected?: boolean;
+}
+
+function toolLabel(call: ToolCall): string {
+  if (call.status === 'running') return 'running';
+  const took = call.durationMs === null ? '' : ` in ${(call.durationMs / 1000).toFixed(1)}s`;
+  return `${call.status}${took}`;
 }
 
 function timeOf(iso: string): string {
@@ -25,7 +39,13 @@ function timeOf(iso: string): string {
   return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleTimeString();
 }
 
-export function PhaseActivity({ phase, events, live }: PhaseActivityProps) {
+export function PhaseActivity({
+  phase,
+  events,
+  live,
+  toolCalls,
+  toolStreamConnected = false,
+}: PhaseActivityProps) {
   if (!phase) {
     return (
       <aside className="glass rounded" data-testid="phase-activity">
@@ -36,6 +56,7 @@ export function PhaseActivity({ phase, events, live }: PhaseActivityProps) {
   }
 
   const phaseEvents = events.filter((e) => e.phase === phase.id);
+  const phaseCalls = (toolCalls ?? []).filter((c) => c.phase === phase.id);
 
   return (
     <aside className="glass rounded" data-testid="phase-activity">
@@ -69,6 +90,28 @@ export function PhaseActivity({ phase, events, live }: PhaseActivityProps) {
         </ol>
       )}
 
+      {toolCalls !== undefined && (
+        <>
+          <p className="eyebrow">TOOL CALLS</p>
+          {phaseCalls.length > 0 ? (
+            <ol aria-label="Tool calls" data-testid="tool-calls">
+              {phaseCalls.map((c) => (
+                <li key={c.callId} data-status={c.status}>
+                  <strong className="mono-value">{c.tool}</strong>{' '}
+                  <span>{toolLabel(c)}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="field-help" role="status" data-testid="tool-calls-empty">
+              {toolStreamConnected
+                ? 'No tool calls from this phase yet.'
+                : 'Live tool calls are not connected, so none can be shown. This is not the same as none made.'}
+            </p>
+          )}
+        </>
+      )}
+
       <p className="eyebrow">COMMITTED</p>
       {phase.artifacts.length === 0 ? (
         <p className="field-help">
@@ -88,9 +131,9 @@ export function PhaseActivity({ phase, events, live }: PhaseActivityProps) {
       )}
 
       <p className="field-help" data-testid="coverage-note">
-        Tool calls, decisions, evidence and token cost are not shown here yet: they come
-        from session capture and twin commits, which this run&apos;s event log does not
-        carry. An empty section would read as &quot;this phase made none&quot;.
+        Decisions, evidence and token cost are not shown here yet: they come from session
+        capture and twin commits, which this run&apos;s event log does not carry. An empty
+        section would read as &quot;this phase made none&quot;.
       </p>
     </aside>
   );

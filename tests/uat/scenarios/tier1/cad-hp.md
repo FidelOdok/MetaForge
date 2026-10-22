@@ -115,10 +115,10 @@ Tier: 1
 
 ### When
 1. Either via the cadquery tool or via the resulting Twin node
-   update, set `material="aluminum_6061"`.
+   update, set `material="aluminium_6061_t6"`.
 
 ### Then
-- The DesignElement node carries `material="aluminum_6061"` and
+- The DesignElement node carries `material="aluminium_6061_t6"` and
   associated mechanical property fields (E, ρ, ν).
 
 ---

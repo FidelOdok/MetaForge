@@ -66,6 +66,10 @@ TERMINAL: frozenset[RunStatus] = frozenset(
 #: would record an approval for a call that is no longer waiting.
 UNANSWERED: frozenset[RunStatus] = frozenset({RunStatus.TIMED_OUT, RunStatus.CANCELED})
 
+#: What an approved hold can be in (FORGE-639): RUNNING right after the
+#: decision, COMPLETED once the hold is closed.
+APPROVED_STATES: frozenset[RunStatus] = frozenset({RunStatus.RUNNING, RunStatus.COMPLETED})
+
 # Allowed status transitions (source -> set of legal destinations).
 _TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.QUEUED: frozenset({RunStatus.RUNNING, RunStatus.CANCELED}),
@@ -394,7 +398,10 @@ async def await_approval_decision(
     try:
         while monotonic() < deadline:
             status = store.get(run_id).status
-            if status is RunStatus.RUNNING:
+            # FORGE-639: an approved tool-call hold is closed COMPLETED at the
+            # decision (nothing else ever finished it, and the reaper turned
+            # every approval into "canceled"); RUNNING is still approved too.
+            if status in APPROVED_STATES:
                 return ApprovalWait.APPROVED
             if status is RunStatus.REJECTED:
                 return ApprovalWait.REJECTED
@@ -410,7 +417,7 @@ async def await_approval_decision(
     # clobbered by the race with submit_approval.
     _close_unanswered(store, run_id, RunStatus.TIMED_OUT, "timed out waiting for approval")
     try:
-        if store.get(run_id).status is RunStatus.RUNNING:
+        if store.get(run_id).status in APPROVED_STATES:
             return ApprovalWait.APPROVED
     except RunNotFoundError:
         pass

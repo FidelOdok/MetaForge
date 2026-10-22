@@ -157,7 +157,7 @@ Routes through `calculix.run_fea`. Captures the run via the MET-331
 ## Install as a plugin
 
 The MCP config below is the manual route. There is also a generated plugin
-that brings the MCP server, the 30 engineering skills, the
+that brings the MCP server, the 35 engineering skills, the
 `intent-to-verified-design` lifecycle skill and the slash commands in one
 install:
 
@@ -207,6 +207,31 @@ python scripts/build_integrations.py
 claude plugin validate --strict integrations/claude-code
 ```
 
+#### The plugin version (FORGE-657)
+
+Claude Code decides whether an installed plugin needs updating by comparing the
+`version` in its `plugin.json`. A version that never changes means installed
+copies never see new skills, `PLUGIN.md` guidance or tool lists, with no error.
+So the generator versions the plugin by its content:
+
+- `integrations/plugin-version.json` holds the version and a digest of the
+  content that version was cut for. Every manifest (Claude Code, the local
+  package, both Codex manifests) takes its version from it.
+- When you run `python scripts/build_integrations.py` and the content changed,
+  the patch number goes up and the lock records the new digest. Run it again and
+  nothing changes. The version field is left out of the digest, so a bump does
+  not change the thing that triggered it.
+- A unit test regenerates the packages and fails if their content no longer
+  matches the lock, which means a source change that was not followed by the
+  generator cannot be merged.
+- Change the major or minor number by hand in the lock when a release deserves
+  it. The next run keeps it and counts patches from there.
+
+This is not the platform release number. The release tag is created by CI after
+a merge and is never committed back, so the source tree cannot carry it. A
+bundle built for a release is named after the plugin version, for example
+`metaforge-plugin-0.2.0.zip`.
+
 Skill frontmatter is generated from each skill's `definition.json` rather
 than written into the source `SKILL.md` files. Those files are read as raw
 body text and injected as procedural context, so frontmatter added there
@@ -236,6 +261,11 @@ Two more sources feed the package's skills (FORGE-533):
   (FORGE-427), and `manage-processes-and-materials`, which records
   manufacturing processes with their rules and materials with their
   properties, each sourced, and uses them in a flow (FORGE-451, FORGE-446).
+  `mechanical-components` builds standard screws, nuts, washers and
+  bearings from their standards' tables and records purchased parts with
+  their CAD licence (FORGE-449). `colour-material-finish` records a part's
+  colour, finish and texture as a library appearance, the colour named in
+  its colour system with a sourced screen value (FORGE-631).
   These carry their own frontmatter and ship verbatim.
 
 A test checks that every tool a shipped skill names is one the repo
@@ -517,7 +547,7 @@ profile the plugin installs by default (FORGE-462):
 | `flow.await_gate` | wait for a run's next gate and ask **you** to decide it in this chat; the agent cannot answer the prompt (FORGE-582). Its default windows (30 s for a gate, then 80 s to answer) end before Claude Code's 120 s call timeout (FORGE-589) |
 | `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back (FORGE-581). Submit with `outcome: incomplete` when the objective was not met, so the gate reads not ready (FORGE-590). If the sidecar owner set `METAFORGE_CLIENT_TASK_WRITES=on`, approving the claim once lets this session's writes for that phase run without further holds until you submit (FORGE-584) |
 | `run.start_design_flow` | start one of the built-in flows on a goal (held write) |
-| `run.get_status` | a run's state, gate reason and result (read) |
+| `run.get_status` | a run's state, gate reason and result (read). In `all` but not in `core`, where it gave its place to `twin.render_work_product` (FORGE-630); `flow.status` reports a run's state there |
 
 They act on the gateway's state, not the sidecar's: a flow proposed here
 is the one on the dashboard's **Approvals** page, and a run started here

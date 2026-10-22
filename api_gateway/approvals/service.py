@@ -81,6 +81,14 @@ _RUN_STATUS = {
 
 def _run_status(run: Run, audited: DecisionRecord | None) -> str:
     """Contract status of a run-backed approval."""
+    # FORGE-639: a hold a person decided was, until the fix, left RUNNING and
+    # then cancelled by the heartbeat reaper as abandoned. The decision logged
+    # on it is what happened; the reaper's "canceled" is not.
+    if run.status in (RunStatus.CANCELED, RunStatus.FAILED) and audited is not None:
+        if audited.decision == "approve":
+            return "approved"
+        if audited.decision == "reject":
+            return "rejected"
     if run.status in _RUN_STATUS:
         return _RUN_STATUS[run.status]
     if audited is not None and audited.decision == "retry":

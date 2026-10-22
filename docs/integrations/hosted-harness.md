@@ -86,12 +86,30 @@ Claude Code can send a static bearer token, so it needs nothing else:
 }
 ```
 
-Or install the plugin, which brings the tools, the slash commands and the
-engineering skills together, and asks for the URL and token on first use:
+Or install the plugin, which brings the tools, the slash commands, the
+agents, the hooks and the engineering skills together, and asks for the gateway
+URL on first use:
 
 ```
 /plugin marketplace add FidelOdok/MetaForge
 /plugin install metaforge
+```
+
+The plugin has no token field (FORGE-659). When the gateway needs a login it
+answers 401, Claude Code flags `metaforge` in `/mcp`, and you sign in there with
+OAuth: run `/mcp`, choose `metaforge`, and follow the browser prompt. This needs
+`METAFORGE_OAUTH_LOGIN_SECRET` set on the gateway, as for claude.ai below.
+
+The reason there is no header: Claude Code does not fall back to OAuth once a
+configured `Authorization` header is rejected, it reports the connection as
+failed. A plugin that always sent a bearer header would therefore never offer
+the sign-in. A gateway with only `METAFORGE_MCP_API_KEY` has no OAuth to offer,
+so for that case skip the plugin's connector and add the server yourself with
+the JSON above, or:
+
+```bash
+claude mcp add --transport http metaforge https://<your-hostname>/mcp \
+  --header "Authorization: Bearer $METAFORGE_MCP_API_KEY"
 ```
 
 ### claude.ai
@@ -149,34 +167,54 @@ So the honest summary is per-mechanism, not per-product: a connector is tools
 and prompts; a bundle is tools, prompts and skills; only Claude Code's own
 plugin format carries agents and hooks as well.
 
-### The plugin's connector needs editing on claude.ai
+### The hosted-gateway package, `metaforge-cloud` (FORGE-658, FORGE-661)
 
-Install the plugin from **Customize → Plugins → Add → Add marketplace** with
-`FidelOdok/MetaForge` and its skills and commands work immediately. Its bundled
-connector does not.
+`metaforge-cloud` is `metaforge` with the hosted gateway's address written in as
+a literal, so there is nothing to enter. It carries the same tools, skills,
+commands, agents and hooks. The connector is the bare address with no `?profile=`
+query and no `${user_config.*}` reference, and no bearer header.
 
-The plugin writes its URL as `${user_config.gateway_url}`, because Claude Code
-prompts for that value on first enable. Per-user configuration prompts are a
-Claude Code feature: **claude.ai shows the template literally** and asks you to
-replace it. The web app is behaving as designed.
-
-Open the plugin's **Connectors** tab and replace the whole URL with your own
-gateway, keeping the profile:
+In Claude Code:
 
 ```
-https://your-gateway.example.com/mcp?profile=core
+/plugin marketplace add FidelOdok/MetaForge
+/plugin install metaforge-cloud
 ```
 
-Clear any `Authorization` field still showing a `${...}` template. A literal
-`Bearer ${user_config.api_token}` is a malformed credential, which a gateway
-rejects less helpfully than no credential at all — and claude.ai cannot send a
-static token regardless, since it runs OAuth off your gateway's 401.
+Then run `/mcp`, choose `metaforge`, and sign in with the access secret. The
+gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set, as above.
 
-**No manifest change fixes this.** Every user runs their own gateway, so there
-is no literal URL a published plugin could carry that is right for the next
-person who installs it. Other plugins connect on install because they point at
-one hosted service. A single address becomes possible here only once a broker
-routes each account to its own gateway.
+Install one MetaForge package, not several: the manifest has no way to switch a
+connector off, so two would offer every tool twice.
+
+**This is an experiment (FORGE-661).** FORGE-660 had removed the address so that
+none of ours was in the public repository. But claude.ai chat ignores a connector
+whose URL has a `${user_config.*}` reference, and a custom connector at the same
+address showed **Connected** while the plugin's own row did not recognise it. The
+literal is back to find out whether claude.ai matches a plugin's connector to one
+on the account by address. If it does not help, the FORGE-660 form (address from
+user configuration) is the one to restore.
+
+### Connecting on claude.ai
+
+Anthropic's plugin support table says claude.ai chat **ignores** an MCP server
+whose URL contains a `${user_config.*}` reference. `metaforge` writes its URL that
+way, so it has no connector there; there is no template to edit and nothing to
+connect. (An earlier version of this page said the template was shown for you to
+replace. That was wrong.) `metaforge-cloud` has a literal address, so its
+connector is listed on the plugin's **Connectors** tab.
+
+Adding a plugin does not add or sign in its connector, so the row starts at
+**Not added**: choose **Add**, then **Connect**. If that cannot be done, add a
+custom connector under **Customize → Connectors** with the same address. Type the
+address with no punctuation after it: a stray backtick or quote copied from a
+document makes it an invalid URL. The custom connector is the route verified end to
+end against the hosted gateway. Your gateway needs `METAFORGE_OAUTH_LOGIN_SECRET`
+set, because claude.ai signs in with OAuth and cannot send a static token.
+
+For your own gateway, install `metaforge` for the skills and commands and add a
+custom connector with your gateway's address for the tools. No manifest can carry
+an address that is right for everyone, because each person runs their own gateway.
 
 ## Things that will bite you
 
