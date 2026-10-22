@@ -870,13 +870,15 @@ class TestPluginVersion:
 
 
 # ---------------------------------------------------------------------------
-# The hosted-gateway package: no hardcoded address (FORGE-658, FORGE-660)
+# The hosted-gateway package: literal address, an experiment (FORGE-658, FORGE-661)
 # ---------------------------------------------------------------------------
 
 
 class TestCloudPackage:
-    """The main package with the local default removed. The address is entered
-    by the person, so nothing of ours is written into the public repo."""
+    """The hosted address is written in so claude.ai does not ignore the connector
+    (it ignores any URL with a `${user_config.*}` reference), and so it can match a
+    connector added on the account with the same address. FORGE-661 is an
+    experiment: if it does not help, revert to the FORGE-660 form."""
 
     @pytest.fixture(scope="class")
     def root(self) -> Path:
@@ -888,25 +890,21 @@ class TestCloudPackage:
     def manifest(self, root: Path) -> dict:
         return json.loads((root / ".claude-plugin" / "plugin.json").read_text())
 
-    def test_no_address_is_written_into_the_package(self, root: Path, manifest: dict) -> None:
-        """The whole point of FORGE-660. The URL is a user_config reference, and
-        no hosted address appears anywhere in the package files."""
-        assert "${user_config.gateway_url}" in manifest["mcpServers"]["metaforge"]["url"]
-        for path in root.rglob("*"):
-            if path.is_file():
-                assert "mcp.metaforge.uk" not in path.read_text(encoding="utf-8"), path
+    def test_the_connector_is_the_bare_literal_address(self, manifest: dict) -> None:
+        from scripts.build_integrations import HOSTED_GATEWAY_URL
 
-    def test_the_address_is_required_and_has_no_default(self, manifest: dict) -> None:
-        """No local default either: a person who installs the hosted package has
-        to say where the gateway is."""
-        field = manifest["userConfig"]["gateway_url"]
-        assert field["required"] is True
-        assert "default" not in field
+        url = manifest["mcpServers"]["metaforge"]["url"]
+        # Exactly the bare URL: the connector claude.ai signed in to had no query
+        # string, and an earlier plugin build with `?profile=all` stayed at "Not added".
+        assert url == HOSTED_GATEWAY_URL
+        assert "?" not in url
+        # Nothing for claude.ai to ignore.
+        assert "${" not in json.dumps(manifest["mcpServers"])
 
-    def test_there_is_no_static_token(self, manifest: dict) -> None:
-        """The sign-in is OAuth in /mcp; a bearer header would stop Claude Code
-        ever offering it (FORGE-659)."""
-        assert "api_token" not in manifest["userConfig"]
+    def test_there_is_nothing_to_configure_and_no_static_token(self, manifest: dict) -> None:
+        """No user_config anywhere in the connector, and no bearer header: a
+        header would stop Claude Code ever offering the sign-in (FORGE-659)."""
+        assert "userConfig" not in manifest
         assert "headers" not in manifest["mcpServers"]["metaforge"]
 
     def test_it_installs_alongside_the_others(self, manifest: dict) -> None:
@@ -944,8 +942,9 @@ class TestCloudPackage:
         assert "METAFORGE_OAUTH_LOGIN_SECRET" in readme
 
     def test_the_readme_explains_claude_ai(self, root: Path) -> None:
-        """claude.ai chat ignores a connector with user_config in its URL, so the
-        package alone gives no tools there; the README must say what to do."""
+        """Adding a plugin does not add or sign in its connector, and a custom
+        connector with the same address is the fallback."""
         readme = (root / "README.md").read_text(encoding="utf-8")
-        assert "ignores" in readme
+        assert "**Add** it, then **Connect**" in readme
         assert "custom connector" in readme
+        assert "FORGE-661" in readme
