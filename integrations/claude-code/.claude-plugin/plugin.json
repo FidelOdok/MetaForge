@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "metaforge",
   "displayName": "MetaForge",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Engineer hardware against a digital twin: requirements, CAD, simulation and evidence, with writes held for human approval.",
   "author": {
     "name": "MetaForge",
@@ -26,12 +26,6 @@
       "default": "http://localhost:8765/mcp",
       "required": true
     },
-    "api_token": {
-      "type": "string",
-      "title": "API token",
-      "description": "Only needed for a gateway that requires one. A local gateway started with no auth configured does not.",
-      "sensitive": true
-    },
     "tool_profile": {
       "type": "string",
       "title": "Tool profile",
@@ -42,10 +36,7 @@
   "mcpServers": {
     "metaforge": {
       "type": "http",
-      "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}",
-      "headers": {
-        "Authorization": "Bearer ${user_config.api_token}"
-      }
+      "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}"
     }
   }
 }

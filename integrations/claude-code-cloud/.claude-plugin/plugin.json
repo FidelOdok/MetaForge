@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "metaforge-cloud",
   "displayName": "MetaForge (cloud)",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "MetaForge on claude.ai: the same digital-twin tools, connected to the hosted gateway with no setup. Sign in once when asked.",
   "author": {
     "name": "MetaForge",
@@ -21,7 +21,7 @@
   "mcpServers": {
     "metaforge": {
       "type": "http",
-      "url": "https://mcp.metaforge.uk/mcp?profile=all"
+      "url": "https://mcp.metaforge.uk/mcp"
     }
   }
 }
