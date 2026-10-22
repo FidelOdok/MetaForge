@@ -34,7 +34,7 @@
     {
       "name": "metaforge-cloud",
       "source": "./integrations/claude-code-cloud",
-      "description": "For a hosted gateway. The same tools, skills, commands, agents and hooks as metaforge, but with no local default: you enter the hosted gateway's address, and sign in through /mcp.",
+      "description": "For the hosted gateway. The same tools, skills, commands, agents and hooks as metaforge, with the address already written in: nothing to enter, sign in once.",
       "category": "engineering",
       "tags": [
         "hardware",

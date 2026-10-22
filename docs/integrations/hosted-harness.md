@@ -167,12 +167,12 @@ So the honest summary is per-mechanism, not per-product: a connector is tools
 and prompts; a bundle is tools, prompts and skills; only Claude Code's own
 plugin format carries agents and hooks as well.
 
-### The hosted-gateway package, `metaforge-cloud` (FORGE-658, FORGE-660)
+### The hosted-gateway package, `metaforge-cloud` (FORGE-658, FORGE-661)
 
-`metaforge-cloud` is `metaforge` with the local default taken out. It carries the
-same tools, skills, commands, agents and hooks, but the gateway address is
-required and has **no default**, so no address of ours is written into the public
-repository. You enter your hosted gateway's address, and sign in the same way.
+`metaforge-cloud` is `metaforge` with the hosted gateway's address written in as
+a literal, so there is nothing to enter. It carries the same tools, skills,
+commands, agents and hooks. The connector is the bare address with no `?profile=`
+query and no `${user_config.*}` reference, and no bearer header.
 
 In Claude Code:
 
@@ -181,38 +181,40 @@ In Claude Code:
 /plugin install metaforge-cloud
 ```
 
-Claude Code asks for the gateway URL on first enable. Then run `/mcp`, choose
-`metaforge`, and sign in with the access secret. The gateway needs
-`METAFORGE_OAUTH_LOGIN_SECRET` set, as above.
+Then run `/mcp`, choose `metaforge`, and sign in with the access secret. The
+gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set, as above.
 
 Install one MetaForge package, not several: the manifest has no way to switch a
 connector off, so two would offer every tool twice.
 
-An earlier build of this package carried the hosted address as a literal, so a
-claude.ai user would not have to type it. It was removed: the address now comes
-from user configuration, and a test checks that no hosted address appears in any
-file of the package.
+**This is an experiment (FORGE-661).** FORGE-660 had removed the address so that
+none of ours was in the public repository. But claude.ai chat ignores a connector
+whose URL has a `${user_config.*}` reference, and a custom connector at the same
+address showed **Connected** while the plugin's own row did not recognise it. The
+literal is back to find out whether claude.ai matches a plugin's connector to one
+on the account by address. If it does not help, the FORGE-660 form (address from
+user configuration) is the one to restore.
 
 ### Connecting on claude.ai
 
-Neither `metaforge` nor `metaforge-cloud` has a connector on claude.ai. Both write
-the URL as `${user_config.gateway_url}`, because Claude Code prompts for that value
-on first enable, and Anthropic's plugin support table says claude.ai chat
-**ignores** an MCP server whose URL contains a `${user_config.*}` reference. There
-is no template to edit and no connector to connect. (An earlier version of this
-page said the template was shown for you to replace. That was wrong.)
+Anthropic's plugin support table says claude.ai chat **ignores** an MCP server
+whose URL contains a `${user_config.*}` reference. `metaforge` writes its URL that
+way, so it has no connector there; there is no template to edit and nothing to
+connect. (An earlier version of this page said the template was shown for you to
+replace. That was wrong.) `metaforge-cloud` has a literal address, so its
+connector is listed on the plugin's **Connectors** tab.
 
-Install either package on claude.ai for its skills, commands and, in Cowork,
-agents. For the tools, add a custom connector under **Customize → Connectors**
-with your gateway's address, as in the section above. Type the address with no
-punctuation after it: a stray backtick or quote copied from a document makes it
-an invalid URL. Your gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set, because
-claude.ai signs in with OAuth and cannot send a static token. That route is the one
-verified end to end against the hosted gateway.
+Adding a plugin does not add or sign in its connector, so the row starts at
+**Not added**: choose **Add**, then **Connect**. If that cannot be done, add a
+custom connector under **Customize → Connectors** with the same address. Type the
+address with no punctuation after it: a stray backtick or quote copied from a
+document makes it an invalid URL. The custom connector is the route verified end to
+end against the hosted gateway. Your gateway needs `METAFORGE_OAUTH_LOGIN_SECRET`
+set, because claude.ai signs in with OAuth and cannot send a static token.
 
-No manifest can carry an address that is right for everyone, because each person
-runs their own gateway. A single address becomes possible only once a broker routes
-each account to its own gateway.
+For your own gateway, install `metaforge` for the skills and commands and add a
+custom connector with your gateway's address for the tools. No manifest can carry
+an address that is right for everyone, because each person runs their own gateway.
 
 ## Things that will bite you
 
