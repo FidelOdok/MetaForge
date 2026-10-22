@@ -18,6 +18,7 @@ Verify with ``claude plugin validate integrations/claude-code``.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -53,7 +54,73 @@ LOCAL_INSTALL_COMMAND = 'pipx install "git+https://github.com/FidelOdok/MetaForg
 
 
 PLUGIN_NAME = "metaforge"
-VERSION = "0.1.0"
+
+# FORGE-657. The version was a literal "0.1.0" that nothing ever changed. Claude
+# Code decides whether to update an installed plugin by comparing this string,
+# so skills, PLUGIN.md and tool lists changed for weeks and no installed copy
+# saw any of it. The version now lives in a committed lock beside the output,
+# next to a digest of the content it was cut for. The generator bumps the patch
+# when (and only when) the content digest moves, and a test fails when content
+# changed without the bump, so "changed but not versioned" cannot be merged.
+#
+# It is not the platform release number: that tag is created by CI after merge
+# and never committed back, so the source tree cannot carry it.
+VERSION_LOCK = OUT / "plugin-version.json"
+
+
+def read_version_lock(lock: Path = VERSION_LOCK) -> dict:
+    return json.loads(lock.read_text(encoding="utf-8"))
+
+
+VERSION = read_version_lock()["version"]
+
+
+def content_digest(root: Path = OUT, lock: Path = VERSION_LOCK) -> str:
+    """Hash everything the plugins ship, ignoring the version they carry.
+
+    A version field is dropped before hashing, otherwise bumping the version
+    would itself change the digest and the bump would never settle.
+    """
+    h = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path == lock:
+            continue
+        data = path.read_bytes()
+        if path.name == "plugin.json":
+            manifest = json.loads(data)
+            manifest.pop("version", None)
+            data = json.dumps(manifest, sort_keys=True).encode()
+        h.update(path.relative_to(root).as_posix().encode())
+        h.update(b"\0")
+        h.update(data)
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def next_version(version: str) -> str:
+    major, minor, patch = version.split(".")
+    return f"{major}.{minor}.{int(patch) + 1}"
+
+
+def bump_if_changed(root: Path = OUT, lock: Path = VERSION_LOCK) -> str | None:
+    """Record the content digest, bumping the patch if it moved.
+
+    Returns the new version when the lock changed, else None. An empty recorded
+    digest adopts the current content at the version already written, which is
+    how the lock is first created without inventing a bump.
+    """
+    recorded = read_version_lock(lock)
+    digest = content_digest(root, lock)
+    if digest == recorded["content_digest"]:
+        return None
+    version = (
+        recorded["version"] if not recorded["content_digest"] else next_version(recorded["version"])
+    )
+    lock.write_text(
+        json.dumps({"version": version, "content_digest": digest}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return version
 
 
 def stdio_plugin_manifest() -> dict:
@@ -854,15 +921,31 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    for build in (build_claude_code, build_codex):
-        root = build(default_gateway_url=args.gateway_url)
-        print(f"wrote {root.relative_to(REPO)}")
-    # FORGE-374: takes no gateway URL, deliberately -- it has nothing to
-    # point at, and offering the option would imply otherwise.
-    local = build_claude_code_local()
-    print(f"wrote {local.relative_to(REPO)}")
-    catalog = build_marketplace()
-    print(f"wrote {catalog.relative_to(REPO)}")
+    def build_all() -> None:
+        for build in (build_claude_code, build_codex):
+            root = build(default_gateway_url=args.gateway_url)
+            print(f"wrote {root.relative_to(REPO)}")
+        # FORGE-374: takes no gateway URL, deliberately -- it has nothing to
+        # point at, and offering the option would imply otherwise.
+        local = build_claude_code_local()
+        print(f"wrote {local.relative_to(REPO)}")
+        catalog = build_marketplace()
+        print(f"wrote {catalog.relative_to(REPO)}")
+
+    global VERSION
+    build_all()
+    if args.gateway_url == DEFAULT_GATEWAY_URL:
+        # FORGE-657: version the content. Manifests are written before the
+        # digest is taken, and again if it moved, so they carry the new number.
+        bumped = bump_if_changed()
+        if bumped is not None and bumped != VERSION:
+            print(f"plugin version {VERSION} -> {bumped}")
+            VERSION = bumped
+            build_all()
+        else:
+            print(f"plugin version {VERSION}")
+    else:
+        print("custom --gateway-url: version not recorded; this tree is not the committed output")
     print(
         "verify: claude plugin validate --strict . integrations/claude-code "
         "integrations/claude-code-local"
