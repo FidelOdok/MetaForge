@@ -188,7 +188,7 @@ def describe(found: GatewayProbe | None, probes: list[GatewayProbe]) -> str:
         if found.server_version:
             lines.append(f"  version {found.server_version}, MCP {found.protocol}")
         if found.requires_auth:
-            lines.append("  it needs credentials -- set the plugin's api_token as well")
+            lines.append("  it needs a sign-in -- run /mcp in Claude Code and choose metaforge")
         lines.append("")
         lines.append("Use this as the plugin's gateway URL:")
         lines.append(f"  {found.url}")

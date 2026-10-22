@@ -49,10 +49,11 @@ LOCAL_PLUGIN_NAME = "metaforge-local"
 # hosted gateway's address as a literal instead, so installing it is the whole
 # setup: claude.ai reads the 401, runs OAuth, and asks for the sign-in secret.
 CLOUD_PLUGIN_NAME = "metaforge-cloud"
+#: No query string. The connector that claude.ai was seen signing in to and
+#: calling had a bare URL, and the plugin's one, which carried `?profile=all`,
+#: stayed at "Not added" with Connect disabled and never sent a request. A server
+#: given no profile serves every tool, which is what `all` meant anyway.
 HOSTED_GATEWAY_URL = "https://mcp.metaforge.uk/mcp"
-#: `all`, because a connector with no capped profile is what claude.ai was seen
-#: connecting to and calling. Change it here if a hard tool limit ever bites.
-HOSTED_TOOL_PROFILE = "all"
 
 # FORGE-648. Both of these READMEs used to say `pip install metaforge`, and
 # `metaforge` on PyPI is an unrelated job-shop scheduling library by someone
@@ -195,12 +196,7 @@ def cloud_plugin_manifest() -> dict:
         "hosted gateway with no setup. Sign in once when asked."
     )
     manifest.pop("userConfig", None)
-    manifest["mcpServers"] = {
-        "metaforge": {
-            "type": "http",
-            "url": f"{HOSTED_GATEWAY_URL}?profile={HOSTED_TOOL_PROFILE}",
-        }
-    }
+    manifest["mcpServers"] = {"metaforge": {"type": "http", "url": HOSTED_GATEWAY_URL}}
     return manifest
 
 
@@ -233,15 +229,11 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 "default": default_gateway_url,
                 "required": True,
             },
-            "api_token": {
-                "type": "string",
-                "title": "API token",
-                "description": (
-                    "Only needed for a gateway that requires one. A local "
-                    "gateway started with no auth configured does not."
-                ),
-                "sensitive": True,
-            },
+            # FORGE-659: there is no token field. A configured Authorization
+            # header that the server rejects is reported as a failed connection
+            # and never falls back to OAuth, so a bearer header here would stop
+            # Claude Code ever offering the sign-in. Without one, a gateway that
+            # answers 401 is flagged in /mcp and the person signs in there.
             # FORGE-410: the deployment plugins connect to serves every tool it
             # has -- 108 at the last count -- because it runs with no
             # `--profile`. Claude Code copes by loading tools lazily; a harness
@@ -285,7 +277,6 @@ def plugin_manifest(*, default_gateway_url: str) -> dict:
                 # sees no profile and serves everything, which is the previous
                 # behaviour rather than a failure.
                 "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}",
-                "headers": {"Authorization": "Bearer ${user_config.api_token}"},
             }
         },
     }
@@ -515,31 +506,26 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
         "Claude Code asks for your gateway URL on first enable. The default "
         "suits a gateway running on your own machine; a team or hosted gateway "
         "is the same package with a different URL.\n\n"
-        "### On claude.ai\n\n"
-        f"Install `{CLOUD_PLUGIN_NAME}` instead: it has the hosted gateway's address "
-        "already filled in, so there is nothing to edit. The rest of this section "
-        "is for pointing this package at your own gateway.\n\n"
-        "The same marketplace works from **Customize \u2192 Plugins \u2192 Add \u2192 "
-        "Add marketplace**, and the skills and commands load straight away.\n\n"
-        "The bundled connector does not. Its URL is written as "
-        "`${user_config.gateway_url}`, and per-user configuration prompts are a "
-        "Claude Code feature \u2014 claude.ai shows the template literally and asks "
-        "you to replace it. That is the web app behaving as designed, not a "
-        "broken plugin.\n\n"
-        "Open the plugin's **Connectors** tab and replace the whole URL with your "
-        "own gateway, keeping the profile:\n\n"
+        "### Signing in\n\n"
+        "There is no token field. When the gateway needs a login it answers 401, "
+        "Claude Code flags `metaforge` in `/mcp`, and you sign in there with OAuth "
+        "(run `/mcp`, choose `metaforge`, and follow the browser prompt). A gateway "
+        "with no auth configured needs nothing.\n\n"
+        "The gateway has to offer OAuth: set `METAFORGE_OAUTH_LOGIN_SECRET` on it. "
+        "A gateway with only `METAFORGE_MCP_API_KEY` has no sign-in to offer. "
+        "Claude Code will not fall back to OAuth after a rejected static header, "
+        "so for a key-only gateway skip this plugin's connector and add the server "
+        "yourself with a header:\n\n"
         "```\n"
-        "https://your-gateway.example.com/mcp?profile=core\n"
+        "claude mcp add --transport http metaforge https://your-gateway.example.com/mcp "
+        '--header "Authorization: Bearer $METAFORGE_MCP_API_KEY"\n'
         "```\n\n"
-        "If an `Authorization` field also shows a `${...}` template, clear it: a "
-        "literal `Bearer ${user_config.api_token}` is a malformed credential, "
-        "which a gateway rejects less helpfully than no credential at all. "
-        "claude.ai cannot send a static token anyway \u2014 it runs OAuth, and your "
-        "gateway advertises that in its 401.\n\n"
-        "There is no URL this package could carry instead. Every user runs their "
-        "own gateway, so no literal is correct for the next installer; a single "
-        "address only becomes possible once a broker routes to each account's "
-        "gateway.\n\n"
+        "### On claude.ai\n\n"
+        f"Install `{CLOUD_PLUGIN_NAME}` instead. claude.ai ignores a connector whose "
+        "URL contains a `${user_config.*}` reference, so this package's connector "
+        "never appears there; the cloud package has the hosted gateway's address "
+        "written in, so it does. To use your own gateway on claude.ai, add a custom "
+        "connector with your URL under **Customize \u2192 Connectors**.\n\n"
         "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
         f"## Skills\n\n{len(skills)} skills are bundled: the engineering skills "
         "MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), "
@@ -697,8 +683,10 @@ def build_claude_code_local() -> Path:
 def build_claude_code_cloud() -> Path:
     """The claude.ai package with a pre-filled connector (FORGE-658).
 
-    Skills and commands only. Hooks and agents are Claude Code features that
-    claude.ai does not run, and the hooks need Python on the person's PATH.
+    Skills, commands and agents. Chat ignores agents, but Cowork loads them, so
+    they ship. Hooks do not: they run on the person's computer and need Python
+    on the PATH, which a claude.ai install cannot promise. Claude Code's full
+    package, ``claude-code/``, carries everything.
     """
     root = OUT / "claude-code-cloud"
     if root.exists():
@@ -709,21 +697,29 @@ def build_claude_code_cloud() -> Path:
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
     commands = write_commands(root)
     skills = write_skills(root)
-    print(f"  {len(skills)} skill(s), {len(commands)} command(s)")
+    agents = write_agents(root)
+    print(f"  {len(skills)} skill(s), {len(commands)} command(s), {len(agents)} agent(s)")
 
     (root / "README.md").write_text(
         "# MetaForge for claude.ai\n\n"
         "**Generated by `scripts/build_integrations.py` — do not edit by hand.**\n\n"
-        "The same skills and commands as `claude-code/`, with the connector already "
+        "The same skills, commands and agents as `claude-code/` (without its hooks), "
+        "with the connector already "
         f"pointing at the hosted gateway (`{HOSTED_GATEWAY_URL}`). There is nothing to "
         "configure: install it, and claude.ai asks you to sign in the first time "
         "it connects.\n\n"
         "## Install\n\n"
         "In claude.ai, **Customize → Plugins → Add → Add marketplace**, "
         f"enter `FidelOdok/MetaForge`, and install `{CLOUD_PLUGIN_NAME}`.\n\n"
-        "Choose **Connect** on the plugin's connector. A MetaForge sign-in page "
+        "Open the plugin's **Connectors** tab. Adding a plugin does not add or sign "
+        "in its connector: **Add** it, then **Connect**. A MetaForge sign-in page "
         "opens; enter the access secret your administrator gave you. claude.ai "
-        "keeps the token it gets back, so you sign in once.\n\n"
+        "keeps the token it gets back, so you sign in once. On a Team or "
+        "Enterprise plan an Owner adds the connector for the organization first.\n\n"
+        "If the connector cannot be added from the plugin, add a custom connector "
+        f"under **Customize → Connectors** with the same URL (`{HOSTED_GATEWAY_URL}`); "
+        "the tools are the same.\n\n"
+        "Agents load in Cowork and Claude Code. Chat ignores them.\n\n"
         "## Which package\n\n"
         "| | `metaforge-cloud` | `metaforge` | `metaforge-local` |\n"
         "|---|---|---|---|\n"
@@ -735,6 +731,7 @@ def build_claude_code_cloud() -> Path:
         "and give it your URL instead.\n\n"
         "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
         f"## Skills\n\n{len(skills)} skills are bundled.\n\n"
+        "## Agents\n\n" + "\n".join(f"- `{a}`" for a in agents) + "\n\n"
         "## Writes wait for a human\n\n"
         "A tool that writes is held for approval, because the hosted gateway sees "
         "you as a remote caller. Held calls appear on the dashboard's Approvals "

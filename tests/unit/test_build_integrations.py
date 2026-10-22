@@ -55,10 +55,15 @@ class TestTheConnectionIsAsked_Not_Assumed:
         # ...and still not into the server config.
         assert manifest["mcpServers"]["metaforge"]["url"].startswith("${user_config.gateway_url}")
 
-    def test_the_token_is_marked_sensitive(self) -> None:
-        # Otherwise it lands in settings.json in the clear.
+    def test_there_is_no_static_token_so_oauth_can_run(self) -> None:
+        """FORGE-659. Claude Code does not fall back to OAuth once a configured
+        Authorization header is rejected, so a bearer header here would stop the
+        sign-in ever being offered. No header and no token field: the gateway's
+        401 flags the server in /mcp and the person signs in there."""
         manifest = plugin_manifest(default_gateway_url=DEFAULT_GATEWAY_URL)
-        assert manifest["userConfig"]["api_token"]["sensitive"] is True
+        assert "api_token" not in manifest["userConfig"]
+        assert "headers" not in manifest["mcpServers"]["metaforge"]
+        assert "Authorization" not in json.dumps(manifest)
 
 
 class TestGeneratedPackage:
@@ -699,17 +704,13 @@ class TestHookScript:
 
 
 class TestClaudeAiConnectorIsDocumented:
-    """claude.ai does not substitute `${user_config.*}` (FORGE-591).
+    """claude.ai ignores a connector whose URL has `${user_config.*}` in it.
 
-    Per-user configuration prompts are a Claude Code feature. On claude.ai the
-    plugin's bundled connector therefore shows its URL template literally, and
-    the user has to replace it by hand. That looks exactly like a broken
-    plugin, and the generated README used to say only "Claude Code asks for
-    your gateway URL on first enable" -- true there, false on the web.
-
-    No manifest change fixes it: every user runs their own gateway, so no
-    literal URL is correct for the next installer. Documentation is the fix,
-    which makes it the kind that rots silently -- hence this test.
+    FORGE-591 documented this as the template being shown literally for the user
+    to edit. Anthropic's plugin support table says otherwise: in chat such a
+    server is ignored outright, so there is nothing to edit (FORGE-659). The
+    README has to say what actually happens and send claude.ai users to the
+    package that works, or it reads as a broken plugin.
     """
 
     @staticmethod
@@ -723,22 +724,29 @@ class TestClaudeAiConnectorIsDocumented:
     def test_the_readme_names_claude_ai_at_all(self) -> None:
         assert "claude.ai" in self._readme()
 
-    def test_it_says_the_template_is_shown_literally(self) -> None:
+    def test_it_says_the_connector_is_ignored_and_points_at_the_cloud_package(self) -> None:
         """The specific surprise. Without this a user reads 'Claude Code asks
         for your gateway URL' and concludes the plugin is broken."""
+        from scripts.build_integrations import CLOUD_PLUGIN_NAME
+
         text = self._readme()
-        assert "${user_config.gateway_url}" in text
-        assert "literal" in text.lower()
+        assert "${user_config.*}" in text
+        assert "ignores" in text
+        assert f"`{CLOUD_PLUGIN_NAME}`" in text
 
-    def test_it_shows_what_to_paste_instead(self) -> None:
-        """Naming the problem without the replacement is half a fix."""
-        assert "?profile=core" in self._readme()
+    def test_it_explains_how_to_sign_in_and_what_the_gateway_needs(self) -> None:
+        """No token field, so the sign-in has to be written down, and so does the
+        server side: OAuth exists only when a login secret is set."""
+        text = self._readme()
+        assert "/mcp" in text
+        assert "METAFORGE_OAUTH_LOGIN_SECRET" in text
 
-    def test_it_warns_about_the_authorization_template(self) -> None:
-        """A literal `Bearer ${...}` is a malformed credential, which reads
-        worse than sending none -- the same reasoning the codex config.toml
-        already applies to an empty bearer."""
-        assert "Bearer ${user_config.api_token}" in self._readme()
+    def test_it_gives_a_key_only_gateway_a_way_in(self) -> None:
+        """Claude Code will not fall back to OAuth after a rejected header, so a
+        gateway with only an API key needs the server added by hand."""
+        text = self._readme()
+        assert "claude mcp add" in text
+        assert "--header" in text
 
 
 def test_the_profile_setting_names_every_profile() -> None:
@@ -884,7 +892,10 @@ class TestCloudPackage:
         from scripts.build_integrations import HOSTED_GATEWAY_URL
 
         url = manifest["mcpServers"]["metaforge"]["url"]
-        assert url.startswith(HOSTED_GATEWAY_URL)
+        # Exactly the bare URL: the connector claude.ai signed in to had no query
+        # string, and the plugin's one with `?profile=all` stayed at "Not added".
+        assert url == HOSTED_GATEWAY_URL
+        assert "?" not in url
         # Nothing for claude.ai to fill in or show as literal text.
         assert "${" not in json.dumps(manifest["mcpServers"])
 
@@ -909,10 +920,17 @@ class TestCloudPackage:
             p.name for p in (main / "commands").iterdir()
         )
 
-    def test_it_ships_no_hooks_or_agents(self, root: Path) -> None:
-        """claude.ai does not run them, and the hooks need Python on the PATH."""
+    def test_it_ships_agents_but_no_hooks(self, root: Path) -> None:
+        """Chat ignores agents but Cowork loads them. Hooks run on the person's
+        computer and need Python on the PATH, which a claude.ai install cannot
+        promise. Claude Code's full package carries both."""
+        main = build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
+        assert sorted(p.name for p in (root / "agents").iterdir()) == sorted(
+            p.name for p in (main / "agents").iterdir()
+        )
+        assert list((root / "agents").iterdir())
         assert not (root / "hooks").exists()
-        assert not (root / "agents").exists()
+        assert (main / "hooks").exists()
 
     def test_the_readme_says_how_to_install_it(self, root: Path) -> None:
         from scripts.build_integrations import CLOUD_PLUGIN_NAME
