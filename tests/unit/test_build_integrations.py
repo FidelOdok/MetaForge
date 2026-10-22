@@ -870,13 +870,13 @@ class TestPluginVersion:
 
 
 # ---------------------------------------------------------------------------
-# The claude.ai package with a pre-filled connector (FORGE-658)
+# The hosted-gateway package: no hardcoded address (FORGE-658, FORGE-660)
 # ---------------------------------------------------------------------------
 
 
 class TestCloudPackage:
-    """On claude.ai the main plugin's connector is a template the web app cannot
-    fill in, so it keeps asking to connect. This package carries a literal URL."""
+    """The main package with the local default removed. The address is entered
+    by the person, so nothing of ours is written into the public repo."""
 
     @pytest.fixture(scope="class")
     def root(self) -> Path:
@@ -888,22 +888,25 @@ class TestCloudPackage:
     def manifest(self, root: Path) -> dict:
         return json.loads((root / ".claude-plugin" / "plugin.json").read_text())
 
-    def test_the_connector_is_a_literal_url(self, manifest: dict) -> None:
-        from scripts.build_integrations import HOSTED_GATEWAY_URL
+    def test_no_address_is_written_into_the_package(self, root: Path, manifest: dict) -> None:
+        """The whole point of FORGE-660. The URL is a user_config reference, and
+        no hosted address appears anywhere in the package files."""
+        assert "${user_config.gateway_url}" in manifest["mcpServers"]["metaforge"]["url"]
+        for path in root.rglob("*"):
+            if path.is_file():
+                assert "mcp.metaforge.uk" not in path.read_text(encoding="utf-8"), path
 
-        url = manifest["mcpServers"]["metaforge"]["url"]
-        # Exactly the bare URL: the connector claude.ai signed in to had no query
-        # string, and the plugin's one with `?profile=all` stayed at "Not added".
-        assert url == HOSTED_GATEWAY_URL
-        assert "?" not in url
-        # Nothing for claude.ai to fill in or show as literal text.
-        assert "${" not in json.dumps(manifest["mcpServers"])
+    def test_the_address_is_required_and_has_no_default(self, manifest: dict) -> None:
+        """No local default either: a person who installs the hosted package has
+        to say where the gateway is."""
+        field = manifest["userConfig"]["gateway_url"]
+        assert field["required"] is True
+        assert "default" not in field
 
-    def test_there_is_nothing_to_configure_and_no_static_token(self, manifest: dict) -> None:
-        """claude.ai cannot prompt for user config or send a bearer header; it
-        runs OAuth off the gateway's 401. A leftover template reads as a
-        malformed credential."""
-        assert "userConfig" not in manifest
+    def test_there_is_no_static_token(self, manifest: dict) -> None:
+        """The sign-in is OAuth in /mcp; a bearer header would stop Claude Code
+        ever offering it (FORGE-659)."""
+        assert "api_token" not in manifest["userConfig"]
         assert "headers" not in manifest["mcpServers"]["metaforge"]
 
     def test_it_installs_alongside_the_others(self, manifest: dict) -> None:
@@ -920,21 +923,29 @@ class TestCloudPackage:
             p.name for p in (main / "commands").iterdir()
         )
 
-    def test_it_ships_agents_but_no_hooks(self, root: Path) -> None:
-        """Chat ignores agents but Cowork loads them. Hooks run on the person's
-        computer and need Python on the PATH, which a claude.ai install cannot
-        promise. Claude Code's full package carries both."""
+    def test_it_ships_agents_and_hooks_like_the_main_package(self, root: Path) -> None:
         main = build_claude_code(default_gateway_url=DEFAULT_GATEWAY_URL)
-        assert sorted(p.name for p in (root / "agents").iterdir()) == sorted(
-            p.name for p in (main / "agents").iterdir()
-        )
-        assert list((root / "agents").iterdir())
-        assert not (root / "hooks").exists()
-        assert (main / "hooks").exists()
+        for folder in ("agents", "hooks"):
+            assert list((root / folder).iterdir()), folder
+            assert sorted(p.name for p in (root / folder).iterdir()) == sorted(
+                p.name for p in (main / folder).iterdir()
+            )
+        assert (root / "hooks" / "hooks.json").read_text() == (
+            main / "hooks" / "hooks.json"
+        ).read_text()
 
-    def test_the_readme_says_how_to_install_it(self, root: Path) -> None:
+    def test_the_readme_says_how_to_install_and_sign_in(self, root: Path) -> None:
         from scripts.build_integrations import CLOUD_PLUGIN_NAME
 
         readme = (root / "README.md").read_text(encoding="utf-8")
-        assert f"install `{CLOUD_PLUGIN_NAME}`" in readme
+        assert f"/plugin install {CLOUD_PLUGIN_NAME}" in readme
         assert "FidelOdok/MetaForge" in readme
+        assert "/mcp" in readme
+        assert "METAFORGE_OAUTH_LOGIN_SECRET" in readme
+
+    def test_the_readme_explains_claude_ai(self, root: Path) -> None:
+        """claude.ai chat ignores a connector with user_config in its URL, so the
+        package alone gives no tools there; the README must say what to do."""
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        assert "ignores" in readme
+        assert "custom connector" in readme

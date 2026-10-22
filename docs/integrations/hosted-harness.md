@@ -167,58 +167,52 @@ So the honest summary is per-mechanism, not per-product: a connector is tools
 and prompts; a bundle is tools, prompts and skills; only Claude Code's own
 plugin format carries agents and hooks as well.
 
-### On claude.ai, install `metaforge-cloud` (FORGE-658)
+### The hosted-gateway package, `metaforge-cloud` (FORGE-658, FORGE-660)
 
-The marketplace carries a package for claude.ai whose connector is already
-pointed at the hosted gateway, so there is no URL to find and nothing to edit.
+`metaforge-cloud` is `metaforge` with the local default taken out. It carries the
+same tools, skills, commands, agents and hooks, but the gateway address is
+required and has **no default**, so no address of ours is written into the public
+repository. You enter your hosted gateway's address, and sign in the same way.
 
-1. **Customize → Plugins → Add → Add marketplace**, and enter `FidelOdok/MetaForge`.
-2. Install `metaforge-cloud`.
-3. Open the plugin's **Connectors** tab. Adding a plugin does not add or sign in
-   its connector, so the row starts at **Not added**: choose **Add**, then
-   **Connect**. claude.ai follows the gateway's 401 into OAuth and opens the
-   sign-in page. Enter the access secret once; claude.ai keeps the token. On a
-   Team or Enterprise plan an Owner adds the connector for the organization first.
+In Claude Code:
 
-If the connector cannot be added from the plugin, add a custom connector under
-**Customize → Connectors** with the same URL. The tools are the same, and that
-route is the one verified end to end against the hosted gateway.
+```
+/plugin marketplace add FidelOdok/MetaForge
+/plugin install metaforge-cloud
+```
 
-It carries the same skills, commands and agents as `metaforge`. Chat ignores
-agents and hooks; Cowork loads agents. Hooks are left out because they run on the
-person's computer and need Python on the PATH. Claude Code's `metaforge` package
-carries everything. Install one MetaForge package, not several: the manifest has
-no way to switch a connector off, so two would offer every tool twice.
+Claude Code asks for the gateway URL on first enable. Then run `/mcp`, choose
+`metaforge`, and sign in with the access secret. The gateway needs
+`METAFORGE_OAUTH_LOGIN_SECRET` set, as above.
 
-The connector URL is the bare `https://mcp.metaforge.uk/mcp`, with no `?profile=`
-query. The connector claude.ai was seen signing in to had none, and an earlier
-build of this package that carried one stayed at **Not added** with Connect
-disabled. A server given no profile serves every tool.
+Install one MetaForge package, not several: the manifest has no way to switch a
+connector off, so two would offer every tool twice.
 
-The address is a constant in `scripts/build_integrations.py`
-(`HOSTED_GATEWAY_URL`), so moving the hosted gateway means regenerating the
-package and publishing a new version, which the content versioning handles.
+An earlier build of this package carried the hosted address as a literal, so a
+claude.ai user would not have to type it. It was removed: the address now comes
+from user configuration, and a test checks that no hosted address appears in any
+file of the package.
 
-### Using your own gateway on claude.ai
+### Connecting on claude.ai
 
-`metaforge` has no connector on claude.ai. The plugin writes its URL as
-`${user_config.gateway_url}`, because Claude Code prompts for that value on first
-enable, and Anthropic's plugin support table says claude.ai chat **ignores** an
-MCP server whose URL contains a `${user_config.*}` reference. There is no
-template to edit and no connector to connect. (An earlier version of this page
-said the template was shown for you to replace. That was wrong.)
+Neither `metaforge` nor `metaforge-cloud` has a connector on claude.ai. Both write
+the URL as `${user_config.gateway_url}`, because Claude Code prompts for that value
+on first enable, and Anthropic's plugin support table says claude.ai chat
+**ignores** an MCP server whose URL contains a `${user_config.*}` reference. There
+is no template to edit and no connector to connect. (An earlier version of this
+page said the template was shown for you to replace. That was wrong.)
 
-Install `metaforge` on claude.ai only for its skills and commands. For the tools,
-add a custom connector under **Customize → Connectors** with your own gateway's
-URL, as in the section above. Your gateway needs `METAFORGE_OAUTH_LOGIN_SECRET`
-set, because claude.ai signs in with OAuth and cannot send a static token.
+Install either package on claude.ai for its skills, commands and, in Cowork,
+agents. For the tools, add a custom connector under **Customize → Connectors**
+with your gateway's address, as in the section above. Type the address with no
+punctuation after it: a stray backtick or quote copied from a document makes it
+an invalid URL. Your gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set, because
+claude.ai signs in with OAuth and cannot send a static token. That route is the one
+verified end to end against the hosted gateway.
 
-**No manifest change fixes this for `metaforge` itself.** Every user runs their
-own gateway, so there is no literal URL it could carry that is right for the
-next person who installs it. That is why the hosted address lives in its own
-package, `metaforge-cloud`, rather than in this one. A single address for
-everyone becomes possible only once a broker routes each account to its own
-gateway.
+No manifest can carry an address that is right for everyone, because each person
+runs their own gateway. A single address becomes possible only once a broker routes
+each account to its own gateway.
 
 ## Things that will bite you
 

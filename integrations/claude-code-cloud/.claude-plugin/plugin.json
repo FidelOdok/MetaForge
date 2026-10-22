@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "metaforge-cloud",
   "displayName": "MetaForge (cloud)",
-  "version": "0.2.2",
-  "description": "MetaForge on claude.ai: the same digital-twin tools, connected to the hosted gateway with no setup. Sign in once when asked.",
+  "version": "0.2.3",
+  "description": "MetaForge for a hosted gateway: the same digital-twin tools, skills, commands, agents and hooks, with the gateway address entered by you.",
   "author": {
     "name": "MetaForge",
     "url": "https://www.metaforge.uk"
@@ -18,10 +18,24 @@
     "digital-twin",
     "engineering"
   ],
+  "userConfig": {
+    "gateway_url": {
+      "type": "string",
+      "title": "Gateway URL",
+      "description": "The MCP endpoint of your hosted MetaForge gateway, for example https://your-gateway.example.com/mcp. Sign in with the access secret your administrator gave you when Claude Code asks.",
+      "required": true
+    },
+    "tool_profile": {
+      "type": "string",
+      "title": "Tool profile",
+      "description": "Which tool set to load. all (the default) loads every tool: Claude Code defers tools behind its tool search, and a client-mode run needs phase, gate, CAD, simulation and value-sourcing tools together, which no capped set holds. On a harness with a hard tool limit pick a capped set instead: core (project, twin reads, decisions, flows), client_run (drive a client-mode run and source values; reads the machine library), mechanical (stateless CAD), mechanical_product (CAD authored in a FreeCAD session), manufacturing (process selection and DFM review; reads the machine library), industrial_design (form factor, ergonomics and finishes; renders and the appearance library), simulation, electronics or robotics, each 25-40 tools. Registering, discovering or sending a job to a machine needs all. Every set includes health.check so /metaforge:doctor always works.",
+      "default": "all"
+    }
+  },
   "mcpServers": {
     "metaforge": {
       "type": "http",
-      "url": "https://mcp.metaforge.uk/mcp"
+      "url": "${user_config.gateway_url}?profile=${user_config.tool_profile}"
     }
   }
 }

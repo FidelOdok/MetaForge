@@ -43,17 +43,17 @@ DEFAULT_GATEWAY_URL = "http://localhost:8765/mcp"
 #: needs its own name -- components are namespaced under it.
 LOCAL_PLUGIN_NAME = "metaforge-local"
 
-# FORGE-658. On claude.ai the main plugin's connector URL is a `${user_config.*}`
-# template that the web app cannot fill in, so the plugin keeps asking to
-# connect and the person has to find and edit a field. This package carries the
-# hosted gateway's address as a literal instead, so installing it is the whole
-# setup: claude.ai reads the 401, runs OAuth, and asks for the sign-in secret.
+# FORGE-658, FORGE-660. The package for a *hosted* gateway. It differs from the
+# main package in one way: the address has no default. `metaforge` offers the
+# local gateway as its default; this one makes the person enter the hosted
+# address, so no address of ours is written into the public repo. (An earlier
+# build carried the hosted address as a literal; nothing here names it now.)
+#
+# Consequence worth knowing: claude.ai chat ignores a connector whose URL has a
+# `${user_config.*}` reference, so on claude.ai this package contributes skills,
+# commands and agents, and the tools come from a custom connector the person adds
+# with the hosted address. In Claude Code the package prompts for the address.
 CLOUD_PLUGIN_NAME = "metaforge-cloud"
-#: No query string. The connector that claude.ai was seen signing in to and
-#: calling had a bare URL, and the plugin's one, which carried `?profile=all`,
-#: stayed at "Not added" with Connect disabled and never sent a request. A server
-#: given no profile serves every tool, which is what `all` meant anyway.
-HOSTED_GATEWAY_URL = "https://mcp.metaforge.uk/mcp"
 
 # FORGE-648. Both of these READMEs used to say `pip install metaforge`, and
 # `metaforge` on PyPI is an unrelated job-shop scheduling library by someone
@@ -182,21 +182,27 @@ def stdio_plugin_manifest() -> dict:
 
 
 def cloud_plugin_manifest() -> dict:
-    """The claude.ai package (FORGE-658): a connector with nothing to fill in.
+    """The hosted-gateway package (FORGE-658, FORGE-660).
 
-    No ``userConfig`` and no ``headers``. claude.ai cannot prompt for the
-    former or send a static token for the latter; it follows the gateway's
-    401 into OAuth and asks the person for the sign-in secret itself.
+    The main package with the local default removed: ``gateway_url`` is
+    required and has no default, so Claude Code asks for the hosted address and
+    nothing of ours is written into the manifest. No bearer header either; the
+    sign-in is OAuth, in ``/mcp`` (FORGE-659).
     """
     manifest = plugin_manifest(default_gateway_url=DEFAULT_GATEWAY_URL)
     manifest["name"] = CLOUD_PLUGIN_NAME
     manifest["displayName"] = "MetaForge (cloud)"
     manifest["description"] = (
-        "MetaForge on claude.ai: the same digital-twin tools, connected to the "
-        "hosted gateway with no setup. Sign in once when asked."
+        "MetaForge for a hosted gateway: the same digital-twin tools, skills, "
+        "commands, agents and hooks, with the gateway address entered by you."
     )
-    manifest.pop("userConfig", None)
-    manifest["mcpServers"] = {"metaforge": {"type": "http", "url": HOSTED_GATEWAY_URL}}
+    field = manifest["userConfig"]["gateway_url"]
+    field.pop("default", None)
+    field["description"] = (
+        "The MCP endpoint of your hosted MetaForge gateway, for example "
+        "https://your-gateway.example.com/mcp. Sign in with the access secret "
+        "your administrator gave you when Claude Code asks."
+    )
     return manifest
 
 
@@ -521,11 +527,11 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
         '--header "Authorization: Bearer $METAFORGE_MCP_API_KEY"\n'
         "```\n\n"
         "### On claude.ai\n\n"
-        f"Install `{CLOUD_PLUGIN_NAME}` instead. claude.ai ignores a connector whose "
-        "URL contains a `${user_config.*}` reference, so this package's connector "
-        "never appears there; the cloud package has the hosted gateway's address "
-        "written in, so it does. To use your own gateway on claude.ai, add a custom "
-        "connector with your URL under **Customize \u2192 Connectors**.\n\n"
+        "claude.ai ignores a connector whose URL contains a `${user_config.*}` "
+        "reference, so this package's connector never appears there, and "
+        f"`{CLOUD_PLUGIN_NAME}` has the same limit. Install either for the skills "
+        "and commands, and add a custom connector with your gateway's address "
+        "under **Customize \u2192 Connectors** for the tools.\n\n"
         "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
         f"## Skills\n\n{len(skills)} skills are bundled: the engineering skills "
         "MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), "
@@ -603,12 +609,12 @@ def build_marketplace() -> Path:
                 "name": CLOUD_PLUGIN_NAME,
                 "source": "./integrations/claude-code-cloud",
                 "description": (
-                    "For claude.ai. The connector is already pointed at the hosted "
-                    "gateway, so there is no URL to enter: install it, choose "
-                    "Connect, and sign in once."
+                    "For a hosted gateway. The same tools, skills, commands, agents "
+                    "and hooks as metaforge, but with no local default: you enter "
+                    "the hosted gateway's address, and sign in through /mcp."
                 ),
                 "category": "engineering",
-                "tags": ["hardware", "cad", "simulation", "claude-ai"],
+                "tags": ["hardware", "cad", "simulation", "hosted"],
             },
         ],
     }
@@ -681,12 +687,10 @@ def build_claude_code_local() -> Path:
 
 
 def build_claude_code_cloud() -> Path:
-    """The claude.ai package with a pre-filled connector (FORGE-658).
+    """The hosted-gateway package (FORGE-658, FORGE-660).
 
-    Skills, commands and agents. Chat ignores agents, but Cowork loads them, so
-    they ship. Hooks do not: they run on the person's computer and need Python
-    on the PATH, which a claude.ai install cannot promise. Claude Code's full
-    package, ``claude-code/``, carries everything.
+    The full set, like ``claude-code/``: skills, commands, agents and hooks. The
+    only difference is the address, which is required and has no default.
     """
     root = OUT / "claude-code-cloud"
     if root.exists():
@@ -697,41 +701,48 @@ def build_claude_code_cloud() -> Path:
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n")
     commands = write_commands(root)
     skills = write_skills(root)
+    hooks = write_hooks(root)
     agents = write_agents(root)
-    print(f"  {len(skills)} skill(s), {len(commands)} command(s), {len(agents)} agent(s)")
+    print(
+        f"  {len(skills)} skill(s), {len(commands)} command(s), "
+        f"{len(hooks)} hook event(s), {len(agents)} agent(s)"
+    )
 
     (root / "README.md").write_text(
-        "# MetaForge for claude.ai\n\n"
+        "# MetaForge for a hosted gateway\n\n"
         "**Generated by `scripts/build_integrations.py` — do not edit by hand.**\n\n"
-        "The same skills, commands and agents as `claude-code/` (without its hooks), "
-        "with the connector already "
-        f"pointing at the hosted gateway (`{HOSTED_GATEWAY_URL}`). There is nothing to "
-        "configure: install it, and claude.ai asks you to sign in the first time "
-        "it connects.\n\n"
+        "The same skills, commands, agents and hooks as `claude-code/`. The one "
+        "difference is the gateway address: `claude-code/` offers a local gateway "
+        "as the default, and this package has no default, so you enter your hosted "
+        "gateway's address and none is written into the package.\n\n"
         "## Install\n\n"
-        "In claude.ai, **Customize → Plugins → Add → Add marketplace**, "
-        f"enter `FidelOdok/MetaForge`, and install `{CLOUD_PLUGIN_NAME}`.\n\n"
-        "Open the plugin's **Connectors** tab. Adding a plugin does not add or sign "
-        "in its connector: **Add** it, then **Connect**. A MetaForge sign-in page "
-        "opens; enter the access secret your administrator gave you. claude.ai "
-        "keeps the token it gets back, so you sign in once. On a Team or "
-        "Enterprise plan an Owner adds the connector for the organization first.\n\n"
-        "If the connector cannot be added from the plugin, add a custom connector "
-        f"under **Customize → Connectors** with the same URL (`{HOSTED_GATEWAY_URL}`); "
-        "the tools are the same.\n\n"
-        "Agents load in Cowork and Claude Code. Chat ignores them.\n\n"
+        "```\n/plugin marketplace add FidelOdok/MetaForge\n"
+        f"/plugin install {CLOUD_PLUGIN_NAME}\n```\n\n"
+        "Claude Code asks for the gateway URL on first enable. Then run `/mcp`, "
+        "choose `metaforge`, and sign in with the access secret your administrator "
+        "gave you. There is no token field: the gateway answers 401 and Claude Code "
+        "runs OAuth. The gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set.\n\n"
+        "### On claude.ai\n\n"
+        "claude.ai chat ignores a connector whose URL contains a `${user_config.*}` "
+        "reference, so this package's connector does not appear there; it "
+        "contributes skills, commands and agents. For the tools, add a custom "
+        "connector under **Customize → Connectors** with your gateway's address, "
+        "type it with no punctuation after it, and sign in when asked. Chat ignores "
+        "agents and hooks; Cowork loads agents.\n\n"
         "## Which package\n\n"
         "| | `metaforge-cloud` | `metaforge` | `metaforge-local` |\n"
         "|---|---|---|---|\n"
-        "| For | claude.ai, hosted gateway | Claude Code, any gateway | Claude Code, no gateway |\n"
-        "| Connector | filled in for you | asks for a URL | a local process |\n\n"
+        "| For | a hosted gateway | any gateway, local by default | no gateway |\n"
+        "| Address | you enter it, no default | you enter it, local default | none |\n\n"
         "Install **one**. The manifest has no way to switch a server entry off, so "
         "two packages would offer every tool twice.\n\n"
-        "Using your own gateway rather than the hosted one? Install `metaforge` "
-        "and give it your URL instead.\n\n"
         "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
         f"## Skills\n\n{len(skills)} skills are bundled.\n\n"
         "## Agents\n\n" + "\n".join(f"- `{a}`" for a in agents) + "\n\n"
+        "## Hooks\n\n"
+        f"{', '.join(hooks)}: the working rules at session start, and a reminder when a "
+        "flow proposal or patch is held for a person. Python 3 on the PATH; "
+        "`METAFORGE_PLUGIN_HOOKS=off` disables them.\n\n"
         "## Writes wait for a human\n\n"
         "A tool that writes is held for approval, because the hosted gateway sees "
         "you as a remote caller. Held calls appear on the dashboard's Approvals "
