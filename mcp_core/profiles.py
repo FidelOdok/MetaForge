@@ -207,6 +207,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "gazebo.validate_world",
         # FORGE-557: steady internal flow (pressure drop, flow rate).
         "openfoam.run_internal_flow",
+        # Composable flows: ask-and-tell search over one design variable,
+        # evaluated with the analysis tools above.
+        "optimize.suggest",
         # FORGE-542: circuit simulation is prediction too.
         "spice.run_simulation",
         "twin.evaluate_metric",

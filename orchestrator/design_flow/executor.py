@@ -39,6 +39,7 @@ from orchestrator.design_flow.context import (
     dfm_review_gap,
     route_decision_gap,
 )
+from orchestrator.design_flow.coupling import iteration_feedback, judge_history, wants_another_pass
 from orchestrator.design_flow.failures import classify_failure
 from orchestrator.design_flow.generator import ROUTE_SELECTION_PHASE_ID
 from orchestrator.design_flow.graph import (
@@ -657,6 +658,8 @@ class DesignFlowExecutor:
         )
         with scope:
             outcome = await self._brain.run_phase(goal=ctx.goal, phase=phase, context=ctx)
+        if phase.coupling is not None:
+            outcome = await self._iterate_block(run_id, phase, ctx, outcome)
         outcome.status = phase_status(outcome.summary, outcome.status)
         ctx.completed.append((phase, outcome))
         logger.info(
@@ -888,6 +891,57 @@ class DesignFlowExecutor:
             missing=missing,
             checked=True,
         )
+
+    async def _iterate_block(
+        self, run_id: str, phase: Phase, ctx: FlowContext, outcome: PhaseOutcome
+    ) -> PhaseOutcome:
+        """Run a coupled block's passes until it settles (composable flows).
+
+        Each brain attempt is one pass. After each, the recorded history of
+        the block's values is judged with the same rule the stage gate uses;
+        another pass runs while the loop is still moving and under its
+        limit. Converged, diverged or out of passes, it goes on to its gate,
+        which reports anything but convergence. A pass that records nothing
+        new stops the loop: repeating it would not change the answer.
+        """
+        coupling = phase.coupling
+        if coupling is None or self._value_reader is None:
+            return outcome
+        names = list(coupling.solves_for)
+        # A first pass that recorded nothing ends the loop: repeating it
+        # would not change the answer, and the gate reports the no-data.
+        seen = 0
+        original_feedback = ctx.retry_feedback
+        try:
+            while True:
+                try:
+                    history = await self._value_reader.history(ctx.project_id, names)
+                except Exception as exc:  # noqa: BLE001 - the gate reports no data instead
+                    logger.warning(
+                        "design_flow_block_history_error", phase=phase.id, error=str(exc)
+                    )
+                    return outcome
+                verdict = judge_history(coupling, history)
+                logger.info(
+                    "design_flow_block_pass",
+                    run_id=run_id,
+                    phase=phase.id,
+                    passes=verdict.iterations,
+                    status=verdict.status.value,
+                )
+                if not wants_another_pass(verdict, coupling) or verdict.iterations <= seen:
+                    return outcome
+                seen = verdict.iterations
+                ctx.retry_feedback = iteration_feedback(verdict, coupling)
+                scope = (
+                    self._phase_scope(run_id, phase.id, ctx.project_id)
+                    if self._phase_scope is not None
+                    else contextlib.nullcontext()
+                )
+                with scope:
+                    outcome = await self._brain.run_phase(goal=ctx.goal, phase=phase, context=ctx)
+        finally:
+            ctx.retry_feedback = original_feedback
 
     async def _task_readiness(self, tasks: list[Phase], ctx: FlowContext) -> list[str]:
         """Findings for attached tasks that did not record their deliverables."""

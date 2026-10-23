@@ -169,6 +169,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"vendor"}
     # FORGE-615: in-process arithmetic, no container, no credentials.
     | {"cost"}
+    # Composable flows: in-process search arithmetic, like power and cost.
+    | {"optimize"}
 )
 
 
@@ -1218,6 +1220,23 @@ async def bootstrap_tool_registry(
                 failed.append("cost")
         else:
             skipped.append("cost")
+
+        # ----- Design-variable search MCP adapter (composable flows) -----
+        # Ask-and-tell search arithmetic like power and cost: registers
+        # wherever it is asked for. It never evaluates an objective itself.
+        if _is_adapter_enabled("optimize") and (not adapter_ids or "optimize" in adapter_ids):
+            try:
+                from tool_registry.tools.optimize.adapter import OptimizeServer
+
+                await registry.register_adapter(OptimizeServer())
+                registered.append("optimize")
+                logger.info("optimize_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("optimize_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("optimize")
+        else:
+            skipped.append("optimize")
 
         # ----- Vendor connector MCP adapter (FORGE-427) -----
         if vendor_service is not None and _is_adapter_enabled("vendor"):

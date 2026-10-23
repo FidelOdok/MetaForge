@@ -72,3 +72,45 @@ export interface EditFlowRequest {
   phases: DesignFlowPhase[];
   name?: string;
 }
+
+/**
+ * A domain fragment, as served by `GET /v1/design-flows/fragments`
+ * (composable flows). One domain's tasks, composed into a flow by a
+ * proposal's `add_fragment` operation; the dashboard only shows them.
+ */
+export interface DesignFragmentTask {
+  id: string;
+  title: string;
+  /** The spine stage whose gate reviews this task. */
+  stage: string;
+  inputs: string[];
+  outputs: string[];
+  checks: string[];
+  capabilities: string[];
+}
+
+export interface DesignFragmentBlock {
+  id: string;
+  stage: string;
+  members: string[];
+  solvesFor: string[];
+  tolerance: number;
+  maxIterations: number;
+}
+
+export interface DesignFragment {
+  id: string;
+  version: string;
+  domain: string;
+  label: string;
+  description: string;
+  spine: string;
+  requires: string[];
+  keywords: string[];
+  tasks: DesignFragmentTask[];
+  blocks: DesignFragmentBlock[];
+}
+
+export interface DesignFragmentCatalog {
+  fragments: DesignFragment[];
+}

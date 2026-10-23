@@ -117,6 +117,14 @@ FAILURE_CLASS_PATCH_ID = "forge-539-failure-class"
 #: histories recorded before it replay with the decisions they had.
 STALL_PATCH_ID = "forge-573-stall"
 
+#: Composable flows: a coupled block phase runs one pass per activity and the
+#: workflow repeats it (judged by the ``judge_block`` activity) until it
+#: settles. Patched so a run started before this replays its single pass.
+BLOCK_PATCH_ID = "composable-block-iteration"
+
+#: How long one ``judge_block`` read may take.
+_JUDGE_TIMEOUT = timedelta(seconds=60)
+
 #: How long a gate waits before it is treated as refused. Long, because the
 #: reviewer is a person who may be asleep; finite, because a run that waits
 #: forever is indistinguishable from one that is progressing.
@@ -619,6 +627,34 @@ class DesignFlowWorkflow:
         }
 
     async def _execute_phase(
+        self, inp: DesignFlowInput, phase: FrozenPhase, retry_feedback: str, attempt: int
+    ) -> PhaseResult:
+        """One phase: one ``run_phase`` activity, or a coupled block's passes."""
+        result = await self._run_phase_once(inp, phase, retry_feedback, attempt)
+        if phase.coupling is None or not workflow.patched(BLOCK_PATCH_ID):
+            return result
+        seen = 0  # a first pass that recorded nothing ends the loop
+        while True:
+            verdict: dict[str, Any] = await workflow.execute_activity(
+                "judge_block",
+                {"project_id": inp.project_id, "phase": phase},
+                start_to_close_timeout=_JUDGE_TIMEOUT,
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
+            passes = int(verdict.get("iterations") or 0)
+            self._record(
+                "block_pass",
+                phase=phase.id,
+                detail=f"{passes} pass(es): {verdict.get('status', 'unknown')}",
+            )
+            if not verdict.get("another") or passes <= seen:
+                return result
+            seen = passes
+            result = await self._run_phase_once(
+                inp, phase, str(verdict.get("feedback") or ""), attempt
+            )
+
+    async def _run_phase_once(
         self, inp: DesignFlowInput, phase: FrozenPhase, retry_feedback: str, attempt: int
     ) -> PhaseResult:
         """One ``run_phase`` activity for ``phase``, with the run's usual policy."""

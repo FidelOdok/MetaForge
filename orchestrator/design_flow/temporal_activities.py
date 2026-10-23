@@ -39,6 +39,10 @@ GateAnnouncer = Callable[[str, str, str], Awaitable[None]]
 #: ``(run_id, phase_id, project_id, gate_reason) -> notes`` (FORGE-530).
 RevisionNotes = Callable[[str, str, str | None, str], Awaitable[list[Any]]]
 
+#: ``(project_id, names) -> {name: [revision values, oldest first]}`` for a
+#: coupled block's values (composable flows).
+ValueHistory = Callable[[str | None, list[str]], Awaitable[dict[str, list[Any]]]]
+
 
 @dataclass
 class DesignFlowActivities:
@@ -48,6 +52,7 @@ class DesignFlowActivities:
     gate_checker: GateChecker | None = None
     gate_announcer: GateAnnouncer | None = None
     revision_notes: RevisionNotes | None = None
+    value_history: ValueHistory | None = None
 
     #: Seconds between heartbeats while a phase is running. A phase is a long
     #: agent loop; without heartbeats Temporal cannot tell a slow one from a
@@ -144,6 +149,51 @@ class DesignFlowActivities:
             return []
         return notes_to_dicts(notes)
 
+    @activity.defn(name="judge_block")
+    async def judge_block(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Whether a coupled block needs another pass (composable flows).
+
+        Reads the block's value history and applies the same rule the stage
+        gate does. Never asks for another pass when nothing could be read:
+        the gate then reports no data, which blocks.
+        """
+        from orchestrator.design_flow.coupling import (
+            iteration_feedback,
+            judge_history,
+            wants_another_pass,
+        )
+        from orchestrator.design_flow.spec import Coupling
+
+        phase = payload.get("phase")
+        raw = phase.get("coupling") if isinstance(phase, dict) else getattr(phase, "coupling", None)
+        if not raw or self.value_history is None:
+            return {"another": False, "iterations": 0, "status": "NO_DATA"}
+
+        def field_of(name: str, default: Any) -> Any:
+            return raw.get(name, default) if isinstance(raw, dict) else getattr(raw, name, default)
+
+        coupling = Coupling(
+            members=tuple(field_of("members", ())),
+            solves_for=tuple(field_of("solves_for", ())),
+            tolerance=float(field_of("tolerance", 0.01)),
+            max_iterations=int(field_of("max_iterations", 20)),
+        )
+        try:
+            history = await self.value_history(
+                payload.get("project_id") or None, list(coupling.solves_for)
+            )
+        except Exception as exc:  # noqa: BLE001 - an unread history ends the loop; the gate reports it
+            logger.warning("design_flow_block_history_error", error=str(exc))
+            return {"another": False, "iterations": 0, "status": "NO_DATA"}
+        verdict = judge_history(coupling, history)
+        another = wants_another_pass(verdict, coupling)
+        return {
+            "another": another,
+            "iterations": verdict.iterations,
+            "status": verdict.status.value,
+            "feedback": iteration_feedback(verdict, coupling) if another else "",
+        }
+
     def all(self) -> list[Any]:
         """The activity callables to register with a worker."""
         return [
@@ -151,4 +201,5 @@ class DesignFlowActivities:
             self.evaluate_gate,
             self.announce_gate,
             self.collect_revision_notes,
+            self.judge_block,
         ]
