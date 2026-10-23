@@ -635,6 +635,10 @@ class TwinConsistencyGateChecker:
         return ConsistencyGateReport(checked=True, evaluation=evaluation)
 
 
+#: Revision statuses that are no longer part of the design (FORGE-525).
+_CLOSED_REVISIONS = frozenset({"rejected", "abandoned"})
+
+
 class TwinDesignValueReader:
     """`DesignValueReader` over the twin's ``design_value`` entities (composable flows).
 
@@ -642,6 +646,11 @@ class TwinDesignValueReader:
     ``source`` (FORGE-586); each changed value is a new record. ``values``
     returns the latest record per name; ``history`` every record per name,
     oldest first, which is what a coupled block's iterations leave behind.
+
+    A revision a gate turned down (``rejected``) or a run left behind
+    (``abandoned``, FORGE-525) is not part of the design and is skipped, so a
+    reworked block is judged on the passes that are still live. Open drafts
+    are kept: they are the run's own work, which its gate is reviewing.
 
     Fails loudly rather than open: the caller turns a failed read into
     no_data for every check, which blocks the gate.
@@ -656,16 +665,36 @@ class TwinDesignValueReader:
             return {}
         entities = await lister(project_id=UUID(str(project_id)), entity_type="design_value")
         by_name: dict[str, list[tuple[float, int, object]]] = {}
+        skipped = 0
         for index, entity in enumerate(entities):
             meta = getattr(entity, "metadata", None) or {}
             name = str(meta.get("name") or "").strip()
             if not name or "value" not in meta:
                 continue
+            if await self._closed(entity):
+                skipped += 1
+                continue
             when = _to_epoch(getattr(entity, "created_at", None)) or 0.0
             by_name.setdefault(name, []).append((when, index, meta.get("value")))
         for rows in by_name.values():
             rows.sort(key=lambda r: (r[0], r[1]))
+        if skipped:
+            logger.info("gate_design_values_closed_drafts_skipped", count=skipped)
         return by_name
+
+    async def _closed(self, entity: object) -> bool:
+        """True for a revision that was rejected or abandoned (FORGE-525)."""
+        from twin_core.items.service import revision_status, supports_items
+
+        node_id = getattr(entity, "id", None)
+        if not isinstance(node_id, UUID) or not supports_items(self._twin):
+            return False
+        try:
+            status = await revision_status(self._twin, node_id)
+        except Exception as exc:  # noqa: BLE001 - an unreadable status is kept, and said
+            logger.warning("gate_design_value_status_unread", node=str(node_id), error=str(exc))
+            return False
+        return status in _CLOSED_REVISIONS
 
     async def values(self, project_id: str | None) -> dict[str, object]:
         records = await self._records(project_id)

@@ -39,8 +39,12 @@ __all__ = [
     "ConvergenceStatus",
     "ConvergenceVerdict",
     "block_phase",
+    "iteration_feedback",
     "judge",
+    "judge_history",
+    "passes_from_history",
     "solve",
+    "wants_another_pass",
 ]
 
 
@@ -96,13 +100,15 @@ def block_phase(
     inputs = [ref for m in members for ref in m.inputs if ref_key(ref) not in internal]
     steps = "\n".join(f"  {i + 1}. {m.title}: {m.objective}" for i, m in enumerate(members))
     objective = (
-        "These tasks depend on each other, so solve them together as one loop. Iterate:\n"
+        "These tasks depend on each other, so they are solved together as one loop. Do ONE "
+        "pass now, in this order, each step using the values the previous step just set:\n"
         f"{steps}\n"
-        f"After each pass record every one of {', '.join(solves_for)} as a design value "
-        "(the next revision of the same item) and note the iteration number in its source. "
-        f"Stop when each changes by less than {tolerance:.2%} from the previous pass, or after "
-        f"{max_iterations} passes. If they have not settled by then, say so plainly: do not "
-        "relax a requirement or a limit to make the loop close."
+        f"Then record every one of {', '.join(solves_for)} as a design value (the next "
+        "revision of the same item) with the pass number in its source. The engine repeats "
+        f"the pass until each value changes by less than {tolerance:.2%} from the previous "
+        f"one, or {max_iterations} passes have been recorded; you are told which pass this "
+        "is. If the values are not settling, say so plainly: do not relax a requirement or "
+        "a limit to make the loop close."
     )
     return Phase(
         id=phase_id,
@@ -194,6 +200,72 @@ def judge(history: Sequence[Mapping[str, float]], coupling: Coupling) -> Converg
         changes=changes,
         reason=f"still iterating: {worst} changed {changes[worst]:.2%} on the last pass",
     )
+
+
+def _number(raw: object) -> float | None:
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def passes_from_history(
+    coupling: Coupling, history: Mapping[str, Sequence[object]]
+) -> list[dict[str, float]]:
+    """Per-value revision histories -> complete passes, oldest first.
+
+    Each value's revisions are aligned from the most recent backwards, so a
+    pass is the n-th-from-last revision of every value. A value recorded fewer
+    times bounds the number of complete passes.
+    """
+    names = coupling.solves_for
+    series: dict[str, list[float]] = {}
+    for name in names:
+        series[name] = [v for v in (_number(x) for x in history.get(name, ())) if v is not None]
+    depth = min((len(s) for s in series.values()), default=0)
+    return [{n: series[n][len(series[n]) - depth + i] for n in names} for i in range(depth)]
+
+
+def judge_history(
+    coupling: Coupling, history: Mapping[str, Sequence[object]]
+) -> ConvergenceVerdict:
+    """:func:`judge` over raw per-value histories (what the twin returns)."""
+    return judge(passes_from_history(coupling, history), coupling)
+
+
+def wants_another_pass(verdict: ConvergenceVerdict, coupling: Coupling) -> bool:
+    """Whether the engine should run the block again after this verdict.
+
+    Yes while it is still iterating (or has fewer than two passes) and under
+    its limit. Never after it converged, diverged or hit the limit: those go
+    to the stage gate, which turns anything but convergence into a finding.
+    """
+    if verdict.status in (ConvergenceStatus.CONVERGED, ConvergenceStatus.DIVERGED):
+        return False
+    return verdict.iterations < coupling.max_iterations
+
+
+def iteration_feedback(verdict: ConvergenceVerdict, coupling: Coupling) -> str:
+    """What the next pass is told: which pass it is, and how far from settled."""
+    number = verdict.iterations + 1
+    lines = [
+        f"BLOCK ITERATION: this is pass {number} of at most {coupling.max_iterations}.",
+    ]
+    if verdict.values:
+        current = ", ".join(f"{k} = {v:g}" for k, v in verdict.values.items())
+        lines.append(f"The last recorded pass gave {current}.")
+    if verdict.changes:
+        moving = ", ".join(f"{k} changed {v:.2%}" for k, v in verdict.changes.items())
+        lines.append(f"Change from the pass before: {moving} (tolerance {coupling.tolerance:.2%}).")
+    else:
+        lines.append(verdict.reason or "Not enough passes recorded yet to judge convergence.")
+    lines.append(
+        "Run the steps once more from these values and record the new values as the next revisions."
+    )
+    return "\n".join(lines)
 
 
 #: One member step: reads the current values, returns the values it sets.

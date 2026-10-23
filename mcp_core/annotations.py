@@ -123,6 +123,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "blender.export_blend",
         # FORGE-615: arithmetic over the caller's figures.
         "cost.estimate_manufacturing",
+        # Composable flows: search arithmetic over the caller's evaluations.
+        "optimize.suggest",
         # FORGE-451: machine library reads.
         "library.list_machines",
         "library.get_machine",

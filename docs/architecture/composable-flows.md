@@ -133,7 +133,34 @@ Both engines evaluate the checks:
 
 The gateway reads design values through `TwinDesignValueReader`, which returns
 the latest `design_value` record per name. The twin refuses to record a value
-without a source (FORGE-586).
+without a source (FORGE-586). Revisions a gate rejected, or that a run
+abandoned (FORGE-525), are skipped. A run's own open drafts are kept, because
+they are what its gate reviews.
+
+## Optimisation
+
+`optimize.suggest` (the `optimize` adapter, in-process, on the `simulation`
+profile) searches one bounded design variable, ask and tell:
+
+- **golden_section:** for a unimodal objective, to within a tolerance of the
+  variable.
+- **grid:** evenly spaced points.
+
+It never evaluates an objective. The agent evaluates each suggested point with
+the real analysis tool and passes back every evaluation (`x`, `objective`,
+`feasible`, `source`). The tool returns the next point, or `converged` with
+the best one. The evaluations are the state, so the same evaluations always
+give the same answer. A point whose checks failed is `feasible: false` and is
+never the best. If every point is infeasible, the status is `infeasible`
+rather than naming one. The variable's bounds must name their source.
+
+## Dashboard
+
+`/flows/fragments` lists the fragments with each task grouped by the gate
+that reviews it: what it reads and writes, its checks, its tools, and any
+coupled loop. The page is read-only. A fragment joins a flow through a
+proposal's `add_fragment`, which a person approves. The new-run page links
+to it.
 
 ## Coupled blocks
 
@@ -152,11 +179,31 @@ blocks:
 
 The block compiles into **one** phase carrying a `coupling` contract, so the
 outer graph stays acyclic. Its inputs are the members' inputs minus those the
-members write themselves. The phase brain iterates the loop and records each
-pass as a new revision of the solved values. The stage gate reads that history
-and judges convergence (`coupling.judge`): every value must change by less
-than the tolerance between the last two passes. Fewer than two passes is
-`NO_DATA`, and too many is `NOT_CONVERGED`; both block.
+members write themselves.
+
+**The engine drives the passes.** Each attempt of a block phase is one pass:
+the agent runs the member steps once and records the solved values as new
+revisions. After each pass the engine reads the value history and judges it
+(`coupling.judge_history`), then runs another pass, telling the agent which
+pass it is and how far each value moved, until:
+
+- the values converge: every one changes by less than the tolerance between
+  the last two passes;
+- they diverge: a value stops being finite, or the iteration overflows;
+- `max_iterations` passes have been recorded;
+- a pass records nothing new, which ends the loop because repeating it would
+  not change the answer.
+
+Both engines do this:
+
+- **In-process:** `DesignFlowExecutor._iterate_block`.
+- **Temporal:** the `judge_block` activity, behind the
+  `composable-block-iteration` patch, so runs started earlier replay their
+  single pass.
+
+The stage gate then applies the same rule. Anything but convergence blocks,
+with `NO_DATA` for fewer than two passes and `NOT_CONVERGED` or `DIVERGED`
+otherwise.
 
 The block's objective and the verdict say that a loop which does not settle
 needs an engineering decision. Nothing relaxes a requirement to make it close.
@@ -176,13 +223,13 @@ plain functions. The tests use it on a closed-form energy loop.
 
 ## Limits
 
-- The engine does not run a block's iterations itself. One block phase is one
-  agent attempt, and convergence is judged from what that attempt recorded.
 - Only `thermal_v1` and `electronics_v1` ship today. Aircraft, mobile-robot
   and packaging fragments need capabilities that do not exist yet
   (aerodynamics, trim, flight simulation, compression and drop testing).
-- There is no optimisation capability.
+- `optimize.suggest` searches one variable at a time. Multi-variable and
+  constrained optimisation are not built.
 - Fragment tasks attach to the stages a template has. A template without a
   stage cannot take a fragment that needs it.
-- `TwinDesignValueReader` orders records by creation time, so a closed draft
-  of a value still counts in a block's history.
+- `TwinDesignValueReader` cannot tell one run's open drafts from another's, so
+  two runs iterating the same block on one project at the same time would
+  read each other's passes.

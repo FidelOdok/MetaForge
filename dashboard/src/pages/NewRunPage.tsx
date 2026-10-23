@@ -232,6 +232,10 @@ export function NewRunPage() {
                     </span>
                   </label>
                 ))}
+                <p className="field-help">
+                  A proposal can also compose domain work into the workflow, such as thermal or
+                  electronics. <Link to="/flows/fragments">See the domain fragments</Link>.
+                </p>
               </fieldset>
 
               <div className="dialog-actions">

@@ -204,8 +204,8 @@ repeats verbatim.
 ## Runtime limits
 
 Only the `ALL` join is supported; `ANY`, `QUORUM` and first-class loops are
-not (iteration is a bounded rework, or a coupled block whose iterations one
-agent attempt records and its gate judges; see
+not (iteration is a bounded rework, or a coupled block, whose passes the
+engine repeats until they converge; see
 [Composable Design Flows](./composable-flows.md#coupled-blocks)). One attempt per phase per wave. A run
 waits only at its gates (no pause), and there is no cancellation over MCP.
 Tool side effects carry no idempotency keys, so an uncertain external effect

@@ -425,6 +425,18 @@ async def _check_gate(payload: dict[str, Any]) -> GateCheck:
     )
 
 
+async def _block_history(project_id: str | None, names: list[str]) -> dict[str, list[Any]]:
+    """The recorded revisions of a block's values, oldest first (composable flows)."""
+    from api_gateway.runs.gate_eval import TwinDesignValueReader
+    from api_gateway.twin.routes import get_twin
+
+    await ensure_gate_stores()
+    twin = get_twin()
+    if twin is None:
+        return {}
+    return await TwinDesignValueReader(twin).history(project_id, names)
+
+
 def build_activities() -> DesignFlowActivities:
     from api_gateway.runs.change_sets import revision_notes
     from api_gateway.runs.gate_announce import http_gate_announcer
@@ -436,6 +448,9 @@ def build_activities() -> DesignFlowActivities:
         # FORGE-530: the twin reads behind a retry/rework brief happen here,
         # in an activity; the workflow only receives the plain notes.
         revision_notes=revision_notes,
+        # Composable flows: a coupled block's value history, read in an
+        # activity so the workflow can decide whether to run another pass.
+        value_history=_block_history,
     )
 
 

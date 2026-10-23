@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
-from orchestrator.design_flow.coupling import judge
+from orchestrator.design_flow.coupling import judge_history
 from orchestrator.design_flow.spec import Coupling
 
 __all__ = [
@@ -255,12 +255,7 @@ def _convergence(
     task_id: str, coupling: Coupling, history: Mapping[str, Sequence[Any]]
 ) -> CheckResult:
     names = coupling.solves_for
-    series = {
-        n: [v for v in (_number(x) for x in history.get(n, ())) if v is not None] for n in names
-    }
-    depth = min((len(s) for s in series.values()), default=0)
-    passes = [{n: series[n][len(series[n]) - depth + i] for n in names} for i in range(depth)]
-    verdict = judge(passes, coupling)
+    verdict = judge_history(coupling, history)
     describe = f"{', '.join(names)} converge within {coupling.tolerance:.2%}"
     if verdict.converged:
         return CheckResult(task_id, "converged", describe, CheckOutcome.PASS)

@@ -392,3 +392,152 @@ def test_a_block_gate_checks_convergence_from_the_recorded_iterations() -> None:
     none = evaluate_stage("design", flow.phases, values, {})
     (converged,) = [r for r in none.results if r.check == "converged"]
     assert converged.outcome is CheckOutcome.NO_DATA
+
+
+# -- follow-up: closed drafts and engine-driven block iteration --------------
+
+
+@pytest.mark.asyncio
+async def test_the_twin_reader_skips_rejected_and_abandoned_revisions() -> None:
+    ids = [uuid4() for _ in range(4)]
+    statuses = {ids[0]: "approved", ids[1]: "rejected", ids[2]: "abandoned", ids[3]: "draft"}
+    rows = [
+        SimpleNamespace(
+            id=node,
+            metadata={"name": "total_mass_kg", "value": float(i)},
+            created_at=f"2026-10-01T1{i}:00:00+00:00",
+        )
+        for i, node in enumerate(ids)
+    ]
+
+    class _Graph:
+        async def get_edges(self, node_id, direction=None, edge_type=None):  # noqa: ANN001
+            return [SimpleNamespace(metadata={"status": statuses[node_id]})]
+
+        async def add_node(self, *a, **k): ...  # noqa: ANN002, ANN003
+        async def get_node(self, *a, **k): ...  # noqa: ANN002, ANN003
+        async def update_node(self, *a, **k): ...  # noqa: ANN002, ANN003
+        async def list_nodes(self, *a, **k): ...  # noqa: ANN002, ANN003
+
+    class _Twin:
+        graph = _Graph()
+
+        async def add_edge(self, *a, **k): ...  # noqa: ANN002, ANN003
+        async def remove_edge(self, *a, **k): ...  # noqa: ANN002, ANN003
+
+        async def list_engineering_entities(self, project_id=None, entity_type=None):  # noqa: ANN001
+            return rows
+
+    reader = TwinDesignValueReader(_Twin())
+    project = str(uuid4())
+    # The approved pass and the run's open draft are kept.
+    assert await reader.history(project, ["total_mass_kg"]) == {"total_mass_kg": [0.0, 3.0]}
+    assert (await reader.values(project))["total_mass_kg"] == 3.0
+
+
+class _LoopBrain:
+    """One pass of the energy loop per call, recorded like a phase would."""
+
+    def __init__(self, values: _Values, endurance_h: float, record: bool = True) -> None:
+        self.values = values
+        self.steps = _steps(endurance_h)
+        self.record = record
+        self.calls: list[tuple[str, str]] = []
+        self.state = {"total_mass_kg": 1.2}
+
+    async def run_phase(self, *, goal: str, phase: Phase, context: FlowContext) -> PhaseOutcome:
+        self.calls.append((phase.id, context.retry_feedback))
+        if phase.coupling is not None and self.record:
+            try:
+                for step in self.steps:
+                    self.state.update(step(self.state))
+            except OverflowError:  # a runaway loop: what the phase would record
+                self.state = {name: float("inf") for name in phase.coupling.solves_for}
+            for name in phase.coupling.solves_for:
+                self.values._history.setdefault(name, []).append(self.state[name])
+        return PhaseOutcome(summary=f"did {phase.id}", status="completed")
+
+
+def _energy_flow() -> FlowDefinition:
+    flow = compose(get_flow("design_v1"), [fragment_from_mapping(_energy_fragment())]).definition
+    return _only_gate(flow, "design")
+
+
+async def _run_loop(brain: _LoopBrain) -> list[str]:
+    flow = _energy_flow()
+    coord = GateCoordinator()
+    store = InMemoryRunStore(on_transition=coord.on_transition)
+    run = store.create({"goal": "g", "flow": flow.id, "project_id": "p1"})
+    executor = DesignFlowExecutor(
+        store=store, brain=brain, coordinator=coord, value_reader=brain.values
+    )
+    task = asyncio.create_task(executor.run(run.id, flow))
+    for _ in range(800):
+        if store.get(run.id).status is RunStatus.AWAITING_APPROVAL:
+            break
+        await asyncio.sleep(0.005)
+    store.submit_approval(run.id, ApprovalDecision.REJECT)
+    await asyncio.wait_for(task, 5)
+    return [c[0] for c in brain.calls]
+
+
+@pytest.mark.asyncio
+async def test_the_engine_repeats_a_block_until_it_converges() -> None:
+    values = _Values({}, {})
+    brain = _LoopBrain(values, endurance_h=0.33)
+    ran = await _run_loop(brain)
+    passes = ran.count("multirotor.energy_closure")
+    assert 3 <= passes < 20
+    history = values._history["hover_power_w"]
+    assert abs(history[-1] - history[-2]) / history[-1] < 0.01  # settled within tolerance
+    feedback = [f for p, f in brain.calls if p == "multirotor.energy_closure"]
+    assert feedback[0] == ""  # first pass is a plain attempt
+    assert feedback[1].startswith("BLOCK ITERATION: this is pass 2")
+
+
+@pytest.mark.asyncio
+async def test_a_block_that_never_settles_stops_at_its_limit() -> None:
+    values = _Values({}, {})
+    brain = _LoopBrain(values, endurance_h=1.5)
+    ran = await _run_loop(brain)
+    assert ran.count("multirotor.energy_closure") <= 20
+
+
+@pytest.mark.asyncio
+async def test_a_pass_that_records_nothing_ends_the_loop() -> None:
+    values = _Values({}, {})
+    brain = _LoopBrain(values, endurance_h=0.33, record=False)
+    ran = await _run_loop(brain)
+    assert ran.count("multirotor.energy_closure") == 1
+
+
+@pytest.mark.asyncio
+async def test_the_judge_block_activity_asks_for_another_pass_while_moving() -> None:
+    from orchestrator.design_flow.temporal_activities import DesignFlowActivities
+
+    moving = {
+        "battery_capacity_wh": [60.0, 70.0],
+        "total_mass_kg": [1.6, 1.7],
+        "hover_power_w": [220.0, 240.0],
+    }
+
+    async def history(project_id: str | None, names: list[str]) -> dict:
+        return {n: moving.get(n, []) for n in names}
+
+    async def never(*_: object) -> object:
+        raise AssertionError("not used")
+
+    activities = DesignFlowActivities(phase_runner=never, value_history=history)
+    flow = freeze_flow(
+        compose(get_flow("design_v1"), [fragment_from_mapping(_energy_fragment())]).definition
+    )
+    block = next(p for p in flow.phases if p.coupling is not None)
+    out = await activities.judge_block({"project_id": "p", "phase": block})
+    assert out["another"] is True and out["iterations"] == 2
+    assert out["feedback"].startswith("BLOCK ITERATION: this is pass 3")
+    out = await activities.judge_block(
+        {"project_id": "p", "phase": {"coupling": {"solves_for": ["x"], "max_iterations": 5}}}
+    )
+    assert out["another"] is True and out["status"] == "NO_DATA"
+    no_reader = DesignFlowActivities(phase_runner=never)
+    assert (await no_reader.judge_block({"phase": block}))["another"] is False

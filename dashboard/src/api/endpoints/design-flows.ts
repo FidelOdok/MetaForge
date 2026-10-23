@@ -12,6 +12,7 @@ import apiClient from '../client';
 import type {
   DesignFlow,
   DesignFlowCatalog,
+  DesignFragmentCatalog,
   EditFlowRequest,
   FlowValidation,
   FlowVersion,
@@ -19,6 +20,12 @@ import type {
 
 export async function getDesignFlows(): Promise<DesignFlowCatalog> {
   const { data } = await apiClient.get<DesignFlowCatalog>('/design-flows');
+  return data;
+}
+
+/** The domain fragments a proposal can compose in (composable flows). */
+export async function getDesignFragments(): Promise<DesignFragmentCatalog> {
+  const { data } = await apiClient.get<DesignFragmentCatalog>('/design-flows/fragments');
   return data;
 }
 
