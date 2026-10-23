@@ -171,6 +171,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"cost"}
     # Composable flows: in-process search arithmetic, like power and cost.
     | {"optimize"}
+    # FORGE-671: mobile-robot drive arithmetic, in-process.
+    | {"robot"}
 )
 
 
@@ -1237,6 +1239,23 @@ async def bootstrap_tool_registry(
                 failed.append("optimize")
         else:
             skipped.append("optimize")
+
+        # ----- Mobile-robot drive MCP adapter (FORGE-671) -----
+        # Drive sizing and kinematics arithmetic, like power: registers
+        # wherever it is asked for.
+        if _is_adapter_enabled("robot") and (not adapter_ids or "robot" in adapter_ids):
+            try:
+                from tool_registry.tools.robot.adapter import RobotServer
+
+                await registry.register_adapter(RobotServer())
+                registered.append("robot")
+                logger.info("robot_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("robot_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("robot")
+        else:
+            skipped.append("robot")
 
         # ----- Vendor connector MCP adapter (FORGE-427) -----
         if vendor_service is not None and _is_adapter_enabled("vendor"):

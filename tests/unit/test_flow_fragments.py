@@ -64,10 +64,10 @@ def _with_task(change: dict, index: int = 0) -> dict:
 
 def test_the_registry_is_what_is_on_disk() -> None:
     assert sorted(load_fragments()) == sorted(p.stem for p in FRAGMENT_DIR.glob("*.yaml"))
-    assert {"thermal_v1", "electronics_v1"} <= set(load_fragments())
+    assert {"thermal_v1", "electronics_v1", "mobile_robot_v1"} <= set(load_fragments())
 
 
-@pytest.mark.parametrize("fragment_id", ["thermal_v1", "electronics_v1"])
+@pytest.mark.parametrize("fragment_id", ["thermal_v1", "electronics_v1", "mobile_robot_v1"])
 def test_every_shipped_fragment_declares_a_version_and_valid_tasks(fragment_id: str) -> None:
     fragment = load_fragment(fragment_id)
     assert fragment.version
@@ -206,3 +206,14 @@ def test_a_cycle_inside_a_block_is_allowed() -> None:
 def test_a_broken_block_is_refused(block: dict, match: str) -> None:
     with pytest.raises(FragmentError, match=match):
         fragment_from_mapping(_loop(**block))
+
+
+def test_the_mobile_robot_energy_loop_is_a_block() -> None:
+    # FORGE-671: mass, drive power and battery capacity depend on each other.
+    fragment = load_fragment("mobile_robot_v1")
+    (block,) = fragment.blocks
+    assert block.members == ("mass_rollup", "drive_sizing", "battery_sizing")
+    assert set(block.solves_for) == {"total_mass_kg", "drive_power_w", "battery_capacity_wh"}
+    # Its limits are inputs, never numbers: the torque margin comes from requirements.
+    (check,) = fragment.task("drive_sizing").checks
+    assert check.limit == "required_torque_margin"

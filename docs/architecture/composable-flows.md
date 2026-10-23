@@ -62,9 +62,17 @@ The fragments shipped today:
 |---|---|
 | `thermal_v1` | heat-load estimation → cooling architecture → heat-transfer analysis (`calculix.run_thermal`) → temperature verification |
 | `electronics_v1` | component selection → power budget (`power.check_budget`) → schematic ERC on the person's own KiCad schematic (KiCad is read-only in Phase 1) → circuit simulation (`spice.run_simulation`) |
+| `mobile_robot_v1` | locomotion selection → energy closure (a coupled block: mass roll-up, drive sizing with `robot.size_drive`, battery sizing) → kinematics (`robot.diff_drive_kinematics`) → dynamics in simulation (`gazebo.run_simulation`) → navigation testing (FORGE-671) |
 
 `electronics_v1` writes `power_dissipation_w`, which `thermal_v1` reads, so
 composing the two feeds the heat load from the power budget.
+
+`mobile_robot_v1` takes everything physical from the requirements as sourced
+values: payload, slope, rolling resistance, speed, acceleration, runtime and
+the required torque margin. Its navigation task names
+`gazebo.run_navigation_scenario`, which no adapter provides yet, so any
+proposal that composes the fragment carries that task as a blocking
+capability gap until one does.
 
 ## Composition
 
@@ -223,9 +231,10 @@ plain functions. The tests use it on a closed-form energy loop.
 
 ## Limits
 
-- Only `thermal_v1` and `electronics_v1` ship today. Aircraft, mobile-robot
+- `thermal_v1`, `electronics_v1` and `mobile_robot_v1` ship today. Aircraft
   and packaging fragments need capabilities that do not exist yet
-  (aerodynamics, trim, flight simulation, compression and drop testing).
+  (aerodynamics, trim, flight simulation, compression and drop testing), and
+  the mobile robot's navigation testing needs a scenario-runner adapter.
 - `optimize.suggest` searches one variable at a time. Multi-variable and
   constrained optimisation are not built.
 - Fragment tasks attach to the stages a template has. A template without a
