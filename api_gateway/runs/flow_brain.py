@@ -49,7 +49,9 @@ def _phase_deliverables(phase: Phase) -> tuple[str, ...]:
 def _report_phase_tools(phase: Phase) -> frozenset[str]:
     """The phase's tool allowlist, with anything dropped or unmapped made visible."""
     deliverables = _phase_deliverables(phase)
-    dropped = phase_overflow(phase.disciplines, deliverables)
+    # FORGE-672: a composed task's own tools are part of its allowlist.
+    required = tuple(getattr(phase, "capabilities", ()) or ())
+    dropped = phase_overflow(phase.disciplines, deliverables, required)
     if dropped:
         logger.warning(
             "design_flow_phase_tools_dropped",
@@ -61,7 +63,7 @@ def _report_phase_tools(phase: Phase) -> frozenset[str]:
         if d.lower() not in _UNMAPPED_LOGGED:
             _UNMAPPED_LOGGED.add(d.lower())
             logger.debug("design_flow_discipline_has_no_tool_profile", discipline=d, phase=phase.id)
-    return tools_for_phase(phase.disciplines, deliverables)
+    return tools_for_phase(phase.disciplines, deliverables, required)
 
 
 #: The twin work-product type each hint produces is the key, spelled exactly as

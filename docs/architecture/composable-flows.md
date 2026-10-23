@@ -36,7 +36,7 @@ A fragment task becomes a phase with no gate, carrying:
 | outputs | Twin items it writes, declared as `outputs:` in the fragment. Each becomes a deliverable slot with a fixed item key (`VAL-HEAT-LOAD-W`) |
 | `records` | Record types it must leave (`simulation_result`, `design_decision`), which are required at the stage gate |
 | `checks` | Acceptance criteria: `value <op> number [unit]`, or `value <op> other_value`, so a limit can come from a sourced record and is never written into a fragment |
-| `capabilities` | Tool ids it needs. A missing, unreachable or unserved tool is a **blocking** capability gap on that task |
+| `capabilities` | Tool ids it needs. A missing, unreachable or unserved tool is a **blocking** capability gap on that task. The task's phase always carries these tools in its allowlist, kept like deliverable tools whatever its discipline profiles hold, on both engines (FORGE-672) |
 
 All of these fields are left out of the frozen content hash when empty
 (`orchestrator/design_flow/frozen.py`). `orchestrator/design_flow/contract.py`
@@ -62,6 +62,7 @@ The fragments shipped today:
 |---|---|
 | `thermal_v1` | heat-load estimation → cooling architecture → heat-transfer analysis (`calculix.run_thermal`) → temperature verification |
 | `electronics_v1` | component selection → power budget (`power.check_budget`) → schematic ERC on the person's own KiCad schematic (KiCad is read-only in Phase 1) → circuit simulation (`spice.run_simulation`) |
+| `packaging_v1` | board material selection → RSC dieline (`packaging.rsc_dieline`) → manufacturing check against the converter's rules → compression strength (`packaging.box_compression`, a McKee estimate) → drop testing, recorded as evidence from a physical test (FORGE-672) |
 | `mobile_robot_v1` | locomotion selection → energy closure (a coupled block: mass roll-up, drive sizing with `robot.size_drive`, battery sizing) → kinematics (`robot.diff_drive_kinematics`) → dynamics in simulation (`gazebo.run_simulation`) → navigation testing (FORGE-671) |
 
 `electronics_v1` writes `power_dissipation_w`, which `thermal_v1` reads, so
@@ -231,10 +232,13 @@ plain functions. The tests use it on a closed-form energy loop.
 
 ## Limits
 
-- `thermal_v1`, `electronics_v1` and `mobile_robot_v1` ship today. Aircraft
-  and packaging fragments need capabilities that do not exist yet
-  (aerodynamics, trim, flight simulation, compression and drop testing), and
-  the mobile robot's navigation testing needs a scenario-runner adapter.
+- `thermal_v1`, `electronics_v1`, `mobile_robot_v1` and `packaging_v1` ship
+  today. An aircraft fragment needs capabilities that do not exist yet
+  (aerodynamics, trim, flight simulation), and the mobile robot's navigation
+  testing needs a scenario-runner adapter.
+- `packaging_v1` covers corrugated regular slotted containers. Its
+  compression figure is a McKee estimate, which a compression test outranks.
+  Its drop testing records a physical test; no drop simulation is built.
 - `optimize.suggest` searches one variable at a time. Multi-variable and
   constrained optimisation are not built.
 - Fragment tasks attach to the stages a template has. A template without a

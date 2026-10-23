@@ -223,3 +223,26 @@ async def test_search_no_match_says_so() -> None:
     out = await tool.handler({"query": "nonexistent widget"})
     assert out["matches"] == []
     assert "No tool matched" in out["instruction"]
+
+
+def test_a_task_keeps_the_tools_it_names_whatever_its_profiles_hold() -> None:
+    # FORGE-672: a composed task's objective is written for its capabilities;
+    # they are kept like deliverable tools even when no discipline profile
+    # carries them and the profiles fill the budget.
+    from mcp_core import profiles
+
+    named = ("packaging.box_compression", "packaging.rsc_dieline")
+    crowded = ("mechanical", "simulation", "electronics", "robotics", "industrial_design")
+    tools = tools_for_phase(crowded, (), named)
+    assert set(named) <= tools
+    assert len(tools) <= profiles.PHASE_MCP_BUDGET
+    # The profiles overflowed; the named tools were not what was dropped.
+    dropped = profiles.phase_overflow(crowded, (), named)
+    assert dropped and not set(named) & set(dropped)
+
+
+def test_the_phase_brain_gives_a_task_its_named_tools() -> None:
+    from orchestrator.design_flow.fragments import load_fragments
+
+    task = load_fragments()["packaging_v1"].task("compression")
+    assert "packaging.box_compression" in _report_phase_tools(task)

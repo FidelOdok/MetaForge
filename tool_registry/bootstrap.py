@@ -173,6 +173,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"optimize"}
     # FORGE-671: mobile-robot drive arithmetic, in-process.
     | {"robot"}
+    # FORGE-672: corrugated carton arithmetic, in-process.
+    | {"packaging"}
 )
 
 
@@ -1256,6 +1258,23 @@ async def bootstrap_tool_registry(
                 failed.append("robot")
         else:
             skipped.append("robot")
+
+        # ----- Packaging MCP adapter (FORGE-672) -----
+        # Carton compression and dieline arithmetic, like power: registers
+        # wherever it is asked for.
+        if _is_adapter_enabled("packaging") and (not adapter_ids or "packaging" in adapter_ids):
+            try:
+                from tool_registry.tools.packaging.adapter import PackagingServer
+
+                await registry.register_adapter(PackagingServer())
+                registered.append("packaging")
+                logger.info("packaging_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("packaging_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("packaging")
+        else:
+            skipped.append("packaging")
 
         # ----- Vendor connector MCP adapter (FORGE-427) -----
         if vendor_service is not None and _is_adapter_enabled("vendor"):

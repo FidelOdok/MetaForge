@@ -353,6 +353,12 @@ async def _run_phase(request: PhaseRequest) -> PhaseResult:
         model=request.phase.model,
         # FORGE-524: the frozen deliverable slots, so writes land on their items.
         slots=_slots_of(request.phase),
+        # FORGE-672: a composed task's contract. ``capabilities`` decides its
+        # tool allowlist; without it a task lost the tools it was written for.
+        fragment=str(getattr(request.phase, "fragment", "") or ""),
+        stage=str(getattr(request.phase, "stage", "") or ""),
+        inputs=tuple(getattr(request.phase, "inputs", ()) or ()),
+        capabilities=tuple(getattr(request.phase, "capabilities", ()) or ()),
     )
     ctx = FlowContext(
         goal=request.goal,
