@@ -128,6 +128,9 @@ READ_ONLY: frozenset[str] = frozenset(
         # FORGE-671: drive arithmetic over the caller's figures.
         "robot.size_drive",
         "robot.diff_drive_kinematics",
+        # FORGE-672: carton arithmetic over the caller's figures.
+        "packaging.box_compression",
+        "packaging.rsc_dieline",
         # FORGE-451: machine library reads.
         "library.list_machines",
         "library.get_machine",

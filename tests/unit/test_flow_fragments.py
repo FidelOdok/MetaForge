@@ -64,10 +64,14 @@ def _with_task(change: dict, index: int = 0) -> dict:
 
 def test_the_registry_is_what_is_on_disk() -> None:
     assert sorted(load_fragments()) == sorted(p.stem for p in FRAGMENT_DIR.glob("*.yaml"))
-    assert {"thermal_v1", "electronics_v1", "mobile_robot_v1"} <= set(load_fragments())
+    assert {"thermal_v1", "electronics_v1", "mobile_robot_v1", "packaging_v1"} <= set(
+        load_fragments()
+    )
 
 
-@pytest.mark.parametrize("fragment_id", ["thermal_v1", "electronics_v1", "mobile_robot_v1"])
+@pytest.mark.parametrize(
+    "fragment_id", ["thermal_v1", "electronics_v1", "mobile_robot_v1", "packaging_v1"]
+)
 def test_every_shipped_fragment_declares_a_version_and_valid_tasks(fragment_id: str) -> None:
     fragment = load_fragment(fragment_id)
     assert fragment.version

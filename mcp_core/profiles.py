@@ -525,9 +525,13 @@ def _drop_rank(tool_id: str) -> tuple[int, str]:
 def _phase_plan(
     disciplines: tuple[str, ...] | list[str],
     deliverables: tuple[str, ...] | list[str],
+    required: tuple[str, ...] | list[str] = (),
 ) -> tuple[frozenset[str], frozenset[str]]:
     """(tools kept, tools dropped) for a phase."""
-    must = PHASE_COMMON | deliverable_tools(deliverables)
+    # A composed task names the tools its objective is written for
+    # (FORGE-672): kept like deliverable tools, never dropped.
+    named = frozenset(t for t in required if not _service_refused(t))
+    must = PHASE_COMMON | deliverable_tools(deliverables) | named
     if len(must) > PHASE_MCP_BUDGET:
         # Never dropped, so the array exceeds the budget: say so loudly rather
         # than silently truncating a tool the gate needs.
@@ -552,6 +556,7 @@ def _phase_plan(
 def tools_for_phase(
     disciplines: tuple[str, ...] | list[str],
     deliverables: tuple[str, ...] | list[str] = (),
+    required: tuple[str, ...] | list[str] = (),
 ) -> frozenset[str]:
     """The MCP tool ids a design-flow phase carries (FORGE-479, FORGE-497).
 
@@ -562,8 +567,12 @@ def tools_for_phase(
     (niche families before the rest, then alphabetically last); a deliverable
     tool or a common tool is never dropped. The drop is reported by
     :func:`phase_overflow`, not silent.
+
+    ``required`` are tools a composed task names in its ``capabilities``
+    (FORGE-672): its objective is written for them, so they are kept like
+    deliverable tools whatever the discipline profiles hold.
     """
-    return _phase_plan(disciplines, deliverables)[0]
+    return _phase_plan(disciplines, deliverables, required)[0]
 
 
 def tools_for_disciplines(disciplines: tuple[str, ...] | list[str]) -> frozenset[str]:
@@ -574,9 +583,10 @@ def tools_for_disciplines(disciplines: tuple[str, ...] | list[str]) -> frozenset
 def phase_overflow(
     disciplines: tuple[str, ...] | list[str],
     deliverables: tuple[str, ...] | list[str] = (),
+    required: tuple[str, ...] | list[str] = (),
 ) -> list[str]:
     """Tools :func:`tools_for_phase` had to drop for this phase (usually none)."""
-    return sorted(_phase_plan(disciplines, deliverables)[1])
+    return sorted(_phase_plan(disciplines, deliverables, required)[1])
 
 
 def profile_names() -> list[str]:

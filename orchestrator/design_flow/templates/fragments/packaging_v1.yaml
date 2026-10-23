@@ -1,0 +1,129 @@
+# packaging_v1 domain fragment (FORGE-672, composable flows).
+#
+# Material selection -> dieline -> manufacturing check -> compression ->
+# drop testing, for a corrugated regular slotted container (FEFCO 0201).
+#
+# Every limit is an input, never a number written here: the inside dimensions
+# and gross mass come from the product, the stack count, safety factor, drop
+# height and number of drops from the requirements (the shipping test the
+# person names, e.g. an ISTA procedure), and the converter's rules (score
+# allowance, glue flap, minimum panel, sheet size) from the converter or the
+# process library. A limit nobody recorded is no_data, which never passes.
+#
+# Drop testing is a physical test: its results are recorded as evidence
+# (twin.record_evidence) and checked; no drop simulation is claimed. The
+# compression figure is a McKee estimate; a compression test outranks it.
+#
+# Bump `version` when a task, its contract or a check changes.
+id: packaging_v1
+version: 1.0.0
+domain: packaging
+label: Packaging
+description: Corrugated carton material, dieline, manufacturing check, compression and drop testing.
+keywords: [packaging, carton, box, corrugated, dieline, shipping box, stacking, drop test]
+disciplines: [industrial_design]
+tasks:
+- id: material_selection
+  stage: design
+  title: Board material selection
+  objective: >-
+    Choose the corrugated board grade (flute and liners) for the product's mass, the stacking and
+    the shipping environment the requirements state, from the material library or a mill's
+    datasheet. Record its edge crush value as `board_ect_n_per_m` (N/m) and its caliper as
+    `board_caliper_m` (m), each sourced to the datasheet, and the choice as a design decision with
+    the grades considered.
+  outputs:
+  - design_value:board_ect_n_per_m
+  - design_value:board_caliper_m
+  records: [design_decision]
+  checks:
+  - board_ect_n_per_m > 0 N/m
+  - board_caliper_m > 0 m
+  capabilities: [library.get_material, twin.record_engineering_entity, twin.record_decision]
+  outcome: board grade chosen with its sourced ECT and caliper
+- id: dieline
+  stage: design
+  title: Dieline
+  objective: >-
+    Lay out the regular slotted container blank with packaging.rsc_dieline from the recorded
+    inside length, width and depth, the board caliper and the converter's score allowance and
+    glue flap. Record the blank's length and width as `blank_length_m` and `blank_width_m` (m),
+    sourced to the tool run. Draw it as a DXF if the converter needs one.
+  inputs:
+  - design_value:inner_length_m
+  - design_value:inner_width_m
+  - design_value:inner_depth_m
+  - design_value:board_caliper_m
+  - design_value:score_allowance_m
+  - design_value:glue_flap_m
+  outputs:
+  - design_value:blank_length_m
+  - design_value:blank_width_m
+  checks:
+  - blank_length_m > 0 m
+  - blank_width_m > 0 m
+  capabilities: [packaging.rsc_dieline]
+- id: manufacturing_check
+  stage: design
+  title: Manufacturing check
+  objective: >-
+    Check the blank against the converter's rules with packaging.rsc_dieline: minimum glue flap,
+    minimum panel and sheet length and width, taken from the converter or library.process_limits
+    with their source. Record the number of rule violations as `dieline_rule_violations`,
+    sourced to the tool run, and name each one in the summary.
+  inputs:
+  - design_value:blank_length_m
+  - design_value:blank_width_m
+  - design_value:min_glue_flap_m
+  - design_value:min_panel_m
+  - design_value:max_sheet_length_m
+  - design_value:max_sheet_width_m
+  outputs:
+  - design_value:dieline_rule_violations
+  checks:
+  - dieline_rule_violations == 0
+  capabilities: [packaging.rsc_dieline, library.process_limits]
+  outcome: blank shown to meet the converter's rules
+- id: compression
+  stage: simulation
+  title: Compression strength
+  objective: >-
+    Estimate the box compression strength with packaging.box_compression from the board's ECT and
+    caliper and the inside length and width, derated for the humidity and storage time the
+    requirements state, against the stack load of the stated stack count of packed boxes times
+    the required safety factor. Record the margin as `compression_margin` (derated strength over
+    required strength, minus one), sourced to the tool run.
+  inputs:
+  - design_value:board_ect_n_per_m
+  - design_value:board_caliper_m
+  - design_value:inner_length_m
+  - design_value:inner_width_m
+  - design_value:gross_mass_kg
+  - design_value:stack_count
+  - design_value:required_stacking_safety_factor
+  - design_value:humidity_derating
+  - design_value:storage_derating
+  outputs:
+  - design_value:compression_margin
+  checks:
+  - compression_margin >= 0
+  capabilities: [packaging.box_compression]
+  outcome: stacking strength shown to exceed the stack load with the required factor
+- id: drop_test
+  stage: simulation
+  title: Drop testing
+  objective: >-
+    Record the results of the drop test the requirements name (procedure, drop height, number and
+    orientation of drops) performed on packed samples: the test report as evidence, and the
+    number of drops after which the product or the box was damaged as `drop_test_failures`,
+    sourced to the report. This is a physical test; do not estimate it.
+  inputs:
+  - design_value:drop_height_m
+  - design_value:drops_required
+  outputs:
+  - design_value:drop_test_failures
+  records: [evidence]
+  checks:
+  - drop_test_failures == 0
+  capabilities: [twin.record_evidence]
+  outcome: packed product shown to survive the named drop test
