@@ -95,13 +95,14 @@ class TestBootstrapToolRegistry:
         render adapter for 12, and FORGE-557 the OpenFOAM flow adapter for 13.
         The composable-flows follow-up added the in-process optimize adapter for 14,
         and FORGE-671 the in-process robot drive adapter for 15, and FORGE-672 the
-        in-process packaging adapter for 16.
+        in-process packaging adapter for 16, and FORGE-670 the in-process aircraft
+        adapter for 17.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 16
+        assert len(adapters) == 17
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -120,6 +121,7 @@ class TestBootstrapToolRegistry:
             "optimize",
             "robot",
             "packaging",
+            "aircraft",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -127,7 +129,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 16
+        assert len(registry.list_adapters()) == 17
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -240,12 +242,13 @@ class TestBootstrapToolRegistry:
         FORGE-557 adds openfoam.run_internal_flow for 91. The composable-flows
         follow-up adds optimize.suggest for 92. FORGE-671 adds robot.size_drive and
         robot.diff_drive_kinematics for 94. FORGE-672 adds packaging.box_compression
-        and packaging.rsc_dieline for 96.
+        and packaging.rsc_dieline for 96. FORGE-670 adds the four aircraft.* estimates
+        for 100.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 96
+        assert len(tools) == 100
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

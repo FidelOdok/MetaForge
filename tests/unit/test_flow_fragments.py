@@ -64,13 +64,18 @@ def _with_task(change: dict, index: int = 0) -> dict:
 
 def test_the_registry_is_what_is_on_disk() -> None:
     assert sorted(load_fragments()) == sorted(p.stem for p in FRAGMENT_DIR.glob("*.yaml"))
-    assert {"thermal_v1", "electronics_v1", "mobile_robot_v1", "packaging_v1"} <= set(
-        load_fragments()
-    )
+    assert {
+        "thermal_v1",
+        "electronics_v1",
+        "mobile_robot_v1",
+        "packaging_v1",
+        "aircraft_v1",
+    } <= set(load_fragments())
 
 
 @pytest.mark.parametrize(
-    "fragment_id", ["thermal_v1", "electronics_v1", "mobile_robot_v1", "packaging_v1"]
+    "fragment_id",
+    ["thermal_v1", "electronics_v1", "mobile_robot_v1", "packaging_v1", "aircraft_v1"],
 )
 def test_every_shipped_fragment_declares_a_version_and_valid_tasks(fragment_id: str) -> None:
     fragment = load_fragment(fragment_id)
@@ -221,3 +226,42 @@ def test_the_mobile_robot_energy_loop_is_a_block() -> None:
     # Its limits are inputs, never numbers: the torque margin comes from requirements.
     (check,) = fragment.task("drive_sizing").checks
     assert check.limit == "required_torque_margin"
+
+
+def test_the_aircraft_power_loop_is_a_block_and_its_limits_are_inputs() -> None:
+    # FORGE-670: all-up mass, cruise power and battery capacity depend on each other.
+    fragment = load_fragment("aircraft_v1")
+    (block,) = fragment.blocks
+    assert block.members == ("mass_rollup", "aerodynamics", "battery_sizing")
+    assert set(block.solves_for) == {"total_mass_kg", "cruise_power_w", "battery_capacity_wh"}
+    # The wing is sized for the stall at MTOW, outside the loop.
+    assert "wing_sizing" not in block.members
+    named = {"wing_sizing", "mass_rollup", "stability", "flight_simulation"}
+    limits = {
+        task.id: [c.limit for c in task.checks]
+        for task in fragment.tasks
+        if task.id.split(".")[-1] in named
+    }
+    assert limits == {
+        "aircraft.wing_sizing": ["max_stall_speed_mps"],
+        "aircraft.mass_rollup": ["max_takeoff_mass_kg"],
+        "aircraft.stability": ["required_static_margin"],
+        "aircraft.flight_simulation": ["required_endurance_min"],
+    }
+
+
+@pytest.mark.parametrize("base", ["design_v1", "mech_v1", "hardware_v1"])
+def test_the_aircraft_composes_with_electronics_and_thermal(base: str) -> None:
+    from orchestrator.design_flow.compose import compose
+    from orchestrator.design_flow.graph import build_graph
+    from orchestrator.design_flow.invariants import validate_flow
+    from orchestrator.design_flow.spec import get_flow
+
+    fr = load_fragments()
+    flow = compose(
+        get_flow(base), [fr["aircraft_v1"], fr["electronics_v1"], fr["thermal_v1"]]
+    ).definition
+    assert validate_flow(flow).ok
+    build_graph(flow.phases)  # acyclic
+    ids = {p.id for p in flow.phases}
+    assert {"aircraft.power_closure", "electronics.power_budget", "thermal.heat_load"} <= ids

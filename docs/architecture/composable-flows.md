@@ -64,6 +64,7 @@ The fragments shipped today:
 | `electronics_v1` | component selection → power budget (`power.check_budget`) → schematic ERC on the person's own KiCad schematic (KiCad is read-only in Phase 1) → circuit simulation (`spice.run_simulation`) |
 | `packaging_v1` | board material selection → RSC dieline (`packaging.rsc_dieline`) → manufacturing check against the converter's rules → compression strength (`packaging.box_compression`, a McKee estimate) → drop testing, recorded as evidence from a physical test (FORGE-672) |
 | `mobile_robot_v1` | locomotion selection → energy closure (a coupled block: mass roll-up, drive sizing with `robot.size_drive`, battery sizing) → kinematics (`robot.diff_drive_kinematics`) → dynamics in simulation (`gazebo.run_simulation`) → navigation testing (FORGE-671) |
+| `aircraft_v1` | configuration → wing sizing for the stall speed at MTOW (`aircraft.wing_sizing`) → layout (tail volume, CG) → power closure (a coupled block: mass roll-up, cruise aerodynamics with `aircraft.cruise_performance`, battery sizing with `aircraft.electric_endurance`) → trim and static stability (`aircraft.trim_stability`) → flight simulation (FORGE-670) |
 
 `electronics_v1` writes `power_dissipation_w`, which `thermal_v1` reads, so
 composing the two feeds the heat load from the power budget.
@@ -74,6 +75,20 @@ the required torque margin. Its navigation task names
 `gazebo.run_navigation_scenario`, which no adapter provides yet, so any
 proposal that composes the fragment carries that task as a blocking
 capability gap until one does.
+
+`aircraft_v1` is a battery-electric fixed-wing aircraft with a conventional
+wing and tail. The maximum take-off mass, stall speed, cruise speed,
+endurance and required static margin are inputs from the requirements; the
+airfoil data, drag build-up and propulsive efficiency come from cited
+sources. The wing is sized for the stall at the maximum take-off mass, so it
+sits outside the power loop, and a layout change (moving the CG, a bigger
+tail) re-runs trim and stability and nothing upstream. The `aircraft.*`
+tools are classical first-order estimates: a parabolic drag polar, Helmbold
+lift slopes and a tail-volume neutral point. Its flight simulation names
+`jsbsim.run_mission`, which no adapter provides yet, so that task is a
+blocking capability gap until one does. Its avionics load is its own input
+(`avionics_power_w`), not the electronics fragment's `power_dissipation_w`;
+composed with `electronics_v1` and `thermal_v1`, the three share no values.
 
 ## Composition
 
@@ -232,10 +247,14 @@ plain functions. The tests use it on a closed-form energy loop.
 
 ## Limits
 
-- `thermal_v1`, `electronics_v1`, `mobile_robot_v1` and `packaging_v1` ship
-  today. An aircraft fragment needs capabilities that do not exist yet
-  (aerodynamics, trim, flight simulation), and the mobile robot's navigation
-  testing needs a scenario-runner adapter.
+- `thermal_v1`, `electronics_v1`, `mobile_robot_v1`, `packaging_v1` and
+  `aircraft_v1` ship today. The mobile robot's navigation testing needs a
+  scenario-runner adapter, and the aircraft's flight simulation a mission
+  simulator (`jsbsim.run_mission`); both are blocking gaps until they exist.
+- `aircraft_v1`'s aerodynamics, trim and stability are first-order estimates
+  (`aircraft.*`). A vortex-lattice or panel code (AVL, XFOIL) would outrank
+  them; neither is built. The stability check is static only: no dynamic
+  modes (short period, phugoid, Dutch roll).
 - `packaging_v1` covers corrugated regular slotted containers. Its
   compression figure is a McKee estimate, which a compression test outranks.
   Its drop testing records a physical test; no drop simulation is built.
