@@ -175,6 +175,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"robot"}
     # FORGE-672: corrugated carton arithmetic, in-process.
     | {"packaging"}
+    # FORGE-670: fixed-wing aircraft arithmetic, in-process.
+    | {"aircraft"}
 )
 
 
@@ -1275,6 +1277,23 @@ async def bootstrap_tool_registry(
                 failed.append("packaging")
         else:
             skipped.append("packaging")
+
+        # ----- Aircraft MCP adapter (FORGE-670) -----
+        # Wing sizing, cruise, trim and endurance arithmetic, like power:
+        # registers wherever it is asked for.
+        if _is_adapter_enabled("aircraft") and (not adapter_ids or "aircraft" in adapter_ids):
+            try:
+                from tool_registry.tools.aircraft.adapter import AircraftServer
+
+                await registry.register_adapter(AircraftServer())
+                registered.append("aircraft")
+                logger.info("aircraft_mcp_adapter_registered")
+            except Exception as exc:
+                logger.error("aircraft_mcp_adapter_failed", error=str(exc))
+                span.record_exception(exc)
+                failed.append("aircraft")
+        else:
+            skipped.append("aircraft")
 
         # ----- Vendor connector MCP adapter (FORGE-427) -----
         if vendor_service is not None and _is_adapter_enabled("vendor"):

@@ -54,11 +54,12 @@ class TestRegistryMcpBridge:
         FORGE-557 adds openfoam.run_internal_flow for 91. The composable-flows
         follow-up adds optimize.suggest for 92. FORGE-671 adds robot.size_drive and
         robot.diff_drive_kinematics for 94. FORGE-672 adds packaging.box_compression
-        and packaging.rsc_dieline for 96.
+        and packaging.rsc_dieline for 96. FORGE-670 adds the four aircraft.* estimates
+        for 100.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 96
+        assert len(tools) == 100
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

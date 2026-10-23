@@ -131,6 +131,11 @@ READ_ONLY: frozenset[str] = frozenset(
         # FORGE-672: carton arithmetic over the caller's figures.
         "packaging.box_compression",
         "packaging.rsc_dieline",
+        # FORGE-670: aircraft arithmetic over the caller's figures.
+        "aircraft.wing_sizing",
+        "aircraft.cruise_performance",
+        "aircraft.trim_stability",
+        "aircraft.electric_endurance",
         # FORGE-451: machine library reads.
         "library.list_machines",
         "library.get_machine",
