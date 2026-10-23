@@ -125,6 +125,9 @@ READ_ONLY: frozenset[str] = frozenset(
         "cost.estimate_manufacturing",
         # Composable flows: search arithmetic over the caller's evaluations.
         "optimize.suggest",
+        # FORGE-671: drive arithmetic over the caller's figures.
+        "robot.size_drive",
+        "robot.diff_drive_kinematics",
         # FORGE-451: machine library reads.
         "library.list_machines",
         "library.get_machine",

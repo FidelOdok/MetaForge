@@ -264,6 +264,10 @@ PROFILES: dict[str, frozenset[str]] = {
         "omniverse_usd.convert_glb_to_usd",
         "omniverse_usd.describe_stage",
         "omniverse_usd.validate_usd_minimum",
+        # FORGE-671: a mobile robot's drive and kinematics, computed rather
+        # than hand-estimated.
+        "robot.diff_drive_kinematics",
+        "robot.size_drive",
         "twin.commit_geometry",
         "twin.stage_work_product_file",
     },
