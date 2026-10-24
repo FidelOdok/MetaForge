@@ -26,7 +26,7 @@
 #
 # Bump `version` when a task, its contract or a check changes.
 id: aircraft_v1
-version: 1.0.0
+version: 1.1.0
 domain: aircraft
 label: Fixed-wing aircraft
 description: Wing sizing, cruise aerodynamics, power closure, trim, stability and flight simulation.
@@ -142,12 +142,13 @@ tasks:
   title: Battery sizing
   objective: >-
     Size the battery with aircraft.electric_endurance for the required endurance at the recorded
-    cruise power plus the avionics and payload power, with the usable fraction (depth of
+    cruise power plus the electronics (avionics) power `electronics_power_w` -- from the power
+    design when it is composed -- and the payload power, with the usable fraction (depth of
     discharge and reserve) from the cell's datasheet and the requirements. Record the capacity
     as `battery_capacity_wh` (Wh), sourced to the tool run.
   inputs:
   - design_value:cruise_power_w
-  - design_value:avionics_power_w
+  - design_value:electronics_power_w
   - design_value:required_endurance_min
   - design_value:usable_battery_fraction
   outputs:

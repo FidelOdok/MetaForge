@@ -272,7 +272,8 @@ def test_intent_suggests_fragments_by_whole_word() -> None:
     assert THERMAL in suggest_fragments("passive cooling for a 20 W heat load")
     assert suggest_fragments("a theatre stage prop") == ()
     model = compile_intent("design a PCB with a regulator and heatsink cooling")
-    assert set(model.suggested_fragments) == {ELEC, THERMAL}
+    # A regulator is the power design subject too (FORGE-682).
+    assert set(model.suggested_fragments) == {ELEC, THERMAL, "power_v1"}
     assert model.as_dict()["suggested_fragments"] == list(model.suggested_fragments)
 
 

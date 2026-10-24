@@ -20,7 +20,7 @@
 #
 # Bump `version` when a task, its contract or a check changes.
 id: mobile_robot_v1
-version: 1.0.0
+version: 1.1.0
 domain: mobile_robot
 label: Mobile robot
 description: Locomotion, drive and battery sizing, kinematics, dynamics and navigation testing.
@@ -91,10 +91,12 @@ tasks:
   title: Battery sizing
   objective: >-
     Size the battery for the required runtime at the recorded drive power plus the electronics
-    load, with the usable depth of discharge from the cell's datasheet. Record the capacity as
+    load (`electronics_power_w`, from the power design when it is composed), with the usable
+    depth of discharge from the cell's datasheet. Record the capacity as
     `battery_capacity_wh` (Wh) with its calculation in the source.
   inputs:
   - design_value:drive_power_w
+  - design_value:electronics_power_w
   - design_value:required_runtime_h
   outputs:
   - design_value:battery_capacity_wh

@@ -72,6 +72,7 @@ def test_the_registry_is_what_is_on_disk() -> None:
         "aircraft_v1",
         "firmware_v1",
         "pcb_v1",
+        "power_v1",
     } <= set(load_fragments())
 
 
@@ -85,6 +86,7 @@ def test_the_registry_is_what_is_on_disk() -> None:
         "aircraft_v1",
         "firmware_v1",
         "pcb_v1",
+        "power_v1",
     ],
 )
 def test_every_shipped_fragment_declares_a_version_and_valid_tasks(fragment_id: str) -> None:
@@ -303,6 +305,45 @@ def test_the_pcb_checks_are_kicads_own_results() -> None:
     assert checks == {"unrouted_count", "drc_error_count", "parity_issue_count"}
     for task in fragment.tasks:
         assert all(c.limit is None or isinstance(c.limit, str) for c in task.checks)
+
+
+def test_the_power_checks_are_tool_results_and_limits_are_inputs() -> None:
+    # FORGE-682: junction margin and runtime from the power tools, limits from
+    # the requirements; the rail load budget stays electronics_v1's.
+    fragment = load_fragment("power_v1")
+    caps = {t.id: t.capabilities for t in fragment.tasks}
+    assert caps["power.regulator_thermal"] == ("power.check_budget",)
+    assert caps["power.battery_runtime"] == ("power.runtime",)
+    assert caps["power.load_transient"] == ("spice.run_simulation",)
+    assert [c.limit for c in fragment.task("battery_runtime").checks] == ["required_runtime_h"]
+    assert [c.limit for c in fragment.task("load_transient").checks] == ["max_load_step_dip_mv"]
+    written = {s.name for t in fragment.tasks for s in t.slots}
+    assert "electronics_power_w" in written and "rail_load_margin_pct" not in written
+
+
+@pytest.mark.parametrize(
+    ("other", "readers"),
+    [
+        ("mobile_robot_v1", {"mobile_robot.energy_closure"}),
+        ("aircraft_v1", {"aircraft.power_closure"}),
+        ("thermal_v1", {"thermal.heat_load", "thermal.temperature_verification"}),
+    ],
+)
+def test_a_regulator_change_reaches_what_reads_the_power(other: str, readers: set[str]) -> None:
+    from orchestrator.design_flow.compose import compose
+    from orchestrator.design_flow.graph import build_graph
+    from orchestrator.design_flow.invariants import validate_flow
+    from orchestrator.design_flow.spec import get_flow
+
+    fr = load_fragments()
+    composed = compose(get_flow("design_v1"), [fr["electronics_v1"], fr["power_v1"], fr[other]])
+    assert validate_flow(composed.definition).ok
+    external = {e.ref for e in composed.external_inputs}
+    # The electronics power comes from the power design, not from outside.
+    assert "design_value:electronics_power_w" not in external
+    hit = set(build_graph(composed.definition.phases).affected("electronics.component_selection"))
+    assert {"power.architecture", "power.regulator_thermal", "power.battery_runtime"} <= hit
+    assert readers <= hit
 
 
 @pytest.mark.parametrize("base", ["design_v1", "mech_v1", "hardware_v1"])
