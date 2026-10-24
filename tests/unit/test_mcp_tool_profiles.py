@@ -132,6 +132,7 @@ class TestProfileDefinitions:
             "manufacturing",  # FORGE-611
             "mechanical",
             "mechanical_product",
+            "pcb_design",  # FORGE-683/684
             "robotics",
             "simulation",
         ]

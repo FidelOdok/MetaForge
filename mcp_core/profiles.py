@@ -239,10 +239,6 @@ PROFILES: dict[str, frozenset[str]] = {
         "firmware.static_check",
         "kicad.export_bom",
         "kicad.export_gerber",
-        # FORGE-683: Phase 2 -- schematic, board and routing from a circuit.
-        "kicad.generate_schematic",
-        "kicad.generate_pcb",
-        "kicad.autoroute_pcb",
         # FORGE-680: drill and pick-and-place complete the fabrication set.
         "kicad.export_drill",
         "kicad.export_pos",
@@ -259,6 +255,34 @@ PROFILES: dict[str, frozenset[str]] = {
         "spice.run_simulation",
         "twin.commit_procurement_record",
         "twin.record_component_selection",
+    },
+    # Phase 2 board design (FORGE-683/684): the schematic, board and routing
+    # generated from a circuit, its 3D model and renders, component updates,
+    # and the checks and fabrication exports a designer runs on the result.
+    # Kept apart from `electronics` (Phase 1 checking, sourcing, power and
+    # firmware), which would otherwise pass the 40-tool cap.
+    "pcb_design": _BASE
+    | {
+        "component.search_parametric",
+        "distributors.resolve_offers",
+        "kicad.generate_schematic",
+        "kicad.generate_pcb",
+        "kicad.autoroute_pcb",
+        "kicad.export_3d",
+        "kicad.render_pcb",
+        "kicad.update_components",
+        "kicad.run_erc",
+        "kicad.run_drc",
+        "kicad.export_bom",
+        "kicad.export_netlist",
+        "kicad.get_pin_mapping",
+        "kicad.export_gerber",
+        "kicad.export_drill",
+        "kicad.export_pos",
+        "power.check_budget",
+        "twin.record_component_selection",
+        "twin.record_document",
+        "twin.stage_work_product_file",
     },
     # Assemblies and robot descriptions, through to a simulator.
     "robotics": _BASE

@@ -248,12 +248,13 @@ class TestBootstrapToolRegistry:
         FORGE-675 adds firmware.static_check for 103.
         FORGE-680 adds kicad.export_drill and kicad.export_pos for 105.
         FORGE-681 adds power.runtime for 106. FORGE-683 adds kicad.generate_schematic,
-        kicad.generate_pcb and kicad.autoroute_pcb for 109.
+        kicad.generate_pcb and kicad.autoroute_pcb for 109. FORGE-684 adds
+        kicad.export_3d, kicad.render_pcb and kicad.update_components for 112.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 109
+        assert len(tools) == 112
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

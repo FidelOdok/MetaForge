@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "metaforge",
   "displayName": "MetaForge",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Engineer hardware against a digital twin: requirements, CAD, simulation and evidence, with writes held for human approval.",
   "author": {
     "name": "MetaForge",
@@ -29,7 +29,7 @@
     "tool_profile": {
       "type": "string",
       "title": "Tool profile",
-      "description": "Which tool set to load. all (the default) loads every tool: Claude Code defers tools behind its tool search, and a client-mode run needs phase, gate, CAD, simulation and value-sourcing tools together, which no capped set holds. On a harness with a hard tool limit pick a capped set instead: core (project, twin reads, decisions, flows), client_run (drive a client-mode run and source values; reads the machine library), mechanical (stateless CAD), mechanical_product (CAD authored in a FreeCAD session), manufacturing (process selection and DFM review; reads the machine library), industrial_design (form factor, ergonomics and finishes; renders and the appearance library), simulation, electronics or robotics, each 25-40 tools. Registering, discovering or sending a job to a machine needs all. Every set includes health.check so /metaforge:doctor always works.",
+      "description": "Which tool set to load. all (the default) loads every tool: Claude Code defers tools behind its tool search, and a client-mode run needs phase, gate, CAD, simulation and value-sourcing tools together, which no capped set holds. On a harness with a hard tool limit pick a capped set instead: core (project, twin reads, decisions, flows), client_run (drive a client-mode run and source values; reads the machine library), mechanical (stateless CAD), mechanical_product (CAD authored in a FreeCAD session), manufacturing (process selection and DFM review; reads the machine library), industrial_design (form factor, ergonomics and finishes; renders and the appearance library), simulation, electronics (checks, sourcing, power, firmware), pcb_design (generate the schematic, board, routing and 3D model) or robotics, each 25-40 tools. Registering, discovering or sending a job to a machine needs all. Every set includes health.check so /metaforge:doctor always works.",
       "default": "all"
     }
   },

@@ -24,6 +24,9 @@ class KicadConfig(BaseModel):
     footprint_dir: str = Field(
         default="/usr/share/kicad/footprints", description="KiCad footprint libraries (*.pretty)"
     )
+    model_dir: str = Field(
+        default="/usr/share/kicad/3dmodels", description="KiCad 3D models (KICAD9_3DMODEL_DIR)"
+    )
     pcbnew_python: str = Field(
         default="/usr/bin/python3", description="The Python that imports KiCad's pcbnew"
     )
