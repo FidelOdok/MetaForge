@@ -404,6 +404,10 @@ PRODUCING: frozenset[str] = frozenset(
         "spice.run_simulation",
         # FORGE-557: writes its case directory to the adapter workspace only.
         "openfoam.run_internal_flow",
+        # FORGE-674/677: build output and run logs go to the adapter workspace
+        # only; the caller's project is copied, never modified.
+        "firmware.build",
+        "firmware.run_emulated",
         "gazebo.run_simulation",
         "isaac_sim.render_scene",
         "isaac_sim.run_physics",

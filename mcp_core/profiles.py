@@ -231,6 +231,10 @@ PROFILES: dict[str, frozenset[str]] = {
         "component.search_parametric",
         "constraint.validate",
         "distributors.resolve_offers",
+        # FORGE-674/677: compile the firmware the skills generate, and run it
+        # on an emulated board, so "it builds" is a result rather than a claim.
+        "firmware.build",
+        "firmware.run_emulated",
         "kicad.export_bom",
         "kicad.export_gerber",
         "kicad.export_netlist",

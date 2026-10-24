@@ -178,7 +178,13 @@ When the user wants it kept, or a flow phase needs it:
 
 - Configuration only. No schedulability, worst-case execution time or
   priority-inversion analysis.
-- No MetaForge tool compiles firmware or runs it on target. Fit in RAM is
-  confirmed only by the user's build.
+- Fit in RAM is an estimate until it is built: `firmware.build` (the
+  `run_firmware` skill) compiles the configuration with the real FreeRTOS
+  kernel on an STM32 or with ESP-IDF on an ESP32 and returns RAM used
+  against the part, and `firmware.run_emulated` can boot it on Renode or
+  QEMU to show the tasks start. Pass `cpu_clock_hz` when the core clock is
+  known; without it the configuration uses CMSIS `SystemCoreClock`.
+- No timing claim from an emulated run: emulation is functional, not
+  cycle-accurate.
 - The twin records a description of the configuration, not a versioned
   firmware work product.

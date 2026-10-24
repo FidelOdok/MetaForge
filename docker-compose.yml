@@ -55,6 +55,10 @@ services:
       # the `cfd` compose profile; without it a call says so rather than failing
       # obscurely.
       - METAFORGE_ADAPTER_OPENFOAM_URL=http://openfoam-adapter:8300
+      # FORGE-674/677: PlatformIO, Renode and Espressif QEMU are only in
+      # firmware-adapter's image, which runs under the `firmware` compose
+      # profile; without it a call says the adapter is not running.
+      - METAFORGE_ADAPTER_FIRMWARE_URL=http://firmware-adapter:8105
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -485,7 +489,7 @@ services:
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
-      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam,firmware
       --allow-twin-mutations
       --capture-sessions
     ports:
@@ -559,6 +563,10 @@ services:
       # the `cfd` compose profile; without it a call says so rather than failing
       # obscurely.
       - METAFORGE_ADAPTER_OPENFOAM_URL=http://openfoam-adapter:8300
+      # FORGE-674/677: PlatformIO, Renode and Espressif QEMU are only in
+      # firmware-adapter's image, which runs under the `firmware` compose
+      # profile; without it a call says the adapter is not running.
+      - METAFORGE_ADAPTER_FIRMWARE_URL=http://firmware-adapter:8105
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       # MET-495: same MinIO config as the gateway so twin.record_decision can
@@ -822,6 +830,45 @@ services:
           cpus: '8'
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8300/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── Firmware Adapter (FORGE-674/677: PlatformIO build, Renode + QEMU) ─
+  # Opt-in: the image carries the STM32 and ESP32 toolchains, ESP-IDF, Renode
+  # and Espressif's QEMU (several GB), so it only runs under the `firmware`
+  # profile (add `firmware` to COMPOSE_PROFILES). Built by CI, not on a shared
+  # host. It shares adapter-workspace, so a project written there is built by
+  # path and the ELF a build leaves is emulated by path. The published port is
+  # loopback only; the gateway reaches the adapter over the compose network.
+  firmware-adapter:
+    profiles: ["firmware"]
+    build:
+      context: .
+      dockerfile: tool_registry/tools/firmware/Dockerfile
+    image: ghcr.io/fidelodok/metaforge-firmware-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "127.0.0.1:8105:8105"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - FIRMWARE_WORK_DIR=/workspace
+      - FIRMWARE_HTTP_PORT=8105
+      - FIRMWARE_MAX_BUILD_TIME=${FIRMWARE_MAX_BUILD_TIME:-600}
+      - FIRMWARE_MAX_EMULATION_TIME=${FIRMWARE_MAX_EMULATION_TIME:-120}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8105/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

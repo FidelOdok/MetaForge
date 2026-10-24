@@ -45,6 +45,7 @@ profile).
 | Pin and net assignments | `kicad.get_pin_mapping` | electronics |
 | MCU reference manual, alternate functions, SDK docs | `knowledge.search`; `web.search` then `web.fetch` | all / core |
 | Write the HAL | your own file tools, in the user's repo | n/a |
+| Build it (STM32, ESP32) | `firmware.build` (see `run_firmware`) | electronics |
 | Record it | `twin.record_document`, `twin.record_decision` | core / all |
 
 ## Inputs you need before you start
@@ -113,8 +114,12 @@ Keep generated pin definitions and hand-written code apart, so the pin map
 can be regenerated from the schematic. Put a comment in the pin map naming
 the schematic file and revision it came from.
 
-If the user's toolchain is available locally, build the project and report
-whether it compiled. No MetaForge tool compiles firmware.
+Then build it: `firmware.build` (the `run_firmware` skill) compiles the
+project with PlatformIO in the firmware adapter for STM32 (STM32Cube) and
+ESP32 (ESP-IDF) boards and returns the compiler's errors at file:line and
+flash/RAM use. Report the verdict it returns. If the firmware adapter is
+not running, or the board's platform is not installed in it, say the build
+was not attempted; never say it compiles without a build.
 
 ### 4. Record it
 

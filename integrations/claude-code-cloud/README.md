@@ -42,7 +42,7 @@ Install **one**. The manifest has no way to switch a server entry off, so two pa
 
 ## Skills
 
-43 skills are bundled.
+44 skills are bundled.
 
 ## Agents
 

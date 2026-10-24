@@ -114,8 +114,11 @@ bmi088.h, bmi088.c and bmi088_regs.h):
 - Follow the user's conventions and error-handling style. Leave clear TODOs
   where behaviour still needs bring-up on hardware.
 
-If the user's toolchain is available locally, build it and report the
-result. No MetaForge tool compiles or runs firmware.
+Then build it with `firmware.build` (the `run_firmware` skill) on the
+user's board, and report the verdict and any errors at file:line. A driver
+that compiles has still not talked to the chip: an emulator does not model
+the sensor, so the chip-ID read stays a bring-up check on hardware. If the
+firmware adapter is not running, say the build was not attempted.
 
 ### 4. Record it
 

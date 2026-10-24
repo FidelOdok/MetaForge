@@ -96,13 +96,13 @@ class TestBootstrapToolRegistry:
         The composable-flows follow-up added the in-process optimize adapter for 14,
         and FORGE-671 the in-process robot drive adapter for 15, and FORGE-672 the
         in-process packaging adapter for 16, and FORGE-670 the in-process aircraft
-        adapter for 17.
+        adapter for 17, and FORGE-674/677 the firmware build/emulation adapter for 18.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 17
+        assert len(adapters) == 18
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -122,6 +122,7 @@ class TestBootstrapToolRegistry:
             "robot",
             "packaging",
             "aircraft",
+            "firmware",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -129,7 +130,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 17
+        assert len(registry.list_adapters()) == 18
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -243,12 +244,12 @@ class TestBootstrapToolRegistry:
         follow-up adds optimize.suggest for 92. FORGE-671 adds robot.size_drive and
         robot.diff_drive_kinematics for 94. FORGE-672 adds packaging.box_compression
         and packaging.rsc_dieline for 96. FORGE-670 adds the four aircraft.* estimates
-        for 100.
+        for 100. FORGE-674/677 add firmware.build and firmware.run_emulated for 102.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 100
+        assert len(tools) == 102
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

@@ -1,0 +1,26 @@
+{
+  "name": "run_firmware",
+  "version": "0.1.0",
+  "domain": "firmware",
+  "agent": "firmware",
+  "description": "Build firmware with PlatformIO and run it on an emulated board (Renode, Espressif QEMU)",
+  "phase": 1,
+  "tools_required": [
+    {
+      "tool_id": "firmware.build",
+      "capability": "firmware_build",
+      "required": true
+    },
+    {
+      "tool_id": "firmware.run_emulated",
+      "capability": "firmware_emulation",
+      "required": false
+    }
+  ],
+  "input_schema": "schema.RunFirmwareInput",
+  "output_schema": "schema.RunFirmwareOutput",
+  "timeout_seconds": 900,
+  "retries": 0,
+  "idempotent": true,
+  "tags": ["firmware", "build", "compile", "emulation", "renode", "qemu", "platformio"]
+}

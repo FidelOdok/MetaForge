@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        adapter: [freecad, calculix, cadquery, kicad, spice, blender, openfoam]
+        adapter: [freecad, calculix, cadquery, kicad, spice, blender, openfoam, firmware]
     steps:
       - uses: actions/checkout@v4
 

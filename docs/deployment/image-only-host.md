@@ -10,12 +10,18 @@ published to GitHub Container Registry and signed (FORGE-593):
 | Image | Published by |
 |---|---|
 | `metaforge-gateway` (also runs the MCP server and both workers) | `release.yml`, every push to `main` |
-| `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter`, `-openfoam-adapter` | `adapter-images.yml`, when their code changes |
+| `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter`, `-openfoam-adapter`, `-firmware-adapter` | `adapter-images.yml`, when their code changes |
 
 The OpenFOAM adapter (FORGE-557) is opt-in. Its image is about 4 GB, so it runs only
 under the `cfd` compose profile: add `cfd` to `COMPOSE_PROFILES` in the host's `.env`
 to have the update pull and start it. Until then the gateway lists
 `openfoam.run_internal_flow` but a call says the adapter is not running.
+
+The firmware adapter (FORGE-674/677) is opt-in the same way. Its image carries the STM32
+and ESP32 toolchains, ESP-IDF, Renode and Espressif QEMU, about 5.5 GB, so it runs only under
+the `firmware` compose profile: add `firmware` to `COMPOSE_PROFILES` to have the update pull
+and start it. Until then the gateway lists `firmware.build` and `firmware.run_emulated`, and
+a call says the adapter is not running.
 | `metaforge-occt`, `metaforge-dashboard` | `adapter-images.yml`, when their code changes |
 | `metaforge-seaweedfs` (the object store) | `mirror-images.yml`: the signed upstream release, copied and re-signed as ours |
 

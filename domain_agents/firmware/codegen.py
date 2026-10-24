@@ -296,6 +296,42 @@ class RtosTask(BaseModel):
     entry: str | None = Field(default=None, description="Entry function; defaults to <name>_task")
 
 
+#: Cortex-M part of FreeRTOSConfig.h: interrupt priorities from the CMSIS
+#: ``__NVIC_PRIO_BITS`` and the port's handlers under the CMSIS vector names,
+#: so the startup file's vector table reaches the kernel. Inert on other cores.
+_CORTEX_M_BLOCK = (
+    "\n#if defined(__ARM_ARCH)\n"
+    "#ifdef __NVIC_PRIO_BITS\n"
+    "#define configPRIO_BITS __NVIC_PRIO_BITS\n"
+    "#else\n"
+    "#define configPRIO_BITS 4\n"
+    "#endif\n"
+    "#define configLIBRARY_LOWEST_INTERRUPT_PRIORITY ((1 << configPRIO_BITS) - 1)\n"
+    "#define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY 5\n"
+    "#define configKERNEL_INTERRUPT_PRIORITY "
+    "(configLIBRARY_LOWEST_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))\n"
+    "#define configMAX_SYSCALL_INTERRUPT_PRIORITY "
+    "(configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))\n"
+    "#define vPortSVCHandler SVC_Handler\n"
+    "#define xPortPendSVHandler PendSV_Handler\n"
+    "#define xPortSysTickHandler SysTick_Handler\n"
+    "#endif\n"
+)
+
+
+def _clock_block(cpu_clock_hz: int | None) -> str:
+    """``configCPU_CLOCK_HZ``: the stated clock, else CMSIS ``SystemCoreClock``."""
+    if cpu_clock_hz:
+        return f"#define configCPU_CLOCK_HZ ((unsigned long){cpu_clock_hz})\n"
+    return (
+        "#ifndef __ASSEMBLER__\n"
+        "#include <stdint.h>\n"
+        "extern uint32_t SystemCoreClock;\n"
+        "#endif\n"
+        "#define configCPU_CLOCK_HZ (SystemCoreClock)\n"
+    )
+
+
 def generate_rtos_files(
     rtos: str,
     tasks: list[RtosTask],
@@ -303,6 +339,7 @@ def generate_rtos_files(
     tick_rate_hz: int,
     output_dir: str,
     stack_word_bytes: int,
+    cpu_clock_hz: int | None = None,
 ) -> tuple[list[GeneratedFile], int]:
     """Config and task table for ``rtos``; returns the files and RAM estimate (bytes)."""
     if rtos not in GENERATED_RTOS:
@@ -336,6 +373,15 @@ def generate_rtos_files(
             + "#define configSUPPORT_DYNAMIC_ALLOCATION 1\n"
             + "#define configUSE_MUTEXES 1\n"
             + "#define configCHECK_FOR_STACK_OVERFLOW 2\n"
+            # FORGE-674: the kernel does not build without these.
+            + "#define configUSE_IDLE_HOOK 0\n"
+            + "#define configUSE_TICK_HOOK 0\n"
+            + "#define configTICK_TYPE_WIDTH_IN_BITS TICK_TYPE_WIDTH_32_BITS\n"
+            + "#define INCLUDE_vTaskDelay 1\n"
+            + "#define INCLUDE_vTaskDelayUntil 1\n"
+            + "#define INCLUDE_vTaskDelete 1\n"
+            + _clock_block(cpu_clock_hz)
+            + _CORTEX_M_BLOCK
             + f"\n#endif /* {g} */\n"
         )
         rows = [
@@ -359,6 +405,10 @@ def generate_rtos_files(
             + "                        app_tasks[i].depth_words, NULL,\n"
             + "                        app_tasks[i].priority, NULL) != pdPASS) {\n"
             + "            return -1;\n        }\n    }\n    return 0;\n}\n"
+            # configCHECK_FOR_STACK_OVERFLOW needs a hook: a weak one halts, and
+            # the application overrides it to report.
+            + "\n__attribute__((weak)) void vApplicationStackOverflowHook(TaskHandle_t task,"
+            + " char *name)\n{\n    (void)task;\n    (void)name;\n    for (;;) {\n    }\n}\n"
         )
         return [
             GeneratedFile(path=cfg_path, content=cfg),
