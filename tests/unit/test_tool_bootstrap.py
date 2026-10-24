@@ -246,11 +246,12 @@ class TestBootstrapToolRegistry:
         and packaging.rsc_dieline for 96. FORGE-670 adds the four aircraft.* estimates
         for 100. FORGE-674/677 add firmware.build and firmware.run_emulated for 102.
         FORGE-675 adds firmware.static_check for 103.
+        FORGE-680 adds kicad.export_drill and kicad.export_pos for 105.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 103
+        assert len(tools) == 105
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""

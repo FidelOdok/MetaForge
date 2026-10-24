@@ -16,10 +16,33 @@ import structlog
 from observability.tracing import get_tracer
 from tool_registry.mcp_server.handlers import ResourceLimits, ToolManifest
 from tool_registry.mcp_server.server import McpToolServer
+from tool_registry.tools.kicad import sexpr
 from tool_registry.tools.kicad.config import KicadConfig
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("tool_registry.tools.kicad")
+
+
+#: Netlist formats: our name -> (kicad-cli 9 --format, file extension). ``kicad``
+#: stays an alias of ``kicadsexpr``; kicad-cli 9 rejects it ("Invalid format").
+#: BOM grouping: our ``group_by`` -> kicad-cli ``--group-by`` fields ("" = one line per symbol).
+BOM_GROUPING: dict[str, str] = {
+    "value": "Value,Footprint",
+    "footprint": "Footprint",
+    "reference": "",
+}
+
+NETLIST_FORMATS: dict[str, tuple[str, str]] = {
+    "kicad": ("kicadsexpr", "net"),
+    "kicadsexpr": ("kicadsexpr", "net"),
+    "kicadxml": ("kicadxml", "xml"),
+    "spice": ("spice", "cir"),
+    "spicemodel": ("spicemodel", "cir"),
+    "cadstar": ("cadstar", "frp"),
+    "orcadpcb2": ("orcadpcb2", "net"),
+    "pads": ("pads", "asc"),
+    "allegro": ("allegro", "txt"),
+}
 
 
 class KicadCliNotFoundError(RuntimeError):
@@ -150,6 +173,7 @@ class KicadServer(McpToolServer):
         super().__init__(adapter_id="kicad", version="0.1.0")
         self.config = config or KicadConfig()
         self._register_tools()
+        self._register_fabrication_tools()
 
     def _register_tools(self) -> None:
         """Register all KiCad tools."""
@@ -269,7 +293,7 @@ class KicadServer(McpToolServer):
                         },
                         "output_format": {
                             "type": "string",
-                            "enum": ["csv", "xml", "json"],
+                            "enum": ["csv", "json"],
                             "default": "csv",
                             "description": "BOM output format",
                         },
@@ -360,7 +384,7 @@ class KicadServer(McpToolServer):
                         },
                         "output_format": {
                             "type": "string",
-                            "enum": ["kicad", "spice", "cadstar"],
+                            "enum": sorted(NETLIST_FORMATS),
                             "default": "kicad",
                             "description": "Netlist output format",
                         },
@@ -426,6 +450,132 @@ class KicadServer(McpToolServer):
     # Tool handlers
     # ------------------------------------------------------------------
 
+    def _register_fabrication_tools(self) -> None:
+        """Drill and position files, which complete the fabrication set (FORGE-680)."""
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="kicad.export_drill",
+                adapter_id="kicad",
+                name="Export Drill Files",
+                description=(
+                    "Export the board's drill files (Excellon, plated and non-plated "
+                    "holes in separate files, millimetres) with kicad-cli, into a new "
+                    "folder on the adapter workspace. Returns the files and the hole "
+                    "count per file. A missing board is refused by name."
+                ),
+                capability="drill_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "pcb_file": {"type": "string", "description": "Path to .kicad_pcb"},
+                        "output_dir": {"type": "string", "description": "Output folder"},
+                    },
+                    "required": ["pcb_file"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=1024, max_cpu_seconds=120),
+            ),
+            handler=self.export_drill,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="kicad.export_pos",
+                adapter_id="kicad",
+                name="Export Component Positions",
+                description=(
+                    "Export the pick-and-place file (CSV, millimetres, both sides) with "
+                    "kicad-cli. Returns the file and each placed component's reference, "
+                    "value, package, position, rotation and side. A missing board is "
+                    "refused by name."
+                ),
+                capability="position_export",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "pcb_file": {"type": "string", "description": "Path to .kicad_pcb"},
+                        "output_file": {"type": "string", "description": "Output CSV path"},
+                    },
+                    "required": ["pcb_file"],
+                },
+                output_schema={"type": "object"},
+                phase=1,
+                resource_limits=ResourceLimits(max_memory_mb=1024, max_cpu_seconds=120),
+            ),
+            handler=self.export_pos,
+        )
+
+    async def export_drill(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        pcb_file = self._existing(str(arguments.get("pcb_file") or ""), "board")
+        stem = Path(pcb_file).stem
+        output_dir = str(arguments.get("output_dir") or f"{self.config.work_dir}/{stem}_drill")
+        with tracer.start_as_current_span("kicad.export_drill") as span:
+            span.set_attribute("kicad.pcb_file", pcb_file)
+            await _check_kicad_cli(self.config.kicad_cli)
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            args = [
+                "pcb",
+                "export",
+                "drill",
+                "--format",
+                "excellon",
+                "--excellon-units",
+                "mm",
+                "--excellon-separate-th",
+                "--output",
+                output_dir.rstrip("/") + "/",
+                pcb_file,
+            ]
+            rc, _out, err = await _run_kicad_cli(
+                self.config.kicad_cli, args, float(self.config.max_operation_time)
+            )
+            if rc != 0:
+                raise KicadCliError(rc, err)
+            files = sorted(p for p in Path(output_dir).iterdir() if p.suffix.lower() == ".drl")
+            holes = {f.name: _count_excellon_holes(f) for f in files}
+            logger.info("Drill export completed", output_dir=output_dir, files=len(files))
+            return {
+                "output_dir": output_dir,
+                "files_generated": [str(f) for f in files],
+                "holes_per_file": holes,
+                "total_holes": sum(holes.values()),
+            }
+
+    async def export_pos(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        pcb_file = self._existing(str(arguments.get("pcb_file") or ""), "board")
+        stem = Path(pcb_file).stem
+        output_file = str(arguments.get("output_file") or f"{self.config.work_dir}/{stem}_pos.csv")
+        with tracer.start_as_current_span("kicad.export_pos") as span:
+            span.set_attribute("kicad.pcb_file", pcb_file)
+            await _check_kicad_cli(self.config.kicad_cli)
+            Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+            args = [
+                "pcb",
+                "export",
+                "pos",
+                "--format",
+                "csv",
+                "--units",
+                "mm",
+                "--side",
+                "both",
+                "--output",
+                output_file,
+                pcb_file,
+            ]
+            rc, _out, err = await _run_kicad_cli(
+                self.config.kicad_cli, args, float(self.config.max_operation_time)
+            )
+            if rc != 0:
+                raise KicadCliError(rc, err)
+            placements = _parse_pos_csv(output_file)
+            logger.info("Position export completed", output_file=output_file, n=len(placements))
+            return {
+                "output_file": output_file,
+                "placements": placements,
+                "total_components": len(placements),
+            }
+
     async def run_erc(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Run Electrical Rules Check on a KiCad schematic.
 
@@ -439,6 +589,7 @@ class KicadServer(McpToolServer):
             raise ValueError("schematic_file is required")
         if severity_filter not in ("all", "error", "warning"):
             raise ValueError(f"Unsupported severity filter: {severity_filter}")
+        schematic_file = self._existing(schematic_file, "schematic")
 
         logger.info(
             "Running ERC",
@@ -459,6 +610,7 @@ class KicadServer(McpToolServer):
             raise ValueError("pcb_file is required")
         if severity_filter not in ("all", "error", "warning"):
             raise ValueError(f"Unsupported severity filter: {severity_filter}")
+        pcb_file = self._existing(pcb_file, "board")
 
         logger.info(
             "Running DRC",
@@ -478,10 +630,14 @@ class KicadServer(McpToolServer):
 
         if not schematic_file:
             raise ValueError("schematic_file is required")
-        if output_format not in ("csv", "xml", "json"):
-            raise ValueError(f"Unsupported BOM format: {output_format}")
+        if output_format not in ("csv", "json"):
+            raise ValueError(
+                f"Unsupported BOM format: {output_format}; kicad-cli writes csv, and json is "
+                "the same rows as a JSON file"
+            )
         if group_by not in ("value", "footprint", "reference"):
             raise ValueError(f"Unsupported group_by field: {group_by}")
+        schematic_file = self._existing(schematic_file, "schematic")
 
         logger.info(
             "Exporting BOM",
@@ -512,6 +668,7 @@ class KicadServer(McpToolServer):
 
         if not pcb_file:
             raise ValueError("pcb_file is required")
+        pcb_file = self._existing(pcb_file, "board")
 
         if not output_dir:
             stem = Path(pcb_file).stem
@@ -534,8 +691,12 @@ class KicadServer(McpToolServer):
 
         if not schematic_file:
             raise ValueError("schematic_file is required")
-        if output_format not in ("kicad", "spice", "cadstar"):
-            raise ValueError(f"Unsupported netlist format: {output_format}")
+        if output_format not in NETLIST_FORMATS:
+            raise ValueError(
+                f"Unsupported netlist format: {output_format}; "
+                f"one of {', '.join(sorted(NETLIST_FORMATS))}"
+            )
+        schematic_file = self._existing(schematic_file, "schematic")
 
         logger.info(
             "Exporting netlist",
@@ -553,6 +714,7 @@ class KicadServer(McpToolServer):
 
         if not schematic_file:
             raise ValueError("schematic_file is required")
+        schematic_file = self._existing(schematic_file, "schematic")
 
         logger.info(
             "Getting pin mapping",
@@ -562,6 +724,26 @@ class KicadServer(McpToolServer):
 
         result = await self._execute_pin_mapping(schematic_file, component_filter)
         return result
+
+    def _existing(self, path: str, kind: str) -> str:
+        """The path, resolved against the workspace, or a refusal naming what is missing.
+
+        kicad-cli answers a missing file with a bare exit code ("Failed to
+        load board"), which read like a broken design; a schematic with no
+        board is a normal state and is said plainly (FORGE-172).
+        """
+        p = Path(path)
+        if not p.is_absolute():
+            p = Path(self.config.work_dir) / p
+        if not p.is_file():
+            suffix = {"board": ".kicad_pcb", "schematic": ".kicad_sch"}[kind]
+            hint = (
+                f"; this project has no {suffix} board yet, so there is nothing to check"
+                if kind == "board"
+                else ""
+            )
+            raise FileNotFoundError(f"no {kind} file at {path}{hint}")
+        return str(p)
 
     # ------------------------------------------------------------------
     # Internal execution methods
@@ -766,36 +948,40 @@ class KicadServer(McpToolServer):
             await _check_kicad_cli(self.config.kicad_cli)
 
             stem = Path(schematic_file).stem
-            output_file = f"{self.config.work_dir}/{stem}_bom.{output_format}"
-
+            csv_file = f"{self.config.work_dir}/{stem}_bom.csv"
             cli_args = [
                 "sch",
                 "export",
                 "bom",
                 "--output",
-                output_file,
-                schematic_file,
+                csv_file,
             ]
+            group_fields = BOM_GROUPING[group_by]
+            if group_fields:
+                cli_args += ["--group-by", group_fields]
+            cli_args.append(schematic_file)
             timeout = float(self.config.max_operation_time)
-
             try:
                 returncode, stdout, stderr = await _run_kicad_cli(
                     self.config.kicad_cli, cli_args, timeout
                 )
-
                 if returncode != 0:
                     raise KicadCliError(returncode, stderr)
-
-                # Parse the BOM output to count components
-                total_components, unique_parts = _parse_bom_csv(output_file)
-
+                parts = _parse_bom_rows(csv_file)
+                total_components = sum(p["quantity"] for p in parts)
+                unique_parts = len(parts)
+                output_file = csv_file
+                if output_format == "json":
+                    output_file = f"{self.config.work_dir}/{stem}_bom.json"
+                    Path(output_file).write_text(json.dumps(parts, indent=1), encoding="utf-8")
                 result = {
                     "output_file": output_file,
                     "total_components": total_components,
                     "unique_parts": unique_parts,
+                    "group_by": group_by,
+                    "parts": parts,
                     "format": output_format,
                 }
-
                 span.set_attribute("kicad.bom.total_components", total_components)
                 span.set_attribute("kicad.bom.unique_parts", unique_parts)
                 logger.info(
@@ -835,9 +1021,10 @@ class KicadServer(McpToolServer):
                 output_dir,
                 pcb_file,
             ]
-            # Add layer arguments
-            for layer in layers:
-                cli_args.extend(["--layers", layer])
+            # kicad-cli 9 takes one comma-separated list; a repeated --layers
+            # keeps only the last one.
+            if layers:
+                cli_args.extend(["--layers", ",".join(layers)])
 
             timeout = float(self.config.max_operation_time)
 
@@ -886,8 +1073,7 @@ class KicadServer(McpToolServer):
 
             await _check_kicad_cli(self.config.kicad_cli)
 
-            format_ext_map = {"kicad": "net", "spice": "cir", "cadstar": "cdx"}
-            ext = format_ext_map.get(output_format, "net")
+            cli_format, ext = NETLIST_FORMATS[output_format]
             stem = Path(schematic_file).stem
             output_file = f"{self.config.work_dir}/{stem}.{ext}"
 
@@ -896,7 +1082,7 @@ class KicadServer(McpToolServer):
                 "export",
                 "netlist",
                 "--format",
-                output_format,
+                cli_format,
                 "--output",
                 output_file,
                 schematic_file,
@@ -911,8 +1097,12 @@ class KicadServer(McpToolServer):
                 if returncode != 0:
                     raise KicadCliError(returncode, stderr)
 
-                # Parse the netlist to count nets and components
-                total_nets, total_components = _parse_netlist_stats(output_file)
+                # Counted from KiCad's own S-expression format only; another
+                # format's counts are unknown, not zero.
+                stats: tuple[int | None, int | None] = (None, None)
+                if cli_format == "kicadsexpr":
+                    stats = _parse_netlist_stats(output_file)
+                total_nets, total_components = stats
 
                 result = {
                     "output_file": output_file,
@@ -921,8 +1111,9 @@ class KicadServer(McpToolServer):
                     "format": output_format,
                 }
 
-                span.set_attribute("kicad.netlist.total_nets", total_nets)
-                span.set_attribute("kicad.netlist.total_components", total_components)
+                if total_nets is not None and total_components is not None:
+                    span.set_attribute("kicad.netlist.total_nets", total_nets)
+                    span.set_attribute("kicad.netlist.total_components", total_components)
                 logger.info(
                     "Netlist export completed",
                     output_file=output_file,
@@ -962,7 +1153,7 @@ class KicadServer(McpToolServer):
                     "export",
                     "netlist",
                     "--format",
-                    "kicad",
+                    "kicadsexpr",
                     "--output",
                     netlist_path,
                     schematic_file,
@@ -1165,34 +1356,40 @@ def _stage_board_with_rules(pcb_file: str, rule_set: str, directory: str) -> str
     return str(staged)
 
 
-def _parse_bom_csv(file_path: str) -> tuple[int, int]:
-    """Parse a KiCad BOM CSV to count total components and unique parts.
+def _parse_bom_rows(file_path: str) -> list[dict[str, Any]]:
+    """Rows of kicad-cli's BOM CSV (Refs, Value, Footprint, Qty, DNP).
 
-    Returns (total_components, unique_parts).
+    The parser used to read ``;``-separated rows; kicad-cli writes ``,``, so
+    every row was one column and the totals were just the row count.
     """
     try:
         with open(file_path, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f, delimiter=";")
-            rows = list(reader)
+            rows = list(csv.DictReader(f))
     except (FileNotFoundError, UnicodeDecodeError):
-        return 0, 0
-
-    total = 0
-    unique_values: set[str] = set()
-
+        return []
+    parts: list[dict[str, Any]] = []
     for row in rows:
-        # KiCad BOM CSV typically has Qty column
-        qty_str = row.get("Qty", row.get("Quantity", "1"))
+        refs = [r.strip() for r in str(row.get("Refs", "")).split(",") if r.strip()]
         try:
-            qty = int(qty_str)
-        except (ValueError, TypeError):
-            qty = 1
-        total += qty
-        value = row.get("Value", row.get("value", ""))
-        if value:
-            unique_values.add(value)
+            qty = int(row.get("Qty") or len(refs) or 1)
+        except ValueError:
+            qty = len(refs) or 1
+        parts.append(
+            {
+                "references": refs,
+                "value": row.get("Value", ""),
+                "footprint": row.get("Footprint", ""),
+                "quantity": qty,
+                "dnp": bool(str(row.get("DNP", "")).strip()),
+            }
+        )
+    return parts
 
-    return total, len(unique_values) if unique_values else len(rows)
+
+def _parse_bom_csv(file_path: str) -> tuple[int, int]:
+    """(total components, BOM lines) of a kicad-cli BOM CSV."""
+    parts = _parse_bom_rows(file_path)
+    return sum(p["quantity"] for p in parts), len(parts)
 
 
 def _list_gerber_files(output_dir: str) -> list[str]:
@@ -1220,107 +1417,101 @@ def _list_gerber_files(output_dir: str) -> list[str]:
         return []
 
 
-def _parse_netlist_stats(file_path: str) -> tuple[int, int]:
-    """Parse a KiCad netlist file to count nets and components.
+def _count_excellon_holes(path: Path) -> int:
+    """Holes in an Excellon file: the coordinate lines after the header."""
+    count = 0
+    in_body = False
+    for line in path.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if line in ("%", "M95"):
+            in_body = True
+            continue
+        if in_body and (line.startswith("X") or line.startswith("Y")):
+            count += 1
+    return count
 
-    Returns (total_nets, total_components).
-    """
+
+def _parse_pos_csv(path: str) -> list[dict[str, Any]]:
+    """kicad-cli's position CSV: Ref, Val, Package, PosX, PosY, Rot, Side."""
+    rows: list[dict[str, Any]] = []
+    with open(path, encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                rows.append(
+                    {
+                        "reference": row["Ref"],
+                        "value": row.get("Val", ""),
+                        "package": row.get("Package", ""),
+                        "x_mm": float(row["PosX"]),
+                        "y_mm": float(row["PosY"]),
+                        "rotation_deg": float(row["Rot"]),
+                        "side": row.get("Side", ""),
+                    }
+                )
+            except (KeyError, ValueError):
+                continue
+    return rows
+
+
+def _read_netlist(file_path: str) -> list[Any] | None:
     try:
-        with open(file_path, encoding="utf-8") as f:
-            content = f.read()
+        text = Path(file_path).read_text(encoding="utf-8")
     except FileNotFoundError:
+        return None
+    try:
+        return sexpr.loads(text)
+    except sexpr.SExprError:
+        return None
+
+
+def _parse_netlist_stats(file_path: str) -> tuple[int, int]:
+    """Nets and components in a KiCad S-expression netlist: (total_nets, total_components)."""
+    tree = _read_netlist(file_path)
+    if tree is None:
         return 0, 0
-
-    # Count (net entries and (comp entries in KiCad netlist format
-    net_count = content.count("(net ")
-    comp_count = content.count("(comp ")
-
-    return net_count, comp_count
+    nets = sexpr.find(tree, "nets")
+    comps = sexpr.find(tree, "components")
+    return (
+        len(sexpr.children(nets, "net")) if nets else 0,
+        len(sexpr.children(comps, "comp")) if comps else 0,
+    )
 
 
 def _parse_pin_mapping_from_netlist(
     netlist_path: str, component_filter: str | None
 ) -> list[dict[str, Any]]:
-    """Parse pin mapping from a KiCad netlist file.
-
-    This is a simplified parser for the KiCad S-expression netlist format.
-    Returns a list of component dicts with their pin-to-net mappings.
-    """
-    try:
-        with open(netlist_path, encoding="utf-8") as f:
-            content = f.read()
-    except FileNotFoundError:
+    """Each component's pins and the net on each, from a KiCad S-expression netlist."""
+    tree = _read_netlist(netlist_path)
+    if tree is None:
         return []
-
-    # This is a simplified extraction -- a full parser would use S-expression parsing.
-    # We extract basic component info from the netlist structure.
-    components: list[dict[str, Any]] = []
-
-    # Split by component blocks
-    comp_sections = content.split("(comp ")
-    for section in comp_sections[1:]:  # skip the preamble
-        ref = _extract_field(section, "ref")
-        value = _extract_field(section, "value")
-        footprint = _extract_field(section, "footprint")
-
-        if not ref:
+    components: dict[str, dict[str, Any]] = {}
+    comps = sexpr.find(tree, "components")
+    for comp in sexpr.children(comps, "comp") if comps else []:
+        ref = sexpr.value(comp, "ref")
+        if not ref or (component_filter and not ref.startswith(component_filter)):
             continue
-
-        if component_filter and not ref.startswith(component_filter):
-            continue
-
-        components.append(
-            {
-                "reference": ref,
-                "value": value,
-                "footprint": footprint,
-                "pins": [],
-            }
-        )
-
-    # Parse net sections to fill in pin mapping
-    net_sections = content.split("(net ")
-    for section in net_sections[1:]:
-        # Extract net name from (name "...") field in this section
-        net_name = _extract_field(section, "name")
-
-        # Find node references in this net section
-        node_sections = section.split("(node ")
-        for node in node_sections[1:]:
-            node_ref = _extract_field(node, "ref")
-            node_pin = _extract_field(node, "pin")
-            pin_name = _extract_field(node, "pinfunction")
-            pin_type = _extract_field(node, "pintype")
-
-            if node_ref and node_pin:
-                for comp in components:
-                    if comp["reference"] == node_ref:
-                        comp["pins"].append(
-                            {
-                                "number": node_pin,
-                                "name": pin_name or node_pin,
-                                "type": pin_type or "passive",
-                                "net": net_name,
-                            }
-                        )
-
-    return components
-
-
-def _extract_field(text: str, field_name: str) -> str:
-    """Extract a field value from an S-expression fragment.
-
-    Looks for (field_name value) or (field_name "value") patterns.
-    """
-    marker = f"({field_name} "
-    idx = text.find(marker)
-    if idx < 0:
-        return ""
-    start = idx + len(marker)
-    if start >= len(text):
-        return ""
-    if text[start] == '"':
-        end = text.find('"', start + 1)
-        return text[start + 1 : end] if end > start else ""
-    end = text.find(")", start)
-    return text[start:end].strip() if end > start else ""
+        components[ref] = {
+            "reference": ref,
+            "value": sexpr.value(comp, "value"),
+            "footprint": sexpr.value(comp, "footprint"),
+            "pins": [],
+        }
+    nets = sexpr.find(tree, "nets")
+    for net in sexpr.children(nets, "net") if nets else []:
+        net_name = sexpr.value(net, "name")
+        for node in sexpr.children(net, "node"):
+            ref = sexpr.value(node, "ref")
+            if ref not in components:
+                continue
+            pin = sexpr.value(node, "pin")
+            components[ref]["pins"].append(
+                {
+                    "number": pin,
+                    "name": sexpr.value(node, "pinfunction") or pin,
+                    "type": sexpr.value(node, "pintype") or "passive",
+                    "net": net_name,
+                }
+            )
+    for entry in components.values():
+        entry["pins"].sort(key=lambda p: (len(p["number"]), p["number"]))
+    return list(components.values())

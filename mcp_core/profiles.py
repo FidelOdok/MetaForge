@@ -239,6 +239,9 @@ PROFILES: dict[str, frozenset[str]] = {
         "firmware.static_check",
         "kicad.export_bom",
         "kicad.export_gerber",
+        # FORGE-680: drill and pick-and-place complete the fabrication set.
+        "kicad.export_drill",
+        "kicad.export_pos",
         "kicad.export_netlist",
         "kicad.get_pin_mapping",
         "kicad.run_drc",

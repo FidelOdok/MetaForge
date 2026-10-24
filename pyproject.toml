@@ -244,6 +244,7 @@ python_files = ["test_*.py", "*_test.py", "tests.py"]
 markers = [
     "no_material_library: run without the test material library (FORGE-446)",
     "perf: opt-in latency/throughput baselines; not run in default CI (MET-477 Phase 6)",
+    "real_paths: kicad handler tests that check real files exist (FORGE-680)",
 ]
 # Phase 6: exclude perf tests from the default `pytest` invocation. Opt in
 # with `pytest -m perf` (or set METAFORGE_PERF_TESTS=1 to belt-and-braces).
