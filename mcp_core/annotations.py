@@ -406,6 +406,11 @@ PRODUCING: frozenset[str] = frozenset(
         "spice.run_simulation",
         # FORGE-557: writes its case directory to the adapter workspace only.
         "openfoam.run_internal_flow",
+        # FORGE-683: a new project folder each, on the adapter workspace; the
+        # caller's files are read or copied, never modified.
+        "kicad.generate_schematic",
+        "kicad.generate_pcb",
+        "kicad.autoroute_pcb",
         # FORGE-674/677: build output and run logs go to the adapter workspace
         # only; the caller's project is copied, never modified.
         "firmware.build",

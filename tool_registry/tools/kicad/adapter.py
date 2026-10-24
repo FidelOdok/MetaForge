@@ -174,6 +174,9 @@ class KicadServer(McpToolServer):
         self.config = config or KicadConfig()
         self._register_tools()
         self._register_fabrication_tools()
+        from tool_registry.tools.kicad.generation import register_generation_tools
+
+        register_generation_tools(self)
 
     def _register_tools(self) -> None:
         """Register all KiCad tools."""
@@ -834,7 +837,11 @@ class KicadServer(McpToolServer):
                     os.unlink(report_path)
 
     async def _execute_drc(
-        self, pcb_file: str, severity_filter: str, rule_set: str | None
+        self,
+        pcb_file: str,
+        severity_filter: str,
+        rule_set: str | None,
+        schematic_parity: bool = False,
     ) -> dict[str, Any]:
         """Execute KiCad DRC via kicad-cli.
 
@@ -863,6 +870,7 @@ class KicadServer(McpToolServer):
                 cli_args = [
                     "pcb",
                     "drc",
+                    *(["--schematic-parity"] if schematic_parity else []),
                     "--format",
                     "json",
                     "--severity-all",
@@ -888,6 +896,10 @@ class KicadServer(McpToolServer):
 
                 violations = _parse_drc_violations(report_data, severity_filter)
                 unconnected = _count_drc_unconnected(report_data)
+                parity_issues = [
+                    {"type": v.get("type", ""), "message": v.get("description", "")}
+                    for v in report_data.get("schematic_parity", [])
+                ]
                 all_errors = sum(
                     1 for v in _parse_drc_violations(report_data, "all") if v["severity"] == "error"
                 )
@@ -906,6 +918,9 @@ class KicadServer(McpToolServer):
                     # Before the severity filter, warnings allowed (FORGE-551).
                     "passed": all_errors == 0 and unconnected == 0,
                 }
+                if schematic_parity:
+                    result["schematic_parity"] = parity_issues
+                    result["passed"] = result["passed"] and not parity_issues
 
                 span.set_attribute("kicad.drc.total_violations", len(violations))
                 span.set_attribute("kicad.drc.unconnected", unconnected)

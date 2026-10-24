@@ -1266,10 +1266,10 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 | Property | Details |
 |----------|---------|
 | Docker Image | `ghcr.io/fidelodok/metaforge-kicad-adapter`, published by CI (FORGE-593) |
-| Base Image | `python:3.11-slim` + KiCad CLI |
-| Transport | stdio |
-| Phase 1 Tools | Read-only: `kicad.run_erc`, `kicad.run_drc`, `kicad.export_bom`, `kicad.export_gerber` |
-| Phase 2 Tools | Write: `kicad.generate_schematic`, `kicad.auto_route` |
+| Base Image | `python:3.11-slim` (Debian trixie) + KiCad 9 (`kicad`, `kicad-symbols`, `kicad-footprints`), OpenJDK 25, Freerouting 2.5.0 (pinned, checksummed) |
+| Transport | HTTP JSON-RPC on port 8103 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_KICAD_URL` |
+| Phase 1 Tools | Read-only: `kicad.run_erc`, `kicad.run_drc`, `kicad.export_bom`, `kicad.export_netlist`, `kicad.get_pin_mapping`, `kicad.export_gerber`, `kicad.export_drill`, `kicad.export_pos` |
+| Phase 2 Tools | Write (a new project folder each, never the caller's files): `kicad.generate_schematic`, `kicad.generate_pcb`, `kicad.autoroute_pcb` (FORGE-683) |
 
 **Phase 1 tools (read-only)**:
 
@@ -1279,6 +1279,14 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 | `kicad.run_drc` | `drc_check` | Design rules check on PCB layout |
 | `kicad.export_bom` | `bom_export` | Export BOM from schematic |
 | `kicad.export_gerber` | `gerber_export` | Export Gerber manufacturing files |
+
+**Phase 2 tools (write, FORGE-683)**:
+
+| Tool ID | Capability | Description |
+|---------|-----------|-------------|
+| `kicad.generate_schematic` | `schematic_generation` | Circuit (components as KiCad symbol and footprint lib_ids, nets as `REF.PIN`) to a schematic of library symbols joined by global labels; then ERC and KiCad's exported netlist compared with the circuit. Returns `verdict`, `erc`, `netlist_check`, `power_flags`, `no_connects`, the file |
+| `kicad.generate_pcb` | `pcb_generation` | Circuit with a `board` to a placed `.kicad_pcb` (pcbnew worker), pad nets from the schematic's netlist, footprints linked to symbols. Returns `placements`, `unplaced` |
+| `kicad.autoroute_pcb` | `pcb_autoroute` | Freerouting over Specctra DSN/SES on a copy, ground pour, then DRC with schematic parity. Returns `unrouted`, `drc`, `schematic_parity`, tracks, vias; `pass` only when all are zero |
 
 ### SPICE Adapter (`tool_registry/tools/spice/`)
 
