@@ -6,14 +6,15 @@ request on stdin and writes one JSON result on stdout.
 
 ``generate``: a ``.kicad_pcb`` from the circuit -- footprints from the KiCad
 libraries with their nets, the outline, design rules and net classes, corner
-mounting holes, and a deterministic placement that puts connectors on the
-left edge and every other part next to the parts it shares the most nets
-with. Placement is a reviewable starting point, not an optimum.
+mounting holes, inner planes on a 4-layer board, and a deterministic
+placement that puts connectors on the left edge, the main IC at the centre
+and every other part next to the part it is most connected to. Placement is
+a reviewable starting point, not an optimum.
 
-``route``: the board out as Specctra DSN, routed by Freerouting (a separate
-GPL-3 program), the session imported back, then the ground pour added and
-filled. Whether the result is complete is for KiCad's DRC to say, not this
-script.
+``route``: plane-net pads fanned out to vias, the board out as Specctra DSN,
+routed by Freerouting (a separate GPL-3 program), the session imported back,
+then the ground pour added and filled. Whether the result is complete is for
+KiCad's DRC to say, not this script.
 """
 
 from __future__ import annotations
@@ -71,10 +72,19 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
             missing.append(f"{comp['ref']}: footprint {comp['footprint']} not in {fp_root}")
             continue
         fp.SetReference(comp["ref"])
+        if comp.get("model"):
+            models = fp.Models()
+            if len(models):
+                models[0].m_Filename = comp["model"]
+            else:
+                m = pcbnew.FP_3DMODEL()
+                m.m_Filename = comp["model"]
+                models.append(m)
         fp.SetValue(comp["value"])
         fp.SetFPID(pcbnew.LIB_ID(lib, name))
         for key, val in (comp.get("fields") or {}).items():
             fp.SetField(key, val)
+            fp.GetFieldByName(key).SetVisible(False)  # data (MPN, ...), not silkscreen
         if comp["ref"] in sym_uuids:
             fp.SetPath(pcbnew.KIID_PATH("/" + sym_uuids[comp["ref"]]))
             fp.SetSheetname("/")
@@ -106,13 +116,26 @@ def generate(req: dict[str, Any]) -> dict[str, Any]:
     rect.SetWidth(MM(0.1))
     board.Add(rect)
 
+    for layer, net_name in zip(
+        (pcbnew.In1_Cu, pcbnew.In2_Cu), board_spec.get("inner_planes") or []
+    ):
+        if net_name not in nets:
+            return {"ok": False, "errors": [f"inner_planes: no net named {net_name!r}"]}
+        # A power layer: the Specctra export then hands the zone to the router
+        # as a plane, which it reaches with vias rather than tracks.
+        board.SetLayerType(layer, pcbnew.LT_POWER)
+        board.Add(_zone(board, layer, nets[net_name], inset=0.5))
+
     keepouts: list[tuple[float, float, float, float]] = []
     hole = board_spec.get("mounting_holes_mm")
     if hole:
         holes = _mounting_holes(board, fp_root, float(hole), x0, y0, w, h)
         keepouts.extend(holes)
 
-    placement = _place(footprints, net_of, x0, y0, w, h, keepouts)
+    power = {*board_spec.get("power_nets", []), *(board_spec.get("inner_planes") or [])}
+    if board_spec.get("ground_pour"):
+        power.add(board_spec["ground_pour"])
+    placement = _place(footprints, net_of, x0, y0, w, h, keepouts, power)
     pcbnew.SaveBoard(out, board)
     return {
         "ok": True,
@@ -132,6 +155,13 @@ def _rules(board: Any, spec: dict[str, Any]) -> None:
     nc.SetTrackWidth(MM(float(spec.get("track_mm", 0.25))))
     nc.SetViaDiameter(MM(float(spec.get("via_diameter_mm", 0.6))))
     nc.SetViaDrill(MM(float(spec.get("via_drill_mm", 0.3))))
+    # The board minimums follow the requested via and track, or DRC rejects
+    # every via smaller than KiCad's defaults (0.3 mm hole) as out of range.
+    ds.m_MinThroughDrill = min(ds.m_MinThroughDrill, MM(float(spec.get("via_drill_mm", 0.3))))
+    ds.m_ViasMinSize = min(ds.m_ViasMinSize, MM(float(spec.get("via_diameter_mm", 0.6))))
+    ds.m_TrackMinWidth = min(ds.m_TrackMinWidth, MM(float(spec.get("track_mm", 0.25))))
+    if spec.get("hole_clearance_mm"):
+        ds.m_HoleClearance = MM(float(spec["hole_clearance_mm"]))
     power = spec.get("power_track_mm")
     if power and spec.get("power_nets"):
         pc = pcbnew.NETCLASS("Power")
@@ -209,20 +239,38 @@ def _place(
     w: float,
     h: float,
     keepouts: list[tuple[float, float, float, float]],
+    power: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Connectors on the left edge, then each part beside its best-connected neighbour."""
-    gap, edge = 1.0, 1.0
+    """Connectors on the left edge, the largest IC as near the centre as fits,
+    then each part beside the part it is most connected to.
+
+    Connection counts shared signal nets first; a net in ``power`` (rails, ground)
+    counts by how many pads the neighbour has on it, so a decoupling capacitor
+    lands by the IC with the most supply pins rather than wherever a rail
+    first appears. Parts with many pads keep a wider margin for fanout.
+    """
+    edge = 1.0
+    power = power or set()
     rel = {ref: _size(fp) for ref, fp in footprints.items()}
     nets_by_ref: dict[str, set[str]] = {}
+    pads_on: dict[tuple[str, str], int] = {}
     for node, net in net_of.items():
         if not net.startswith("unconnected-"):
-            nets_by_ref.setdefault(node.split(".", 1)[0], set()).add(net)
+            ref = node.split(".", 1)[0]
+            nets_by_ref.setdefault(ref, set()).add(net)
+            pads_on[(ref, net)] = pads_on.get((ref, net), 0) + 1
     pads = {ref: len(list(fp.Pads())) for ref, fp in footprints.items()}
+    connectors = sorted(r for r in footprints if r.startswith(("J", "P", "CN")))
+    gaps = {ref: 2.0 if n > 16 and ref not in connectors else 1.0 for ref, n in pads.items()}
     taken: list[tuple[float, float, float, float]] = list(keepouts)
     pos: dict[str, tuple[float, float]] = {}
 
+    def affinity(ref: str, other: str) -> int:
+        shared = nets_by_ref.get(ref, set()) & nets_by_ref.get(other, set())
+        return sum(100 if n not in power else pads_on.get((other, n), 0) for n in shared)
+
     def fits(ref: str, cx: float, cy: float) -> bool:
-        a = rel[ref]
+        a, gap = rel[ref], gaps[ref]
         box = (cx + a[0] - gap, cy + a[1] - gap, cx + a[2] + gap, cy + a[3] + gap)
         if (
             box[0] < x0 + edge
@@ -236,8 +284,8 @@ def _place(
         )
 
     def put(ref: str, cx: float, cy: float) -> None:
-        a = rel[ref]
-        taken.append((cx + a[0], cy + a[1], cx + a[2], cy + a[3]))
+        a, extra = rel[ref], gaps[ref] - 1.0  # a wide-margin part keeps it on all sides
+        taken.append((cx + a[0] - extra, cy + a[1] - extra, cx + a[2] + extra, cy + a[3] + extra))
         pos[ref] = (cx, cy)
 
     def spiral(ref: str, tx: float, ty: float) -> bool:
@@ -260,19 +308,22 @@ def _place(
                     return True
         return False
 
-    connectors = sorted(r for r in footprints if r.startswith(("J", "P", "CN")))
     for i, ref in enumerate(connectors):
         a = rel[ref]
-        cx = x0 + edge + gap - a[0]
+        cx = x0 + edge + gaps[ref] - a[0]
         cy = y0 + h * (i + 1) / (len(connectors) + 1)
         if not spiral(ref, cx, cy):
             pass
-    rest = sorted((r for r in footprints if r not in pos), key=lambda r: (-pads[r], r))
+    ics = sorted((r for r in footprints if r not in pos), key=lambda r: (-pads[r], r))
+    if ics and pads[ics[0]] > 16:  # the main IC as near the centre as fits
+        a = rel[ics[0]]
+        spiral(ics[0], x0 + w / 2 - (a[0] + a[2]) / 2, y0 + h / 2 - (a[1] + a[3]) / 2)
+    rest = [r for r in ics if r not in pos]
     unplaced: list[str] = []
     for ref in rest:
         best, score = None, -1
         for placed in pos:
-            shared = len(nets_by_ref.get(ref, set()) & nets_by_ref.get(placed, set()))
+            shared = affinity(ref, placed)
             if shared > score:
                 best, score = placed, shared
         tx, ty = pos[best] if best is not None and score > 0 else (x0 + w / 2, y0 + h / 2)
@@ -293,6 +344,9 @@ def route(req: dict[str, Any]) -> dict[str, Any]:
     board = pcbnew.LoadBoard(path)
     base = os.path.splitext(path)[0]
     dsn, ses = base + ".dsn", base + ".ses"
+    fanout = _fanout_planes(board)
+    if fanout["vias"]:
+        pcbnew.SaveBoard(path, board)
     if not pcbnew.ExportSpecctraDSN(board, dsn):
         return {"ok": False, "errors": ["Specctra DSN export failed"]}
     router = req.get("router_cmd") or ["java", "-jar", "/opt/freerouting/freerouting.jar"]
@@ -337,35 +391,153 @@ def route(req: dict[str, Any]) -> dict[str, Any]:
         "tracks": len(tracks) - vias,
         "vias": vias,
         "track_length_mm": round(length, 1),
+        "plane_fanout": fanout,
         "log_tail": log[-1500:],
     }
+
+
+def _fanout_planes(board: Any) -> dict[str, Any]:
+    """A via beside every SMD pad on an inner-plane net, joined by a short track.
+
+    Freerouting reaches a plane only by dropping a via of its own, and on a
+    dense board it leaves many supply pins unconnected doing so. Fanning them
+    out first -- under an IC's body where there is room, so the signal pins
+    beside them keep their way out, else away from the part -- leaves the
+    router the signals alone. The fanout is locked, so the router keeps it.
+    """
+    planes = {
+        z.GetNetCode()
+        for z in board.Zones()
+        if z.GetLayer() in (pcbnew.In1_Cu, pcbnew.In2_Cu)
+        and board.GetLayerType(z.GetLayer()) == pcbnew.LT_POWER
+    }
+    if not planes:
+        return {"vias": 0, "skipped": []}
+    nc = board.GetDesignSettings().m_NetSettings.GetDefaultNetclass()
+    clear, track_w = nc.GetClearance(), nc.GetTrackWidth()
+    via_d, drill = nc.GetViaDiameter(), nc.GetViaDrill()
+    hole_clear = board.GetDesignSettings().m_HoleClearance
+    edge = board.GetBoardEdgesBoundingBox()
+    margin = via_d // 2 + clear + MM(0.3)
+    pads = [p for fp in board.GetFootprints() for p in fp.Pads()]
+    # Rule areas, the board's and the footprints' own (a sensor's no-via zone).
+    keepouts = [
+        z
+        for z in [*board.Zones(), *(z for fp in board.GetFootprints() for z in fp.Zones())]
+        if z.GetIsRuleArea()
+    ]
+    placed: list[Any] = []
+    skipped: list[str] = []
+
+    def free(item: Any, net: int, is_via: bool) -> bool:
+        for z in keepouts:
+            barred = z.GetDoNotAllowVias() if is_via else z.GetDoNotAllowTracks()
+            if barred and (is_via or z.IsOnLayer(pcbnew.F_Cu)):
+                if z.Outline().Collide(item.GetEffectiveShape(pcbnew.F_Cu), clear):
+                    return False
+        for layer in (pcbnew.F_Cu, pcbnew.B_Cu):
+            shape = item.GetEffectiveShape(layer)
+            for p in pads:
+                if p.GetNetCode() != net and p.IsOnLayer(layer):
+                    if shape.Collide(p.GetEffectiveShape(layer), clear):
+                        return False
+            for t in placed:
+                if t.GetNetCode() != net and shape.Collide(t.GetEffectiveShape(layer), clear):
+                    return False
+        if is_via:
+            hole = item.GetEffectiveHoleShape()
+            for p in pads:
+                if p.HasHole() and hole.Collide(p.GetEffectiveHoleShape(), hole_clear):
+                    return False
+            for t in placed:
+                if t.GetClass() == "PCB_VIA" and hole.Collide(
+                    t.GetEffectiveHoleShape(), hole_clear
+                ):
+                    return False
+        return True
+
+    for fp in board.GetFootprints():
+        centre = fp.GetPosition()
+        many = len(list(fp.Pads())) > 16
+        for pad in fp.Pads():
+            net = pad.GetNetCode()
+            if net not in planes or pad.HasHole() or not pad.IsOnLayer(pcbnew.F_Cu):
+                continue
+            pos = pad.GetPosition()
+            dx, dy = pos.x - centre.x, pos.y - centre.y
+            # The pad's outward axis, from the footprint's centre.
+            ax = (1 if dx > 0 else -1, 0) if abs(dx) >= abs(dy) else (0, 1 if dy > 0 else -1)
+            if ax == (0, 0) or (dx == 0 and dy == 0):
+                ax = (0, -1)
+            out, back = ax, (-ax[0], -ax[1])
+            side1, side2 = (ax[1], ax[0]), (-ax[1], -ax[0])
+            dirs = [back, out, side1, side2] if many else [out, side1, side2, back]
+            size = pad.GetBoundingBox()
+            half = max(size.GetWidth(), size.GetHeight()) // 2
+            done = False
+            for d in dirs:
+                for step in range(0, 12):
+                    dist = half + via_d // 2 + clear + MM(0.1) + step * MM(0.25)
+                    at = pcbnew.VECTOR2I(pos.x + d[0] * dist, pos.y + d[1] * dist)
+                    if not (
+                        edge.GetX() + margin < at.x < edge.GetRight() - margin
+                        and edge.GetY() + margin < at.y < edge.GetBottom() - margin
+                    ):
+                        break
+                    via = pcbnew.PCB_VIA(board)
+                    via.SetPosition(at)
+                    via.SetWidth(pcbnew.F_Cu, via_d)
+                    via.SetDrill(drill)
+                    via.SetNetCode(net)
+                    track = pcbnew.PCB_TRACK(board)
+                    track.SetStart(pos)
+                    track.SetEnd(at)
+                    track.SetWidth(track_w)
+                    track.SetLayer(pcbnew.F_Cu)
+                    track.SetNetCode(net)
+                    if free(via, net, True) and free(track, net, False):
+                        for item in (track, via):
+                            item.SetLocked(True)
+                            board.Add(item)
+                            placed.append(item)
+                        done = True
+                        break
+                if done:
+                    break
+            if not done:
+                skipped.append(f"{fp.GetReference()}.{pad.GetNumber()}")
+    return {"vias": len(placed) // 2, "skipped": skipped}
 
 
 def _pour(board: Any, net_name: str) -> None:
     net = board.FindNet(net_name)
     if net is None:
         return
+    for layer in (pcbnew.F_Cu, pcbnew.B_Cu):
+        board.Add(_zone(board, layer, net, inset=0.5))
+
+
+def _zone(board: Any, layer: int, net: Any, inset: float) -> Any:
+    """A solid copper zone over the whole board, ``inset`` mm inside the edge."""
     edge = board.GetBoardEdgesBoundingBox()
-    layers = [pcbnew.F_Cu, pcbnew.B_Cu]
-    for layer in layers:
-        zone = pcbnew.ZONE(board)
-        zone.SetLayer(layer)
-        zone.SetNetCode(net.GetNetCode())
-        zone.SetLocalClearance(MM(0.3))
-        zone.SetMinThickness(MM(0.25))
-        # Solid: thermal spokes to small SMD pads starve (DRC starved_thermal).
-        zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
-        outline = zone.Outline()
-        outline.NewOutline()
-        inset = MM(0.5)
-        for x, y in (
-            (edge.GetX() + inset, edge.GetY() + inset),
-            (edge.GetRight() - inset, edge.GetY() + inset),
-            (edge.GetRight() - inset, edge.GetBottom() - inset),
-            (edge.GetX() + inset, edge.GetBottom() - inset),
-        ):
-            outline.Append(x, y)
-        board.Add(zone)
+    zone = pcbnew.ZONE(board)
+    zone.SetLayer(layer)
+    zone.SetNetCode(net.GetNetCode())
+    zone.SetLocalClearance(MM(0.3))
+    zone.SetMinThickness(MM(0.25))
+    # Solid: thermal spokes to small SMD pads starve (DRC starved_thermal).
+    zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
+    outline = zone.Outline()
+    outline.NewOutline()
+    d = MM(inset)
+    for x, y in (
+        (edge.GetX() + d, edge.GetY() + d),
+        (edge.GetRight() - d, edge.GetY() + d),
+        (edge.GetRight() - d, edge.GetBottom() - d),
+        (edge.GetX() + d, edge.GetBottom() - d),
+    ):
+        outline.Append(x, y)
+    return zone
 
 
 def main() -> None:

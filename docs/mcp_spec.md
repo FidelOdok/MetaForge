@@ -1285,8 +1285,8 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
 | `kicad.generate_schematic` | `schematic_generation` | Circuit (components as KiCad symbol and footprint lib_ids, nets as `REF.PIN`) to a schematic of library symbols joined by global labels; then ERC and KiCad's exported netlist compared with the circuit. Returns `verdict`, `erc`, `netlist_check`, `power_flags`, `no_connects`, the file |
-| `kicad.generate_pcb` | `pcb_generation` | Circuit with a `board` to a placed `.kicad_pcb` (pcbnew worker), pad nets from the schematic's netlist, footprints linked to symbols. Returns `placements`, `unplaced` |
-| `kicad.autoroute_pcb` | `pcb_autoroute` | Freerouting over Specctra DSN/SES on a copy, ground pour, then DRC with schematic parity. Returns `unrouted`, `drc`, `schematic_parity`, tracks, vias; `pass` only when all are zero |
+| `kicad.generate_pcb` | `pcb_generation` | Circuit with a `board` to a placed `.kicad_pcb` (pcbnew worker), pad nets from the schematic's netlist, footprints linked to symbols. A 4-layer board may name `inner_planes` (In1/In2) and `hole_clearance_mm`; a component may name its own 3D `model`. Returns `placements`, `unplaced` |
+| `kicad.autoroute_pcb` | `pcb_autoroute` | Plane-net pads fanned out to locked vias first, then Freerouting over Specctra DSN/SES on a copy, ground pour, then DRC with schematic parity. Returns `unrouted`, `drc`, `schematic_parity`, tracks, vias; `pass` only when all are zero |
 | `kicad.export_3d` | `pcb_3d_export` | Board as STEP or GLB with the library's 3D models; `missing_models` lists components left out, `complete` false then |
 | `kicad.render_pcb` | `pcb_render` | Ray-traced PNG, `view` top, bottom or iso; `inline` returns base64 |
 | `kicad.update_components` | `component_update` | Value, footprint, fields by reference into a new revision, then ERC; a footprint change sets `board_stale` |

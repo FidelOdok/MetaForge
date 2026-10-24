@@ -71,6 +71,7 @@ def test_the_registry_is_what_is_on_disk() -> None:
         "packaging_v1",
         "aircraft_v1",
         "firmware_v1",
+        "pcb_v1",
     } <= set(load_fragments())
 
 
@@ -83,6 +84,7 @@ def test_the_registry_is_what_is_on_disk() -> None:
         "packaging_v1",
         "aircraft_v1",
         "firmware_v1",
+        "pcb_v1",
     ],
 )
 def test_every_shipped_fragment_declares_a_version_and_valid_tasks(fragment_id: str) -> None:
@@ -286,6 +288,47 @@ def test_the_firmware_checks_name_their_tools_and_take_limits_as_inputs() -> Non
     assert caps["firmware.pin_map"] == ("kicad.get_pin_mapping",)
     limits = [c.limit for c in fragment.task("build").checks]
     assert "max_flash_pct" in limits and "max_ram_pct" in limits
+
+
+def test_the_pcb_checks_are_kicads_own_results() -> None:
+    # FORGE-685: ERC, DRC, parity and the unrouted count come from KiCad runs.
+    fragment = load_fragment("pcb_v1")
+    caps = {t.id: t.capabilities for t in fragment.tasks}
+    assert caps["pcb.schematic"] == ("kicad.generate_schematic",)
+    assert caps["pcb.board"] == ("kicad.generate_pcb",)
+    assert caps["pcb.routing"] == ("kicad.autoroute_pcb",)
+    assert "kicad.export_gerber" in caps["pcb.fabrication_outputs"]
+    assert caps["pcb.board_3d"] == ("kicad.export_3d", "kicad.render_pcb")
+    checks = {c.value for c in fragment.task("routing").checks}
+    assert checks == {"unrouted_count", "drc_error_count", "parity_issue_count"}
+    for task in fragment.tasks:
+        assert all(c.limit is None or isinstance(c.limit, str) for c in task.checks)
+
+
+@pytest.mark.parametrize("base", ["design_v1", "mech_v1", "hardware_v1"])
+def test_the_board_follows_the_component_selection(base: str) -> None:
+    from orchestrator.design_flow.compose import compose
+    from orchestrator.design_flow.graph import build_graph
+    from orchestrator.design_flow.invariants import validate_flow
+    from orchestrator.design_flow.spec import get_flow
+
+    fr = load_fragments()
+    composed = compose(get_flow(base), [fr["electronics_v1"], fr["pcb_v1"], fr["firmware_v1"]])
+    assert validate_flow(composed.definition).ok
+    # The generated board adds no outside input: it is built from the selection.
+    assert not {e.ref for e in composed.external_inputs if e.ref.startswith("design_value:")} - {
+        "design_value:max_flash_pct",
+        "design_value:max_ram_pct",
+        "design_value:max_supply_ripple_mv",
+    }
+    hit = set(build_graph(composed.definition.phases).affected("electronics.component_selection"))
+    assert {
+        "pcb.schematic",
+        "pcb.board",
+        "pcb.routing",
+        "pcb.fabrication_outputs",
+        "pcb.board_3d",
+    } <= hit
 
 
 @pytest.mark.parametrize("base", ["design_v1", "mech_v1", "hardware_v1"])

@@ -6,6 +6,7 @@ import asyncio
 import csv
 import json
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -675,6 +676,10 @@ class KicadServer(McpToolServer):
         if not pcb_file:
             raise ValueError("pcb_file is required")
         pcb_file = self._existing(pcb_file, "board")
+        if "layers" not in arguments:
+            # A multilayer board's inner copper belongs in the default set too,
+            # or the fab gets a 4-layer job without its planes.
+            layers = [*layers[:1], *_inner_copper_layers(pcb_file), *layers[1:]]
 
         if not output_dir:
             stem = Path(pcb_file).stem
@@ -1336,6 +1341,16 @@ def _parse_drc_violations(report: dict[str, Any], severity_filter: str) -> list[
     return result
 
 
+def _inner_copper_layers(pcb_file: str) -> list[str]:
+    """The inner copper layers (In1.Cu, ...) a ``.kicad_pcb`` declares, in order."""
+    try:
+        head = Path(pcb_file).read_text(encoding="utf-8", errors="replace")[:20000]
+    except OSError:
+        return []
+    found = re.findall(r'\(\s*\d+\s+"(In\d+\.Cu)"', head)
+    return sorted(set(found), key=lambda n: int(n[2:-3]))
+
+
 def _count_drc_unconnected(report: dict[str, Any]) -> int:
     """Count unconnected items from a DRC report.
 
@@ -1428,7 +1443,8 @@ def _list_gerber_files(output_dir: str) -> list[str]:
         files = []
         for entry in os.listdir(output_dir):
             ext = Path(entry).suffix.lower()
-            if ext in gerber_extensions or entry.endswith(".gbr"):
+            # Inner copper comes out as .g1, .g2, ... (Protel extensions).
+            if ext in gerber_extensions or re.fullmatch(r"\.g\d+", ext):
                 files.append(entry)
         return sorted(files)
     except FileNotFoundError:

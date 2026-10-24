@@ -213,6 +213,36 @@ class TestCircuitModel:
         with pytest.raises(ValueError, match=message):
             Circuit.model_validate({**LDO_LED, **change})
 
+    def test_inner_planes_need_a_four_layer_board(self) -> None:
+        """FORGE-685: planes on In1/In2, at most two, only on a 4-layer board."""
+        board = {"width_mm": 40, "height_mm": 40}
+        with pytest.raises(ValueError, match="inner_planes needs a 4-layer board"):
+            Circuit.model_validate({**LDO_LED, "board": {**board, "inner_planes": ["GND"]}})
+        with pytest.raises(ValueError, match="at most two"):
+            Circuit.model_validate(
+                {**LDO_LED, "board": {**board, "layers": 4, "inner_planes": ["GND", "A", "B"]}}
+            )
+        ok = Circuit.model_validate(
+            {
+                **LDO_LED,
+                "board": {
+                    **board,
+                    "layers": 4,
+                    "inner_planes": ["GND", "+3V3"],
+                    "hole_clearance_mm": 0.15,
+                },
+            }
+        )
+        assert ok.board is not None and ok.board.inner_planes == ["GND", "+3V3"]
+        assert ok.board.hole_clearance_mm == 0.15
+
+    def test_a_component_may_name_its_own_3d_model(self) -> None:
+        model = "${KICAD9_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/QFN-24.step"
+        comps = [{**LDO_LED["components"][0], "model": model}, *LDO_LED["components"][1:]]
+        circuit = Circuit.model_validate({**LDO_LED, "components": comps})
+        assert circuit.components[0].model == model
+        assert circuit.components[1].model is None
+
     def test_ids_must_be_library_ids(self) -> None:
         bad = [{**LDO_LED["components"][0], "symbol": "R"}, *LDO_LED["components"][1:]]
         with pytest.raises(ValueError, match="'Library:Name'"):
