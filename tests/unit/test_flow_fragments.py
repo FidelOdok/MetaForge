@@ -70,12 +70,20 @@ def test_the_registry_is_what_is_on_disk() -> None:
         "mobile_robot_v1",
         "packaging_v1",
         "aircraft_v1",
+        "firmware_v1",
     } <= set(load_fragments())
 
 
 @pytest.mark.parametrize(
     "fragment_id",
-    ["thermal_v1", "electronics_v1", "mobile_robot_v1", "packaging_v1", "aircraft_v1"],
+    [
+        "thermal_v1",
+        "electronics_v1",
+        "mobile_robot_v1",
+        "packaging_v1",
+        "aircraft_v1",
+        "firmware_v1",
+    ],
 )
 def test_every_shipped_fragment_declares_a_version_and_valid_tasks(fragment_id: str) -> None:
     fragment = load_fragment(fragment_id)
@@ -265,3 +273,45 @@ def test_the_aircraft_composes_with_electronics_and_thermal(base: str) -> None:
     build_graph(flow.phases)  # acyclic
     ids = {p.id for p in flow.phases}
     assert {"aircraft.power_closure", "electronics.power_budget", "thermal.heat_load"} <= ids
+
+
+def test_the_firmware_checks_name_their_tools_and_take_limits_as_inputs() -> None:
+    # FORGE-676: the build, static check and boot are tool results; flash and
+    # RAM limits come from the requirements.
+    fragment = load_fragment("firmware_v1")
+    caps = {t.id: t.capabilities for t in fragment.tasks}
+    assert caps["firmware.build"] == ("firmware.build",)
+    assert caps["firmware.static_analysis"] == ("firmware.static_check",)
+    assert caps["firmware.emulated_boot"] == ("firmware.run_emulated",)
+    assert caps["firmware.pin_map"] == ("kicad.get_pin_mapping",)
+    limits = [c.limit for c in fragment.task("build").checks]
+    assert "max_flash_pct" in limits and "max_ram_pct" in limits
+
+
+@pytest.mark.parametrize("base", ["design_v1", "mech_v1", "hardware_v1"])
+def test_firmware_follows_the_board_when_composed_with_electronics(base: str) -> None:
+    from orchestrator.design_flow.compose import compose
+    from orchestrator.design_flow.graph import build_graph
+    from orchestrator.design_flow.invariants import validate_flow
+    from orchestrator.design_flow.spec import get_flow
+
+    fr = load_fragments()
+    composed = compose(get_flow(base), [fr["electronics_v1"], fr["firmware_v1"]])
+    flow = composed.definition
+    assert validate_flow(flow).ok
+    graph = build_graph(flow.phases)
+    # The MCU comes from the electronics component selection, not from outside.
+    external = {e.ref for e in composed.external_inputs}
+    assert "component_selection:electronics" not in external
+    assert {"design_value:max_flash_pct", "design_value:max_ram_pct"} <= external
+    # A changed part re-runs the pin map and every firmware task after it.
+    hit = set(graph.affected("electronics.component_selection"))
+    assert {
+        "firmware.pin_map",
+        "firmware.rtos_configuration",
+        "firmware.build",
+        "firmware.static_analysis",
+        "firmware.emulated_boot",
+    } <= hit
+    # A configuration change does not re-run the pin map.
+    assert "firmware.pin_map" not in set(graph.affected("firmware.rtos_configuration"))

@@ -65,6 +65,7 @@ The fragments shipped today:
 | `packaging_v1` | board material selection → RSC dieline (`packaging.rsc_dieline`) → manufacturing check against the converter's rules → compression strength (`packaging.box_compression`, a McKee estimate) → drop testing, recorded as evidence from a physical test (FORGE-672) |
 | `mobile_robot_v1` | locomotion selection → energy closure (a coupled block: mass roll-up, drive sizing with `robot.size_drive`, battery sizing) → kinematics (`robot.diff_drive_kinematics`) → dynamics in simulation (`gazebo.run_simulation`) → navigation testing (FORGE-671) |
 | `aircraft_v1` | configuration → wing sizing for the stall speed at MTOW (`aircraft.wing_sizing`) → layout (tail volume, CG) → power closure (a coupled block: mass roll-up, cruise aerodynamics with `aircraft.cruise_performance`, battery sizing with `aircraft.electric_endurance`) → trim and static stability (`aircraft.trim_stability`) → flight simulation (FORGE-670) |
+| `firmware_v1` | pin map from the schematic (`kicad.get_pin_mapping`) → RTOS configuration → build (`firmware.build`) → static analysis (`firmware.static_check`) → emulated boot (`firmware.run_emulated` on Renode or Espressif QEMU) (FORGE-676) |
 
 `electronics_v1` writes `power_dissipation_w`, which `thermal_v1` reads, so
 composing the two feeds the heat load from the power budget.
@@ -89,6 +90,19 @@ lift slopes and a tail-volume neutral point. Its flight simulation names
 blocking capability gap until one does. Its avionics load is its own input
 (`avionics_power_w`), not the electronics fragment's `power_dissipation_w`;
 composed with `electronics_v1` and `thermal_v1`, the three share no values.
+
+`firmware_v1` takes its MCU from the component selection, so composed with
+`electronics_v1` the firmware follows the board: a changed part re-runs the
+pin map and every firmware task after it, and a changed RTOS configuration
+re-runs the build, the static check and the boot but not the pin map. The
+flash and RAM limits (`max_flash_pct`, `max_ram_pct`) are inputs from the
+requirements. Every firmware result is a tool run on the real toolchain in
+the firmware adapter: a build that does not link records an error and no
+size, so its size checks are no data, and a board neither emulator models
+leaves the boot unrecorded rather than passed. Its end-to-end test runs the
+generated FreeRTOS app's real recorded results: a 160 KB heap overflows the
+STM32F407's RAM by 34592 bytes, the V&V gate is not ready, the configuration
+is reworked to 16 KB, and the build fits at 12.7 % of RAM and boots.
 
 ## Composition
 
@@ -247,8 +261,8 @@ plain functions. The tests use it on a closed-form energy loop.
 
 ## Limits
 
-- `thermal_v1`, `electronics_v1`, `mobile_robot_v1`, `packaging_v1` and
-  `aircraft_v1` ship today. The mobile robot's navigation testing needs a
+- `thermal_v1`, `electronics_v1`, `mobile_robot_v1`, `packaging_v1`,
+  `aircraft_v1` and `firmware_v1` ship today. The mobile robot's navigation testing needs a
   scenario-runner adapter, and the aircraft's flight simulation a mission
   simulator (`jsbsim.run_mission`); both are blocking gaps until they exist.
 - `aircraft_v1`'s aerodynamics, trim and stability are first-order estimates
@@ -258,6 +272,10 @@ plain functions. The tests use it on a closed-form energy loop.
 - `packaging_v1` covers corrugated regular slotted containers. Its
   compression figure is a McKee estimate, which a compression test outranks.
   Its drop testing records a physical test; no drop simulation is built.
+- `firmware_v1` builds for the boards the firmware adapter carries: STM32
+  F4/F7/H7 (STM32Cube) and the ESP32 (ESP-IDF). Its boot check is
+  functional emulation, not cycle-accurate, so it checks no timing; and
+  only a board Renode or Espressif QEMU models is booted.
 - `optimize.suggest` searches one variable at a time. Multi-variable and
   constrained optimisation are not built.
 - Fragment tasks attach to the stages a template has. A template without a

@@ -1,0 +1,120 @@
+# firmware_v1 domain fragment (FORGE-676, composable flows).
+#
+# Pin map -> RTOS configuration -> build -> static analysis -> emulated boot,
+# for microcontroller firmware on the boards the firmware adapter carries
+# (STM32 F4/F7/H7 with STM32Cube, ESP32 with ESP-IDF).
+#
+# The pin map is read from the person's schematic and the MCU from the
+# component selection, so composed with electronics_v1 the firmware follows
+# the board: a changed part re-runs the pin map and everything after it. The
+# flash and RAM limits are inputs from the requirements (a share of the part,
+# leaving room for growth), never numbers written here; a limit nobody
+# recorded is no_data, which never passes.
+#
+# Every result comes from a tool run on the real toolchain: the build's
+# errors and flash/RAM use from firmware.build, high findings from
+# firmware.static_check, and the boot from firmware.run_emulated on Renode or
+# Espressif QEMU. Emulation is functional, not cycle-accurate, so nothing here
+# checks timing. A board neither emulator models leaves the boot task
+# not_established; it does not pass.
+#
+# Bump `version` when a task, its contract or a check changes.
+id: firmware_v1
+version: 1.0.0
+domain: firmware
+label: Firmware
+description: Pin map, RTOS configuration, build, static analysis and emulated boot.
+keywords: [firmware, embedded, microcontroller, mcu, rtos, freertos, zephyr, stm32, esp32, hal, bootloader]
+disciplines: [firmware]
+tasks:
+- id: pin_map
+  stage: design
+  title: Pin map
+  objective: >-
+    Read the MCU's pin and net assignments from the person's KiCad schematic with
+    kicad.get_pin_mapping, for the MCU in the component selection, and generate the board pin
+    header from them (the generate_hal skill). Record the number of pins assigned twice, or to a
+    name the part does not have, as `pin_conflict_count`, sourced to the schematic revision. Do
+    not edit the schematic.
+  inputs:
+  - component_selection:electronics
+  outputs:
+  - design_value:pin_conflict_count
+  checks:
+  - pin_conflict_count == 0
+  capabilities: [kicad.get_pin_mapping]
+  outcome: every firmware signal on one valid pin of the selected MCU
+- id: rtos_configuration
+  stage: design
+  title: RTOS configuration
+  objective: >-
+    Configure the RTOS the requirements name (the configure_rtos skill) from the task list,
+    priorities and stack sizes, and the heap the person states, with the core clock from the
+    MCU's datasheet. Record the generator's RAM estimate (heap plus every task stack) as
+    `rtos_ram_estimate_bytes`, sourced to the configuration, and the heap and stack choices as a
+    design decision with the alternatives considered.
+  inputs:
+  - design_value:pin_conflict_count
+  outputs:
+  - design_value:rtos_ram_estimate_bytes
+  records: [design_decision]
+  checks:
+  - rtos_ram_estimate_bytes > 0 B
+  outcome: tasks, priorities, stacks and heap set from stated figures
+- id: build
+  stage: simulation
+  title: Firmware build
+  objective: >-
+    Build the firmware for the board with firmware.build: the generated pin header, the RTOS
+    configuration and the person's application sources. Record the number of compiler and
+    linker errors as `build_error_count`, and the flash and RAM used as a share of the part as
+    `flash_used_pct` and `ram_used_pct` (%), all sourced to the build, and the build as a
+    simulation_result naming the toolchain versions. A build that did not link has no size: say
+    so rather than estimating it.
+  inputs:
+  - design_value:rtos_ram_estimate_bytes
+  outputs:
+  - design_value:build_error_count
+  - design_value:flash_used_pct
+  - design_value:ram_used_pct
+  records: [simulation_result]
+  checks:
+  - build_error_count == 0
+  - flash_used_pct <= max_flash_pct
+  - ram_used_pct <= max_ram_pct
+  capabilities: [firmware.build]
+  outcome: firmware builds and fits the part with the stated room to spare
+- id: static_analysis
+  stage: simulation
+  title: Static analysis
+  objective: >-
+    Run firmware.static_check (cppcheck) on the same sources. Record the number of high-severity
+    findings as `static_high_findings`, sourced to the check. A suppressed rule needs the
+    person's reason, and is named in the summary.
+  inputs:
+  - design_value:build_error_count
+  outputs:
+  - design_value:static_high_findings
+  checks:
+  - static_high_findings == 0
+  capabilities: [firmware.static_check]
+  outcome: no high-severity defect in the firmware sources
+- id: emulated_boot
+  stage: simulation
+  title: Emulated boot
+  objective: >-
+    Boot the built firmware on an emulated board with firmware.run_emulated and check the boot
+    the requirements describe: the lines it must print in order, the lines it must never print
+    (HardFault, assert), and any register the outputs must leave set. Record the number of
+    failed checks as `boot_checks_failed`, sourced to the run, and the run as a
+    simulation_result naming the emulator and its version. A board no emulator models is not
+    run; leave the value unrecorded rather than claiming a boot.
+  inputs:
+  - design_value:build_error_count
+  outputs:
+  - design_value:boot_checks_failed
+  records: [simulation_result]
+  checks:
+  - boot_checks_failed == 0
+  capabilities: [firmware.run_emulated]
+  outcome: firmware boots on the emulated board and does what the requirements say

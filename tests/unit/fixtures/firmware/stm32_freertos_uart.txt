@@ -1,0 +1,20 @@
+MetaForge boot
+task sensor started
+task telemetry started
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
+telemetry tick
