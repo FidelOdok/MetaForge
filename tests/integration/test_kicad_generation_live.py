@@ -209,3 +209,27 @@ async def test_update_components(server: KicadServer) -> None:
             "kicad.update_components",
             {"schematic_file": pcb["schematic_file"], "changes": [{"ref": "R9", "value": "1"}]},
         )
+
+
+DRONE_FC = Path(__file__).resolve().parents[2] / "examples/drone_flight_controller/eda/circuit.json"
+
+
+async def test_drone_flight_controller_routes_complete_on_four_layers(server: KicadServer) -> None:
+    """FORGE-685: the reference design -- STM32F405 LQFP-64, IMU, baro, USB-C, LDO,
+    34 parts on 40x40 mm, 4 layers with GND/+3V3 planes -- from circuit to a
+    fabrication set and a complete STEP, every check one KiCad runs."""
+    circuit = json.loads(DRONE_FC.read_text(encoding="utf-8"))
+    sch = await call(server, "kicad.generate_schematic", {"circuit": circuit})
+    assert sch["erc"]["errors"] == 0 and sch["netlist_check"]["mismatched"] == []
+    pcb = await call(server, "kicad.generate_pcb", {"circuit": circuit})
+    assert pcb["unplaced"] == [] and pcb["footprints"] == 34
+    routed = await call(
+        server, "kicad.autoroute_pcb", {"pcb_file": pcb["pcb_file"], "ground_pour": "GND"}
+    )
+    assert routed["verdict"] == "pass", (routed["unrouted"], routed["drc"])
+    assert routed["schematic_parity"] == []
+    gerbers = await call(server, "kicad.export_gerber", {"pcb_file": routed["pcb_file"]})
+    names = " ".join(gerbers["files_generated"])
+    assert "In1_Cu" in names and "In2_Cu" in names
+    step = await call(server, "kicad.export_3d", {"pcb_file": routed["pcb_file"], "format": "step"})
+    assert step["complete"] and step["models_referenced"] == 34

@@ -66,6 +66,7 @@ The fragments shipped today:
 | `mobile_robot_v1` | locomotion selection → energy closure (a coupled block: mass roll-up, drive sizing with `robot.size_drive`, battery sizing) → kinematics (`robot.diff_drive_kinematics`) → dynamics in simulation (`gazebo.run_simulation`) → navigation testing (FORGE-671) |
 | `aircraft_v1` | configuration → wing sizing for the stall speed at MTOW (`aircraft.wing_sizing`) → layout (tail volume, CG) → power closure (a coupled block: mass roll-up, cruise aerodynamics with `aircraft.cruise_performance`, battery sizing with `aircraft.electric_endurance`) → trim and static stability (`aircraft.trim_stability`) → flight simulation (FORGE-670) |
 | `firmware_v1` | pin map from the schematic (`kicad.get_pin_mapping`) → RTOS configuration → build (`firmware.build`) → static analysis (`firmware.static_check`) → emulated boot (`firmware.run_emulated` on Renode or Espressif QEMU) (FORGE-676) |
+| `pcb_v1` | schematic generated from the circuit (`kicad.generate_schematic`: ERC and a netlist match) → board (`kicad.generate_pcb`) → routing (`kicad.autoroute_pcb`: unrouted, DRC and schematic parity) → fabrication outputs (gerbers with every copper layer, drill, placement, BOM) → 3D board (`kicad.export_3d`, `kicad.render_pcb`) (FORGE-685) |
 
 `electronics_v1` writes `power_dissipation_w`, which `thermal_v1` reads, so
 composing the two feeds the heat load from the power budget.
@@ -90,6 +91,20 @@ lift slopes and a tail-volume neutral point. Its flight simulation names
 blocking capability gap until one does. Its avionics load is its own input
 (`avionics_power_w`), not the electronics fragment's `power_dissipation_w`;
 composed with `electronics_v1` and `thermal_v1`, the three share no values.
+
+`pcb_v1` is Phase 2 board design. It takes its parts from the component
+selection, so composed with `electronics_v1` a changed part regenerates the
+schematic, the board and everything after them. Every check is a KiCad
+result: ERC, the netlist match, KiCad's own unconnected-item count (never
+the router's), DRC with schematic parity, the copper layers without a
+gerber, and the footprints without a 3D model, each `== 0`. Its ERC value is
+`generated_erc_error_count`, kept apart from `electronics_v1`'s
+`erc_error_count` on the person's own schematic. All its tasks sit in the
+design stage, so it composes with every spine; `design_v1` has no
+manufacturing stage. The schematic, board and fabrication files are staged
+work products (`twin.stage_work_product_file`). The twin's type registry has
+no `schematic`, `pcb_layout` or `gerber` record type yet, so the fragment
+requires only the BOM and the STEP `cad_model`.
 
 `firmware_v1` takes its MCU from the component selection, so composed with
 `electronics_v1` the firmware follows the board: a changed part re-runs the
@@ -262,7 +277,7 @@ plain functions. The tests use it on a closed-form energy loop.
 ## Limits
 
 - `thermal_v1`, `electronics_v1`, `mobile_robot_v1`, `packaging_v1`,
-  `aircraft_v1` and `firmware_v1` ship today. The mobile robot's navigation testing needs a
+  `aircraft_v1`, `firmware_v1` and `pcb_v1` ship today. The mobile robot's navigation testing needs a
   scenario-runner adapter, and the aircraft's flight simulation a mission
   simulator (`jsbsim.run_mission`); both are blocking gaps until they exist.
 - `aircraft_v1`'s aerodynamics, trim and stability are first-order estimates
@@ -276,6 +291,9 @@ plain functions. The tests use it on a closed-form energy loop.
   F4/F7/H7 (STM32Cube) and the ESP32 (ESP-IDF). Its boot check is
   functional emulation, not cycle-accurate, so it checks no timing; and
   only a board Renode or Espressif QEMU models is booted.
+- `pcb_v1` produces a correct board, not a tuned one. Placement is a
+  deterministic heuristic, and nothing checks signal integrity, controlled
+  impedance or EMC.
 - `optimize.suggest` searches one variable at a time. Multi-variable and
   constrained optimisation are not built.
 - Fragment tasks attach to the stages a template has. A template without a

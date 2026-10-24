@@ -32,7 +32,8 @@
 #define ENABLE_USART2           1   /* Telemetry / OSD */
 #define ENABLE_USART3           1   /* RC receiver (SBUS/CRSF) */
 #define ENABLE_USART6           1   /* Spare */
-#define ENABLE_TIM1             1   /* Motor DShot outputs */
+#define ENABLE_TIM3             1   /* Motor DShot outputs M1/M2 */
+#define ENABLE_TIM5             1   /* Motor DShot outputs M3/M4 */
 #define ENABLE_ADC1             1   /* Battery voltage */
 #define ENABLE_USB_OTG_FS       1   /* USB-C */
 #define ENABLE_SDIO             1   /* Micro-SD blackbox */
@@ -67,10 +68,10 @@
 #define MOTOR_IDLE_THROTTLE     0       /* DShot command 0 = disarmed */
 
 /* Motor mixing table (quadcopter X configuration)
- *   Motor 1: Front-Right (CW)  -> TIM1_CH1
- *   Motor 2: Rear-Right  (CCW) -> TIM1_CH2
- *   Motor 3: Rear-Left   (CW)  -> TIM1_CH3
- *   Motor 4: Front-Left  (CCW) -> TIM1_CH4
+ *   Motor 1: Front-Right (CW)  -> TIM3_CH3 (PB0)
+ *   Motor 2: Rear-Right  (CCW) -> TIM3_CH4 (PB1)
+ *   Motor 3: Rear-Left   (CW)  -> TIM5_CH1 (PA0)
+ *   Motor 4: Front-Left  (CCW) -> TIM5_CH2 (PA1)
  */
 
 /* ================================================================

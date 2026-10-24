@@ -16,6 +16,7 @@ from tool_registry.tools.kicad.adapter import (
     KicadServer,
     _check_kicad_cli,
     _count_drc_unconnected,
+    _inner_copper_layers,
     _list_gerber_files,
     _parse_bom_csv,
     _parse_drc_violations,
@@ -542,6 +543,28 @@ class TestExportGerber:
         call_args = server_with_mocks._execute_gerber_export.call_args  # type: ignore[attr-defined]
         assert call_args[0][1] == "/tmp/kicad/board_gerber"
 
+    async def test_default_layers_include_a_multilayer_boards_inner_copper(
+        self, server_with_mocks: KicadServer, tmp_path
+    ) -> None:
+        """FORGE-685: a 4-layer job without its planes is not a fabrication set."""
+        board = tmp_path / "fc.kicad_pcb"
+        board.write_text(
+            '(kicad_pcb (version 20241229)\n  (layers (0 "F.Cu" signal) (4 "In1.Cu" power)\n'
+            '    (6 "In2.Cu" power) (2 "B.Cu" signal) (25 "Edge.Cuts" user)))\n'
+        )
+        await server_with_mocks.export_gerber({"pcb_file": str(board)})
+        layers = server_with_mocks._execute_gerber_export.call_args[0][2]  # type: ignore[attr-defined]
+        assert layers[:4] == ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"]
+        # Layers the caller names are taken as given.
+        await server_with_mocks.export_gerber({"pcb_file": str(board), "layers": ["F.Cu"]})
+        assert server_with_mocks._execute_gerber_export.call_args[0][2] == ["F.Cu"]  # type: ignore[attr-defined]
+
+    def test_inner_copper_layers(self, tmp_path) -> None:
+        two = tmp_path / "two.kicad_pcb"
+        two.write_text('(kicad_pcb (layers (0 "F.Cu" signal) (2 "B.Cu" signal)))')
+        assert _inner_copper_layers(str(two)) == []
+        assert _inner_copper_layers(str(tmp_path / "missing.kicad_pcb")) == []
+
 
 # ---------------------------------------------------------------------------
 # TestExportNetlist
@@ -863,6 +886,13 @@ class TestRealKicadExecution:
         (tmp_path / "readme.txt").touch()  # should be excluded
         files = _list_gerber_files(str(tmp_path))
         assert len(files) == 3
+        # Inner copper (.g1, .g2, ...) counts; a 4-layer job is listed whole.
+        (tmp_path / "board-In1_Cu.g1").touch()
+        (tmp_path / "board-In2_Cu.g2").touch()
+        (tmp_path / "board-job.gbrjob").touch()
+        files = _list_gerber_files(str(tmp_path))
+        assert {"board-In1_Cu.g1", "board-In2_Cu.g2"} <= set(files)
+        assert "board-job.gbrjob" not in files
         assert "board-F_Cu.gtl" in files
         assert "readme.txt" not in files
 

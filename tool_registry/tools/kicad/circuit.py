@@ -27,6 +27,14 @@ class Component(BaseModel):
     )
     value: str = Field(..., min_length=1)
     fields: dict[str, str] = Field(default_factory=dict, description="Extra fields, e.g. MPN")
+    model: str | None = Field(
+        default=None,
+        description=(
+            "3D model (STEP) to use instead of the footprint's own, for a library "
+            "footprint whose model reference is wrong or missing, e.g. "
+            "${KICAD9_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/<name>.step"
+        ),
+    )
 
     @field_validator("ref")
     @classmethod
@@ -68,11 +76,27 @@ class Board(BaseModel):
     power_nets: list[str] = Field(default_factory=list)
     via_diameter_mm: float = Field(default=0.6, gt=0)
     via_drill_mm: float = Field(default=0.3, gt=0)
+    hole_clearance_mm: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Copper-to-hole clearance; KiCad's default (0.25) when omitted. Lower it to "
+            "what the fab allows when a vendor land pattern sits closer to its own holes"
+        ),
+    )
     ground_pour: str | None = Field(
         default=None, description="Net to pour on the outer layers, e.g. GND"
     )
     mounting_holes_mm: float | None = Field(
         default=None, gt=0, description="Add four corner mounting holes of this drill"
+    )
+    inner_planes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "4-layer boards: the nets for solid planes on In1.Cu and In2.Cu, in that "
+            "order, e.g. [GND, +3V3]. The router reaches a plane net through vias "
+            "instead of routing it as tracks"
+        ),
     )
 
     @field_validator("layers")
@@ -81,6 +105,14 @@ class Board(BaseModel):
         if v not in (2, 4):
             raise ValueError("layers must be 2 or 4")
         return v
+
+    @model_validator(mode="after")
+    def _planes(self) -> Board:
+        if self.inner_planes and self.layers != 4:
+            raise ValueError("inner_planes needs a 4-layer board")
+        if len(self.inner_planes) > 2:
+            raise ValueError("inner_planes: at most two (In1.Cu, In2.Cu)")
+        return self
 
 
 class Circuit(BaseModel):

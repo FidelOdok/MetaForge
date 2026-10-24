@@ -70,6 +70,14 @@ Ask for anything missing; do not choose parts, values or the board yourself.
   `U1.VO`). Check pin numbers against the datasheet: symbol and part must
   agree.
 - Every pin on no net gets a no-connect flag; say which pins those are.
+- A board with a fine-pitch MCU (LQFP, QFN) wants four layers:
+  `"layers": 4, "inner_planes": ["GND", "+3V3"]` puts solid planes on In1
+  and In2, and the router reaches them through vias it is given, not tracks.
+  Leave plane nets out of `power_nets`: a wide power track cannot leave a
+  0.5 mm-pitch pin. Take track, via and `hole_clearance_mm` from the fab's
+  limits, and say which fab.
+- A component may name its own 3D `model` when KiCad's footprint points at a
+  model the library does not ship; say so in the report.
 
 ## Procedure
 
@@ -112,7 +120,8 @@ Ask for anything missing; do not choose parts, values or the board yourself.
 | "U1.9: ... has no pin '9'" | Pin number does not exist on the symbol | Check the symbol's pins against the datasheet. |
 | ERC errors | Unconnected input, conflicting outputs, power not driven | Fix the circuit and regenerate. |
 | `unplaced` not empty | Board too small | Ask for a larger board. |
-| `unrouted` > 0 | Too dense for two layers | More passes, a larger board, or four layers. |
+| `unrouted` > 0 | Too dense for two layers, or supply pins with no plane | Four layers with `inner_planes`, a larger board, or smaller passives (0402); report the nets by name. |
+| DRC `hole_clearance` inside one footprint | The vendor's land pattern sits closer to its holes than KiCad's 0.25 mm default | Set `hole_clearance_mm` to what the fab allows, or choose another footprint; never hide the error. |
 | `schematic_parity` issues | Board and schematic disagree | Regenerate the board from the schematic. |
 | `-32001` | kicad adapter down | Tell the user. |
 

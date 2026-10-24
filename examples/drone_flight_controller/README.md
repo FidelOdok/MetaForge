@@ -33,9 +33,10 @@ The demo simulates the user project structure that `forge setup` would create:
 project/
 ├── PRD.md                         # Product Requirements Document
 ├── constraints.json               # Design rules (yield strength, thermal limits, etc.)
-├── eda/kicad/                     # KiCad schematic and PCB files
-│   ├── main.kicad_sch             # Top-level schematic
-│   └── main.kicad_pcb             # PCB layout
+├── eda/                           # Circuit description + generated KiCad project
+│   ├── build_circuit.py           # The design by pin name -> circuit.json
+│   ├── generate.py                # circuit.json -> schematic, routed board, outputs
+│   └── kicad/                     # drone-fc.kicad_sch / .kicad_pcb (generated)
 ├── bom/                           # Bill of Materials
 │   └── bom.csv                    # Component list with distributor data
 ├── firmware/src/                  # Firmware source code

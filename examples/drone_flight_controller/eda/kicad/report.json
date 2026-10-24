@@ -1,0 +1,69 @@
+{
+ "schematic": {
+  "verdict": "pass",
+  "erc": {
+   "errors": 0,
+   "warnings": 0,
+   "violations": [],
+   "passed": true
+  },
+  "netlist_mismatched": []
+ },
+ "pcb": {
+  "verdict": "pass",
+  "footprints": 34,
+  "unplaced": []
+ },
+ "routing": {
+  "verdict": "pass",
+  "unrouted": 0,
+  "tracks": 349,
+  "vias": 97,
+  "drc": {
+   "errors": 0,
+   "warnings": 3,
+   "violations": [
+    {
+     "rule_id": "via_dangling",
+     "severity": "warning",
+     "message": "Via is not connected or connected on only one layer",
+     "location": {
+      "x": 108.177,
+      "y": 119.9992,
+      "layer": ""
+     }
+    },
+    {
+     "rule_id": "silk_over_copper",
+     "severity": "warning",
+     "message": "Silkscreen clipped by solder mask",
+     "location": {
+      "x": 127.075,
+      "y": 131.575,
+      "layer": ""
+     }
+    },
+    {
+     "rule_id": "silk_overlap",
+     "severity": "warning",
+     "message": "Silkscreen overlap",
+     "location": {
+      "x": 129.015,
+      "y": 132.735,
+      "layer": ""
+     }
+    }
+   ]
+  },
+  "schematic_parity_checked": true,
+  "schematic_parity": []
+ },
+ "step": {
+  "complete": true,
+  "missing_models": [],
+  "models_referenced": 34
+ },
+ "gerber_files": 9,
+ "drill_holes": 118,
+ "bom_components": 34
+}
