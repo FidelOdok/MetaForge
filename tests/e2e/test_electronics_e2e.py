@@ -595,7 +595,7 @@ class TestKicadMcpProtocolE2E:
 
         assert health.status == "healthy"
         assert health.adapter_id == "kicad"
-        assert health.tools_available == 6
+        assert health.tools_available == 8  # FORGE-680: + export_drill, export_pos
 
 
 # ---------------------------------------------------------------------------
