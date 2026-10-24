@@ -51,6 +51,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# FORGE-684: 3D models for the board's STEP/GLB export and renders. KiCad 9
+# footprints reference the STEP models, so the VRML copies go, and only the
+# families generated boards use stay (vertical headers and sockets only): the
+# full package is 4.9 GB. Installed and pruned in one layer so the pruned files
+# never reach the image. kicad.export_3d lists any model that is missing.
+RUN apt-get update && apt-get install -y --no-install-recommends kicad-packages3d \
+    && cd /usr/share/kicad/3dmodels \
+    && find . -iname "*.wrl" -delete \
+    && keep="Resistor_SMD Capacitor_SMD Capacitor_Tantalum_SMD Inductor_SMD Diode_SMD LED_SMD \
+        Package_TO_SOT_SMD Package_SO Package_QFP Package_DFN_QFN Package_LGA Package_SON \
+        Package_CSP Crystal Oscillator Connector_JST Connector_USB Connector_PinHeader_2.54mm \
+        Connector_PinHeader_1.27mm Connector_PinSocket_2.54mm Button_Switch_SMD Fuse TestPoint \
+        Connector_Coaxial Buzzer_Beeper Sensor_Pressure RF_Module" \
+    && for d in *.3dshapes; do \
+         case " $(echo $keep) " in *" ${d%.3dshapes} "*) ;; *) rm -rf "$d" ;; esac; \
+       done \
+    && find Connector_PinHeader_2.54mm.3dshapes Connector_PinHeader_1.27mm.3dshapes \
+         Connector_PinSocket_2.54mm.3dshapes -iname "*.step" ! -iname "*Vertical*" -delete \
+    && du -sh /usr/share/kicad/3dmodels \
+    && rm -rf /var/lib/apt/lists/*
+ENV KICAD9_3DMODEL_DIR=/usr/share/kicad/3dmodels
+
 # FORGE-683: Freerouting (GPL-3.0), the autorouter, run as a separate program
 # through KiCad's Specctra export/import. Pinned and checksummed. Its native
 # freerouting-cli build crashes mid-route (a GraalVM serialization error), so

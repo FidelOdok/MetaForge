@@ -145,3 +145,67 @@ async def test_unknown_footprint_is_refused_by_name(server: KicadServer) -> None
     circuit["components"][2]["footprint"] = "Capacitor_SMD:C_0000_NoSuch"
     with pytest.raises(ValueError, match="C1: footprint Capacitor_SMD:C_0000_NoSuch"):
         await call(server, "kicad.generate_pcb", {"circuit": circuit})
+
+
+async def _routed_board(server: KicadServer, circuit: dict[str, Any]) -> dict[str, Any]:
+    pcb = await call(server, "kicad.generate_pcb", {"circuit": circuit})
+    return await call(
+        server, "kicad.autoroute_pcb", {"pcb_file": pcb["pcb_file"], "ground_pour": "GND"}
+    )
+
+
+async def test_3d_export_and_render(server: KicadServer) -> None:
+    """FORGE-684: STEP and GLB with the library's 3D models, and a rendered view."""
+    routed = await _routed_board(server, {**copy.deepcopy(LDO_LED), "board": BOARD})
+    for fmt in ("step", "glb"):
+        out = await call(server, "kicad.export_3d", {"pcb_file": routed["pcb_file"], "format": fmt})
+        assert out["complete"] and out["missing_models"] == [], out
+        assert out["models_referenced"] >= 6 and out["bytes"] > 50_000
+    render = await call(
+        server, "kicad.render_pcb", {"pcb_file": routed["pcb_file"], "view": "iso", "inline": True}
+    )
+    assert render["png_base64"].startswith("iVBORw0KGgo")  # PNG signature
+    assert render["bytes"] > 20_000
+
+
+async def test_a_part_without_a_3d_model_is_named(server: KicadServer) -> None:
+    circuit = copy.deepcopy(OPAMP_BUFFER)
+    # A family the image does not carry models for.
+    circuit["components"][0]["footprint"] = (
+        "Connector_Molex:Molex_KK-254_AE-6410-03A_1x03_P2.54mm_Vertical"
+    )
+    pcb = await call(server, "kicad.generate_pcb", {"circuit": circuit})
+    out = await call(server, "kicad.export_3d", {"pcb_file": pcb["pcb_file"]})
+    assert not out["complete"]
+    assert [m["ref"] for m in out["missing_models"]] == ["J1"]
+
+
+async def test_update_components(server: KicadServer) -> None:
+    circuit = {**copy.deepcopy(LDO_LED), "board": BOARD}
+    pcb = await call(server, "kicad.generate_pcb", {"circuit": circuit})
+    upd = await call(
+        server,
+        "kicad.update_components",
+        {
+            "schematic_file": pcb["schematic_file"],
+            "pcb_file": pcb["pcb_file"],
+            "changes": [
+                {"ref": "R1", "value": "2.2k", "fields": {"MPN": "RC0603FR-072K2L"}},
+                {"ref": "C1", "footprint": "Capacitor_SMD:C_1206_3216Metric"},
+            ],
+        },
+    )
+    assert upd["updated"] == ["R1", "C1"] and upd["erc"]["errors"] == 0
+    assert upd["board_stale"] and upd["footprint_changes"] == ["C1"]
+    bom = await call(server, "kicad.export_bom", {"schematic_file": upd["schematic_file"]})
+    values = {r for p in bom["parts"] for r in p["references"] if p["value"] == "2.2k"}
+    assert values == {"R1"}
+    # The original schematic is untouched.
+    original = Path(pcb["schematic_file"]).read_text()
+    assert '"2.2k"' not in original
+    with pytest.raises(ValueError, match="no such reference in the schematic: R9"):
+        await call(
+            server,
+            "kicad.update_components",
+            {"schematic_file": pcb["schematic_file"], "changes": [{"ref": "R9", "value": "1"}]},
+        )

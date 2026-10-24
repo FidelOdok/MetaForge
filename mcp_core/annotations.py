@@ -411,6 +411,10 @@ PRODUCING: frozenset[str] = frozenset(
         "kicad.generate_schematic",
         "kicad.generate_pcb",
         "kicad.autoroute_pcb",
+        # FORGE-684: a new file each (3D model, render, schematic revision).
+        "kicad.export_3d",
+        "kicad.render_pcb",
+        "kicad.update_components",
         # FORGE-674/677: build output and run logs go to the adapter workspace
         # only; the caller's project is copied, never modified.
         "firmware.build",

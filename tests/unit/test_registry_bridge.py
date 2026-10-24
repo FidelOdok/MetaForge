@@ -59,11 +59,12 @@ class TestRegistryMcpBridge:
         FORGE-675 adds firmware.static_check for 103.
         FORGE-680 adds kicad.export_drill and kicad.export_pos for 105.
         FORGE-681 adds power.runtime for 106. FORGE-683 adds kicad.generate_schematic,
-        kicad.generate_pcb and kicad.autoroute_pcb for 109.
+        kicad.generate_pcb and kicad.autoroute_pcb for 109. FORGE-684 adds
+        kicad.export_3d, kicad.render_pcb and kicad.update_components for 112.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 109
+        assert len(tools) == 112
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

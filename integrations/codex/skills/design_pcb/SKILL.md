@@ -23,7 +23,8 @@ said.
 Not for:
 
 - Checking a schematic or board the user made (`run_erc`, `run_drc`).
-- Changing values on an existing design.
+- Changing values on an existing design: `kicad.update_components`, then
+  regenerate the board if a footprint changed.
 - Impedance-controlled, length-matched or high-speed layout: the router
   knows clearances and widths, nothing more.
 
@@ -32,10 +33,12 @@ Not for:
 | Step | Tool | Profile |
 |---|---|---|
 | Find parts | `component.search_parametric`, `knowledge.search` | electronics |
-| Schematic | `kicad.generate_schematic` | electronics |
-| Board | `kicad.generate_pcb` | electronics |
-| Routing | `kicad.autoroute_pcb` | electronics |
-| Fabrication files | `kicad.export_gerber`, `kicad.export_drill`, `kicad.export_pos` | electronics |
+| Schematic | `kicad.generate_schematic` | pcb_design |
+| Board | `kicad.generate_pcb` | pcb_design |
+| Routing | `kicad.autoroute_pcb` | pcb_design |
+| 3D model, renders | `kicad.export_3d`, `kicad.render_pcb` | pcb_design |
+| Change a part | `kicad.update_components` | pcb_design |
+| Fabrication files | `kicad.export_gerber`, `kicad.export_drill`, `kicad.export_pos` | pcb_design, electronics |
 | Record | `twin.record_document`, `twin.record_decision` | core |
 
 The tools run in the `kicad-adapter` container. `-32001` means it is down:
@@ -84,8 +87,11 @@ Ask for anything missing; do not choose parts, values or the board yourself.
    ground net as `ground_pour`. It routes a copy and returns `unrouted`,
    `drc` (errors, warnings), `schematic_parity`, tracks and vias. `pass`
    means all three checks are zero. Report unrouted nets by name.
-4. **Fabrication.** On a pass, export Gerbers, drill and positions from the
-   routed board.
+4. **Fabrication and 3D.** On a pass, export Gerbers, drill and positions
+   from the routed board; `kicad.export_3d` (`step` for the enclosure
+   designer, `glb` for viewing) and say which parts have no 3D model
+   (`missing_models`); `kicad.render_pcb` with `view: iso` and `inline: true`
+   to show the person the board.
 5. **Record.** `twin.record_document` with the files, the circuit, the
    KiCad verdicts and their counts; `twin.record_decision` for any part,
    footprint or board-size choice made on the way.
