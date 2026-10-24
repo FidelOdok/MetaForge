@@ -56,10 +56,11 @@ class TestRegistryMcpBridge:
         robot.diff_drive_kinematics for 94. FORGE-672 adds packaging.box_compression
         and packaging.rsc_dieline for 96. FORGE-670 adds the four aircraft.* estimates
         for 100. FORGE-674/677 add firmware.build and firmware.run_emulated for 102.
+        FORGE-675 adds firmware.static_check for 103.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 102
+        assert len(tools) == 103
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

@@ -408,6 +408,7 @@ PRODUCING: frozenset[str] = frozenset(
         # only; the caller's project is copied, never modified.
         "firmware.build",
         "firmware.run_emulated",
+        "firmware.static_check",
         "gazebo.run_simulation",
         "isaac_sim.render_scene",
         "isaac_sim.run_physics",

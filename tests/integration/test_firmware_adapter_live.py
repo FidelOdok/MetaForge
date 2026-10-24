@@ -227,6 +227,74 @@ async def test_nucleo_boards_boot_on_renode(
     assert ran["verdict"] == "pass", ran
 
 
+DEFECTIVE = r"""
+#include <string.h>
+
+int main(void)
+{
+    char buf[4];
+    int unused;
+    strcpy(buf, "too long string");
+    int *p = 0;
+    return *p + buf[5];
+}
+"""
+
+
+async def test_static_check_finds_real_defects(server: FirmwareServer) -> None:
+    out = await server.static_check(
+        {
+            "files": [{"path": "src/main.c", "content": DEFECTIVE}],
+            "board": "disco_f407vg",
+            "framework": "stm32cube",
+        }
+    )
+    assert out["verdict"] == "fail", out
+    ids = {(f["id"], f["severity"]) for f in out["findings"]}
+    assert ("nullPointer", "high") in ids
+    assert ("arrayIndexOutOfBounds", "high") in ids
+    assert ("unusedVariable", "low") in ids
+    assert all(f["file"] == "src/main.c" for f in out["findings"])
+
+
+async def test_static_check_suppression_and_clean_code(server: FirmwareServer) -> None:
+    clean = "int main(void)\n{\n    int unused;\n    for (;;) {\n    }\n}\n"
+    out = await server.static_check(
+        {
+            "files": [{"path": "src/main.c", "content": clean}],
+            "board": "disco_f407vg",
+            "framework": "stm32cube",
+        }
+    )
+    assert out["verdict"] == "pass", out
+    assert out["counts"]["low"] >= 1  # the unused variable, which does not fail it
+    suppressed = await server.static_check(
+        {
+            "files": [{"path": "src/main.c", "content": clean}],
+            "board": "disco_f407vg",
+            "framework": "stm32cube",
+            "fail_on": "low",
+            "suppressions": [{"id": "unusedVariable", "file": "src/main.c", "reason": "live test"}],
+        }
+    )
+    assert "unusedVariable" not in {f["id"] for f in suppressed["findings"]}, suppressed
+
+
+async def test_clang_tidy_runs_offline(server: FirmwareServer) -> None:
+    out = await server.static_check(
+        {
+            "files": [{"path": "src/main.c", "content": DEFECTIVE}],
+            "board": "disco_f407vg",
+            "framework": "stm32cube",
+            "tools": ["cppcheck", "clangtidy"],
+            "fail_on": "low",
+        }
+    )
+    assert {r["tool"] for r in out["runs"]} == {"cppcheck", "clangtidy"}, out
+    assert all(r["succeeded"] for r in out["runs"]), out
+    assert out["verdict"] == "fail"
+
+
 async def test_a_broken_source_fails_with_the_compiler_error(server: FirmwareServer) -> None:
     out = await server.build(
         {

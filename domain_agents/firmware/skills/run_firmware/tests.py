@@ -94,6 +94,24 @@ class TestRunFirmwareSkill:
         )
         assert any("firmware adapter is not running" in e for e in errors)
 
+    async def test_static_check_alongside_the_build(self, fw_context: SkillContext) -> None:
+        fw_context.mcp.register_tool("firmware.build", "firmware_build")
+        fw_context.mcp.register_tool("firmware.static_check", "firmware_static_analysis")
+        fw_context.mcp.register_tool_response("firmware.build", _built())
+        fw_context.mcp.register_tool_response(
+            "firmware.static_check",
+            {
+                "verdict": "fail",
+                "counts": {"high": 1, "medium": 0, "low": 2},
+                "findings": [{"severity": "high", "id": "nullPointer", "file": "src/main.c"}],
+            },
+        )
+        out = await RunFirmwareHandler(fw_context).execute(
+            RunFirmwareInput(work_product_id=uuid4(), project_path="fw", static_check=True)
+        )
+        assert out.build_verdict == "pass"
+        assert out.check_verdict == "fail" and out.check_counts["high"] == 1
+
     def test_exactly_one_source(self) -> None:
         with pytest.raises(ValueError, match="exactly one"):
             RunFirmwareInput(work_product_id=uuid4())

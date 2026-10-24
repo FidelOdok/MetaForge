@@ -67,7 +67,8 @@ RUN git clone --depth 1 --branch "${FREERTOS_KERNEL_VERSION}" \
 
 USER metaforge
 
-# PlatformIO's platforms, installed by building the seed projects. Telemetry
+# PlatformIO's platforms, installed by building the seed projects, and the
+# static checkers (cppcheck, clang-tidy), installed by checking one. Telemetry
 # off, and the upgrade check pushed out ten years: at its default PlatformIO
 # checks for an upgrade after a build, and with no network that waits about a
 # minute on every call.
@@ -82,6 +83,7 @@ RUN sed -i "s/^platform = ststm32$/platform = platformio\/ststm32@${STSTM32_VERS
     && sed -i "s/^platform = espressif32$/platform = platformio\/espressif32@${ESPRESSIF32_VERSION}/" /tmp/seed/esp32/platformio.ini \
     && pio run -d /tmp/seed/stm32 \
     && pio run -d /tmp/seed/esp32 \
+    && pio check -d /tmp/seed/stm32 -e f4 \
     && rm -rf /tmp/seed "${PLATFORMIO_CORE_DIR}/.cache"
 
 # Load every board firmware.run_emulated maps (adapter.RENODE_BOARDS) once, so
