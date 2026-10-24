@@ -10,16 +10,6 @@ allowance, which is a fail whatever the unknowns turn out to be).
 Regulator input current is carried upstream: a linear regulator draws its
 output current plus its quiescent current from its input rail; a switching
 regulator draws ``Vout * Iout / (efficiency * Vin)``.
-
-Regulator heat (FORGE-681). Each regulator's dissipation follows from the
-same figures: a linear regulator burns ``(Vin - Vout) * Iout + Vin * Iq``,
-a switching one ``Pout * (1 / efficiency - 1)``. With the package's
-junction-to-ambient resistance, the ambient temperature and the part's
-maximum junction temperature (each from its datasheet or the requirements),
-the junction temperature is ``Ta + P * theta_JA`` and the margin is
-``Tj_max - Tj``. This is the thermal verdict, kept apart from the load
-verdict: a regulator nobody gave thermal figures for is ``not_established``
-thermally without changing whether its rail carries its load.
 """
 
 from __future__ import annotations
@@ -55,14 +45,6 @@ class Rail(BaseModel):
     )
     quiescent_ma: float | None = Field(
         default=None, ge=0, description="Regulator quiescent current (ldo)"
-    )
-    theta_ja_c_per_w: float | None = Field(
-        default=None,
-        gt=0,
-        description="Regulator junction-to-ambient thermal resistance, C/W (datasheet, as mounted)",
-    )
-    tj_max_c: float | None = Field(
-        default=None, description="Regulator maximum junction temperature, C (datasheet)"
     )
     source: str = Field(default="", description="Where the rating came from (datasheet, page)")
 
@@ -100,10 +82,6 @@ class BudgetRequest(BaseModel):
         le=1,
         description="Allowed share of each rated output, e.g. 0.8 for 'load <= 80 %'",
     )
-    ambient_c: float | None = Field(
-        default=None,
-        description="Worst-case ambient temperature around the regulators, C (requirements)",
-    )
 
 
 class RailBudget(BaseModel):
@@ -120,15 +98,6 @@ class RailBudget(BaseModel):
     status: RailStatus
     unknowns: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
-    dissipation_mw: float | None = Field(
-        default=None, description="Heat in the regulator itself (None for a supply or unknown)"
-    )
-    junction_c: float | None = Field(default=None, description="Regulator junction temperature")
-    tj_margin_c: float | None = Field(default=None, description="tj_max_c - junction_c")
-    thermal_status: RailStatus | None = Field(
-        default=None, description="Regulator thermal verdict; None for a supply"
-    )
-    thermal_unknowns: list[str] = Field(default_factory=list)
 
 
 class BudgetResult(BaseModel):
@@ -139,16 +108,6 @@ class BudgetResult(BaseModel):
     worst_rail: str | None
     source_power_mw: float | None = Field(
         description="Power drawn from the supply rails; None when any of it is unknown"
-    )
-    regulator_dissipation_mw: float | None = Field(
-        default=None, description="Heat in all regulators; None when any is unknown"
-    )
-    thermal_verdict: RailStatus | None = Field(
-        default=None,
-        description="Regulator junction temperatures against Tj max; None with no regulator",
-    )
-    hottest_regulator: str | None = Field(
-        default=None, description="The regulator with the least junction-temperature margin"
     )
 
 
@@ -215,34 +174,6 @@ def check_budget(request: BudgetRequest) -> BudgetResult:
     else:
         verdict = "pass"
 
-    for b in budgets:
-        rail = rails[b.name]
-        if rail.source_kind == "supply" or rail.input_rail is None:
-            continue
-        _thermal(rail, rails[rail.input_rail], b, request.ambient_c)
-    regulators = [b for b in budgets if b.source_kind != "supply"]
-    thermal_verdict: RailStatus | None = None
-    regulator_dissipation: float | None = None
-    hottest: str | None = None
-    if regulators:
-        statuses = {b.thermal_status for b in regulators}
-        thermal_verdict = (
-            "fail"
-            if "fail" in statuses
-            else "not_established"
-            if "not_established" in statuses
-            else "pass"
-        )
-        losses = [b.dissipation_mw for b in regulators]
-        regulator_dissipation = (
-            round(sum(x for x in losses if x is not None), 3)
-            if all(x is not None for x in losses)
-            else None
-        )
-        margins = [b for b in regulators if b.tj_margin_c is not None]
-        if margins:
-            hottest = min(margins, key=lambda b: b.tj_margin_c or 0.0).name
-
     source_power: float | None = 0.0
     for b in budgets:
         if b.source_kind != "supply":
@@ -259,47 +190,7 @@ def check_budget(request: BudgetRequest) -> BudgetResult:
         rails=budgets,
         worst_rail=_worst(budgets),
         source_power_mw=round(source_power, 3) if source_power is not None else None,
-        regulator_dissipation_mw=regulator_dissipation,
-        thermal_verdict=thermal_verdict,
-        hottest_regulator=hottest,
     )
-
-
-def _thermal(rail: Rail, parent: Rail, budget: RailBudget, ambient_c: float | None) -> None:
-    """Fill ``budget``'s dissipation and junction temperature for regulator ``rail``."""
-    missing: list[str] = []
-    loss_mw: float | None = None
-    if budget.unknowns and budget.status != "fail":
-        missing.append("output current not established")
-    elif rail.source_kind == "ldo":
-        loss_mw = (parent.voltage_v - rail.voltage_v) * budget.load_ma
-        loss_mw += parent.voltage_v * (rail.quiescent_ma or 0.0)
-        if parent.voltage_v < rail.voltage_v:
-            missing.append(f"input {parent.voltage_v} V is below the {rail.voltage_v} V output")
-    elif rail.efficiency is None:
-        missing.append("switching regulator efficiency not given")
-    else:
-        pout = rail.voltage_v * budget.load_ma
-        loss_mw = pout * (1.0 / rail.efficiency - 1.0)
-    if loss_mw is not None:
-        budget.dissipation_mw = round(loss_mw, 3)
-    if rail.theta_ja_c_per_w is None:
-        missing.append("theta_JA not given")
-    if rail.tj_max_c is None:
-        missing.append("Tj max not given")
-    if ambient_c is None:
-        missing.append("ambient temperature not given")
-    if loss_mw is not None and rail.theta_ja_c_per_w is not None and ambient_c is not None:
-        budget.junction_c = round(ambient_c + loss_mw / 1000.0 * rail.theta_ja_c_per_w, 2)
-        if rail.tj_max_c is not None:
-            budget.tj_margin_c = round(rail.tj_max_c - budget.junction_c, 2)
-    budget.thermal_unknowns = missing
-    if budget.tj_margin_c is not None and budget.tj_margin_c < 0:
-        budget.thermal_status = "fail"
-    elif missing:
-        budget.thermal_status = "not_established"
-    else:
-        budget.thermal_status = "pass"
 
 
 def _input_current(child: Rail, out_ma: float, parent: Rail) -> tuple[float, str]:
