@@ -452,6 +452,9 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         "freecad.export_geometry",
         "kicad.export_bom",
         "kicad.export_gerber",
+        # FORGE-680: write to a caller-supplied path, like the other exports.
+        "kicad.export_drill",
+        "kicad.export_pos",
         "kicad.export_netlist",
         "omniverse_usd.convert_glb_to_usd",
         "project.delete",

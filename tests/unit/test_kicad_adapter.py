@@ -16,7 +16,6 @@ from tool_registry.tools.kicad.adapter import (
     KicadServer,
     _check_kicad_cli,
     _count_drc_unconnected,
-    _extract_field,
     _list_gerber_files,
     _parse_bom_csv,
     _parse_drc_violations,
@@ -30,6 +29,18 @@ from tool_registry.tools.kicad.config import KicadConfig
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _design_paths_exist(request, monkeypatch) -> None:
+    """The handler tests mock kicad-cli and use paths like /designs/x.kicad_sch.
+
+    The missing-file refusal (FORGE-680) is tested on its own, with real
+    files, in TestMissingFiles; elsewhere a named file is taken to exist.
+    """
+    if request.node.get_closest_marker("real_paths"):
+        return
+    monkeypatch.setattr(KicadServer, "_existing", lambda self, path, kind: path)
 
 
 @pytest.fixture()
@@ -314,10 +325,11 @@ SAMPLE_DRC_REPORT = {
 
 # Sample BOM CSV content
 SAMPLE_BOM_CSV = (
-    '"Reference";"Value";"Footprint";"Qty"\n'
-    '"R1, R2, R3";"10k";"0402";"3"\n'
-    '"C1, C2";"100nF";"0402";"2"\n'
-    '"U1";"STM32F405";"LQFP-64";"1"\n'
+    # kicad-cli 9's default columns, grouped by value and footprint.
+    '"Refs","Value","Footprint","Qty","DNP"\n'
+    '"R1,R2,R3","10k","0402","3",""\n'
+    '"C1,C2","100nF","0402","2",""\n'
+    '"U1","STM32F405","LQFP-64","1",""\n'
 )
 
 
@@ -379,8 +391,8 @@ class TestKicadServer:
     def test_server_version(self, server: KicadServer) -> None:
         assert server.version == "0.1.0"
 
-    def test_registers_six_tools(self, server: KicadServer) -> None:
-        assert len(server.tool_ids) == 6
+    def test_registers_eight_tools(self, server: KicadServer) -> None:
+        assert len(server.tool_ids) == 8
         expected = {
             "kicad.run_erc",
             "kicad.run_drc",
@@ -388,6 +400,9 @@ class TestKicadServer:
             "kicad.export_gerber",
             "kicad.export_netlist",
             "kicad.get_pin_mapping",
+            # FORGE-680: drill and position files complete the fabrication set.
+            "kicad.export_drill",
+            "kicad.export_pos",
         }
         assert set(server.tool_ids) == expected
 
@@ -626,12 +641,12 @@ class TestKicadCliNotAvailable:
 
 
 class TestJsonRpcIntegration:
-    async def test_tool_list_returns_six_tools(self, server: KicadServer) -> None:
+    async def test_tool_list_returns_eight_tools(self, server: KicadServer) -> None:
         request = _make_jsonrpc("tool/list")
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 6
+        assert len(response["result"]["tools"]) == 8
 
     async def test_tool_call_erc(self, server_with_mocks: KicadServer) -> None:
         request = _make_jsonrpc(
@@ -676,7 +691,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "kicad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 6
+        assert response["result"]["tools_available"] == 8
 
     async def test_tool_list_filter_by_capability(self, server: KicadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "erc_validation"})
@@ -929,24 +944,6 @@ class TestRealKicadExecution:
         assert components == []
 
     # -- S-expression field extraction tests --
-
-    def test_extract_field_quoted(self) -> None:
-        """Extract a quoted field value."""
-        text = '(ref "U1") (value "STM32")'
-        assert _extract_field(text, "ref") == "U1"
-        assert _extract_field(text, "value") == "STM32"
-
-    def test_extract_field_unquoted(self) -> None:
-        """Extract an unquoted field value."""
-        text = "(ref U1) (value 10k)"
-        assert _extract_field(text, "ref") == "U1"
-        assert _extract_field(text, "value") == "10k"
-
-    def test_extract_field_missing(self) -> None:
-        """Missing field returns empty string."""
-        assert _extract_field("(ref U1)", "value") == ""
-
-    # -- Full ERC execution with mocked subprocess --
 
     async def test_execute_erc_with_mocked_subprocess(self, tmp_path) -> None:
         """Full ERC execution with mocked kicad-cli subprocess."""
@@ -1342,3 +1339,32 @@ class TestDrcVerdictForge551:
 
         assert _count_drc_unconnected({"unresolved": [{}, {}]}) == 2
         assert _count_drc_unconnected({"unconnected_items": [{}]}) == 1
+
+
+@pytest.mark.real_paths
+class TestMissingFiles:
+    """A schematic with no board is a normal state, said plainly (FORGE-172)."""
+
+    async def test_drc_with_no_board_says_so(self, tmp_path) -> None:
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        with pytest.raises(FileNotFoundError, match="no .kicad_pcb board yet"):
+            await server.run_drc({"pcb_file": "drone-fc.kicad_pcb"})
+
+    async def test_every_reader_refuses_a_missing_file(self, tmp_path) -> None:
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        for tool, arg in (
+            ("run_erc", "schematic_file"),
+            ("export_bom", "schematic_file"),
+            ("export_netlist", "schematic_file"),
+            ("get_pin_mapping", "schematic_file"),
+            ("export_gerber", "pcb_file"),
+            ("export_drill", "pcb_file"),
+            ("export_pos", "pcb_file"),
+        ):
+            with pytest.raises(FileNotFoundError, match="no (schematic|board) file at"):
+                await getattr(server, tool)({arg: "nope"})
+
+    def test_relative_paths_resolve_against_the_workspace(self, tmp_path) -> None:
+        (tmp_path / "a.kicad_sch").write_text("(kicad_sch)")
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        assert server._existing("a.kicad_sch", "schematic") == str(tmp_path / "a.kicad_sch")
