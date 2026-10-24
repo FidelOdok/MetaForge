@@ -249,6 +249,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "knowledge.populate_bom",
         # FORGE-544: the per-rail budget, computed rather than hand-summed.
         "power.check_budget",
+        # FORGE-681: battery runtime from the budget's source power.
+        "power.runtime",
         # FORGE-542: simulate the netlist kicad.export_netlist writes.
         "spice.run_simulation",
         "twin.commit_procurement_record",

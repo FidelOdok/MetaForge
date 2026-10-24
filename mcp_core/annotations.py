@@ -117,6 +117,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "web.search",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
+        # FORGE-681: the same, for battery runtime.
+        "power.runtime",
         # FORGE-628: renders and a staged .blend are returned inline and the
         # scratch directory removed; nothing is left behind.
         "blender.render",
