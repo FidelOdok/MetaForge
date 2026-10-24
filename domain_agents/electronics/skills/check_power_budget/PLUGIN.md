@@ -46,6 +46,7 @@ user, rather than working around it silently.
 | Part numbers already chosen | BOMItems via `twin.find_by_property` (`property: "mpn"`) / `twin.get_node` | all |
 | Datasheet figures | `knowledge.search`; `web.search` then `web.fetch`; `knowledge.extract` only if listed | all / core / no profile |
 | The budget arithmetic | `power.check_budget` | electronics |
+| Battery runtime | `power.runtime` | electronics |
 | Keep a datasheet for next time | `knowledge.ingest` | core |
 | Record the budget | `twin.record_document`, `twin.record_decision` | core / all |
 | Budget entity and evidence | `twin.record_engineering_entity`, `twin.record_evidence`, only if listed | not on the dev server |
@@ -132,6 +133,24 @@ switching regulator's `Vout x Iout / (efficiency x Vin)`), `allowed_ma`
 `notes`. A rail whose known load already exceeds its allowance fails even
 with unknowns; otherwise any unknown leaves it `not_established`.
 
+**Regulator heat.** Give each regulator's `theta_ja_c_per_w` (junction to
+ambient as mounted, from its datasheet) and `tj_max_c`, and the request's
+`ambient_c` (the worst case the requirements state). Each regulator then
+returns `dissipation_mw` (LDO `(Vin - Vout) x Iout + Vin x Iq`; switching
+`Pout x (1/eta - 1)`), `junction_c`, `tj_margin_c` and `thermal_status`, and
+the result a separate `thermal_verdict`, `hottest_regulator` and
+`regulator_dissipation_mw`. A hot LDO fails thermally while its rail still
+passes its load budget: say both. A regulator you gave no thermal figures
+for is `not_established`, never assumed cool.
+
+**Runtime.** For a battery-powered design, call `power.runtime` with the
+battery's `capacity_mah` and `nominal_voltage_v` (or `capacity_wh`), its
+`usable_fraction`, `average_load_mw` (the budget's `source_power_mw`, at the
+average duty the requirements state), and if relevant `required_runtime_h`,
+`peak_current_ma` and `max_continuous_ma`. Each figure is
+`{value, source}`. It returns `runtime_h`, `required_capacity_wh` and
+`required_capacity_mah`, and the peak margin.
+
 Show the user the per-rail table from the result, with the source of every
 figure you passed in. If the tool is not in your list, the same rules apply
 by hand; say the sum is yours, not a tool's.
@@ -189,8 +208,10 @@ Only when the user wants it kept, or a flow phase needs it:
 
 ## Limits
 
-- Static worst-case sum only. No transients, inrush, brown-out, ripple or
-  regulator thermal derating unless the user supplies those figures.
+- Static worst-case sum only. No transients, inrush, brown-out or ripple
+  (simulate those with `spice.run_simulation`). Regulator junction
+  temperature is a steady-state `Ta + P x theta_JA` with the datasheet's
+  theta_JA for the stated mounting; copper area and airflow change it.
 - The tool checks the arithmetic, not the figures: a wrong datasheet
   number gives a wrong budget. Cite every one so a person can check it.
 - The budget is valid for the BOM and schematic revision it was built from.
