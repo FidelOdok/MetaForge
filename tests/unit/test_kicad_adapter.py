@@ -354,7 +354,8 @@ class TestKicadConfig:
         assert cfg.work_dir == "/tmp/kicad"
         assert cfg.max_operation_time == 120
         assert cfg.max_memory_mb == 1024
-        assert cfg.supported_versions == ["7", "8"]
+        assert cfg.supported_versions == ["8", "9"]
+        assert cfg.router_cmd[-1] == "/opt/freerouting/freerouting.jar"
 
     def test_custom_config(self) -> None:
         cfg = KicadConfig(
@@ -391,8 +392,8 @@ class TestKicadServer:
     def test_server_version(self, server: KicadServer) -> None:
         assert server.version == "0.1.0"
 
-    def test_registers_eight_tools(self, server: KicadServer) -> None:
-        assert len(server.tool_ids) == 8
+    def test_registers_eleven_tools(self, server: KicadServer) -> None:
+        assert len(server.tool_ids) == 11
         expected = {
             "kicad.run_erc",
             "kicad.run_drc",
@@ -403,6 +404,10 @@ class TestKicadServer:
             # FORGE-680: drill and position files complete the fabrication set.
             "kicad.export_drill",
             "kicad.export_pos",
+            # FORGE-683: Phase 2 generation.
+            "kicad.generate_schematic",
+            "kicad.generate_pcb",
+            "kicad.autoroute_pcb",
         }
         assert set(server.tool_ids) == expected
 
@@ -641,12 +646,12 @@ class TestKicadCliNotAvailable:
 
 
 class TestJsonRpcIntegration:
-    async def test_tool_list_returns_eight_tools(self, server: KicadServer) -> None:
+    async def test_tool_list_returns_eleven_tools(self, server: KicadServer) -> None:
         request = _make_jsonrpc("tool/list")
         raw_response = await server.handle_request(request)
         response = json.loads(raw_response)
         assert "result" in response
-        assert len(response["result"]["tools"]) == 8
+        assert len(response["result"]["tools"]) == 11
 
     async def test_tool_call_erc(self, server_with_mocks: KicadServer) -> None:
         request = _make_jsonrpc(
@@ -691,7 +696,7 @@ class TestJsonRpcIntegration:
         assert response["result"]["adapter_id"] == "kicad"
         assert response["result"]["status"] == "healthy"
         assert response["result"]["version"] == "0.1.0"
-        assert response["result"]["tools_available"] == 8
+        assert response["result"]["tools_available"] == 11
 
     async def test_tool_list_filter_by_capability(self, server: KicadServer) -> None:
         request = _make_jsonrpc("tool/list", {"capability": "erc_validation"})

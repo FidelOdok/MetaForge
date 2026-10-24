@@ -1,0 +1,31 @@
+{
+  "name": "design_pcb",
+  "version": "0.1.0",
+  "domain": "electronics",
+  "agent": "electronics",
+  "description": "Generate a KiCad schematic, board and routing from a circuit description, each judged by KiCad's own ERC, DRC and schematic parity",
+  "phase": 2,
+  "tools_required": [
+    {
+      "tool_id": "kicad.generate_schematic",
+      "capability": "schematic_generation",
+      "required": true
+    },
+    {
+      "tool_id": "kicad.generate_pcb",
+      "capability": "pcb_generation",
+      "required": false
+    },
+    {
+      "tool_id": "kicad.autoroute_pcb",
+      "capability": "pcb_autoroute",
+      "required": false
+    }
+  ],
+  "input_schema": "schema.DesignPcbInput",
+  "output_schema": "schema.DesignPcbOutput",
+  "timeout_seconds": 1200,
+  "retries": 0,
+  "idempotent": false,
+  "tags": ["schematic", "pcb", "layout", "routing", "freerouting", "kicad", "electronics"]
+}

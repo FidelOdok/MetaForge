@@ -239,6 +239,10 @@ PROFILES: dict[str, frozenset[str]] = {
         "firmware.static_check",
         "kicad.export_bom",
         "kicad.export_gerber",
+        # FORGE-683: Phase 2 -- schematic, board and routing from a circuit.
+        "kicad.generate_schematic",
+        "kicad.generate_pcb",
+        "kicad.autoroute_pcb",
         # FORGE-680: drill and pick-and-place complete the fabrication set.
         "kicad.export_drill",
         "kicad.export_pos",

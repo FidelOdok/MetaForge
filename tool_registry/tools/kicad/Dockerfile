@@ -1,8 +1,9 @@
 # MetaForge KiCad Adapter — multi-stage build
 # Usage:  docker build -f tool_registry/tools/kicad/Dockerfile -t metaforge/kicad-adapter .
 #
-# Provides KiCad 8 CLI for ERC, DRC, BOM export, Gerber export, netlist
-# export, and pin mapping extraction (Phase 1 — read-only operations).
+# Provides KiCad 9 CLI for ERC, DRC, BOM, Gerber, drill, position, netlist and
+# pin-mapping (Phase 1, read-only), and the Phase 2 generation tools: the KiCad
+# libraries, pcbnew for board generation, and Freerouting for routing (FORGE-683).
 
 # ── Stage 1: dependencies ────────────────────────────────────────────
 FROM python:3.11-slim AS deps
@@ -35,12 +36,31 @@ WORKDIR /app
 # KiCad 8 is available in Debian testing/unstable repos; for slim images
 # we use the Debian package with minimal GUI deps via --no-install-recommends
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        # KiCad CLI package (provides kicad-cli binary)
+        # KiCad CLI package (provides kicad-cli binary, and pcbnew for /usr/bin/python3)
         kicad \
+        # FORGE-683: the libraries Phase 2 generation draws symbols and footprints
+        # from; nothing is drawn freehand.
+        kicad-symbols \
+        kicad-footprints \
+        # FORGE-683: Freerouting 2.5 runs on Java 25.
+        openjdk-25-jre-headless \
+        ca-certificates \
+        curl \
         # Required runtime libraries
         libgl1 \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
+
+# FORGE-683: Freerouting (GPL-3.0), the autorouter, run as a separate program
+# through KiCad's Specctra export/import. Pinned and checksummed. Its native
+# freerouting-cli build crashes mid-route (a GraalVM serialization error), so
+# the jar runs on the JRE above.
+ARG FREEROUTING_VERSION=2.5.0
+ARG FREEROUTING_SHA256=f6f51bb02245e8e717f9359bd260cc9c5c0b1bc0acc8b7cb2cd5b8ffeb5de3c7
+RUN mkdir -p /opt/freerouting \
+    && curl -fsSL -o /opt/freerouting/freerouting.jar \
+        "https://github.com/freerouting/freerouting/releases/download/v${FREEROUTING_VERSION}/freerouting-${FREEROUTING_VERSION}.jar" \
+    && echo "${FREEROUTING_SHA256}  /opt/freerouting/freerouting.jar" | sha256sum -c -
 
 # Copy Python packages from deps stage
 COPY --from=deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
