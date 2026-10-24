@@ -53,6 +53,7 @@ class ConfigureRtosHandler(SkillBase[ConfigureRtosInput, ConfigureRtosOutput]):
                 input_data.tick_rate_hz,
                 input_data.output_dir,
                 input_data.stack_word_bytes,
+                input_data.cpu_clock_hz,
             )
         except CodegenError as exc:
             raise ValueError(str(exc)) from exc

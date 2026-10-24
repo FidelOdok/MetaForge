@@ -18,6 +18,7 @@ repository's CI built.
 | `ghcr.io/fidelodok/metaforge-kicad-adapter` | KiCad tool adapter |
 | `ghcr.io/fidelodok/metaforge-spice-adapter` | SPICE tool adapter |
 | `ghcr.io/fidelodok/metaforge-openfoam-adapter` | OpenFOAM flow solver adapter (opt-in, `cfd` compose profile; the base is the OpenFOAM Foundation release image, pinned by digest) |
+| `ghcr.io/fidelodok/metaforge-firmware-adapter` | Firmware build and emulation adapter (opt-in, `firmware` compose profile; PlatformIO with the STM32 and ESP32 platforms, Renode, Espressif QEMU) |
 | `ghcr.io/fidelodok/metaforge-occt` | STEP to GLB converter for the viewer |
 | `ghcr.io/fidelodok/metaforge-dashboard` | The production dashboard (static build behind nginx) |
 | `ghcr.io/fidelodok/metaforge-seaweedfs` | The object store: a byte-for-byte copy of the signed SeaweedFS release, mirrored by `mirror-images.yml` (FORGE-577) |

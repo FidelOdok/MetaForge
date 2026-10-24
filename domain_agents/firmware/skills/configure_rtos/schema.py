@@ -36,6 +36,14 @@ class ConfigureRtosInput(BaseModel):
     stack_word_bytes: int = Field(
         default=4, description="Bytes per stack word (4 on a 32-bit MCU); FreeRTOS counts words"
     )
+    cpu_clock_hz: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Core clock for configCPU_CLOCK_HZ (FreeRTOS); omitted, the config uses "
+            "CMSIS SystemCoreClock"
+        ),
+    )
     output_dir: str = Field(default="firmware/rtos", description="Output directory")
 
 
