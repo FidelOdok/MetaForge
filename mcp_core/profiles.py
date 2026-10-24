@@ -235,6 +235,8 @@ PROFILES: dict[str, frozenset[str]] = {
         # on an emulated board, so "it builds" is a result rather than a claim.
         "firmware.build",
         "firmware.run_emulated",
+        # FORGE-675: cppcheck / clang-tidy findings on the same sources.
+        "firmware.static_check",
         "kicad.export_bom",
         "kicad.export_gerber",
         "kicad.export_netlist",

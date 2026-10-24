@@ -20,13 +20,17 @@ from tool_registry.tools.firmware.adapter import (
     FirmwareServer,
     FirmwareToolNotAvailableError,
     _append_build_flags,
+    _at_least,
     _esp_chip,
     _ini_section,
     _merge_flash,
+    _set_env_option,
+    _suppressions,
     check_memory,
     check_uart,
     freertos_port,
     missing_package,
+    parse_check_report,
     parse_diagnostics,
     parse_renode_reads,
     parse_size,
@@ -172,6 +176,22 @@ class TestRecordedOutput:
         assert [(w["file"], w["line"]) for w in warnings] == [("src/main.c", 4)]
         assert parse_size(log) == {"flash": None, "ram": None}
 
+    def test_cppcheck_report(self) -> None:
+        # `pio check --json-output` on a main.c with an out-of-bounds read, a
+        # buffer overrun, a null dereference and an unused variable.
+        report = parse_check_report((FIXTURES / "cppcheck_report.log").read_text(), "/tmp/p")
+        assert report is not None
+        assert report["runs"][0]["tool"] == "cppcheck" and report["runs"][0]["succeeded"]
+        found = {(f["severity"], f["id"], f["line"]) for f in report["findings"]}
+        assert {
+            ("high", "arrayIndexOutOfBounds", 9),
+            ("high", "bufferAccessOutOfBounds", 7),
+            ("high", "nullPointer", 9),
+            ("low", "unusedVariable", 6),
+        } <= found
+        assert all(f["file"] == "src/main.c" for f in report["findings"])
+        assert [f["severity"] for f in report["findings"]][:3] == ["high"] * 3
+
     def test_renode_console_read(self) -> None:
         console = (FIXTURES / "renode_console.log").read_text()
         assert parse_renode_reads(console) == {0x40020C14: 0x1000}
@@ -264,6 +284,16 @@ class TestHelpers:
         )
         assert _ini_section(ini, None) == {"platform": "ststm32", "board": "disco_f407vg"}
         assert _ini_section(ini, "b")["board"] == "x"
+
+    def test_set_env_option_replaces_or_adds(self, tmp_path: Path) -> None:
+        ini = tmp_path / "platformio.ini"
+        ini.write_text("[env:a]\nboard = b\ncheck_tool = pvs\n[env:c]\nboard = d\n")
+        _set_env_option(ini, "a", "check_tool", "cppcheck")
+        _set_env_option(ini, "c", "check_tool", "clangtidy")
+        text = ini.read_text()
+        assert "check_tool = pvs" not in text
+        assert text.count("check_tool = cppcheck") == 1
+        assert text.rstrip().endswith("check_tool = clangtidy")
 
     def test_append_build_flags_extends_or_adds(self, tmp_path: Path) -> None:
         ini = tmp_path / "platformio.ini"
@@ -439,6 +469,113 @@ class TestBuildHandler:
         assert json.loads((lib / "library.json").read_text())["name"] == "FreeRTOS-Kernel"
 
 
+class TestParseCheckReport:
+    def test_findings_after_install_chatter(self) -> None:
+        out = (
+            "Tool Manager: Installing platformio/tool-cppcheck @ ~1.21100.0\n"
+            "Unpacking 0% 100%\n"
+            '[{"env": "a", "tool": "cppcheck", "duration": 2.47, "defects": ['
+            '{"severity": "low", "category": "style", "message": "Unused variable: unused",'
+            ' "file": "/p/src/main.c", "line": 5, "column": 9,'
+            ' "id": "unusedVariable", "cwe": "563"},'
+            ' {"severity": "high", "category": "error", "message": "Null pointer dereference: p",'
+            ' "file": "/p/src/main.c", "line": 8, "column": 13, "id": "nullPointer", "cwe": "476"}'
+            '], "succeeded": true}]\n'
+        )
+        report = parse_check_report(out, "/p")
+        assert report is not None
+        assert report["runs"] == [
+            {"env": "a", "tool": "cppcheck", "succeeded": True, "duration_s": 2.47}
+        ]
+        # Most severe first, paths relative to the project.
+        assert [(f["severity"], f["id"], f["file"], f["line"]) for f in report["findings"]] == [
+            ("high", "nullPointer", "src/main.c", 8),
+            ("low", "unusedVariable", "src/main.c", 5),
+        ]
+
+    def test_no_report(self) -> None:
+        assert parse_check_report("Error: no such env\n") is None
+
+    def test_empty_report_is_a_report(self) -> None:
+        assert parse_check_report("[]\n") == {"runs": [], "findings": []}
+
+    def test_severity_threshold(self) -> None:
+        assert _at_least("high", "high") and _at_least("high", "low")
+        assert not _at_least("low", "high") and not _at_least("medium", "high")
+        assert _at_least("medium", "medium")
+
+    def test_suppressions_need_a_reason_and_a_rule_id(self) -> None:
+        assert _suppressions([{"id": "unusedFunction", "reason": "ISR table, REV-12"}]) == [
+            {"id": "unusedFunction", "reason": "ISR table, REV-12"}
+        ]
+        with pytest.raises(ValueError, match="needs a reason"):
+            _suppressions([{"id": "nullPointer"}])
+        with pytest.raises(ValueError, match="rule id"):
+            _suppressions([{"id": "x; rm -rf /", "reason": "r"}])
+        with pytest.raises(ValueError, match="invalid suppression file"):
+            _suppressions([{"id": "x", "file": "../etc/passwd", "reason": "r"}])
+
+
+class TestStaticCheckHandler:
+    async def _check(self, tmp_path: Path, fake_pio: str, main: str, **kw: object) -> dict:
+        server = _server(tmp_path, pio=fake_pio)
+        return await server.static_check(
+            {
+                "files": [{"path": "src/main.c", "content": main}],
+                "board": "disco_f407vg",
+                "framework": "stm32cube",
+                **kw,
+            }
+        )
+
+    async def test_a_high_finding_fails(self, tmp_path: Path, fake_pio: str) -> None:
+        out = await self._check(tmp_path, fake_pio, "HIGH")
+        assert out["verdict"] == "fail" and not out["passed"]
+        assert out["counts"] == {"high": 1, "medium": 0, "low": 1}
+        assert out["failing_count"] == 1
+        assert out["findings"][0]["id"] == "nullPointer"
+        assert out["findings"][0]["file"] == "src/main.c"
+
+    async def test_style_findings_do_not_fail(self, tmp_path: Path, fake_pio: str) -> None:
+        out = await self._check(tmp_path, fake_pio, "int main(void){}")
+        assert out["verdict"] == "pass" and out["counts"]["low"] == 1
+
+    async def test_fail_on_low_makes_style_fail(self, tmp_path: Path, fake_pio: str) -> None:
+        out = await self._check(tmp_path, fake_pio, "int main(void){}", fail_on="low")
+        assert out["verdict"] == "fail"
+
+    async def test_suppressions_reach_cppcheck_and_are_echoed(
+        self, tmp_path: Path, fake_pio: str
+    ) -> None:
+        sup = [{"id": "unusedVariable", "file": "src/main.c", "reason": "kept for REV-3"}]
+        out = await self._check(tmp_path, fake_pio, "x", suppressions=sup)
+        argv = json.loads((tmp_path / out["project_dir"] / "argv.json").read_text())
+        project = (tmp_path / out["project_dir"]).resolve().as_posix()
+        assert f"cppcheck: --suppress=unusedVariable:{project}/src/main.c" in argv
+        assert out["suppressions"] == sup
+
+    async def test_clangtidy_is_requested_by_name(self, tmp_path: Path, fake_pio: str) -> None:
+        out = await self._check(tmp_path, fake_pio, "x", tools=["cppcheck", "clangtidy"])
+        ini = (tmp_path / out["project_dir"] / "platformio.ini").read_text()
+        assert "check_tool = cppcheck, clangtidy" in ini
+
+    async def test_unknown_tool_is_refused(self, tmp_path: Path, fake_pio: str) -> None:
+        with pytest.raises(ValueError, match="tools must be from"):
+            await self._check(tmp_path, fake_pio, "x", tools=["pclint"])
+
+    async def test_no_report_is_not_established(self, tmp_path: Path, fake_pio: str) -> None:
+        out = await self._check(tmp_path, fake_pio, "NOREPORT")
+        assert out["verdict"] == "not_established"
+        assert out["reason"] == "PlatformIO produced no check report"
+
+    async def test_a_checker_that_did_not_complete_is_not_established(
+        self, tmp_path: Path, fake_pio: str
+    ) -> None:
+        out = await self._check(tmp_path, fake_pio, "CRASH")
+        assert out["verdict"] == "not_established"
+        assert "did not complete" in out["reason"]
+
+
 class TestRunEmulatedHandler:
     async def test_unmodelled_board_is_not_established(self, tmp_path: Path) -> None:
         (tmp_path / "fw.elf").write_bytes(b"\x7fELF")
@@ -566,6 +703,23 @@ def fake_pio(tmp_path: Path) -> str:
 import json, sys, pathlib
 args = sys.argv[1:]
 d = pathlib.Path(args[args.index("-d") + 1])
+if args[0] == "check":
+    (d / "argv.json").write_text(json.dumps(args))
+    main = (d / "src" / "main.c").read_text() if (d / "src" / "main.c").exists() else ""
+    if main == "NOREPORT":
+        print("Error: something went wrong")
+        sys.exit(1)
+    print("Tool Manager: tool-cppcheck already installed")
+    defects = [{"severity": "low", "category": "style", "message": "Unused variable: x",
+                "file": f"{d}/src/main.c", "line": 4, "column": 9, "id": "unusedVariable",
+                "cwe": "563"}]
+    if "HIGH" in main:
+        defects.append({"severity": "high", "category": "error",
+                        "message": "Null pointer dereference: p", "file": f"{d}/src/main.c",
+                        "line": 8, "column": 13, "id": "nullPointer", "cwe": "476"})
+    print(json.dumps([{"env": "app", "tool": "cppcheck", "duration": 1.5,
+                       "defects": defects, "succeeded": main != "CRASH"}]))
+    sys.exit(0)
 main = (d / "src" / "main.c")
 print("PLATFORM: ST STM32 (20.0.0) > ST STM32F4DISCOVERY")
 print("PACKAGES: ")

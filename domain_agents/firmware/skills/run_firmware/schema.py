@@ -47,6 +47,12 @@ class RunFirmwareInput(BaseModel):
         default_factory=list, description="Words to check after the run (Renode only)"
     )
     sim_time_s: float = Field(default=2.0, gt=0, le=600, description="Emulated seconds to run")
+    static_check: bool = Field(
+        default=False, description="Also run firmware.static_check (cppcheck) on the sources"
+    )
+    fail_on: Literal["high", "medium", "low"] = Field(
+        default="high", description="Lowest static-check severity that fails"
+    )
 
     @model_validator(mode="after")
     def _one_source(self) -> RunFirmwareInput:
@@ -85,3 +91,12 @@ class RunFirmwareOutput(BaseModel):
     uart_log: str = Field(default="", description="What the firmware printed (tail)")
     log_tail: str = Field(default="", description="Build log tail when the build failed")
     reason: str = Field(default="", description="Why a step was not established")
+    check_verdict: Verdict | None = Field(
+        default=None, description="firmware.static_check, when it was asked for"
+    )
+    check_counts: dict[str, int] = Field(
+        default_factory=dict, description="Static-check findings per severity"
+    )
+    check_findings: list[dict[str, Any]] = Field(
+        default_factory=list, description="Static-check findings, most severe first"
+    )

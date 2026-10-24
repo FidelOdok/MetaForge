@@ -32,6 +32,7 @@ import re
 import shutil
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,24 @@ _SIZE = re.compile(
 _PLATFORM_LINE = re.compile(r"^PLATFORM:\s*(?P<name>.+?)\s*\((?P<version>[^)]+)\)", re.MULTILINE)
 _PACKAGE = re.compile(r"^\s*-\s*(?P<name>[\w.-]+)\s*@\s*(?P<version>[^\s(]+)", re.MULTILINE)
 _SAFE_REL = re.compile(r"^[\w./ -]+$")
+
+
+#: Static checkers ``pio check`` runs; both are baked into the image.
+CHECK_TOOLS = ("cppcheck", "clangtidy")
+#: PlatformIO's defect severities, most severe first.
+SEVERITIES = ("high", "medium", "low")
+
+
+@dataclass(frozen=True)
+class _Prepared:
+    pio: str
+    run_dir: Path
+    project: Path
+    env: str | None
+    board: str | None
+    info: dict[str, Any] | None
+    platform: str | None
+    rtos_note: dict[str, Any] | None
 
 
 class FirmwareToolNotAvailableError(RuntimeError):
@@ -232,6 +251,81 @@ def missing_package(log: str) -> str | None:
         return None
     last = installs[-1]
     return last.group("pkg") + (f" @ {last.group('ver')}" if last.group("ver") else "")
+
+
+def parse_check_report(output: str, project_dir: str = "") -> dict[str, Any] | None:
+    """Findings from ``pio check --json-output``; None when there is no report.
+
+    PlatformIO prints its install chatter before the JSON array, so the array
+    is taken from the last line that starts one.
+    """
+    start = None
+    for i, line in enumerate(output.splitlines()):
+        if line.lstrip().startswith("[{") or line.strip() == "[]":
+            start = i
+    if start is None:
+        return None
+    try:
+        rows = json.loads("\n".join(output.splitlines()[start:]))
+    except ValueError:
+        return None
+    prefix = project_dir.rstrip("/") + "/" if project_dir else ""
+    findings: list[dict[str, Any]] = []
+    runs: list[dict[str, Any]] = []
+    for row in rows:
+        runs.append(
+            {
+                "env": row.get("env"),
+                "tool": row.get("tool"),
+                "succeeded": bool(row.get("succeeded")),
+                "duration_s": round(float(row.get("duration") or 0.0), 3),
+            }
+        )
+        for d in row.get("defects") or []:
+            findings.append(
+                {
+                    "tool": row.get("tool"),
+                    "severity": str(d.get("severity", "")).lower(),
+                    "category": d.get("category"),
+                    "id": d.get("id"),
+                    "cwe": d.get("cwe"),
+                    "file": _rel(str(d.get("file", "")), prefix),
+                    "line": d.get("line"),
+                    "column": d.get("column"),
+                    "message": d.get("message"),
+                }
+            )
+    order = {sev: i for i, sev in enumerate(SEVERITIES)}
+    findings.sort(key=lambda f: (order.get(f["severity"], 9), f["file"], f["line"] or 0))
+    return {"runs": runs, "findings": findings}
+
+
+def _at_least(severity: str, threshold: str) -> bool:
+    """Whether ``severity`` is ``threshold`` or more severe."""
+    order = {sev: i for i, sev in enumerate(SEVERITIES)}
+    return order.get(severity, 9) <= order[threshold]
+
+
+def _suppressions(items: list[Any]) -> list[dict[str, str]]:
+    """Validated suppressions: a rule id, an optional file, and a reason that says why."""
+    out: list[dict[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("each suppression is {id, file?, reason}")
+        rule = str(item.get("id", "")).strip()
+        reason = str(item.get("reason", "")).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", rule):
+            raise ValueError(f"suppression id must be a rule id, got {rule!r}")
+        if not reason:
+            raise ValueError(f"suppression {rule} needs a reason (who decided, and why)")
+        sup = {"id": rule, "reason": reason}
+        if item.get("file"):
+            f = str(item["file"]).strip().lstrip("/")
+            if ".." in Path(f).parts or not _SAFE_REL.match(f):
+                raise ValueError(f"invalid suppression file: {item['file']!r}")
+            sup["file"] = f
+        out.append(sup)
+    return out
 
 
 def freertos_port(mcu: str) -> str | None:
@@ -424,6 +518,40 @@ class FirmwareServer(McpToolServer):
         )
         self.register_tool(
             manifest=ToolManifest(
+                tool_id="firmware.static_check",
+                adapter_id="firmware",
+                name="Static Check Firmware",
+                description=(
+                    "Run static analysis on firmware sources with PlatformIO's `pio check` in "
+                    "the firmware adapter: cppcheck by default, clang-tidy on request "
+                    "(`tools`). Same project input as firmware.build (`project_path`, or "
+                    "`files` with `board` and `framework`). Returns each finding with its "
+                    "tool, severity (high, medium, low), rule id, CWE and file:line, counts "
+                    "per severity, and `passed`: no finding at or above `fail_on` (default "
+                    "high), so style findings do not fail it. `suppressions` take a rule id, "
+                    "an optional file and a required reason, and are echoed back. A check "
+                    "that did not run is not_established, never a pass."
+                ),
+                capability="firmware_static_analysis",
+                input_schema=_CHECK_SCHEMA,
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "verdict": {"type": "string", "enum": ["pass", "fail", "not_established"]},
+                        "passed": {"type": "boolean"},
+                        "counts": {"type": "object"},
+                        "findings": {"type": "array"},
+                    },
+                },
+                phase=1,
+                resource_limits=ResourceLimits(
+                    max_memory_mb=2048, max_cpu_seconds=600, max_disk_mb=1024
+                ),
+            ),
+            handler=self.static_check,
+        )
+        self.register_tool(
+            manifest=ToolManifest(
                 tool_id="firmware.run_emulated",
                 adapter_id="firmware",
                 name="Run Firmware in an Emulator",
@@ -458,7 +586,13 @@ class FirmwareServer(McpToolServer):
 
     # -- firmware.build -----------------------------------------------------
 
-    async def build(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _prepare(self, arguments: dict[str, Any]) -> _Prepared:
+        """Find PlatformIO, copy the project into a run dir, resolve its board.
+
+        Shared by ``firmware.build`` and ``firmware.static_check`` so both see
+        the same project: the same pinned platform and, on an STM32 with a
+        ``FreeRTOSConfig.h``, the same kernel sources.
+        """
         pio = shutil.which(self.config.pio)
         if pio is None:
             raise FirmwareToolNotAvailableError(
@@ -480,6 +614,12 @@ class FirmwareServer(McpToolServer):
                 f"{', '.join(INSTALLED_PLATFORMS)} installed"
             )
         rtos_note = self._add_freertos(project, env, info)
+        return _Prepared(pio, run_dir, project, env, board, info, platform, rtos_note)
+
+    async def build(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        prep = self._prepare(arguments)
+        pio, run_dir, project, env = prep.pio, prep.run_dir, prep.project, prep.env
+        board, info, platform, rtos_note = prep.board, prep.info, prep.platform, prep.rtos_note
 
         with tracer.start_as_current_span("firmware.build") as span:
             span.set_attribute("firmware.board", board or "")
@@ -545,6 +685,100 @@ class FirmwareServer(McpToolServer):
                 )
             if not success:
                 out["log_tail"] = "\n".join(log.splitlines()[-60:])
+            return out
+
+    # -- firmware.static_check ---------------------------------------------
+
+    async def static_check(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        tools = [str(t).lower() for t in arguments.get("tools") or ["cppcheck"]]
+        unknown = sorted(set(tools) - set(CHECK_TOOLS))
+        if unknown or not tools:
+            raise ValueError(f"tools must be from {', '.join(CHECK_TOOLS)}; got {unknown}")
+        fail_on = str(arguments.get("fail_on", "high")).lower()
+        if fail_on not in SEVERITIES:
+            raise ValueError(f"fail_on must be one of {', '.join(SEVERITIES)}")
+        suppressions = _suppressions(arguments.get("suppressions") or [])
+        prep = self._prepare(arguments)
+
+        with tracer.start_as_current_span("firmware.static_check") as span:
+            span.set_attribute("firmware.board", prep.board or "")
+            cmd = [prep.pio, "check", "-d", str(prep.project), "--json-output"]
+            if prep.env:
+                cmd += ["-e", prep.env]
+            # pio check has no CLI switch for the checker: it is the env's
+            # `check_tool` option.
+            _set_env_option(
+                prep.project / "platformio.ini", prep.env, "check_tool", ", ".join(tools)
+            )
+            for sup in suppressions:
+                if "cppcheck" in tools:
+                    # cppcheck sees absolute paths, so a relative file never matches.
+                    target = (
+                        f"{sup['id']}:{(prep.project / sup['file']).as_posix()}"
+                        if sup.get("file")
+                        else sup["id"]
+                    )
+                    cmd += ["--flags", f"cppcheck: --suppress={target}"]
+            started = time.monotonic()
+            async with self._build_lock:
+                rc, log = await _run_capture(cmd, self.config.max_build_time, cwd=str(prep.project))
+            elapsed = round(time.monotonic() - started, 3)
+            (prep.run_dir / "check.log").write_text(log, encoding="utf-8")
+            report = parse_check_report(log, str(prep.project))
+            timed_out = rc == -9
+            missing = missing_package(log) if report is None else None
+            findings = report["findings"] if report else []
+            counts = {sev: sum(1 for f in findings if f["severity"] == sev) for sev in SEVERITIES}
+            failing = [f for f in findings if _at_least(f["severity"], fail_on)]
+            not_run = [r for r in (report or {}).get("runs", []) if not r["succeeded"]]
+            if timed_out or missing or report is None or not_run:
+                verdict = "not_established"
+            elif failing:
+                verdict = "fail"
+            else:
+                verdict = "pass"
+            span.set_attribute("firmware.verdict", verdict)
+            logger.info(
+                "firmware_static_check_run",
+                board=prep.board,
+                tools=tools,
+                returncode=rc,
+                verdict=verdict,
+                findings=len(findings),
+                seconds=elapsed,
+            )
+            out: dict[str, Any] = {
+                "verdict": verdict,
+                "passed": verdict == "pass",
+                "fail_on": fail_on,
+                "tools": tools,
+                "board": prep.board,
+                "env": prep.env,
+                "counts": counts,
+                "failing_count": len(failing),
+                "findings": findings[:300],
+                "suppressions": suppressions,
+                "runs": (report or {}).get("runs", []),
+                "project_dir": self._ws_rel(prep.project),
+                "log_path": self._ws_rel(prep.run_dir / "check.log"),
+                "check_time_s": elapsed,
+            }
+            if prep.rtos_note:
+                out["freertos"] = prep.rtos_note
+            if timed_out:
+                out["reason"] = f"check exceeded {self.config.max_build_time}s and was stopped"
+            elif missing:
+                out["reason"] = (
+                    f"the check needs {missing}, which is not in the firmware image, and it "
+                    "could not be downloaded"
+                )
+            elif report is None:
+                out["reason"] = "PlatformIO produced no check report"
+                out["log_tail"] = "\n".join(log.splitlines()[-60:])
+            elif not_run:
+                out["reason"] = "a checker did not complete: " + ", ".join(
+                    f"{r['env']}/{r['tool']}" for r in not_run
+                )
             return out
 
     def _stage_project(self, arguments: dict[str, Any], project: Path) -> str | None:
@@ -950,6 +1184,36 @@ def _append_build_flags(ini: Path, env: str | None, flags: list[str]) -> None:
     ini.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def _set_env_option(ini: Path, env: str | None, key: str, value: str) -> None:
+    """Set ``key = value`` in the env being built, replacing any existing value."""
+    lines = ini.read_text(encoding="utf-8").splitlines()
+    target = (
+        f"[env:{env}]"
+        if env
+        else next((ln.strip() for ln in lines if ln.strip().startswith("[env:")), None)
+    )
+    if target is None:
+        return
+    out: list[str] = []
+    in_target, done = False, False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            if in_target and not done:
+                out.append(f"{key} = {value}")
+                done = True
+            in_target = stripped == target
+        elif in_target and re.match(rf"^{re.escape(key)}\s*=", line):
+            if not done:
+                out.append(f"{key} = {value}")
+                done = True
+            continue
+        out.append(line)
+    if in_target and not done:
+        out.append(f"{key} = {value}")
+    ini.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
 def _pin_platform(ini: Path, platform: str) -> None:
     """Name the installed platform version in a generated ini, so nothing is fetched."""
     version = os.environ.get(f"{platform.upper()}_VERSION")
@@ -1048,6 +1312,37 @@ _BUILD_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string"},
             "description": "Extra compiler flags with files, e.g. -DHSE_VALUE=8000000",
+        },
+    },
+}
+
+_CHECK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        **_BUILD_SCHEMA["properties"],
+        "tools": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(CHECK_TOOLS)},
+            "description": "Checkers to run; default [cppcheck]",
+        },
+        "fail_on": {
+            "type": "string",
+            "enum": list(SEVERITIES),
+            "default": "high",
+            "description": "Lowest severity that fails the check",
+        },
+        "suppressions": {
+            "type": "array",
+            "description": "cppcheck rules to suppress, each with the reason it is accepted",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "file": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["id", "reason"],
+            },
         },
     },
 }

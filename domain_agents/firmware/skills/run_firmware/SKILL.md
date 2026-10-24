@@ -5,12 +5,14 @@ Build firmware with PlatformIO and, when checks are given, run it on an emulated
 ## What it does
 
 1. Invokes `firmware.build` in the firmware-adapter container (FORGE-674): PlatformIO compiles the project with the STM32 (STM32Cube) or ESP32 (ESP-IDF) toolchain baked into the image. A project with a `FreeRTOSConfig.h` on an STM32 gets the FreeRTOS kernel compiled in
-2. If the build passed and UART or memory checks were given, invokes `firmware.run_emulated` (FORGE-677): Renode for STM32F4-Discovery, Nucleo-F767ZI and Nucleo-H753ZI; Espressif QEMU for the ESP32
-3. Returns the compiler's diagnostics, flash and RAM use, and each check's status; it records nothing itself
+2. With `static_check`, invokes `firmware.static_check` (FORGE-675): `pio check` with cppcheck on the same sources, findings by severity; fails on `fail_on` (default high) and above
+3. If the build passed and UART or memory checks were given, invokes `firmware.run_emulated` (FORGE-677): Renode for STM32F4-Discovery, Nucleo-F767ZI and Nucleo-H753ZI; Espressif QEMU for the ESP32
+4. Returns the compiler's diagnostics, flash and RAM use, and each check's status; it records nothing itself
 
 ## Tools Required
 
 - `firmware.build` -- PlatformIO compile, diagnostics, flash/RAM
+- `firmware.static_check` -- cppcheck / clang-tidy findings (optional)
 - `firmware.run_emulated` -- Renode / Espressif QEMU run with UART and memory checks (optional)
 
 ## Input

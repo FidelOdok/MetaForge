@@ -28,7 +28,6 @@ Not for:
   hardware; MetaForge has no tool for it.
 - Timing: emulation is functional, not cycle-accurate. Do not quote boot
   time, tick counts or throughput from an emulated run.
-- Static analysis (cppcheck): not yet a tool.
 
 ## Tools and profile
 
@@ -36,6 +35,7 @@ Not for:
 |---|---|---|
 | Check the connection | `health.check` | every profile |
 | Build | `firmware.build` | `electronics` |
+| Static analysis | `firmware.static_check` | `electronics` |
 | Run on an emulated board | `firmware.run_emulated` | `electronics` |
 | Pin map for the HAL | `kicad.get_pin_mapping` | `electronics` |
 | Record the result | `twin.record_document` | `core` |
@@ -88,7 +88,21 @@ package versions) and `elf_path`. On failure, `log_tail` holds the end of
 the build log. Report errors at their file and line, as the compiler said
 them; do not paraphrase them into something else.
 
-### 3. Run it (when there is something to check)
+### 3. Static analysis (when asked, or before a review)
+
+Call `firmware.static_check` with the same `files`/`project_path`, `board`
+and `framework`. It runs `pio check` with cppcheck (add `tools:
+["cppcheck", "clangtidy"]` for clang-tidy too) on the project's sources and
+returns `findings` (tool, severity, rule `id`, CWE, file:line, message),
+`counts` per severity, and `verdict`: `fail` when a finding is at or above
+`fail_on` (default `high`), so style findings alone do not fail it.
+
+Report high findings at their file and line with the rule id. Never
+suppress a finding to make the check pass: a suppression needs the user's
+reason (`suppressions: [{id, file?, reason}]`), it is echoed in the result,
+and it belongs in the recorded result too.
+
+### 4. Run it (when there is something to check)
 
 Call `firmware.run_emulated` with the `elf_path` and the same `board`, and
 the user's checks:
@@ -106,7 +120,7 @@ Renode runs `disco_f407vg` (UART: USART2), `nucleo_f767zi` and
 modelled boards: say that the firmware built but was not run. Never call a
 `not_established` run a pass.
 
-### 4. Record
+### 5. Record
 
 1. `twin.record_document` with `document_type: "simulation_result"`, a
    `name` naming the firmware, board and commit or revision, and a
@@ -121,7 +135,7 @@ modelled boards: say that the firmware built but was not run. Never call a
    fit, record it with `twin.record_decision`, with the original value as
    the alternative.
 
-### 5. Report
+### 6. Report
 
 - Build: verdict, errors at file:line, flash and RAM against the part.
 - Run: emulator, each check pass/fail/not_established, the UART lines.
@@ -132,6 +146,7 @@ modelled boards: say that the firmware built but was not run. Never call a
 - [ ] Every "it builds" rests on a `firmware.build` with verdict `pass`
 - [ ] Every "it boots" rests on a `firmware.run_emulated` with verdict `pass`
 - [ ] Errors quoted at the compiler's file and line
+- [ ] Every suppressed static-check rule carries the user's reason
 - [ ] No timing claim drawn from an emulated run
 - [ ] The recorded result names the board, toolchain and emulator versions
 

@@ -1320,18 +1320,19 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 | Property | Details |
 |----------|---------|
 | Docker Image | `ghcr.io/fidelodok/metaforge-firmware-adapter`, published by CI (FORGE-674/677; `tool_registry/tools/firmware/Dockerfile`) |
-| Base Image | `python:3.11-slim`, with PlatformIO 6.2.0 and its ST STM32 20.0.0 (STM32Cube for F4, F7, H7) and Espressif 32 7.1.3 (ESP-IDF) platforms installed at image build by building seed projects; Renode 1.17.0 (portable); Espressif QEMU 9.2.2 (xtensa); FreeRTOS-Kernel V11.3.1 sources |
+| Base Image | `python:3.11-slim`, with PlatformIO 6.2.0 and its ST STM32 20.0.0 (STM32Cube for F4, F7, H7) and Espressif 32 7.1.3 (ESP-IDF) platforms installed at image build by building seed projects, and cppcheck and clang-tidy by checking one; Renode 1.17.0 (portable); Espressif QEMU 9.2.2 (xtensa); FreeRTOS-Kernel V11.3.1 sources |
 | Transport | HTTP JSON-RPC on port 8105 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_FIRMWARE_URL` |
 | Workspace | Shares `adapter-workspace`; a project is copied to `firmware/<run id>/project` and built there, and emulator runs write under `firmware/emulation/<run id>` |
 | Compose | Opt-in under the `firmware` profile; limited to 4 CPUs and 4 GB, one build at a time |
 | Network | None needed at run time: toolchains, frameworks and Renode's SVD files are in the image, board data is read from the platforms' manifests, and PlatformIO's upgrade check is pushed out (offline it otherwise waits a minute per call). A build needing a package that is not in the image is `not_established`, naming the package |
-| Tools | `firmware.build`, `firmware.run_emulated` |
+| Tools | `firmware.build`, `firmware.static_check`, `firmware.run_emulated` |
 
-**Tools provided** (FORGE-674, FORGE-677):
+**Tools provided** (FORGE-674, FORGE-675, FORGE-677):
 
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
 | `firmware.build` | `firmware_build` | Compile `project_path` (a PlatformIO project) or `files` with `board` and `framework` (`stm32cube`, `espidf`). Adds the FreeRTOS kernel to an STM32 project carrying a `FreeRTOSConfig.h`. Returns `verdict` (`pass`, `fail`, `not_established` on timeout), `error_count`, `warning_count`, `diagnostics` (file, line, column, severity, message), `flash` and `ram` (`used_bytes`, `total_bytes`, `used_pct`), `toolchain`, `elf_path`, `log_path`, and `log_tail` on failure. A board outside the installed platforms is a JSON-RPC error. |
+| `firmware.static_check` | `firmware_static_analysis` | `pio check` on the same project input as `firmware.build`, with `tools` (`cppcheck` default, `clangtidy`), `fail_on` (`high` default) and `suppressions` (`{id, file?, reason}`, cppcheck). Returns `verdict`, `passed`, `findings` (tool, severity, category, id, cwe, file, line, column, message), `counts` per severity, `runs` (each checker and whether it completed) and `log_path`. |
 | `firmware.run_emulated` | `firmware_emulation` | Run `elf_path` for `board` for `sim_time_s` emulated seconds on Renode (STM32F4-Discovery, Nucleo-F767ZI, Nucleo-H753ZI) or Espressif QEMU (ESP32), and check `uart_expect` (in order), `uart_forbid` and, on Renode, `memory_expect`. Returns `verdict`, the `emulator` and its version, each assertion with its status, and the UART log. An unmodelled board is `not_established` with the list of modelled boards. |
 
 ---

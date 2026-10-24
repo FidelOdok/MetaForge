@@ -12,6 +12,11 @@
       "required": true
     },
     {
+      "tool_id": "firmware.static_check",
+      "capability": "firmware_static_analysis",
+      "required": false
+    },
+    {
       "tool_id": "firmware.run_emulated",
       "capability": "firmware_emulation",
       "required": false

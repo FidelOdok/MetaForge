@@ -53,6 +53,11 @@ class RunFirmwareHandler(SkillBase[RunFirmwareInput, RunFirmwareOutput]):
         if input_data.env:
             args["env"] = input_data.env
         built: dict[str, Any] = await self.context.mcp.invoke("firmware.build", args, timeout=900)
+        checked: dict[str, Any] | None = None
+        if input_data.static_check:
+            checked = await self.context.mcp.invoke(
+                "firmware.static_check", {**args, "fail_on": input_data.fail_on}, timeout=900
+            )
 
         out = RunFirmwareOutput(
             work_product_id=input_data.work_product_id,
@@ -67,6 +72,10 @@ class RunFirmwareHandler(SkillBase[RunFirmwareInput, RunFirmwareOutput]):
             log_tail=str(built.get("log_tail", "")),
             reason=str(built.get("reason", "")),
         )
+        if checked is not None:
+            out.check_verdict = checked.get("verdict", "not_established")
+            out.check_counts = dict(checked.get("counts", {}))
+            out.check_findings = list(checked.get("findings", []))
         if not input_data.emulate or out.build_verdict != "pass" or not out.elf_path:
             return out
 
