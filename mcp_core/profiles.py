@@ -404,6 +404,8 @@ DISCIPLINE_PROFILES: dict[str, str] = {
     "mechanical": "mechanical_product",
     "simulation": "simulation",
     "electronics": "electronics",
+    # FORGE-676: the firmware tools live on the electronics profile.
+    "firmware": "electronics",
     "supply_chain": "electronics",
     "robotics": "robotics",
     "manufacturing": "manufacturing",
