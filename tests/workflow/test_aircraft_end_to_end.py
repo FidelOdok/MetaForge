@@ -57,7 +57,7 @@ REQUIREMENTS = {
     "air_density_kg_m3": 1.225,  # ISA sea level, the condition the requirement names
     "required_endurance_min": 60.0,
     "required_static_margin": 0.10,
-    "avionics_power_w": 10.0,
+    "electronics_power_w": 10.0,
     "usable_battery_fraction": 0.8,
     "propulsive_efficiency": 0.55,  # propeller x motor x ESC datasheets
 }
@@ -185,7 +185,7 @@ class AircraftBrain:
                     {
                         "usable_fraction": fig(now["usable_battery_fraction"], "cell datasheet"),
                         "propulsion_power_w": fig(cruise.electrical_power_w, "cruise run"),
-                        "avionics_power_w": fig(now["avionics_power_w"], "REQ-AVIONICS"),
+                        "avionics_power_w": fig(now["electronics_power_w"], "REQ-AVIONICS"),
                         "required_endurance_min": fig(now["required_endurance_min"], "REQ"),
                     }
                 )
