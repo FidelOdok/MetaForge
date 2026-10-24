@@ -7,8 +7,12 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+# Install from the lockfile. With only package.json, every build resolved the
+# whole tree afresh from the registry, so an upstream release could break an
+# image nobody changed -- it did from 2026-10-22 (npm: "Cannot read properties
+# of null (reading edgesOut)"). npm ci installs exactly what was tested.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 
