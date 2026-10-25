@@ -3387,6 +3387,10 @@ button:disabled {
   white-space: nowrap;
 }
 .tw-thread-arrow.is-linked span { color: var(--mf-c-3dd68c); }
+.tw-thread-arrow.is-stale::before { border-top-color: var(--mf-c-f5b04d); }
+.tw-thread-arrow.is-stale::after { border-left-color: var(--mf-c-f5b04d); }
+.tw-thread-arrow.is-stale span { color: var(--mf-c-f5b04d); }
+.tw-thread > p.tw-mfg-intro + h3 { margin-top: 22px; }
 .tw-thread-from { font-size: 11px; color: var(--mf-c-9a9aaa); font-style: italic; }
 .tw-mfg-hint code {
   font-family: 'Roboto Mono', monospace;

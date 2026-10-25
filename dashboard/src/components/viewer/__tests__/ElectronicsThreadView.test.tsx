@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '../../../test/test-utils';
 import type { TwinNode, TwinRelationship } from '../../../types/twin';
-import { ElectronicsThreadView, currentOf, isLinked } from '../ElectronicsThreadView';
+import { ElectronicsThreadView, currentOf, isLinked, linkState } from '../ElectronicsThreadView';
 
 vi.mock('../../../api/endpoints/twin', () => ({
   nodeNamedFileUrl: (id: string, path: string) => `/files/${id}/${path}`,
@@ -81,5 +81,17 @@ describe('ElectronicsThreadView (FORGE-687)', () => {
       <ElectronicsThreadView nodes={[wp('bom', 'bom'), wp('sch', 'schematic')]} relationships={[]} onSelect={() => {}} />,
     );
     expect(screen.getByLabelText('not linked')).toBeInTheDocument();
+  });
+
+  it('shows a link to an earlier revision as out of date, not as unlinked', () => {
+    const sch1 = wp('sch-1', 'schematic', {}, { item_key: 'SCH-FC', item_revision: 1 });
+    const sch2 = wp('sch-2', 'schematic', {}, { item_key: 'SCH-FC', item_revision: 2 });
+    const board = wp('pcb', 'pcb_layout');
+    const all = [wp('bom', 'bom'), sch1, sch2, board];
+    const rels = [rel('pcb', 'sch-1'), rel('sch-2', 'bom')];
+    expect(linkState([board], [sch2], all, rels)).toEqual({ state: 'stale', staleFrom: '@1' });
+    render(<ElectronicsThreadView nodes={all} relationships={rels} onSelect={() => {}} />);
+    expect(screen.getByLabelText('from @1')).toBeInTheDocument();
+    expect(screen.getByText(/1 of 6 links\s*, 1 out of date/)).toBeInTheDocument();
   });
 });

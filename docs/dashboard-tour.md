@@ -311,8 +311,11 @@ revision of what is recorded, with the sheet or board preview where there
 is one, and each arrow is solid and labelled *generated from* only when
 the later work product is linked `GENERATED_FROM` the earlier one in the
 graph; *not linked* means both are recorded but the link was not passed
-(`source_node_ids` on `twin.record_design_files`). A stage with nothing
-recorded names the tools that produce it.
+(`source_node_ids` on `twin.record_design_files`). An amber *from @1*
+means the later work product was made from an earlier revision of the one
+before it (the board from schematic @1, after the schematic moved to @2), so
+it is out of date and wants regenerating. A stage with nothing recorded
+names the tools that produce it.
 
 The Model tab shows the model standing on a visible workplane, turned by
 a Tinkercad-style turntable (FORGE-620). **Right-drag rotates,
