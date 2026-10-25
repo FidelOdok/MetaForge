@@ -1,0 +1,38 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-10-25T15:42:45+0000",
+    "kicad_version": "9.0.2",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/cd583d4c-4a05-4b32-a482-7b7a421235d1",
+            "violations": [
+                {
+                    "description": "Pins of type Bidirectional and Power output are connected",
+                    "items": [
+                        {
+                            "description": "Symbol U3 Pin 5 [SDO, Bidirectional, Line]",
+                            "pos": {
+                                "x": 1.7526,
+                                "y": 0.4826
+                            },
+                            "uuid": "9ed9dd08-ae03-4483-b069-4b54cce61843"
+                        },
+                        {
+                            "description": "Symbol #FLG02 Pin 1 [Power output, Line]",
+                            "pos": {
+                                "x": 3.048,
+                                "y": 2.3368
+                            },
+                            "uuid": "682cdc45-863e-4c91-b1e5-12b5d53a2f9c"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "pin_to_pin"
+                }
+            ]
+        }
+    ],
+    "source": "drone-fc.kicad_sch"
+}

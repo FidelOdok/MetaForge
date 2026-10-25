@@ -1230,59 +1230,84 @@ class KicadServer(McpToolServer):
 def _parse_erc_violations(report: dict[str, Any], severity_filter: str) -> list[dict[str, Any]]:
     """Parse ERC violations from kicad-cli JSON report.
 
-    KiCad 8 JSON ERC report format:
+    KiCad 8 and 9 group violations by sheet (FORGE-686):
     {
         "source": "...",
-        "date": "...",
-        "kicad_version": "...",
-        "sheets": [...],
-        "violations": [
+        "kicad_version": "9.0.2",
+        "sheets": [
             {
-                "type": "...",
-                "description": "...",
-                "severity": "error"|"warning",
-                "items": [
-                    {"description": "...", "sheet": "...", "pos": {"x": ..., "y": ...}}
+                "path": "/",
+                "violations": [
+                    {
+                        "type": "pin_not_connected",
+                        "description": "Pin not connected",
+                        "severity": "error"|"warning",
+                        "items": [
+                            {"description": "Symbol U4 Pin 1 [VIN, Power input, Line]",
+                             "pos": {"x": ..., "y": ...}, "uuid": "..."}
+                        ]
+                    }
                 ]
             }
         ]
     }
+
+    A top-level ``violations`` list is read as well, under the root sheet.
+    Reading only that list made every report parse as clean.
     """
-    raw_violations = report.get("violations", [])
+    groups: list[tuple[str, list[dict[str, Any]]]] = [
+        (s.get("path", ""), s.get("violations", [])) for s in report.get("sheets", [])
+    ]
+    groups.append(("", report.get("violations", [])))
     result: list[dict[str, Any]] = []
 
-    for v in raw_violations:
-        severity = v.get("severity", "error")
-        if severity_filter != "all" and severity != severity_filter:
-            continue
+    for sheet_path, raw_violations in groups:
+        for v in raw_violations:
+            severity = v.get("severity", "error")
+            if severity_filter != "all" and severity != severity_filter:
+                continue
 
-        # Extract component and sheet info from items
-        items = v.get("items", [])
-        sheet = ""
-        component = ""
-        pin = ""
-        if items:
-            first_item = items[0]
-            sheet = first_item.get("sheet", "")
-            desc = first_item.get("description", "")
-            # Try to extract component reference from description
-            if ":" in desc:
-                component = desc.split(":")[0].strip()
-            if len(items) > 1:
-                pin = items[1].get("description", "")
+            items = v.get("items", [])
+            sheet = sheet_path
+            component = ""
+            pin = ""
+            if items:
+                first_item = items[0]
+                sheet = first_item.get("sheet", sheet)
+                component, pin = _erc_item_ref(first_item.get("description", ""))
+                if len(items) > 1 and not pin:
+                    pin = items[1].get("description", "")
 
-        result.append(
-            {
-                "rule_id": v.get("type", ""),
-                "severity": severity,
-                "message": v.get("description", ""),
-                "sheet": sheet,
-                "component": component,
-                "pin": pin,
-            }
-        )
+            result.append(
+                {
+                    "rule_id": v.get("type", ""),
+                    "severity": severity,
+                    "message": v.get("description", ""),
+                    "sheet": sheet,
+                    "component": component,
+                    "pin": pin,
+                    "items": [i.get("description", "") for i in items],
+                }
+            )
 
     return result
+
+
+_ERC_SYMBOL_PIN = re.compile(r"^Symbol\s+(\S+)\s+Pin\s+(\S+)")
+
+
+def _erc_item_ref(desc: str) -> tuple[str, str]:
+    """Component reference and pin number from an ERC item description.
+
+    KiCad 9 writes ``Symbol U4 Pin 1 [VIN, Power input, Line]``; older
+    reports used ``U1: pin VCC not connected``.
+    """
+    m = _ERC_SYMBOL_PIN.match(desc)
+    if m:
+        return m.group(1), m.group(2)
+    if ":" in desc:
+        return desc.split(":")[0].strip(), ""
+    return "", ""
 
 
 def _parse_drc_violations(report: dict[str, Any], severity_filter: str) -> list[dict[str, Any]]:

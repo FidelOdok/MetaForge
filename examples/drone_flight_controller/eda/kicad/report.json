@@ -3,8 +3,21 @@
   "verdict": "pass",
   "erc": {
    "errors": 0,
-   "warnings": 0,
-   "violations": [],
+   "warnings": 1,
+   "violations": [
+    {
+     "rule_id": "pin_to_pin",
+     "severity": "warning",
+     "message": "Pins of type Bidirectional and Power output are connected",
+     "sheet": "/",
+     "component": "U3",
+     "pin": "5",
+     "items": [
+      "Symbol U3 Pin 5 [SDO, Bidirectional, Line]",
+      "Symbol #FLG02 Pin 1 [Power output, Line]"
+     ]
+    }
+   ],
    "passed": true
   },
   "netlist_mismatched": []
