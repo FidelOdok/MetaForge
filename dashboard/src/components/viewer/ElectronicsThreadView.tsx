@@ -15,6 +15,9 @@ import { iconForNode } from '../../utils/wp-icons';
  * board preview where there is one. Each arrow says whether the downstream
  * node really is linked GENERATED_FROM the upstream one in the graph, since
  * that link is what lets a changed part be traced to every file it touches.
+ * A link to an earlier revision of the upstream item is shown as such: the
+ * board was made from schematic @1 and the schematic is now @2, so the board
+ * is out of date, which is different from never having been linked.
  * A stage with nothing recorded names the tools that produce it.
  */
 
@@ -91,6 +94,32 @@ export function isLinked(down: TwinNode[], up: TwinNode[], relationships: TwinRe
   return relationships.some((r) => r.type === 'generated_from' && d.has(r.sourceId) && u.has(r.targetId));
 }
 
+export type LinkState = 'linked' | 'stale' | 'none';
+
+/**
+ * 'linked' when a current downstream node is generated from a current
+ * upstream one; 'stale' when it is generated from an earlier revision of an
+ * upstream item (`staleFrom` names the revision); else 'none'.
+ */
+export function linkState(
+  down: TwinNode[],
+  up: TwinNode[],
+  all: TwinNode[],
+  relationships: TwinRelationship[],
+): { state: LinkState; staleFrom?: string } {
+  if (isLinked(down, up, relationships)) return { state: 'linked' };
+  const d = new Set(down.map((n) => n.id));
+  const keys = new Set(up.map((n) => n.properties.item_key).filter(Boolean).map(String));
+  const byId = new Map(all.map((n) => [n.id, n]));
+  for (const r of relationships) {
+    if (r.type !== 'generated_from' || !d.has(r.sourceId)) continue;
+    const target = byId.get(r.targetId);
+    const key = target?.properties.item_key ? String(target.properties.item_key) : '';
+    if (key && keys.has(key)) return { state: 'stale', staleFrom: `@${target?.properties.item_revision ?? '?'}` };
+  }
+  return { state: 'none' };
+}
+
 function StageCard({
   stage,
   nodes,
@@ -136,18 +165,20 @@ function StageCard({
   );
 }
 
-function Arrow({ linked, present }: { linked: boolean; present: boolean }) {
-  const label = !present ? '' : linked ? 'generated from' : 'not linked';
+function Arrow({ state, staleFrom, present }: { state: LinkState; staleFrom?: string; present: boolean }) {
+  const label = !present ? '' : state === 'linked' ? 'generated from' : state === 'stale' ? `from ${staleFrom}` : 'not linked';
   return (
     <div
-      className={`tw-thread-arrow ${linked ? 'is-linked' : 'is-unlinked'}`}
+      className={`tw-thread-arrow ${state === 'linked' ? 'is-linked' : state === 'stale' ? 'is-stale' : 'is-unlinked'}`}
       aria-label={label || 'waiting'}
       title={
-        linked
+        state === 'linked'
           ? 'Linked GENERATED_FROM in the twin'
-          : present
-            ? 'Both are recorded, but not linked: pass source_node_ids when recording'
-            : 'Waiting for both ends to be recorded'
+          : state === 'stale'
+            ? `Made from revision ${staleFrom} of the earlier stage, which has been revised since: regenerate it`
+            : present
+              ? 'Both are recorded, but not linked: pass source_node_ids when recording'
+              : 'Waiting for both ends to be recorded'
       }
     >
       <span>{label}</span>
@@ -167,11 +198,13 @@ export function ElectronicsThreadView({
   const current = new Map(ALL_STAGES.map((s) => [s.type, currentOf(nodes, s.type)]));
   const at = (s: Stage) => current.get(s.type) ?? [];
   const link = (down: Stage, up: Stage) => ({
-    linked: isLinked(at(down), at(up), relationships),
+    ...linkState(at(down), at(up), nodes, relationships),
     present: at(down).length > 0 && at(up).length > 0,
   });
   const recorded = ALL_STAGES.filter((s) => at(s).length > 0).length;
-  const linkedCount = THREAD_LINKS.filter(([d, u]) => link(d, u).linked).length;
+  const states = THREAD_LINKS.map(([d, u]) => link(d, u).state);
+  const linkedCount = states.filter((s) => s === 'linked').length;
+  const staleCount = states.filter((s) => s === 'stale').length;
 
   return (
     <div className="tw-assembly tw-thread" data-testid="electronics-thread">
@@ -180,6 +213,7 @@ export function ElectronicsThreadView({
         <h2>Electronics thread</h2>
         <span className="tw-mfg-count">
           {recorded} of {ALL_STAGES.length} recorded, {linkedCount} of {THREAD_LINKS.length} links
+          {staleCount > 0 ? `, ${staleCount} out of date` : ''}
         </span>
       </div>
       <p className="tw-mfg-intro">
