@@ -171,3 +171,23 @@ describe('is3dEngine', () => {
     expect(is3dEngine('markdown')).toBe(false);
   });
 });
+
+describe('previewEngineFor: design files (FORGE-687)', () => {
+  const files = { files: [{ path: 'a.kicad_sch' }], previews: [], layers: [], buildOutputs: [], sources: [] };
+
+  it.each(['schematic', 'pcb_layout', 'gerber', 'pick_and_place', 'pinmap', 'firmware_source'])(
+    'a %s kept by twin.record_design_files uses the design-files engine',
+    (wpType) => {
+      expect(previewEngineFor({ ...wp(wpType, 'kicad_sch'), designFiles: files }).engine).toBe('design');
+    },
+  );
+
+  it('an imported schematic with no design files keeps the format route', () => {
+    expect(engine('schematic', 'kicad_sch')).toBe('kicad');
+  });
+
+  it('is labelled and is not a text engine', () => {
+    expect(ENGINE_LABELS.design).toBe('Design files');
+    expect(TEXT_ENGINES.has('design')).toBe(false);
+  });
+});

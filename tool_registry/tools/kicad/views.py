@@ -7,6 +7,9 @@ adapter resolves each footprint's model path itself.
 ``kicad.render_pcb`` renders the board with kicad-cli's ray tracer (top,
 bottom, or an isometric view) to PNG, for review.
 
+``kicad.export_svg`` plots a schematic (one SVG per sheet) or a board side to SVG, for
+previews (FORGE-687).
+
 ``kicad.update_components`` changes the value, footprint or fields of named
 references in a schematic (and a board's value and fields), writing a new
 revision in a new folder, then re-runs ERC. A footprint change makes the
@@ -99,6 +102,36 @@ def register_view_tools(server: KicadServer) -> None:
             resource_limits=ResourceLimits(max_memory_mb=2048, max_cpu_seconds=300),
         ),
         handler=lambda args: render_pcb(server, args),
+    )
+    server.register_tool(
+        manifest=ToolManifest(
+            tool_id="kicad.export_svg",
+            adapter_id="kicad",
+            name="Export SVG",
+            description=(
+                "Plot a schematic (one SVG per sheet) or a board (one SVG of `layers`, "
+                "default the top side: copper, silkscreen, mask and outline, cropped to the "
+                "board) with kicad-cli, for previews. Give `schematic_file` or `pcb_file`."
+            ),
+            capability="eda_svg_export",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "schematic_file": {"type": "string"},
+                    "pcb_file": {"type": "string"},
+                    "layers": {
+                        "type": "string",
+                        "description": (
+                            "Board layers, comma separated (e.g. B.Cu,B.Silkscreen,Edge.Cuts)"
+                        ),
+                    },
+                },
+            },
+            output_schema={"type": "object"},
+            phase=2,
+            resource_limits=ResourceLimits(max_memory_mb=1024, max_cpu_seconds=120),
+        ),
+        handler=lambda args: export_svg(server, args),
     )
     server.register_tool(
         manifest=ToolManifest(
@@ -267,6 +300,69 @@ async def render_pcb(server: KicadServer, arguments: dict[str, Any]) -> dict[str
         }
         if arguments.get("inline"):
             result["png_base64"] = base64.b64encode(out.read_bytes()).decode()
+        return result
+
+
+# -- svg ------------------------------------------------------------------------------------
+
+#: The board's top side as a reviewer sees it (FORGE-687).
+TOP_LAYERS = "F.Cu,F.Paste,F.Silkscreen,F.Mask,Edge.Cuts"
+
+
+async def export_svg(server: KicadServer, arguments: dict[str, Any]) -> dict[str, Any]:
+    sch, pcb = arguments.get("schematic_file"), arguments.get("pcb_file")
+    if bool(sch) == bool(pcb):
+        raise ValueError("give exactly one of schematic_file or pcb_file")
+    from tool_registry.tools.kicad.generation import _run
+
+    cli, timeout = server.config.kicad_cli, float(server.config.max_operation_time)
+    with tracer.start_as_current_span("kicad.export_svg") as span:
+        if sch:
+            src = server._existing(str(sch), "schematic")
+            out_dir = Path(server.config.work_dir) / "svg" / f"{Path(src).stem}-sch"
+            shutil.rmtree(out_dir, ignore_errors=True)
+            out_dir.mkdir(parents=True)
+            cmd = [cli, "sch", "export", "svg", "--exclude-drawing-sheet", "-o", str(out_dir), src]
+            rc, stdout, err = await _run(cmd, timeout)
+            files = sorted(out_dir.glob("*.svg"))
+            kind, layers = "schematic", ""
+        else:
+            src = server._existing(str(pcb), "board")
+            layers = str(arguments.get("layers") or TOP_LAYERS)
+            out = Path(server.config.work_dir) / "svg" / f"{Path(src).stem}-pcb.svg"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.unlink(missing_ok=True)
+            cmd = [
+                cli,
+                "pcb",
+                "export",
+                "svg",
+                "--layers",
+                layers,
+                "--mode-single",
+                "--page-size-mode",
+                "2",
+                "--exclude-drawing-sheet",
+                "--drill-shape-opt",
+                "2",
+                "-o",
+                str(out),
+                src,
+            ]
+            rc, stdout, err = await _run(cmd, timeout)
+            files = [out] if out.is_file() else []
+            kind = "board"
+        span.set_attribute("kicad.svg.kind", kind)
+        span.set_attribute("kicad.svg.files", len(files))
+        if rc != 0 or not files:
+            raise ValueError(f"kicad-cli svg export failed: {(err or stdout).strip()[-400:]}")
+        logger.info("svg_exported", kind=kind, files=len(files))
+        result: dict[str, Any] = {
+            "kind": kind,
+            "files": [{"file": str(f), "bytes": f.stat().st_size} for f in files],
+        }
+        if layers:
+            result["layers"] = layers.split(",")
         return result
 
 

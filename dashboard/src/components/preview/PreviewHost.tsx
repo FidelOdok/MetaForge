@@ -23,6 +23,9 @@ const JsonTree = lazy(() => import('./engines/DataEngines').then((m) => ({ defau
 const CodeView = lazy(() => import('./engines/DataEngines').then((m) => ({ default: m.CodeView })));
 const GerberView = lazy(() => import('./engines/VectorEngines').then((m) => ({ default: m.GerberView })));
 const DxfView = lazy(() => import('./engines/VectorEngines').then((m) => ({ default: m.DxfView })));
+const DesignFilesView = lazy(() =>
+  import('./engines/DesignFilesView').then((m) => ({ default: m.DesignFilesView })),
+);
 
 /**
  * Engines the twin inspector panel leaves to something else: the main 3D
@@ -95,6 +98,9 @@ export function PreviewHost({ node, mode, onOpenInViewer }: PreviewHostProps) {
   switch (engine) {
     case 'sim':
       return frame(doc(<FeaSummaryCard node={node} mode={mode} />));
+    // FORGE-687: sheets, gerber layers and sources, fetched by the engine.
+    case 'design':
+      return frame(doc(<DesignFilesView node={node} mode={mode} />));
     case 'cad3d':
     case 'mesh3d':
       return frame(

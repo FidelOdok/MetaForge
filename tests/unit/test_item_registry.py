@@ -29,6 +29,13 @@ def test_definitions_are_the_versioned_types() -> None:
         "bom",
         "component_selection",
         "prd",
+        # FORGE-687: electronics and firmware design files.
+        "schematic",
+        "pcb_layout",
+        "gerber",
+        "pick_and_place",
+        "pinmap",
+        "firmware_source",
     }
 
 

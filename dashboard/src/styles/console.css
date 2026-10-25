@@ -3280,6 +3280,114 @@ button:disabled {
   color: var(--mf-c-9a9aaa);
 }
 .tw-mfg-hint { margin-top: 8px !important; }
+
+/* FORGE-687: the electronics and firmware thread. */
+.tw-thread > h3 {
+  margin: 18px 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mf-c-9a9aaa);
+}
+.tw-thread-lane {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+}
+.tw-thread-fan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tw-thread-card {
+  width: 210px;
+  border: 1px solid var(--mf-r-65-72-90-0p2);
+  border-radius: 7px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.tw-thread-card > strong { font-size: 12.5px; }
+.tw-thread-card.is-missing {
+  border-style: dashed;
+  opacity: 0.7;
+}
+.tw-thread-card.is-missing p { margin: 0; color: var(--mf-c-9a9aaa); line-height: 1.5; }
+.tw-thread-card code {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  color: var(--mf-c-86cfff);
+}
+.tw-thread-state { font-size: 11px; color: var(--mf-c-9a9aaa); }
+.tw-thread-node {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 4px;
+  color: inherit;
+  cursor: pointer;
+}
+.tw-thread-node:hover { border-color: var(--mf-r-65-72-90-0p35); }
+.tw-thread-node img,
+.tw-thread-node .material-symbols-outlined {
+  grid-row: 1 / span 2;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  background: #f5f4ef;
+  border-radius: 3px;
+  font-size: 22px;
+  line-height: 40px;
+  text-align: center;
+}
+.tw-thread-node .material-symbols-outlined { background: transparent; }
+.tw-thread-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tw-thread-node small { font-size: 10.5px; color: var(--mf-c-9a9aaa); }
+.tw-thread-arrow {
+  position: relative;
+  width: 74px;
+  height: 18px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.tw-thread-arrow::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 8px;
+  top: 50%;
+  border-top: 2px dashed var(--mf-r-65-72-90-0p35);
+}
+.tw-thread-arrow::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  top: calc(50% - 5px);
+  border-left: 7px solid var(--mf-r-65-72-90-0p35);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.tw-thread-arrow.is-linked::before { border-top-style: solid; border-top-color: var(--mf-c-3dd68c); }
+.tw-thread-arrow.is-linked::after { border-left-color: var(--mf-c-3dd68c); }
+.tw-thread-arrow span {
+  position: relative;
+  top: -14px;
+  font-size: 9.5px;
+  color: var(--mf-c-9a9aaa);
+  white-space: nowrap;
+}
+.tw-thread-arrow.is-linked span { color: var(--mf-c-3dd68c); }
+.tw-thread-from { font-size: 11px; color: var(--mf-c-9a9aaa); font-style: italic; }
 .tw-mfg-hint code {
   font-family: 'Roboto Mono', monospace;
   font-size: 12px;

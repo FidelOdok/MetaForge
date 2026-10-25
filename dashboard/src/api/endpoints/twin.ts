@@ -1,4 +1,4 @@
-import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription, AssemblyPart } from '../../types/twin';
+import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription, AssemblyPart, DesignFilesView } from '../../types/twin';
 import apiClient from '../client';
 import { apiUrl } from '../../lib/gatewayConfig';
 import { isSampleMode, sampleFileUrl } from '../../lib/sample-workspace';
@@ -26,6 +26,8 @@ interface TwinNodeApiResponse {
   meshStats?: Record<string, unknown> | null;
   assemblyParts?: AssemblyPart[] | null;
   projectId?: string | null;
+  // FORGE-687: a design-files node's files, previews, layers and build output.
+  designFiles?: DesignFilesView | null;
 }
 
 export interface TwinNodeScript {
@@ -68,6 +70,7 @@ export async function getTwinNodes(projectId?: string): Promise<TwinNode[]> {
     meshStats: node.meshStats ?? undefined,
     assemblyParts: node.assemblyParts ?? undefined,
     projectId: node.projectId ?? undefined,
+    designFiles: node.designFiles ?? undefined,
   }));
 }
 
@@ -90,6 +93,7 @@ export async function getTwinNode(id: string): Promise<TwinNode | undefined> {
       meshStats: node.meshStats ?? undefined,
       assemblyParts: node.assemblyParts ?? undefined,
       projectId: node.projectId ?? undefined,
+      designFiles: node.designFiles ?? undefined,
     };
   } catch {
     return undefined;
@@ -356,6 +360,20 @@ export async function fetchNodeFileText(nodeId: string): Promise<string> {
  * stand in for the whole file set. */
 export function nodeMeshBaseUrl(nodeId: string): string {
   return apiUrl(`/twin/nodes/${nodeId}/files/`);
+}
+
+/** FORGE-687: one named file of a node (a schematic sheet, a gerber layer, a
+ * firmware source), by its path in the project folder. */
+export function nodeNamedFileUrl(nodeId: string, path: string): string {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  return apiUrl(`/twin/nodes/${nodeId}/files/${encoded}`);
+}
+
+/** FORGE-687: one named file of a node, as text. */
+export async function fetchNodeNamedFileText(nodeId: string, path: string): Promise<string> {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  const { data } = await apiClient.get(`/twin/nodes/${nodeId}/files/${encoded}`, { responseType: 'text' });
+  return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 }
 
 // ── Design-sketch approval gate (follow-up to MET-740/747) ──────────────────

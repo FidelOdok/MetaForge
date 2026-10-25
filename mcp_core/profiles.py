@@ -255,6 +255,8 @@ PROFILES: dict[str, frozenset[str]] = {
         "spice.run_simulation",
         "twin.commit_procurement_record",
         "twin.record_component_selection",
+        # FORGE-687: the firmware project, its build and its pin map.
+        "twin.record_design_files",
     },
     # Phase 2 board design (FORGE-683/684): the schematic, board and routing
     # generated from a circuit, its 3D model and renders, component updates,
@@ -281,6 +283,7 @@ PROFILES: dict[str, frozenset[str]] = {
         "kicad.export_pos",
         "power.check_budget",
         "twin.record_component_selection",
+        "twin.record_design_files",
         "twin.record_document",
         "twin.stage_work_product_file",
     },
@@ -521,8 +524,16 @@ DELIVERABLE_TOOLS: dict[str, frozenset[str]] = {
     ),
     # FORGE-630: studio renders of a model, kept in the twin.
     "render": frozenset({"twin.render_work_product"}),
-    "pinmap": frozenset({"twin.create_firmware_scaffold"}),
-    "firmware_source": frozenset({"twin.create_firmware_scaffold"}),
+    # FORGE-687: KiCad and firmware outputs, kept by twin.record_design_files.
+    # Only the recorder is always kept: the tools that make the files come
+    # with the phase's own profile (pcb_design, electronics), and a phase
+    # with several deliverables must stay inside the phase budget.
+    "schematic": frozenset({"twin.record_design_files"}),
+    "pcb_layout": frozenset({"twin.record_design_files"}),
+    "gerber": frozenset({"twin.record_design_files"}),
+    "pick_and_place": frozenset({"twin.record_design_files"}),
+    "pinmap": frozenset({"twin.create_firmware_scaffold", "twin.record_design_files"}),
+    "firmware_source": frozenset({"twin.create_firmware_scaffold", "twin.record_design_files"}),
 }
 
 #: Families dropped first when a discipline mix overflows the budget: niche

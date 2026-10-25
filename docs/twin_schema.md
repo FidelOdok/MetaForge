@@ -1167,6 +1167,12 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `design_value` | definition | `VAL` | `EngineeringEntity` `design_value` (FORGE-586) |
 | `bom` | definition | `BOM` | `WorkProduct` `bom` (electronics BOM recorder) |
 | `component_selection` | definition | `CMP` | `BOMItem` (`twin.record_component_selection`), keyed by `role`, else manufacturer + MPN |
+| `schematic` | definition | `SCH` | `WorkProduct` `schematic`: a KiCad project's sheets (`twin.record_design_files`, FORGE-687) |
+| `pcb_layout` | definition | `PCB` | `WorkProduct` `pcb_layout`: a KiCad board (`twin.record_design_files`) |
+| `gerber` | definition | `GBR` | `WorkProduct` `gerber`: a board's gerber and drill set (`twin.record_design_files`) |
+| `pick_and_place` | definition | `PNP` | `WorkProduct` `pick_and_place`: a board's placement file (`twin.record_design_files`) |
+| `pinmap` | definition | `PIN` | `WorkProduct` `pinmap` (`twin.record_design_files`, or `twin.create_firmware_scaffold`) |
+| `firmware_source` | definition | `FW` | `WorkProduct` `firmware_source`: a firmware project's sources and build output (`twin.record_design_files`, or `twin.create_firmware_scaffold`) |
 | `design_decision` | record | | `WorkProduct` `design_decision` |
 | `simulation_result` | record | | `WorkProduct` `simulation_result` |
 | `evidence` | record | | `EngineeringEntity` `evidence`, pinned to the revisions it was produced against |

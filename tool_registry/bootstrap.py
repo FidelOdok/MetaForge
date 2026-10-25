@@ -337,6 +337,7 @@ async def bootstrap_tool_registry(
     thermal_evaluator: Any = None,
     overhang_evaluator: Any = None,
     work_product_renderer: Any = None,
+    design_files_recorder: Any = None,
     revalidation_executor: Any = None,
     sensitivity_ranker: Any = None,
     promotion_attempter: Any = None,
@@ -489,6 +490,12 @@ async def bootstrap_tool_registry(
             registers ``twin.render_work_product``: a STEP or mesh work
             product rendered by ``blender.render`` and stored as a
             ``render`` work product. ``None`` skips registration.
+        design_files_recorder: Optional async ``record(...)``
+            (make_design_files_recorder, FORGE-687). When supplied,
+            registers ``twin.record_design_files``: KiCad and firmware
+            files kept as schematic / pcb_layout / gerber /
+            pick_and_place / pinmap / firmware_source work products.
+            ``None`` skips registration.
         overhang_evaluator: Optional async ``evaluate_overhang(...)``
             (make_overhang_evidence_recorder, FORGE-273). When supplied,
             registers ``twin.evaluate_overhang_metric`` -- runs a real
@@ -793,6 +800,7 @@ async def bootstrap_tool_registry(
                     thermal_evaluator=thermal_evaluator,
                     overhang_evaluator=overhang_evaluator,
                     work_product_renderer=work_product_renderer,
+                    design_files_recorder=design_files_recorder,
                     revalidation_executor=revalidation_executor,
                     sensitivity_ranker=sensitivity_ranker,
                     promotion_attempter=promotion_attempter,

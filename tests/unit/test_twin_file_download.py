@@ -151,6 +151,59 @@ async def test_download_named_mesh_file(monkeypatch) -> None:
     assert resp.body == b"solid body\nendsolid body\n"
 
 
+async def test_download_design_file_by_nested_path(monkeypatch) -> None:
+    """FORGE-687: a design-files node serves each file by its project path."""
+    node_id = await _seed(
+        _wp(
+            metadata={
+                "minio_object_key": "work-products/x/src_main.c",
+                "original_filename": "main.c",
+                "design_files": {
+                    "src/main.c": "work-products/x/src_main.c",
+                    "platformio.ini": "work-products/x/platformio.ini",
+                },
+                "image_files": {"preview/fc.svg": "work-products/x/preview_fc.svg"},
+            },
+            fmt="c",
+        )
+    )
+    blobs = {
+        "work-products/x/src_main.c": b"int main(void){}",
+        "work-products/x/platformio.ini": b"[env:f405]",
+        "work-products/x/preview_fc.svg": b"<svg/>",
+    }
+    monkeypatch.setattr(blob_store, "fetch_work_product_blob", lambda key: blobs[key])
+
+    ini = await routes.download_node_named_file(node_id, "platformio.ini")
+    assert ini.body == b"[env:f405]" and ini.media_type.startswith("text/plain")
+    main = await routes.download_node_named_file(node_id, "src/main.c")
+    assert main.body == b"int main(void){}"
+    svg = await routes.download_node_named_file(node_id, "preview/fc.svg")
+    assert svg.media_type == "image/svg+xml"
+
+
+def test_design_files_view_on_the_node_response() -> None:
+    """FORGE-687: the dashboard gets the file list, previews and layers."""
+    wp = _wp(
+        metadata={
+            "design_files": {"fc-F_Cu.gtl": "k1", "fc-PTH.drl": "k2"},
+            "files": [{"path": "fc-F_Cu.gtl", "bytes": 10}, {"path": "fc-PTH.drl", "bytes": 4}],
+            "layers": [
+                {"path": "fc-F_Cu.gtl", "layer": "copper"},
+                {"path": "fc-PTH.drl", "layer": "drill"},
+            ],
+            "source_work_product_ids": ["board-1"],
+            "preview_error": None,
+        },
+        fmt="gtl",
+    )
+    view = routes._wp_to_response(wp).designFiles
+    assert view is not None
+    assert [f["path"] for f in view["files"]] == ["fc-F_Cu.gtl", "fc-PTH.drl"]
+    assert view["layers"][1]["layer"] == "drill" and view["sources"] == ["board-1"]
+    assert routes._wp_to_response(_wp()).designFiles is None
+
+
 async def test_download_named_file_falls_back_to_primary_blob(monkeypatch) -> None:
     """The URDF itself is fetchable through this same route (same filename
     as GET /nodes/{id}/file), not just its meshes — one base URL serves

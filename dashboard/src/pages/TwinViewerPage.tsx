@@ -42,6 +42,7 @@ import { BomAnnotationPanel } from '../components/viewer/BomAnnotationPanel';
 import { NodeProposals } from '../components/viewer/NodeProposals';
 import { ExplodedViewControls } from '../components/viewer/ExplodedViewControls';
 import { ManufacturingView } from '../components/viewer/ManufacturingView';
+import { ElectronicsThreadView } from '../components/viewer/ElectronicsThreadView';
 import { StructureView } from '../components/viewer/StructureView';
 import { AssemblyExportPanel } from '../components/viewer/AssemblyExportPanel';
 import { AssemblyJointsEditor } from '../components/viewer/AssemblyJointsEditor';
@@ -961,11 +962,11 @@ function GeometryDiffSection({ nodeId }: { nodeId: string }) {
 
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
-type TwinTab = 'graph' | 'structure' | 'model' | 'sim' | 'asm' | 'mfg';
+type TwinTab = 'graph' | 'structure' | 'model' | 'sim' | 'asm' | 'mfg' | 'thread';
 type InspectorTab = 'overview' | 'constraints' | 'history';
 type NodeScope = 'all' | 'attention' | string;
 
-const TWIN_TABS: TwinTab[] = ['graph', 'structure', 'model', 'sim', 'asm', 'mfg'];
+const TWIN_TABS: TwinTab[] = ['graph', 'structure', 'model', 'sim', 'asm', 'mfg', 'thread'];
 
 /** A ?tab= value, or 'graph' (FORGE-371). An unknown name is not worth an
  *  error: the page still works, and the link may come from a build older
@@ -980,6 +981,8 @@ const TAB_LABELS: Record<TwinTab, string> = {
   sim: 'Sim',
   asm: 'Assembly',
   mfg: 'Manufacturing',
+  // FORGE-687: BOM to schematic to board to fab files, and the firmware.
+  thread: 'Electronics',
 };
 const INSPECTOR_TABS: InspectorTab[] = ['overview', 'constraints', 'history'];
 
@@ -1373,6 +1376,8 @@ export function TwinViewerPage() {
             <StructureView projectId={activeProjectId} onSelect={selectNode} />
           ) : tab === 'mfg' ? (
             <ManufacturingView nodes={items} onSelect={selectNode} />
+          ) : tab === 'thread' ? (
+            <ElectronicsThreadView nodes={items} relationships={relationships} onSelect={selectNode} />
           ) : tab === 'asm' ? (
             <div className="tw-assembly">
               <div className="tw-assembly-heading">

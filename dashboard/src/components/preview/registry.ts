@@ -10,7 +10,8 @@
  * `PreviewHost`.
  *
  * Rules, in priority order:
- *   1. A work product type whose meaning beats its file format (robot,
+ *   1. A work product type whose meaning beats its file format (design
+ *      files kept by twin.record_design_files, FORGE-687, robot,
  *      simulation result, design decision, constraint set, BOM, assembly,
  *      and a prd revision, FORGE-528, which renders the derived prd).
  *   2. The file format (from `format`, else the `file_path` extension).
@@ -38,6 +39,8 @@ export type PreviewEngine =
   | 'pdf'
   | 'html'
   | 'robot'
+  // FORGE-687: a node kept by twin.record_design_files (sheets, layers, sources).
+  | 'design'
   | 'text'
   | 'none';
 
@@ -45,6 +48,7 @@ export type PreviewEngine =
 export interface PreviewSubject {
   properties?: Record<string, string | number | boolean | undefined>;
   assemblyParts?: unknown[];
+  designFiles?: unknown;
 }
 
 export interface PreviewResolution {
@@ -120,6 +124,7 @@ export const ENGINE_LABELS: Record<PreviewEngine, string> = {
   pdf: 'PDF',
   html: 'HTML sketch',
   robot: 'Robot viewer',
+  design: 'Design files',
   text: 'Text',
   none: 'No preview engine',
 };
@@ -173,6 +178,7 @@ export function previewEngineFor(subject: PreviewSubject): PreviewResolution {
   const fmt = formatOf(subject);
 
   // 1. Type beats format where the type carries the meaning.
+  if (subject.designFiles) return { engine: 'design', format: fmt };
   if (wpType === 'robot_description') return { engine: 'robot', format: fmt };
   if (wpType === 'simulation_result') return { engine: 'sim', format: fmt };
   if (wpType === 'design_decision' && isTextualOrUnknown(fmt)) return { engine: 'decision', format: fmt };

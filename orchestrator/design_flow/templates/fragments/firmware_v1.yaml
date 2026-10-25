@@ -18,9 +18,13 @@
 # checks timing. A board neither emulator models leaves the boot task
 # not_established; it does not pass.
 #
+# FORGE-687: the pin map and the built project are twin work products
+# (twin.record_design_files): schematic -> pinmap -> firmware_source, with the
+# build output kept beside the sources.
+#
 # Bump `version` when a task, its contract or a check changes.
 id: firmware_v1
-version: 1.0.0
+version: 1.1.0
 domain: firmware
 label: Firmware
 description: Pin map, RTOS configuration, build, static analysis and emulated boot.
@@ -34,12 +38,14 @@ tasks:
     Read the MCU's pin and net assignments from the person's KiCad schematic with
     kicad.get_pin_mapping, for the MCU in the component selection, and generate the board pin
     header from them (the generate_hal skill). Record the number of pins assigned twice, or to a
-    name the part does not have, as `pin_conflict_count`, sourced to the schematic revision. Do
-    not edit the schematic.
+    name the part does not have, as `pin_conflict_count`, sourced to the schematic revision, and
+    record the pin map with twin.record_design_files (work_product_type pinmap, generated from
+    the schematic). Do not edit the schematic.
   inputs:
   - component_selection:electronics
   outputs:
   - design_value:pin_conflict_count
+  records: [pinmap]
   checks:
   - pin_conflict_count == 0
   capabilities: [kicad.get_pin_mapping]
@@ -68,16 +74,17 @@ tasks:
     Build the firmware for the board with firmware.build: the generated pin header, the RTOS
     configuration and the person's application sources. Record the number of compiler and
     linker errors as `build_error_count`, and the flash and RAM used as a share of the part as
-    `flash_used_pct` and `ram_used_pct` (%), all sourced to the build, and the build as a
-    simulation_result naming the toolchain versions. A build that did not link has no size: say
-    so rather than estimating it.
+    `flash_used_pct` and `ram_used_pct` (%), all sourced to the build, the build as a
+    simulation_result naming the toolchain versions, and the project with its build output as
+    firmware_source (twin.record_design_files, generated from the pin map). A build that did not
+    link has no size: say so rather than estimating it.
   inputs:
   - design_value:rtos_ram_estimate_bytes
   outputs:
   - design_value:build_error_count
   - design_value:flash_used_pct
   - design_value:ram_used_pct
-  records: [simulation_result]
+  records: [simulation_result, firmware_source]
   checks:
   - build_error_count == 0
   - flash_used_pct <= max_flash_pct

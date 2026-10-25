@@ -595,7 +595,8 @@ class TestKicadMcpProtocolE2E:
 
         assert health.status == "healthy"
         assert health.adapter_id == "kicad"
-        assert health.tools_available == 14  # + drill, pos; + 3 generators; + 3d, render, update
+        # + drill, pos; + 3 generators; + 3d, render, update; + svg (FORGE-687)
+        assert health.tools_available == 15
 
 
 # ---------------------------------------------------------------------------

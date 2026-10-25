@@ -304,6 +304,16 @@ with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
+The **Electronics** tab (FORGE-687) draws the electronics and firmware
+thread: BOM, schematic, board, then gerbers and pick and place, and from
+the schematic the pin map and the firmware. Each stage shows the current
+revision of what is recorded, with the sheet or board preview where there
+is one, and each arrow is solid and labelled *generated from* only when
+the later work product is linked `GENERATED_FROM` the earlier one in the
+graph; *not linked* means both are recorded but the link was not passed
+(`source_node_ids` on `twin.record_design_files`). A stage with nothing
+recorded names the tools that produce it.
+
 The Model tab shows the model standing on a visible workplane, turned by
 a Tinkercad-style turntable (FORGE-620). **Right-drag rotates,
 middle-drag pans, the wheel zooms toward the cursor, and the left button
@@ -415,7 +425,8 @@ extension); otherwise a per-type default applies.
 | CSV table | `.csv`, `.tsv` | A table, capped with a "Show all" for long files. |
 | JSON tree | `.json` | A collapsible tree. Invalid JSON is shown as text with a warning. |
 | Code | `.c`, `.h`, `.cpp`, `.py` and other sources, `firmware_source`, `cad_source_script` | Highlighted source with line numbers. |
-| KiCad viewer | `.kicad_sch`, `.kicad_pcb`, `schematic`, `pcb_layout` | Not available yet: no embeddable KiCad viewer ships as an npm package. Says so and offers the download. |
+| Design files | a `schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `pinmap` or `firmware_source` kept by `twin.record_design_files` (FORGE-687) | A schematic's sheets or a board's top side as the SVGs `kicad.export_svg` made when it was recorded; a gerber set's layers drawn by tracespace in one shared box so they line up, each one switchable; a firmware project's files one at a time with its `firmware.elf` to download; a pin map or placement file as a table. Every file is listed with a download link. |
+| KiCad viewer | `.kicad_sch`, `.kicad_pcb`, `schematic`, `pcb_layout` imported as a single file | No embeddable KiCad viewer ships as an npm package. Says so and offers the download; record the project with `twin.record_design_files` to get previews. |
 | Gerber renderer | `.gbr`, `.gtl`, `.gbl` and the other layer extensions, `.drl` | The layer drawn by tracespace. A zipped Gerber set is not unpacked. |
 | DXF viewer | `.dxf` | Lines, polylines, arcs, circles, ellipses, splines and text drawn from dxf-parser. |
 | FEA summary | `simulation_result` | The FEA result card described above, with the 3D field viewer (FORGE-532) in the inspector and the modal; project rows show the numbers only. |

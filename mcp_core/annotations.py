@@ -332,6 +332,9 @@ ADDITIVE: frozenset[str] = frozenset(
         # FORGE-630: adds a render node linked to the model it shows; the
         # model itself is never touched. With store=false it records nothing.
         "twin.render_work_product",
+        # FORGE-687: a new design-files node (or the next revision of its
+        # item); the files it reads on the workspace are not touched.
+        "twin.record_design_files",
         "twin.optimize_parameter",
         "twin.propose_change",
         "twin.propose_engineering_change",
@@ -414,6 +417,8 @@ PRODUCING: frozenset[str] = frozenset(
         # FORGE-684: a new file each (3D model, render, schematic revision).
         "kicad.export_3d",
         "kicad.render_pcb",
+        # FORGE-687: SVG files on the adapter workspace only.
+        "kicad.export_svg",
         "kicad.update_components",
         # FORGE-674/677: build output and run logs go to the adapter workspace
         # only; the caller's project is copied, never modified.

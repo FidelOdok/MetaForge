@@ -1963,6 +1963,19 @@ def _build_evidence_bindings(twin: Any, project_backend: Any) -> tuple[dict[str,
     except Exception as exc:  # noqa: BLE001
         logger.warning("mcp_collaborator_init_failed", collaborator="renderer", error=str(exc))
 
+    # FORGE-687: twin.record_design_files, whose kicad.export_svg previews go
+    # through this server's own registry once it exists.
+    try:
+        from api_gateway.twin.design_files_recorder import make_design_files_recorder
+
+        files_bridge = _LateBridge()
+        bindings["design_files_recorder"] = make_design_files_recorder(
+            twin, project_backend, mcp_bridge=files_bridge
+        )
+        bridges.append(files_bridge)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_collaborator_init_failed", collaborator="design_files", error=str(exc))
+
     try:
         from api_gateway.requirement_intelligence.promotion import attempt_promotion
 
