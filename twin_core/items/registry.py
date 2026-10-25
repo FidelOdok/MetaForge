@@ -142,6 +142,56 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "values live in the constraint set."
         ),
     ),
+    # FORGE-687: the electronics and firmware design files, recorded by
+    # twin.record_design_files from what the KiCad and firmware adapters wrote.
+    TwinTypeSpec(
+        "schematic",
+        TwinTypeKind.DEFINITION,
+        "work_product:schematic",
+        key_prefix="SCH",
+        description="A KiCad schematic, every sheet of it (twin.record_design_files).",
+    ),
+    TwinTypeSpec(
+        "pcb_layout",
+        TwinTypeKind.DEFINITION,
+        "work_product:pcb_layout",
+        key_prefix="PCB",
+        description="A KiCad board (twin.record_design_files).",
+    ),
+    TwinTypeSpec(
+        "gerber",
+        TwinTypeKind.DEFINITION,
+        "work_product:gerber",
+        key_prefix="GBR",
+        description="A board's gerber and drill set (twin.record_design_files).",
+    ),
+    TwinTypeSpec(
+        "pick_and_place",
+        TwinTypeKind.DEFINITION,
+        "work_product:pick_and_place",
+        key_prefix="PNP",
+        description="A board's placement file (twin.record_design_files).",
+    ),
+    TwinTypeSpec(
+        "pinmap",
+        TwinTypeKind.DEFINITION,
+        "work_product:pinmap",
+        key_prefix="PIN",
+        description=(
+            "Which MCU pin does what (twin.record_design_files, or "
+            "twin.create_firmware_scaffold from an assembly's joints)."
+        ),
+    ),
+    TwinTypeSpec(
+        "firmware_source",
+        TwinTypeKind.DEFINITION,
+        "work_product:firmware_source",
+        key_prefix="FW",
+        description=(
+            "A firmware project's sources and its build output "
+            "(twin.record_design_files, or twin.create_firmware_scaffold)."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",

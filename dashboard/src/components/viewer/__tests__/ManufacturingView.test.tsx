@@ -50,7 +50,11 @@ describe('ManufacturingView', () => {
   it('tells you which tool produces a missing output', () => {
     // "Not produced" with no next step is just a shrug.
     render(<ManufacturingView nodes={[]} onSelect={vi.fn()} />);
-    expect(screen.getByText('kicad.export_gerber')).toBeInTheDocument();
+    expect(
+      screen.getByText('kicad.export_gerber and kicad.export_drill, then twin.record_design_files'),
+    ).toBeInTheDocument();
+    // FORGE-687: placement comes from export_pos, not export_bom.
+    expect(screen.getByText('kicad.export_pos, then twin.record_design_files')).toBeInTheDocument();
     expect(screen.getByText('freecad.export_model')).toBeInTheDocument();
   });
 

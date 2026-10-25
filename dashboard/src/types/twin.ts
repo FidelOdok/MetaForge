@@ -57,6 +57,24 @@ export interface TwinNode {
   assemblyParts?: AssemblyPart[];
   // FORGE-528: the project the node belongs to, when it has one.
   projectId?: string;
+  // FORGE-687: a node kept by twin.record_design_files (schematic, board,
+  // gerbers, placement, pin map, firmware). Undefined for every other node.
+  designFiles?: DesignFilesView;
+}
+
+/** FORGE-687: what twin.record_design_files kept, as GET /twin/nodes returns it. */
+export interface DesignFilesView {
+  /** Every file, by its path in the project folder. */
+  files: { path: string; bytes?: number }[];
+  /** SVG previews (one per schematic sheet, or the board's top side). */
+  previews: string[];
+  previewError?: string | null;
+  /** A gerber set's files and what each layer is. */
+  layers: { path: string; layer: string }[];
+  /** A firmware project's build output (firmware.elf/.bin/.hex). */
+  buildOutputs: string[];
+  /** Node ids it was generated from. */
+  sources: string[];
 }
 
 export interface AssemblyPartBox {

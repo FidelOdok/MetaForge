@@ -61,10 +61,11 @@ class TestRegistryMcpBridge:
         FORGE-681 adds power.runtime for 106. FORGE-683 adds kicad.generate_schematic,
         kicad.generate_pcb and kicad.autoroute_pcb for 109. FORGE-684 adds
         kicad.export_3d, kicad.render_pcb and kicad.update_components for 112.
+        FORGE-687 adds kicad.export_svg for 113.
         """
         bridge = await self._make_bridge()
         tools = await bridge.list_tools()
-        assert len(tools) == 112
+        assert len(tools) == 113
 
     async def test_list_tools_filter_capability(self):
         """List tools filtered by capability."""

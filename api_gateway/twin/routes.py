@@ -238,6 +238,8 @@ def _wp_to_response(wp: WorkProduct) -> TwinNodeResponse:
         ),
         # FORGE-511: an assembly cad_model's part list (metadata.parts).
         assemblyParts=assembly_parts(wp.metadata) or None,
+        # FORGE-687: what twin.record_design_files kept, for the previews.
+        designFiles=_design_files_view(wp.metadata),
         # FORGE-293: a technical_drawing node's own structured dimensions/
         # GD&T/surface-finish/inspection data and approval state, keyed by
         # wp.type rather than a shape-sniff (unlike `assembly` above, there's
@@ -565,6 +567,15 @@ _PREVIEW_CONTENT_TYPES: dict[str, str] = {
     "gbr": "text/plain; charset=utf-8",
     "c": "text/plain; charset=utf-8",
     "h": "text/plain; charset=utf-8",
+    # FORGE-687: the rest of a design-files node's text files.
+    "cpp": "text/plain; charset=utf-8",
+    "hpp": "text/plain; charset=utf-8",
+    "ini": "text/plain; charset=utf-8",
+    "ld": "text/plain; charset=utf-8",
+    "pos": "text/plain; charset=utf-8",
+    "drl": "text/plain; charset=utf-8",
+    "gbrjob": "application/json",
+    "kicad_pro": "application/json",
     # FORGE-532: solver result formats. A CalculiX .frd is fixed-width
     # ASCII; a .vtu is VTK XML. The 3D viewer's own field payload is served
     # by GET /v1/simulation/results/{id}/field, not this route.
@@ -603,6 +614,21 @@ def _resolve_blob(wp: WorkProduct) -> tuple[bytes, str]:
                 error=exc.detail,
             )
         raise
+
+
+def _design_files_view(meta: dict[str, Any]) -> dict[str, Any] | None:
+    """The file list, previews, layers and build output of a design-files node."""
+    if not isinstance(meta.get("design_files"), dict):
+        return None
+    files = [f for f in meta.get("files") or [] if isinstance(f, dict)]
+    return {
+        "files": files or [{"path": p} for p in meta["design_files"]],
+        "previews": [p for p in meta.get("preview_files") or [] if isinstance(p, str)],
+        "previewError": meta.get("preview_error"),
+        "layers": [r for r in meta.get("layers") or [] if isinstance(r, dict)],
+        "buildOutputs": [p for p in meta.get("build_outputs") or [] if isinstance(p, str)],
+        "sources": [s for s in meta.get("source_work_product_ids") or [] if isinstance(s, str)],
+    }
 
 
 @router.get("/nodes/{node_id}/file")
@@ -648,7 +674,7 @@ async def download_node_file(
         )
 
 
-@router.get("/nodes/{node_id}/files/{filename}")
+@router.get("/nodes/{node_id}/files/{filename:path}")
 async def download_node_named_file(node_id: str, filename: str) -> Response:
     """Stream one of a work product's NAMED blobs (MET-740 follow-up).
 
@@ -674,9 +700,10 @@ async def download_node_named_file(node_id: str, filename: str) -> Response:
         if wp is None:
             raise HTTPException(status_code=404, detail="Node not found")
 
-        # A render node (FORGE-630) keeps its other views the same way.
+        # A render node (FORGE-630) keeps its other views the same way, and a
+        # design-files node (FORGE-687) every file by its path in the project.
         mesh_key = None
-        for field in ("mesh_files", "image_files"):
+        for field in ("mesh_files", "image_files", "design_files"):
             named = wp.metadata.get(field)
             if isinstance(named, dict) and named.get(filename):
                 mesh_key = named[filename]

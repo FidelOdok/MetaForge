@@ -942,6 +942,14 @@ async def _init_orchestrator(app: FastAPI) -> None:
     work_product_renderer_fn = make_work_product_renderer(
         twin, project_backend, mcp_bridge=work_product_renderer_bridge
     )
+    # FORGE-687: twin.record_design_files -- KiCad and firmware files kept as
+    # work products, with kicad.export_svg previews over the same seam.
+    from api_gateway.twin.design_files_recorder import make_design_files_recorder
+
+    design_files_bridge = _LazyBridge()
+    design_files_recorder_fn = make_design_files_recorder(
+        twin, project_backend, mcp_bridge=design_files_bridge
+    )
     # MET-618: hoisted so the SAME blob-stager instance (and its staged-file
     # cache) is reused by both twin.stage_work_product_file (below) and
     # manufacture_release_fn, same pattern FORGE-265 established for
@@ -1267,6 +1275,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
         overhang_evaluator=overhang_evaluator_fn,
         # FORGE-630: renders of a work product, bound to active_bridge below.
         work_product_renderer=work_product_renderer_fn,
+        # FORGE-687: design files, bound to active_bridge below.
+        design_files_recorder=design_files_recorder_fn,
         # FORGE-316: automatic selective re-run of exactly what a
         # committed ECT's real revalidation_plan marked stale.
         revalidation_executor=revalidation_executor_fn,
@@ -1374,6 +1384,8 @@ async def _init_orchestrator(app: FastAPI) -> None:
     overhang_evaluator_bridge.bridge = active_bridge
     # FORGE-630: same for work_product_renderer_bridge (blender.render).
     work_product_renderer_bridge.bridge = active_bridge
+    # FORGE-687: same for design_files_bridge (kicad.export_svg).
+    design_files_bridge.bridge = active_bridge
     # FORGE-294: same for manufacture_release_bridge (manufacture_release's
     # cadquery.export_geometry call).
     manufacture_release_bridge.bridge = active_bridge

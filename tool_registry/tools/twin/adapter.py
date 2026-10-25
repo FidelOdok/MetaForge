@@ -216,6 +216,7 @@ class TwinServer(McpToolServer):
         firmware_scaffold_creator: Any = None,
         harness_estimate_getter: Any = None,
         item_history_reader: Any = None,
+        design_files_recorder: Any = None,
     ) -> None:
         super().__init__(adapter_id="twin", version="0.1.0")
         self._twin = twin
@@ -495,6 +496,11 @@ class TwinServer(McpToolServer):
         # work product pair. Same injection seam as every recorder above;
         # None keeps tool_registry free of api_gateway imports.
         self._firmware_scaffold_creator = firmware_scaffold_creator
+        # FORGE-687: an injected async ``record(*, work_product_type, file_path,
+        # name, ...)`` (make_design_files_recorder) -- KiCad and firmware files
+        # from the adapter workspace kept as schematic / pcb_layout / gerber /
+        # pick_and_place / pinmap / firmware_source work products.
+        self._design_files_recorder = design_files_recorder
         # FORGE-275: an injected async ``get(*, work_product_id) -> dict``
         # (make_harness_estimate_getter) -- derives a per-joint cumulative
         # cable-length estimate along the real base->follower kinematic
@@ -602,6 +608,8 @@ class TwinServer(McpToolServer):
             self._register_get_harness_estimate()
         if item_history_reader is not None:
             self._register_item_history()
+        if design_files_recorder is not None:
+            self._register_record_design_files()
         self._add_item_arguments()
 
     def _add_item_arguments(self) -> None:
@@ -5277,6 +5285,104 @@ class TwinServer(McpToolServer):
         result: dict[str, Any] = await self._work_product_renderer(
             work_product_id=work_product_id,
             store=arguments.get("store") is not False,
+            **options,
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # twin.record_design_files (FORGE-687)
+    # ------------------------------------------------------------------
+
+    def _register_record_design_files(self) -> None:
+        self.register_tool(
+            manifest=ToolManifest(
+                tool_id="twin.record_design_files",
+                adapter_id="twin",
+                name="Record Design Files",
+                description=(
+                    "Record KiCad or firmware files the adapters wrote on the workspace as a "
+                    "twin work product: 'schematic' (a .kicad_sch or its project folder), "
+                    "'pcb_layout' (a .kicad_pcb), 'gerber' (the export_gerber + export_drill "
+                    "folder), 'pick_and_place' (export_pos file), 'pinmap' (CSV/JSON) or "
+                    "'firmware_source' (a PlatformIO project folder; its build output is "
+                    "kept too). Recording the same name again is that item's next revision. "
+                    "source_node_ids are what it was made from (the BOM for a schematic, the "
+                    "schematic for a board, the board for gerbers and placement, the pinmap "
+                    "for firmware), linked GENERATED_FROM. A schematic or board also gets an "
+                    "SVG preview."
+                ),
+                capability="twin_record_design_files",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "work_product_type": {
+                            "type": "string",
+                            "enum": [
+                                "schematic",
+                                "pcb_layout",
+                                "gerber",
+                                "pick_and_place",
+                                "pinmap",
+                                "firmware_source",
+                            ],
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": "A file or folder on the adapter workspace.",
+                        },
+                        "name": {"type": "string"},
+                        "project_id": {"type": "string"},
+                        "source_node_ids": {"type": "array", "items": {"type": "string"}},
+                        "metadata": {
+                            "type": "object",
+                            "description": (
+                                "Facts to keep with it, e.g. ERC/DRC counts, layer count, "
+                                "firmware.build's flash/ram use."
+                            ),
+                        },
+                        "preview": {"type": "boolean", "description": "Default true."},
+                        "item_key": {"type": "string"},
+                        "supersedes": {"type": "string"},
+                        "change_reason": {"type": "string"},
+                    },
+                    "required": ["work_product_type", "file_path", "name"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "files": {"type": "integer"},
+                        "previews": {"type": "array"},
+                        "generated_from": {"type": "array"},
+                        "item_ref": {"type": "string"},
+                    },
+                },
+                phase=2,
+                resource_limits=ResourceLimits(max_memory_mb=512, max_cpu_seconds=180),
+            ),
+            handler=self.record_design_files,
+        )
+
+    async def record_design_files(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        for key in ("work_product_type", "file_path", "name"):
+            if not arguments.get(key) or not isinstance(arguments.get(key), str):
+                raise ValueError(f"twin.record_design_files: '{key}' is required")
+        sources = arguments.get("source_node_ids") or []
+        if not isinstance(sources, list):
+            raise ValueError("twin.record_design_files: 'source_node_ids' must be a list")
+        metadata = arguments.get("metadata")
+        options = {
+            key: arguments[key]
+            for key in ("project_id", "item_key", "supersedes", "change_reason")
+            if arguments.get(key)
+        }
+        result: dict[str, Any] = await self._design_files_recorder(
+            work_product_type=arguments["work_product_type"],
+            file_path=arguments["file_path"],
+            name=arguments["name"],
+            source_node_ids=[str(s) for s in sources],
+            metadata=metadata if isinstance(metadata, dict) else None,
+            preview=arguments.get("preview") is not False,
             **options,
         )
         return result

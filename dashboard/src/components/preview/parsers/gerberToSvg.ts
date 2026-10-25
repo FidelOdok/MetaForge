@@ -52,19 +52,48 @@ export function hastToSvg(node: HastNode): string {
 export interface GerberSvgResult {
   svg: string;
   empty: boolean;
+  /** FORGE-687: [x, y, width, height] in the file's units, for stacking layers. */
+  viewBox: [number, number, number, number] | null;
 }
 
 /** Copper-ish on the dark canvas; the renderer draws in `currentColor`. */
 const LAYER_COLOR = '#e8b04a';
 
-export function gerberToSvg(text: string): GerberSvgResult {
+export function gerberToSvg(text: string, color: string = LAYER_COLOR): GerberSvgResult {
   const parser = createParser();
   parser.feed(text);
   const image = plot(parser.result());
   const tree = render(image) as unknown as HastNode;
   const viewBox = String(tree.properties?.viewBox ?? '');
   const empty = image.children.length === 0 || viewBox === '0 0 0 0';
+  const box = viewBox.split(/[\s,]+/).map(Number);
   // Let the <img> size the drawing, and colour it.
-  tree.properties = { ...tree.properties, width: '100%', height: '100%', style: `color:${LAYER_COLOR}` };
-  return { svg: hastToSvg(tree), empty };
+  tree.properties = { ...tree.properties, width: '100%', height: '100%', style: `color:${color}` };
+  return {
+    svg: hastToSvg(tree),
+    empty,
+    viewBox: box.length === 4 && box.every(Number.isFinite) ? (box as [number, number, number, number]) : null,
+  };
+}
+
+/**
+ * FORGE-687: one box around every layer, so layers drawn in it line up. The
+ * renderer only negates y (no per-layer offset), so a shared viewBox stacks
+ * a board's gerbers exactly.
+ */
+export function unionViewBox(
+  boxes: ([number, number, number, number] | null)[],
+): [number, number, number, number] | null {
+  const real = boxes.filter((b): b is [number, number, number, number] => b !== null && b[2] > 0 && b[3] > 0);
+  if (!real.length) return null;
+  const x0 = Math.min(...real.map((b) => b[0]));
+  const y0 = Math.min(...real.map((b) => b[1]));
+  const x1 = Math.max(...real.map((b) => b[0] + b[2]));
+  const y1 = Math.max(...real.map((b) => b[1] + b[3]));
+  return [x0, y0, x1 - x0, y1 - y0];
+}
+
+/** The same drawing in another viewBox (the first viewBox attribute is the root's). */
+export function withViewBox(svg: string, box: [number, number, number, number]): string {
+  return svg.replace(/viewBox="[^"]*"/, `viewBox="${box.join(' ')}"`);
 }

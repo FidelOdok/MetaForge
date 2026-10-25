@@ -115,3 +115,64 @@ class TestUpdates:
         assert r1["Value"] == "2.2k" and r1["MPN"] == "X"
         (j1,) = _props(tree, "J1")
         assert j1["Value"] == "IO"
+
+
+class TestExportSvg:
+    """kicad.export_svg's kicad-cli command lines and results (FORGE-687)."""
+
+    @pytest.fixture
+    def server(self, tmp_path: Path) -> object:
+        from tool_registry.tools.kicad.adapter import KicadServer
+        from tool_registry.tools.kicad.config import KicadConfig
+
+        return KicadServer(KicadConfig(work_dir=str(tmp_path / "work")))
+
+    @pytest.fixture
+    def cli(self, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+        import tool_registry.tools.kicad.generation as generation
+
+        calls: list[list[str]] = []
+
+        async def run(cmd: list[str], timeout: float, **_: object) -> tuple[int, str, str]:
+            calls.append(cmd)
+            out = Path(cmd[cmd.index("-o") + 1])
+            if cmd[1] == "sch":
+                for n in ("fc.svg", "fc-power.svg"):
+                    (out / n).write_text("<svg/>")
+            else:
+                out.write_text("<svg/>")
+            return 0, "", ""
+
+        monkeypatch.setattr(generation, "_run", run)
+        return calls
+
+    async def test_schematic_gives_one_svg_per_sheet(
+        self, server: object, cli: list[list[str]], tmp_path: Path
+    ) -> None:
+        from tool_registry.tools.kicad.views import export_svg
+
+        sch = tmp_path / "fc.kicad_sch"
+        sch.write_text("(kicad_sch)")
+        out = await export_svg(server, {"schematic_file": str(sch)})  # type: ignore[arg-type]
+        assert out["kind"] == "schematic"
+        assert [Path(f["file"]).name for f in out["files"]] == ["fc-power.svg", "fc.svg"]
+        assert cli[0][1:4] == ["sch", "export", "svg"] and "--exclude-drawing-sheet" in cli[0]
+
+    async def test_board_is_the_top_side_cropped_to_the_board(
+        self, server: object, cli: list[list[str]], tmp_path: Path
+    ) -> None:
+        from tool_registry.tools.kicad.views import TOP_LAYERS, export_svg
+
+        pcb = tmp_path / "fc.kicad_pcb"
+        pcb.write_text("(kicad_pcb)")
+        out = await export_svg(server, {"pcb_file": str(pcb)})  # type: ignore[arg-type]
+        cmd = cli[0]
+        assert out["kind"] == "board" and out["layers"] == TOP_LAYERS.split(",")
+        assert cmd[cmd.index("--layers") + 1] == TOP_LAYERS
+        assert cmd[cmd.index("--page-size-mode") + 1] == "2" and "--mode-single" in cmd
+
+    async def test_exactly_one_input(self, server: object, cli: list[list[str]]) -> None:
+        from tool_registry.tools.kicad.views import export_svg
+
+        with pytest.raises(ValueError, match="exactly one"):
+            await export_svg(server, {})  # type: ignore[arg-type]

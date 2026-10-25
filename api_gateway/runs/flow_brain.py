@@ -157,19 +157,42 @@ def deliverable_hints(pid: str) -> dict[str, str]:
             f"project_id={pid}; the calls build the project's bom"
         ),
         "pinmap": (
-            "derive it with the create-firmware-scaffold tool "
-            f"(work_product_id=a work product with metadata.assembly.joints), project_id={pid}; "
-            "the same call also records the firmware_source"
+            "record the pin map file (CSV or JSON) with the record-design-files tool "
+            "(work_product_type='pinmap', file_path, name, source_node_ids=[the schematic's "
+            "node id]), or derive it from joints with the create-firmware-scaffold tool "
+            f"(work_product_id=a work product with metadata.assembly.joints), project_id={pid}"
         ),
         "firmware_source": (
-            "derive it with the create-firmware-scaffold tool "
-            f"(work_product_id=a work product with metadata.assembly.joints), project_id={pid}; "
-            "the same call also records the pinmap"
+            "after firmware.build, record the PlatformIO project folder with the "
+            "record-design-files tool (work_product_type='firmware_source', file_path=the "
+            "project_dir, name, source_node_ids=[the pinmap's node id], metadata={the build's "
+            "flash and ram}); its build output is kept with it. From joints instead: the "
+            f"create-firmware-scaffold tool, project_id={pid}"
         ),
-        "schematic": f"{no_tool} (Phase 1 KiCad is read-only)",
-        "pcb_layout": f"{no_tool} (Phase 1 KiCad is read-only)",
-        "gerber": f"{no_tool}; the kicad export-gerber tool writes a file, not a twin node",
-        "pick_and_place": no_tool,
+        "schematic": (
+            "generate it with kicad.generate_schematic, then record the project folder with "
+            "the record-design-files tool (work_product_type='schematic', file_path=the "
+            "schematic_file, name, source_node_ids=[the bom's node id], metadata={erc errors "
+            f"and warnings}}), project_id={pid}"
+        ),
+        "pcb_layout": (
+            "generate and route it (kicad.generate_pcb, kicad.autoroute_pcb), then record "
+            "the routed board with the record-design-files tool "
+            "(work_product_type='pcb_layout', file_path=the routed pcb_file, name, "
+            "source_node_ids=[the schematic's node id], metadata={drc errors, unrouted}), "
+            f"project_id={pid}"
+        ),
+        "gerber": (
+            "export with kicad.export_gerber and kicad.export_drill into one folder, then "
+            "record it with the record-design-files tool (work_product_type='gerber', "
+            "file_path=that folder, name, source_node_ids=[the pcb_layout's node id]), "
+            f"project_id={pid}"
+        ),
+        "pick_and_place": (
+            "export with kicad.export_pos, then record the file with the record-design-files "
+            "tool (work_product_type='pick_and_place', file_path, name, "
+            f"source_node_ids=[the pcb_layout's node id]), project_id={pid}"
+        ),
         "manufacturing_file": no_tool,
         "test_plan": (
             f"{no_tool}; the generate-test-plan tool records verification_case entities, "

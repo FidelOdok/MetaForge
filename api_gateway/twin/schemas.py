@@ -81,6 +81,10 @@ class TwinNodeResponse(BaseModel):
     # scalar-only properties loop drops it" shape as meshStats above).
     # None for every other node type.
     technicalDrawing: dict[str, Any] | None = None  # noqa: N815
+    # FORGE-687: a node kept by twin.record_design_files (schematic, board,
+    # gerbers, placement, pin map, firmware): its files, previews, gerber
+    # layers, build output and sources. None for every other node.
+    designFiles: dict[str, Any] | None = None  # noqa: N815
     # FORGE-527: a record's (simulation_result, design_decision, evidence)
     # revision pins and staleness. None for definitions and other nodes.
     dependsOn: list[RecordPinResponse] | None = None  # noqa: N815

@@ -20,9 +20,13 @@
 # Every task sits in the design stage, so the fragment composes with every
 # spine (design_v1 has no manufacturing stage); the STEP feeds the enclosure.
 #
+# FORGE-687: the schematic, the routed board, the gerber set and the placement
+# file are twin work products (twin.record_design_files), each linked to what
+# it was made from: BOM -> schematic -> board -> gerbers and placement.
+#
 # Bump `version` when a task, its contract or a check changes.
 id: pcb_v1
-version: 1.0.0
+version: 1.1.0
 domain: pcb
 label: PCB design
 description: Schematic generation, board layout, autorouting, fabrication outputs and the 3D board.
@@ -37,13 +41,15 @@ tasks:
     footprint, each net by pin name resolved to the symbol's pin number -- and generate the
     schematic with kicad.generate_schematic. Record KiCad's ERC error count as
     `generated_erc_error_count` and the number of nets KiCad's exported netlist does not match as
-    `netlist_mismatch_count`, both sourced to the schematic revision, and stage the KiCad
-    project (twin.stage_work_product_file). Fix the circuit, not the check: an ERC error is a real connection problem.
+    `netlist_mismatch_count`, both sourced to the schematic revision, and record the schematic
+    with twin.record_design_files (work_product_type schematic, generated from the BOM). Fix the
+    circuit, not the check: an ERC error is a real connection problem.
   inputs:
   - component_selection:electronics
   outputs:
   - design_value:generated_erc_error_count
   - design_value:netlist_mismatch_count
+  records: [schematic]
   checks:
   - generated_erc_error_count == 0
   - netlist_mismatch_count == 0
@@ -73,15 +79,16 @@ tasks:
     Route the board with kicad.autoroute_pcb (Freerouting, the ground pour, then KiCad DRC with
     schematic parity). Record KiCad's unconnected-item count as `unrouted_count`, its DRC error
     count as `drc_error_count` and the schematic-parity findings as `parity_issue_count`, all
-    sourced to the routed revision, and stage the routed board (twin.stage_work_product_file).
-    A board that
-    does not route completely is reported with what is left, never finished by hand-waving.
+    sourced to the routed revision, and record the routed board with twin.record_design_files
+    (work_product_type pcb_layout, generated from the schematic). A board that does not route
+    completely is reported with what is left, never finished by hand-waving.
   inputs:
   - design_value:unplaced_count
   outputs:
   - design_value:unrouted_count
   - design_value:drc_error_count
   - design_value:parity_issue_count
+  records: [pcb_layout]
   checks:
   - unrouted_count == 0
   - drc_error_count == 0
@@ -96,12 +103,13 @@ tasks:
     planes included), the drill files, the pick-and-place file and the BOM, with
     kicad.export_gerber, kicad.export_drill, kicad.export_pos and kicad.export_bom. Record the
     number of copper layers without a gerber as `missing_copper_gerbers`, sourced to the export,
-    the BOM in the twin, and stage the gerber, drill and placement files.
+    the BOM in the twin, and the gerber and drill folder (gerber) and the placement file
+    (pick_and_place) with twin.record_design_files, both generated from the board.
   inputs:
   - design_value:drc_error_count
   outputs:
   - design_value:missing_copper_gerbers
-  records: [bom]
+  records: [bom, gerber, pick_and_place]
   checks:
   - missing_copper_gerbers == 0
   capabilities: [kicad.export_gerber, kicad.export_drill, kicad.export_pos, kicad.export_bom]

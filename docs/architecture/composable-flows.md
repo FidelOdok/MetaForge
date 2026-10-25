@@ -120,10 +120,14 @@ gerber, and the footprints without a 3D model, each `== 0`. Its ERC value is
 `generated_erc_error_count`, kept apart from `electronics_v1`'s
 `erc_error_count` on the person's own schematic. All its tasks sit in the
 design stage, so it composes with every spine; `design_v1` has no
-manufacturing stage. The schematic, board and fabrication files are staged
-work products (`twin.stage_work_product_file`). The twin's type registry has
-no `schematic`, `pcb_layout` or `gerber` record type yet, so the fragment
-requires only the BOM and the STEP `cad_model`.
+manufacturing stage. Since FORGE-687 (version 1.1.0) the schematic, the
+routed board, the gerber set and the placement file are work products in
+the twin, kept by `twin.record_design_files` and required at the gate
+(`schematic`, `pcb_layout`, `gerber`, `pick_and_place`, beside the BOM and
+the STEP `cad_model`). Each is linked `GENERATED_FROM` what it was made
+from, BOM to schematic to board to gerbers and placement, so the thread
+from a part choice to the files a fab receives is in the graph, and a
+schematic or board carries SVG previews for the dashboard.
 
 `firmware_v1` takes its MCU from the component selection, so composed with
 `electronics_v1` the firmware follows the board: a changed part re-runs the
@@ -136,7 +140,11 @@ size, so its size checks are no data, and a board neither emulator models
 leaves the boot unrecorded rather than passed. Its end-to-end test runs the
 generated FreeRTOS app's real recorded results: a 160 KB heap overflows the
 STM32F407's RAM by 34592 bytes, the V&V gate is not ready, the configuration
-is reworked to 16 KB, and the build fits at 12.7 % of RAM and boots.
+is reworked to 16 KB, and the build fits at 12.7 % of RAM and boots. Since
+FORGE-687 (version 1.1.0) the pin map and the built project are work
+products too: the pin map (`pinmap`) generated from the schematic, and the
+PlatformIO project with its `firmware.elf` (`firmware_source`) generated from
+the pin map, both kept by `twin.record_design_files`.
 
 ## Composition
 
