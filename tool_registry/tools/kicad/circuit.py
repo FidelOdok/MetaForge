@@ -5,18 +5,42 @@ components (each a KiCad library symbol and footprint), the nets that join
 their pins, and the board. The electronics agent builds it from the component
 selection; nothing in it is drawn freehand, every symbol and footprint must
 exist in the libraries the adapter carries.
+
+A part with no KiCad symbol of its own is drawn with a stand-in (a BMI270 with
+``Sensor_Motion:BMI160``). :func:`symbol_substitutions` finds those by
+comparing each symbol's name with the part number, so the substitution is
+reported instead of passing silently (FORGE-699).
 """
 
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-__all__ = ["Board", "Circuit", "Component", "Net"]
+__all__ = ["Board", "Circuit", "Component", "Net", "symbol_matches_part", "symbol_substitutions"]
 
 _LIB_ID = re.compile(r"^[A-Za-z0-9_.+\-]+:[^:\s][^:]*$")
 _REF = re.compile(r"^[A-Za-z#]+[A-Za-z0-9_]*$")
+#: Libraries of generic symbols (a resistor, a header): their names say nothing
+#: about the part number, so they are never a substitution.
+GENERIC_SYMBOL_LIBS = frozenset(
+    {
+        "Device",
+        "power",
+        "Connector",
+        "Connector_Generic",
+        "Connector_Generic_MountingPin",
+        "Connector_Generic_Shielded",
+        "Jumper",
+        "Switch",
+        "Mechanical",
+        "Graphic",
+    }
+)
+_MPN_KEYS = frozenset({"mpn", "manufacturer_part_number", "mfr_pn", "part_number"})
+_PART_NUMBER = re.compile(r"^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9][A-Za-z0-9_.+/\-]{3,}$")
 
 
 class Component(BaseModel):
@@ -35,6 +59,15 @@ class Component(BaseModel):
             "${KICAD9_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/<name>.step"
         ),
     )
+    symbol_pinout_checked: str | None = Field(
+        default=None,
+        description=(
+            "When `symbol` is a stand-in for a part that has no KiCad symbol of its "
+            "own (e.g. Sensor_Motion:BMI160 for a BMI270): how its pin numbers were "
+            "checked against the part's datasheet. Without it the substitution is "
+            "reported as unconfirmed"
+        ),
+    )
 
     @field_validator("ref")
     @classmethod
@@ -49,6 +82,13 @@ class Component(BaseModel):
         if not _LIB_ID.match(v):
             raise ValueError(f"{v!r} is not a 'Library:Name' id")
         return v
+
+    def part_number(self) -> str | None:
+        """The MPN field, or the value when it reads as a part number."""
+        for key, val in self.fields.items():
+            if key.strip().lower().replace(" ", "_") in _MPN_KEYS and val.strip():
+                return val.strip()
+        return self.value.strip() if _PART_NUMBER.match(self.value.strip()) else None
 
 
 class Net(BaseModel):
@@ -146,3 +186,59 @@ class Circuit(BaseModel):
     def net_of(self) -> dict[str, str]:
         """``"REF.PIN" -> net name``."""
         return {node: net.name for net in self.nets for node in net.nodes}
+
+
+def _stem(text: str) -> str:
+    """The first alphanumeric run: ``BMI270`` of ``BMI270``, ``MCP73831`` of ``MCP73831-2-OT``."""
+    return re.split(r"[^A-Za-z0-9]", text.strip(), maxsplit=1)[0]
+
+
+def symbol_matches_part(symbol: str, part: str) -> bool:
+    """Whether the symbol's name names this part number.
+
+    KiCad writes a lowercase ``x`` for any character (``STM32F407VGTx``). The
+    part number may carry a suffix the symbol does not (``LPS22HBTR`` for
+    ``LPS22HB``), or the symbol a package code the part number leaves out.
+    """
+    name = _stem(symbol.split(":", 1)[-1])
+    pn = _stem(part).upper()
+    if not name or not pn:
+        return True
+    if re.match(_pattern(name), pn):
+        return True
+    return len(pn) >= 5 and re.fullmatch(_pattern(name[: len(pn)]), pn) is not None
+
+
+def _pattern(name: str) -> str:
+    return "".join("[A-Z0-9]" if ch == "x" else re.escape(ch.upper()) for ch in name)
+
+
+def symbol_substitutions(circuit: Circuit) -> list[dict[str, Any]]:
+    """Parts drawn with a symbol whose name is not their part number.
+
+    Each entry names the reference, the part number, the symbol used, whether
+    the pinout check is recorded (``symbol_pinout_checked``) and, while it is
+    not, a warning to check the pins against the part's datasheet.
+    """
+    out: list[dict[str, Any]] = []
+    for comp in circuit.components:
+        lib = comp.symbol.split(":", 1)[0]
+        part = comp.part_number()
+        if lib in GENERIC_SYMBOL_LIBS or part is None or symbol_matches_part(comp.symbol, part):
+            continue
+        confirmed = bool(comp.symbol_pinout_checked and comp.symbol_pinout_checked.strip())
+        entry: dict[str, Any] = {
+            "ref": comp.ref,
+            "part_number": part,
+            "symbol": comp.symbol,
+            "confirmed": confirmed,
+            "pinout_check": comp.symbol_pinout_checked if confirmed else None,
+        }
+        if not confirmed:
+            entry["warning"] = (
+                f"{comp.ref} ({part}) is drawn with the {comp.symbol} symbol. Check every "
+                f"pin number against the {part} datasheet, then record how in "
+                "symbol_pinout_checked, before the board is ordered"
+            )
+        out.append(entry)
+    return out

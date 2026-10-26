@@ -66,7 +66,11 @@ def register_generation_tools(server: KicadServer) -> None:
                 "no-connect flags, undriven power nets a PWR_FLAG. Then KiCad's ERC runs on "
                 "it and the netlist KiCad exports is compared net by net with the circuit. "
                 "verdict pass = no ERC error and every net matched. Writes a new project "
-                "folder; an unknown symbol or pin is refused by name."
+                "folder; an unknown symbol or pin is refused by name. A part drawn with "
+                "a symbol whose name is not its MPN (a stand-in, e.g. BMI160 for a "
+                "BMI270) is listed in symbol_substitutions with a warning until the "
+                "component's symbol_pinout_checked says how its pins were checked "
+                "against the datasheet; unconfirmed_symbol_substitutions counts them."
             ),
             capability="schematic_generation",
             input_schema={
@@ -165,12 +169,15 @@ async def _schematic(server: KicadServer, circuit: Circuit, folder: Path) -> dic
     erc = await server._execute_erc(str(path), "all")
     check = await _netlist_check(server, circuit, path)
     passed = erc.get("errors", 0) == 0 and not check["mismatched"]
+    unconfirmed = [s for s in gen.substitutions if not s["confirmed"]]
     logger.info(
         "schematic_generated",
         circuit=circuit.name,
         symbols=gen.symbols_placed,
         erc_errors=erc.get("errors"),
         mismatched=len(check["mismatched"]),
+        symbol_substitutions=len(gen.substitutions),
+        unconfirmed_substitutions=len(unconfirmed),
     )
     return {
         "verdict": "pass" if passed else "fail",
@@ -185,6 +192,11 @@ async def _schematic(server: KicadServer, circuit: Circuit, folder: Path) -> dic
         "netlist_check": check,
         "pins": gen.pins,
         "symbol_uuids": gen.symbol_uuids,
+        # FORGE-699: a part drawn with another part's symbol. ERC and the netlist
+        # check pass on the stand-in's pins, so only a person can confirm them.
+        "symbol_substitutions": gen.substitutions,
+        "unconfirmed_symbol_substitutions": len(unconfirmed),
+        "warnings": [s["warning"] for s in unconfirmed],
     }
 
 
@@ -246,7 +258,17 @@ async def generate_pcb_tool(server: KicadServer, arguments: dict[str, Any]) -> d
             "unplaced": result["unplaced"],
         }
         if schematic is not None:
-            out["schematic"] = {k: schematic[k] for k in ("verdict", "erc", "netlist_check")}
+            out["schematic"] = {
+                k: schematic[k]
+                for k in (
+                    "verdict",
+                    "erc",
+                    "netlist_check",
+                    "symbol_substitutions",
+                    "unconfirmed_symbol_substitutions",
+                    "warnings",
+                )
+            }
         logger.info("pcb_generated", circuit=circuit.name, unplaced=len(result["unplaced"]))
         return out
 
