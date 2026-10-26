@@ -288,3 +288,53 @@ class TestOverHttp:
         )
         # A legacy unknown method keeps its old 200 + JSON-RPC error.
         assert listed.status_code == 200
+
+
+class TestHealthCheckWithoutAHandshake:
+    """FORGE-696: a 2026-07-28 client never sends ``initialize``.
+
+    health.check read only the handshake copy, so Claude Code 2.1.294 was told
+    "no initialize handshake has been completed on this server" and shown the
+    server's default revision as negotiated, while every call it made worked.
+    """
+
+    def _client(self, server: UnifiedMcpServer) -> dict[str, Any]:
+        response = _call(
+            server,
+            "tools/call",
+            {"name": "health.check", "arguments": {}, "_meta": _meta()},
+        )
+        text = response["result"]["content"][0]["text"]
+        return dict(json.loads(text)["data"]["client"])
+
+    def test_the_request_names_the_client_and_its_revision(self) -> None:
+        client = self._client(UnifiedMcpServer(adapters=[]))
+        assert client["connected"] is True
+        assert (client["name"], client["version"]) == ("modern-client", "1")
+        assert client["protocol_requested"] == client["protocol_negotiated"] == MODERN
+        assert "handshake-free" in client["handshake"]
+        assert "protocol_skew" not in client
+
+    def test_an_earlier_handshake_client_does_not_answer_for_it(self) -> None:
+        """The handshake copy belongs to whichever legacy client came last."""
+        server = UnifiedMcpServer(adapters=[])
+        _call(
+            server,
+            "initialize",
+            {"protocolVersion": "2025-06-18", "clientInfo": {"name": "old-harness"}},
+        )
+        client = self._client(server)
+        assert client["name"] == "modern-client"
+        assert client["protocol_negotiated"] == MODERN
+
+    def test_the_handshake_path_still_reports_its_own(self) -> None:
+        server = UnifiedMcpServer(adapters=[])
+        _call(
+            server,
+            "initialize",
+            {"protocolVersion": "2025-06-18", "clientInfo": {"name": "old-harness"}},
+        )
+        report = asyncio.run(server._health_check())["client"]
+        assert report["name"] == "old-harness"
+        assert report["protocol_negotiated"] == "2025-06-18"
+        assert current_modern_request() is None

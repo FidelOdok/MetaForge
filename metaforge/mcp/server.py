@@ -1251,10 +1251,12 @@ class UnifiedMcpServer:
             logger.info("mcp_modern_request_malformed", method=method, problem=problem)
             return json.dumps(make_error(request_id, INVALID_PARAMS, problem))
         meta = params["_meta"]
-        request = ModernRequest(
-            version=version, client_capabilities=dict(meta[META_CLIENT_CAPABILITIES])
-        )
         client = meta.get(META_CLIENT_INFO)
+        request = ModernRequest(
+            version=version,
+            client_capabilities=dict(meta[META_CLIENT_CAPABILITIES]),
+            client_info=client if isinstance(client, dict) else None,
+        )
         with tracer.start_as_current_span("unified_mcp.modern_request") as span:
             span.set_attribute("rpc.method", method)
             span.set_attribute("mcp.protocol_version", version)
@@ -2701,7 +2703,24 @@ class UnifiedMcpServer:
         ``initialize``, and reporting an empty name there would read as a
         client that failed to identify itself rather than one that never
         arrived.
+
+        FORGE-696: a handshake-free (2026-07-28) client never sends
+        ``initialize``; its identity and revision come with each request. The
+        report is then about the request asking, not the server's handshake
+        copy, which a modern client never fills.
         """
+        modern = current_modern_request()
+        if modern is not None:
+            info = modern.client_info or {}
+            return {
+                "connected": True,
+                "name": info.get("name"),
+                "version": info.get("version"),
+                "protocol_requested": modern.version,
+                "protocol_negotiated": modern.version,
+                "handshake": "none: this revision is handshake-free, each request names it",
+                "can_elicit": self.can_elicit,
+            }
         if self._client_info is None and self._client_protocol is None:
             return {
                 "connected": False,

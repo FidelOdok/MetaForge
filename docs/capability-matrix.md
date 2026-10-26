@@ -1268,7 +1268,14 @@ means open mode. That is the state an unset `METAFORGE_MCP_API_KEY` gives
 you, so it is the one most likely to be in force without anyone having
 chosen it.
 
-`client` is filled from the `initialize` handshake. Before any handshake
+`client` is filled from the `initialize` handshake, or, for a
+handshake-free 2026-07-28 client, from the request asking (FORGE-696). Such
+a client never sends `initialize`; its `clientInfo` and revision come with
+every request, so the report names them, sets `protocol_requested` and
+`protocol_negotiated` to that revision, and adds
+`handshake: "none: this revision is handshake-free, ..."`. Before that fix it
+was told no handshake had been completed and shown the server's default
+revision. Before any handshake on the legacy path
 it reports `connected: false` rather than an anonymous client — the
 legacy transports dispatch without one, and an empty name would read as a
 client that failed to identify itself. `protocol_skew` appears when the
