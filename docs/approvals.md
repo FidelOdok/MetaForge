@@ -152,6 +152,16 @@ cannot.
   110 s (FORGE-589). `wait_seconds` and `answer_seconds` override this for a
   client that allows longer calls. When nobody answers in time the gate stays
   open and the agent can call the tool again.
+- **A gate decided elsewhere says who decided it** (FORGE-695). When the gate
+  is answered in the dashboard, with `forge approvals`, or through
+  `POST /v1/approvals/{id}/decision` while the tool waits, it returns
+  `decided_elsewhere` with the decision record: the decision, the approver, the
+  surface, the agent and the person it acted for when an agent decided, the
+  reason and the time. Every other result (`no_gate_yet`, `run_ended`,
+  `decided`) and `run.get_status` carry the run's most recent decision as
+  `last_gate_decision`, read from the run's own decision log. Before this a gate
+  decided outside the prompt simply disappeared, and an agent reported it as
+  closed with nobody approving it.
 - **Not held at the call.** The tool's only effect is asking the person, so
   holding the call first would ask them twice for one decision. The
   design-flow worker cannot call it (`flow.*` is refused for the service

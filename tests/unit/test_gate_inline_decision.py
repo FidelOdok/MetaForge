@@ -112,4 +112,5 @@ def test_in_process_reader_reports_a_run_without_a_gate(client: TestClient) -> N
     run = store.create({"flow": "design_v1"})
     store.start(run.id)
     state = asyncio.run(make_gate_reader()(run.id))
-    assert state == {"run_status": "running", "gate": None}
+    # FORGE-695: no decision yet, and the reader says so rather than omitting it.
+    assert state == {"run_status": "running", "gate": None, "last_decision": None}

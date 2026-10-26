@@ -331,3 +331,78 @@ def test_an_explicit_answer_window_is_kept() -> None:
     person = _Person(ElicitResult(ElicitAction.ACCEPT, {"decision": "approve"}))
     _run(gw, person, answer_seconds=600)
     assert _answer_window(person) == 600
+
+
+# ── a gate decided outside the prompt (FORGE-695) ─────────────────────────
+
+API_DECISION: dict[str, Any] = {
+    "decision": "approve",
+    "reason": "Gate 'G3' clean.",
+    "approver": "Fidel Odok",
+    "approver_verified": False,
+    "surface": "agent",
+    "on_behalf_of": "Fidel Odok",
+    "agent": "claude-code",
+    "decided_at": "2026-10-26T16:57:53+00:00",
+}
+
+
+def test_a_gate_decided_through_the_api_while_waiting_says_who_and_how() -> None:
+    """The agent saw the gate vanish and reported it closed with no approver."""
+    gw = _Gateway(
+        [
+            {"run_status": "running", "gate": None, "last_decision": None},
+            {"run_status": "running", "gate": None, "last_decision": API_DECISION},
+        ]
+    )
+    out = _run(gw, None)
+    assert out["status"] == "decided_elsewhere"
+    assert out["decided_by"] == "Fidel Odok"
+    assert out["last_gate_decision"]["surface"] == "agent"
+    assert "through an agent (claude-code) on behalf of Fidel Odok" in out["message"]
+    assert "Reason: Gate 'G3' clean." in out["message"]
+
+
+def test_a_decision_from_before_the_call_is_reported_not_announced() -> None:
+    """Decided before this call: no gate yet, but the latest decision is named."""
+    clock = iter([0.0, 0.0, 5.0, 500.0, 500.0])
+    gw = _Gateway([{"run_status": "running", "gate": None, "last_decision": API_DECISION}])
+
+    async def go() -> dict[str, Any]:
+        return await await_gate(
+            "run-1",
+            reader=gw.read,
+            decider=gw.decide,
+            wait_seconds=10,
+            sleep=_no_sleep,
+            clock=lambda: next(clock),
+        )
+
+    out = asyncio.run(go())
+    assert out["status"] == "no_gate_yet"
+    assert out["last_gate_decision"] == API_DECISION
+    assert "most recent gate decision: 'approve' by Fidel Odok" in out["message"]
+
+
+def test_a_finished_run_names_its_last_decision() -> None:
+    rejected = {**API_DECISION, "decision": "reject", "surface": "dashboard", "reason": "no"}
+    out = _run(_Gateway([{"run_status": "rejected", "last_decision": rejected}]), None)
+    assert out["status"] == "run_ended"
+    assert "'reject' by Fidel Odok, through dashboard" in out["message"]
+
+
+def test_a_decision_in_the_prompt_carries_its_record() -> None:
+    gw = _Gateway([{"run_status": "awaiting_approval", "gate": _gate()}])
+    person = _Person(ElicitResult(ElicitAction.ACCEPT, {"decision": "approve"}))
+    out = _run(gw, person)
+    assert out["status"] == "decided"
+    assert out["last_gate_decision"]["approver"]
+
+
+def test_last_gate_decision_reads_the_runs_decision_log() -> None:
+    from tool_registry.tools.design_flow.gates import last_gate_decision
+
+    assert last_gate_decision({}) is None
+    assert last_gate_decision({"decisions": []}) is None
+    older = {**API_DECISION, "decision": "retry"}
+    assert last_gate_decision({"decisions": [older, API_DECISION]}) == API_DECISION
