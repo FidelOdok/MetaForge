@@ -291,6 +291,23 @@ class TestDecideTable:
     def test_the_worker_takes_no_phase_tasks(self) -> None:
         assert decide("phase.claim", caller=Caller.SERVICE).refused
 
+    @pytest.mark.parametrize(
+        "tool",
+        [
+            "kicad.export_gerber",
+            "kicad.export_drill",
+            "kicad.export_pos",
+            "kicad.export_bom",
+            "kicad.export_netlist",
+        ],
+    )
+    @pytest.mark.parametrize("caller", [Caller.CLIENT_TASK, Caller.SERVICE])
+    def test_a_flow_can_make_its_fabrication_files(self, tool: str, caller: Caller) -> None:
+        """FORGE-692: the KiCad exports never overwrite, so a phase task may run
+        them. As destructive they were refused, and no flow reached its gerbers."""
+        result = decide(tool, caller=caller)
+        assert not result.refused and not result.requires_approval
+
 
 # ── the verifier ─────────────────────────────────────────────────────────
 
