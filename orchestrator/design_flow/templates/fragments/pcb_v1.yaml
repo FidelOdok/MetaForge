@@ -28,9 +28,14 @@
 # placed BOM lines whose symbols name no manufacturer part number. A run's
 # BOM passed every gate with its passives unsourced.
 #
+# FORGE-699: the schematic task gates on `unconfirmed_symbol_substitutions`,
+# the parts drawn with another part's symbol (a BMI270 as a BMI160) whose
+# pinout check is not recorded. ERC and the netlist match pass on the
+# stand-in's pins, so they cannot catch a pin that differs.
+#
 # Bump `version` when a task, its contract or a check changes.
 id: pcb_v1
-version: 1.2.0
+version: 1.3.0
 domain: pcb
 label: PCB design
 description: Schematic generation, board layout, autorouting, fabrication outputs and the 3D board.
@@ -47,16 +52,23 @@ tasks:
     `generated_erc_error_count` and the number of nets KiCad's exported netlist does not match as
     `netlist_mismatch_count`, both sourced to the schematic revision, and record the schematic
     with twin.record_design_files (work_product_type schematic, generated from the BOM). Fix the
-    circuit, not the check: an ERC error is a real connection problem.
+    circuit, not the check: an ERC error is a real connection problem. A part with no KiCad
+    symbol of its own drawn with another part's (a BMI270 as Sensor_Motion:BMI160) comes back in
+    `symbol_substitutions` with a warning: check every pin number against the ordered part's
+    datasheet, say how in the component's `symbol_pinout_checked`, regenerate, and record the
+    result's `unconfirmed_symbol_substitutions`, sourced to the schematic revision. Never set
+    symbol_pinout_checked without having compared the pins.
   inputs:
   - component_selection:electronics
   outputs:
   - design_value:generated_erc_error_count
   - design_value:netlist_mismatch_count
+  - design_value:unconfirmed_symbol_substitutions
   records: [schematic]
   checks:
   - generated_erc_error_count == 0
   - netlist_mismatch_count == 0
+  - unconfirmed_symbol_substitutions == 0
   capabilities: [kicad.generate_schematic]
   outcome: a schematic KiCad's ERC passes, wired exactly as the circuit says
 - id: board

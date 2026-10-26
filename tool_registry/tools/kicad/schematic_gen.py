@@ -10,6 +10,10 @@ circuit (that check lives in the adapter).
 
 Nothing is drawn freehand: an unknown symbol, or a node naming a pin the
 symbol does not have, is refused by name.
+
+A part drawn with a stand-in symbol (it has none of its own) carries a
+``Symbol_Substitute`` field saying so and is listed in the result
+(FORGE-699): the pins are the stand-in's, so a person checks them.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from tool_registry.tools.kicad import sexpr
-from tool_registry.tools.kicad.circuit import Circuit
+from tool_registry.tools.kicad.circuit import Circuit, symbol_substitutions
 from tool_registry.tools.kicad.sexpr import QStr
 
 __all__ = [
@@ -252,6 +256,7 @@ class SchematicResult:
     paper: str = "A4"
     pins: dict[str, list[dict[str, str]]] = field(default_factory=dict)
     symbol_uuids: dict[str, str] = field(default_factory=dict)
+    substitutions: list[dict[str, Any]] = field(default_factory=list)
 
 
 def generate_schematic(
@@ -330,6 +335,8 @@ def generate_schematic(
 
     # -- write ------------------------------------------------------------------
     comp_by_ref = {c.ref: c for c in circuit.components}
+    substitutions = symbol_substitutions(circuit)
+    substitute_of = {s["ref"]: s for s in substitutions}
     body: list[Any] = []
     labels = no_connects = 0
     pin_report: dict[str, list[dict[str, str]]] = {}
@@ -355,6 +362,11 @@ def generate_schematic(
                 ("Datasheet", "", True),
             ]
             props += [(k, v, True) for k, v in comp.fields.items()]
+            sub = substitute_of.get(ref)
+            if sub is not None:
+                note = sub["pinout_check"] or "pinout not yet checked against the datasheet"
+                text = f"{lib_id} drawn for {sub['part_number']}; {note}"
+                props.append(("Symbol_Substitute", text, True))
         inst: list[Any] = [
             "symbol",
             ["lib_id", QStr(lib_id)],
@@ -464,6 +476,7 @@ def generate_schematic(
         paper=paper[0],
         pins=pin_report,
         symbol_uuids=symbol_uuids,
+        substitutions=substitutions,
     )
 
 

@@ -70,6 +70,12 @@ Ask for anything missing; do not choose parts, values or the board yourself.
 - Nodes are `REF.PIN` with the **symbol's pin number** (`U1.2`, not
   `U1.VO`). Check pin numbers against the datasheet: symbol and part must
   agree.
+- A part KiCad has no symbol for may be drawn with a pin-compatible one
+  (a BMI270 as `Sensor_Motion:BMI160`). Keep the real part in `value` and
+  `MPN`, compare every pin with the ordered part's datasheet, and say how in
+  the component's `symbol_pinout_checked` (e.g. "all 14 pins compared with
+  the BMI270 datasheet pin table: they match the BMI160 symbol"). Never fill
+  it in without comparing.
 - Every pin on no net gets a no-connect flag; say which pins those are.
 - A board with a fine-pitch MCU (LQFP, QFN) wants four layers:
   `"layers": 4, "inner_planes": ["GND", "+3V3"]` puts solid planes on In1
@@ -92,7 +98,10 @@ Ask for anything missing; do not choose parts, values or the board yourself.
    (nets matched and mismatched), `power_flags`, `no_connects` and the
    schematic file. Report any ERC error at its location; a mismatch means
    the schematic does not say what the circuit says: stop and fix the
-   circuit.
+   circuit. `symbol_substitutions` lists parts drawn with another part's
+   symbol; each one still in `warnings` (counted by
+   `unconfirmed_symbol_substitutions`) needs its pins checked before the
+   schematic is done. Tell the person which part and which symbol.
 2. **Board.** With a `board`, call `kicad.generate_pcb` with the circuit and
    the `schematic_file`. Footprints are linked to their symbols. `unplaced`
    lists parts that did not fit: ask for a bigger board or fewer parts;
@@ -118,6 +127,7 @@ Ask for anything missing; do not choose parts, values or the board yourself.
 
 - [ ] Every part's symbol, footprint and pin numbers come from its datasheet
 - [ ] "Schematic done" rests on ERC with 0 errors and 0 netlist mismatches
+- [ ] Every stand-in symbol named, with its pinout check, and `unconfirmed_symbol_substitutions` 0
 - [ ] "Board done" rests on 0 unrouted, 0 DRC errors, 0 parity issues
 - [ ] "Ready to build" rests on `lines_without_mpn` 0: every placed part, passives too, has an MPN
 - [ ] DRC warnings listed, not hidden
@@ -130,6 +140,7 @@ Ask for anything missing; do not choose parts, values or the board yourself.
 | "symbol X is not in the Y library" / "footprint ... not in" | Wrong lib id | Search the library names; ask if unsure. |
 | "U1.9: ... has no pin '9'" | Pin number does not exist on the symbol | Check the symbol's pins against the datasheet. |
 | ERC errors | Unconnected input, conflicting outputs, power not driven | Fix the circuit and regenerate. |
+| `warnings`: "U2 (BMI270) is drawn with the Sensor_Motion:BMI160 symbol" | No KiCad symbol for the part; a stand-in was used | Compare the pins with the datasheet, set `symbol_pinout_checked`, regenerate; if they differ, pick another symbol. |
 | `unplaced` not empty | Board too small | Ask for a larger board. |
 | `unrouted` > 0 | Too dense for two layers, or supply pins with no plane | Four layers with `inner_planes`, a larger board, or smaller passives (0402); report the nets by name. |
 | DRC `hole_clearance` inside one footprint | The vendor's land pattern sits closer to its holes than KiCad's 0.25 mm default | Set `hole_clearance_mm` to what the fab allows, or choose another footprint; never hide the error. |
