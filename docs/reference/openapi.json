@@ -1464,8 +1464,15 @@
             "type": "string"
           },
           "unitPrice": {
-            "title": "Unitprice",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unitprice"
           }
         },
         "required": [
@@ -1475,7 +1482,6 @@
           "description",
           "manufacturer",
           "quantity",
-          "unitPrice",
           "priceCurrency",
           "status",
           "category",
@@ -5694,6 +5700,21 @@
               }
             ],
             "title": "Costoverbudget"
+          },
+          "costPartial": {
+            "default": false,
+            "title": "Costpartial",
+            "type": "boolean"
+          },
+          "costPricedLines": {
+            "default": 0,
+            "title": "Costpricedlines",
+            "type": "integer"
+          },
+          "costTotalLines": {
+            "default": 0,
+            "title": "Costtotallines",
+            "type": "integer"
           },
           "dissipationW": {
             "title": "Dissipationw",

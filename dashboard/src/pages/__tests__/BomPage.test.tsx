@@ -82,6 +82,22 @@ describe('BomPage', () => {
     expect(screen.getByText('U1')).toBeInTheDocument();
     expect(screen.getByText('STM32F405')).toBeInTheDocument();
     expect(screen.getByText('$8.50')).toBeInTheDocument();
+    expect(screen.queryByTestId('bom-cost-partial')).not.toBeInTheDocument();
+  });
+
+  it('labels the total partial and shows no price for an unpriced line (FORGE-700)', () => {
+    const line = { description: 'x', manufacturer: 'm', quantity: 1, priceCurrency: 'USD', status: 'available', category: 'IC', projectId: 'p1', imageUrl: null, purchaseUrl: null, datasheetUrl: null, footprint: null, cadModelUrl: null };
+    mockUseBom.mockReturnValue({
+      data: [
+        { ...line, id: 'b1', designator: 'U1', partNumber: 'STM32F405', unitPrice: 8.5 },
+        { ...line, id: 'b2', designator: 'C1', partNumber: 'CAP-100N', unitPrice: null },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useBom>);
+    render(<BomPage />);
+    expect(screen.getByText('no price')).toBeInTheDocument();
+    expect(screen.getByTestId('bom-cost-partial')).toHaveTextContent('1 of 2 lines priced');
+    expect(screen.getByText(/partial total \$8\.50/)).toBeInTheDocument();
   });
 
   it('renders a purchase link, datasheet link, and non-USD price correctly', () => {

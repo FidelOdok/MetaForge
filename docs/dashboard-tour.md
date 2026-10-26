@@ -290,6 +290,10 @@ item revision shows its `@n` (marked *old* when it is not current); clicking
 it opens the item's history. The Requirements page's matrix does the same
 for each requirement, with its constraint set's revision.
 
+A line with no price shows *no price*, not $0.00. When any line is
+unpriced, the header total is labelled partial and says how many lines
+are priced, so it is never read as the board cost.
+
 - **Backed by:** `GET /v1/bom`, `GET /v1/twin/revision-index`.
 - **Use it to:** sanity-check supply-chain coverage before a fab
   release.

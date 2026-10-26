@@ -84,6 +84,12 @@ class HierarchyNodeResponse(BaseModel):
     placement: dict[str, Any] | None = None
     massKg: float  # noqa: N815
     cost: float
+    # FORGE-700: how many of the branch's BOM lines carry a price. When
+    # costPartial is true, ``cost`` is the priced lines only -- a lower
+    # bound, not the branch's cost.
+    costPricedLines: int = 0  # noqa: N815
+    costTotalLines: int = 0  # noqa: N815
+    costPartial: bool = False  # noqa: N815
     # FORGE-264 (gap G-B4): set only when a "mass"/"cost" budget entity has
     # an allocation whose target resolves to this node's id. None means no
     # allocation targets this node -- not "not over budget".
@@ -304,6 +310,8 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
             try:
                 rollup = await compute_hierarchy_rollup(_twin, node.id)
                 mass_kg, cost = rollup.mass_kg, rollup.cost
+                priced_lines, total_lines = rollup.priced_lines, rollup.total_lines
+                cost_partial = rollup.cost_partial
                 draw_peak_w = rollup.draw_peak_w
                 draw_average_w = rollup.draw_average_w
                 output_w = rollup.output_w
@@ -312,6 +320,8 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                 # Shouldn't happen (every node here came from list_hierarchy_nodes
                 # itself), but a rollup failure must never break the whole list.
                 mass_kg, cost = 0.0, 0.0
+                priced_lines = total_lines = 0
+                cost_partial = False
                 draw_peak_w = draw_average_w = output_w = dissipation_w = 0.0
             parent_id = parent_of.get(node.id)
             mass_status = mass_status_by_node.get(node.id)
@@ -326,6 +336,9 @@ async def get_hierarchy_tree(project_id: str | None = None) -> HierarchyTreeResp
                     placement=placement_of.get(node.id),
                     massKg=mass_kg,
                     cost=cost,
+                    costPricedLines=priced_lines,
+                    costTotalLines=total_lines,
+                    costPartial=cost_partial,
                     massBudgetKg=mass_status.allocated if mass_status else None,
                     massOverBudget=mass_status.over_budget if mass_status else None,
                     costBudget=cost_status.allocated if cost_status else None,

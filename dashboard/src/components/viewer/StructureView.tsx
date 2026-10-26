@@ -60,9 +60,19 @@ function formatMass(massKg: number, budgetKg: number | null): string {
   return budgetKg != null ? `${massKg.toFixed(2)} / ${budgetKg.toFixed(2)} kg` : `${massKg.toFixed(2)} kg`;
 }
 
-function formatCost(cost: number, budget: number | null): string {
-  if (cost <= 0) return '—';
-  return budget != null ? `$${cost.toFixed(2)} / $${budget.toFixed(2)}` : `$${cost.toFixed(2)}`;
+function formatCost(cost: number, budget: number | null, partial = false): string {
+  if (cost <= 0 && !partial) return '—';
+  // FORGE-700: a total with unpriced lines is a lower bound, so it reads "≥".
+  const amount = `${partial ? '≥ ' : ''}$${cost.toFixed(2)}`;
+  return budget != null ? `${amount} / $${budget.toFixed(2)}` : amount;
+}
+
+/** FORGE-700: tooltip naming how many lines the cost covers, when partial. */
+function costTitle(node: HierarchyNode): string | undefined {
+  const owner = ownerTitle(node.costBudgetOwner, node.costBudgetDiscipline);
+  if (!node.costPartial) return owner;
+  const coverage = `Partial: ${node.costPricedLines ?? 0} of ${node.costTotalLines ?? 0} BOM lines priced`;
+  return owner ? `${coverage}. ${owner}` : coverage;
 }
 
 /** FORGE-313: "owner (discipline)" for a budget-allocation tooltip, or
@@ -1088,10 +1098,11 @@ function TreeRow({
           {formatMass(node.massKg, node.massBudgetKg)}
         </span>
         <span
-          className={`tw-structure-cost${node.costOverBudget ? ' is-over-budget' : ''}`}
-          title={ownerTitle(node.costBudgetOwner, node.costBudgetDiscipline)}
+          className={`tw-structure-cost${node.costOverBudget ? ' is-over-budget' : ''}${node.costPartial ? ' is-partial' : ''}`}
+          title={costTitle(node)}
+          data-testid={node.costPartial ? 'structure-cost-partial' : undefined}
         >
-          {formatCost(node.cost, node.costBudget)}
+          {formatCost(node.cost, node.costBudget, node.costPartial)}
         </span>
         <span
           className="tw-structure-power"

@@ -26,6 +26,11 @@ FORGE-345: those degradations are no longer the *same* "can't check".
 "this metric will never be checkable", "you wrote a label where a node id
 goes" and "that node id points at nothing" call for different actions and
 were arriving as one identical blank cell.
+
+FORGE-700: a cost rollup with unpriced BOM lines is a lower bound, not the
+branch's cost. Checked against an allocation it can prove a branch is over
+budget, never that it is within, so ``over_budget`` is left undecided
+(``reason=COST_PARTIAL``) unless the priced lines alone already exceed it.
 """
 
 from __future__ import annotations
@@ -89,7 +94,8 @@ class AllocationStatus(BaseModel):
     detail: str = ""
     """What to do about ``reason``, when a sentence helps. Empty otherwise."""
     reason: str = ""
-    """Why ``actual`` is None, when it is. Empty when the check ran.
+    """Why ``actual`` is None, or ``over_budget`` undecided, when it is.
+    Empty when the check ran.
 
     FORGE-345. Three unrelated situations used to arrive as the same blank
     cell: a metric no rollup can compute, a target that is not a node id at
@@ -106,6 +112,7 @@ UNSUPPORTED_METRIC = "metric_has_no_rollup"
 AMBIGUOUS_METRIC = "metric_is_ambiguous"
 TARGET_NOT_A_NODE_ID = "target_is_not_a_node_id"
 TARGET_NOT_FOUND = "target_node_not_found"
+COST_PARTIAL = "cost_is_partial"
 
 
 async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> list[AllocationStatus]:
@@ -144,7 +151,21 @@ async def compute_budget_allocation_status(twin: TwinAPI, budget: Budget) -> lis
                     reason = TARGET_NOT_FOUND
                 else:
                     actual = getattr(rollup, rollup_field)
+                    if budget.metric == "cost" and rollup.cost_partial:
+                        reason = COST_PARTIAL
+                        missing = ", ".join(
+                            line.part_number or str(line.bom_item_id)
+                            for line in rollup.unpriced_lines
+                        )
+                        detail = (
+                            f"{rollup.priced_lines} of {rollup.total_lines} BOM lines "
+                            f"are priced; {actual:g} is the priced lines only. "
+                            f"No price for: {missing}."
+                        )
         over_budget = actual > allocation.amount if actual is not None else None
+        if reason == COST_PARTIAL and not over_budget:
+            # A lower bound under the allocation proves nothing.
+            over_budget = None
         results.append(
             AllocationStatus(
                 target=allocation.target,

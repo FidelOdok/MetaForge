@@ -36,7 +36,8 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   JPY: '¥',
 };
 
-function formatPrice(amount: number, currency: string): string {
+function formatPrice(amount: number | null, currency: string): string {
+  if (amount === null) return 'no price';
   const symbol = CURRENCY_SYMBOLS[currency];
   return symbol ? `${symbol}${amount.toFixed(2)}` : `${currency} ${amount.toFixed(2)}`;
 }
@@ -553,7 +554,11 @@ export function BomPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   const items = components ?? [];
-  const totalCost = items.reduce((sum, c) => sum + c.quantity * c.unitPrice, 0);
+  // FORGE-700: an unpriced line adds nothing to the total, so the total is
+  // labelled partial whenever one exists, never shown as the board cost.
+  const pricedItems = items.filter((c) => c.unitPrice !== null);
+  const totalCost = pricedItems.reduce((sum, c) => sum + c.quantity * (c.unitPrice ?? 0), 0);
+  const costPartial = pricedItems.length < items.length;
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -576,7 +581,9 @@ export function BomPage() {
       const cmp =
         typeof av === 'number' && typeof bv === 'number'
           ? av - bv
-          : String(av).localeCompare(String(bv));
+          : av === null || bv === null
+            ? (av === null ? 1 : 0) - (bv === null ? 1 : 0)
+            : String(av).localeCompare(String(bv));
       return sortDir === 'asc' ? cmp : -cmp;
     });
   }, [filtered, sortField, sortDir]);
@@ -598,7 +605,7 @@ export function BomPage() {
       c.description,
       c.manufacturer,
       String(c.quantity),
-      c.unitPrice.toFixed(2),
+      c.unitPrice === null ? '' : c.unitPrice.toFixed(2),
       c.priceCurrency,
       c.status,
       c.purchaseUrl ?? '',
@@ -639,7 +646,16 @@ export function BomPage() {
           </h1>
           <span className="font-mono text-xs text-on-surface-variant">
             {view === 'flat'
-              ? <>{items.length} components &middot; total ${totalCost.toFixed(2)}</>
+              ? costPartial
+                ? (
+                    <>
+                      {items.length} components &middot; partial total ${totalCost.toFixed(2)}{' '}
+                      <span data-testid="bom-cost-partial" className="text-error">
+                        ({pricedItems.length} of {items.length} lines priced)
+                      </span>
+                    </>
+                  )
+                : <>{items.length} components &middot; total ${totalCost.toFixed(2)}</>
               : <>{(hierarchicalLines ?? []).length} EBOM lines</>}
           </span>
         </div>

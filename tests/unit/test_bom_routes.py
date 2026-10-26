@@ -45,10 +45,12 @@ class TestMapping:
         item = BOMItem(part_number="x", manufacturer="y", specifications={"status": "bogus"})
         assert _item_to_component(item).status == "available"
 
-    def test_missing_unit_cost_is_zero(self) -> None:
+    def test_missing_unit_cost_is_none_not_zero(self) -> None:
+        """FORGE-700: 0.0 made an unpriced line look free, so a summed total
+        looked complete."""
         item = BOMItem(part_number="x", manufacturer="y")
         c = _item_to_component(item)
-        assert c.unitPrice == 0.0
+        assert c.unitPrice is None
         assert c.category == "uncategorized"
 
     def test_maps_media_purchase_and_price_currency_fields(self) -> None:
