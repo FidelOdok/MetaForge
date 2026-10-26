@@ -22,12 +22,21 @@ from api_gateway.runs.analysis_constraints import (
     SimResult,
     check_analysis_constraints,
 )
+from api_gateway.runs.analysis_constraints import classify as classify_analysis
+from api_gateway.runs.design_fact_constraints import (
+    DesignFact,
+    DesignFactCheck,
+    check_design_fact_constraints,
+    read_design_facts,
+    states_metric,
+)
 from api_gateway.runs.geometry_constraints import (
     GeometryCheck,
     check_assembly,
     check_geometry_constraints,
     is_analysis_model,
 )
+from api_gateway.runs.geometry_constraints import classify as classify_geometry
 from orchestrator.design_flow.executor import ConsistencyGateReport, ConstraintReport
 from twin_core.consistency import (
     evaluate_g3_feasibility,
@@ -39,6 +48,7 @@ from twin_core.consistency import (
 )
 from twin_core.consistency.record_pins import is_valid_evidence
 from twin_core.models.enums import EdgeType
+from twin_core.models.quantity import is_currency_code
 
 logger = structlog.get_logger(__name__)
 
@@ -373,12 +383,23 @@ class TwinConstraintChecker:
             models = [m for m in models if m[0] not in replaced]
         return models
 
-    async def _geometry_check(self, project_id: str | None, since_ts: float = 0.0) -> GeometryCheck:
+    async def _geometry_check(
+        self,
+        project_id: str | None,
+        since_ts: float = 0.0,
+        facts: dict[str, DesignFact] | None = None,
+    ) -> GeometryCheck:
         lister = getattr(self._twin, "list_constraints", None)
         if lister is None or not project_id:
             return GeometryCheck()
         try:
-            constraints = await lister(project_id=UUID(project_id))
+            # FORGE-698: a size a design record states (a board's length) is
+            # measured by the design-record check, not against a cad_model.
+            constraints = [
+                c
+                for c in await lister(project_id=UUID(project_id))
+                if not states_metric(c, facts or {})
+            ]
             # FORGE-515: only this phase window's current parts (not every
             # cad_model name ever used in the project).
             window = await self._current_cad_entries(project_id, since_ts, drop_superseded=True)
@@ -537,6 +558,64 @@ class TwinConstraintChecker:
             logger.info("gate_eval_undeclared_items", project_id=project_id, count=len(findings))
         return list(findings.values())
 
+    async def _read_design_facts(self, project_id: str | None) -> dict[str, DesignFact]:
+        if not project_id:
+            return {}
+        try:
+            return await read_design_facts(self._twin, project_id)
+        except Exception as exc:  # noqa: BLE001 - design comparison is best-effort
+            logger.warning(
+                "gate_eval_design_facts_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="design-record constraints not compared at this gate",
+            )
+            return {}
+
+    async def _design_fact_check(
+        self, project_id: str | None, facts: dict[str, DesignFact]
+    ) -> DesignFactCheck:
+        """FORGE-698: structured constraints vs what the current design records state.
+
+        A metric a design record states is measured here. Otherwise the
+        constraints the geometry or analysis check owns, and cost limits, are
+        left to those checks.
+        """
+        lister = getattr(self._twin, "list_constraints", None)
+        if lister is None or not project_id:
+            return DesignFactCheck()
+
+        def _owned_elsewhere(constraint: Any) -> bool:
+            if states_metric(constraint, facts):
+                return False
+            unit = str(getattr(constraint, "unit", "") or "")
+            metric = str(getattr(constraint, "metric", "") or "")
+            return (
+                is_currency_code(unit)
+                or classify_geometry(metric) is not None
+                or classify_analysis(constraint) is not None
+            )
+
+        try:
+            constraints = await lister(project_id=UUID(project_id))
+        except Exception as exc:  # noqa: BLE001 - design comparison is best-effort
+            logger.warning(
+                "gate_eval_design_fact_constraints_failed",
+                project_id=project_id,
+                error=str(exc),
+                consequence="design-record constraints not compared at this gate",
+            )
+            return DesignFactCheck()
+        outcome = check_design_fact_constraints(constraints, facts, skip=_owned_elsewhere)
+        logger.info(
+            "gate_eval_design_fact_constraints",
+            project_id=project_id,
+            evaluated=outcome.evaluated,
+            violations=len(outcome.violations),
+            not_evaluated=len(outcome.not_evaluated),
+        )
+        return outcome
+
     async def check(self, project_id: str | None, since_ts: float = 0.0) -> ConstraintReport:
         evaluate = getattr(self._twin, "evaluate_constraints", None)
         if evaluate is None:
@@ -560,22 +639,27 @@ class TwinConstraintChecker:
         # FORGE-496: structured metric/limit constraints carry a placeholder
         # expression the engine can never fail, so compare them to the
         # committed cad_model here.
-        geometry = await self._geometry_check(project_id, since_ts)
+        facts = await self._read_design_facts(project_id)
+        geometry = await self._geometry_check(project_id, since_ts, facts)
         violations += geometry.violations
         warnings += geometry.warnings
         analysis = await self._analysis_check(project_id)
         violations += analysis.violations
         warnings += analysis.warnings
+        design = await self._design_fact_check(project_id, facts)
+        violations += design.violations
+        warnings += design.warnings
         report = ConstraintReport(
             checked=True,
             passed=not violations,
             evaluated_count=int(getattr(result, "evaluated_count", 0))
             + geometry.evaluated
-            + analysis.evaluated,
+            + analysis.evaluated
+            + design.evaluated,
             violations=violations,
             warnings=warnings,
             satisfied=analysis.satisfied,
-            not_evaluated=geometry.not_evaluated + analysis.not_evaluated,
+            not_evaluated=geometry.not_evaluated + analysis.not_evaluated + design.not_evaluated,
             assumptions=analysis.assumptions,
             undeclared_items=await self._undeclared_items(project_id, since_ts),
         )

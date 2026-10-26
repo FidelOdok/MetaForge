@@ -22,7 +22,11 @@ Status is one of 5 states, derived live every call (same "never a stored,
 driftable boolean" discipline FORGE-65's own ``evaluate_claim`` already
 established):
 
-- ``no_data``: no claim recorded against this requirement at all.
+- ``no_data``: no claim recorded against this requirement at all, and (for a
+  structured ``metric`` + ``limit`` requirement) no current design record
+  states that metric. FORGE-698: when one does, the requirement is
+  ``pass`` / ``fail`` measured from it (``design_fact_constraints``), with the
+  record named in the detail.
 - ``stale``: a claim's cited evidence includes at least one entity whose
   current staleness is STALE/SUPERSEDED/INVALID -- flagged even when the
   claim itself is still SUPPORTED by some other current evidence, so
@@ -51,6 +55,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from api_gateway.runs.design_fact_constraints import DesignFact, measure, read_design_facts
 from twin_core.api import TwinAPI
 from twin_core.consistency.claims import Claim, ClaimStatus, list_claims_for_requirement
 from twin_core.consistency.staleness import StalenessEngine, StalenessStatus
@@ -141,7 +146,11 @@ async def _evidence_summary(
 
 
 async def _derive_row(
-    twin: TwinAPI, staleness: StalenessEngine, req: Any, claims: list[Claim]
+    twin: TwinAPI,
+    staleness: StalenessEngine,
+    req: Any,
+    claims: list[Claim],
+    facts: dict[str, DesignFact] | None = None,
 ) -> RequirementMatrixRow:
     # FORGE-259: prefer the structured metric/operator/limit/unit binding
     # (real, machine-set data) over the free-text message/name fallback,
@@ -157,12 +166,30 @@ async def _derive_row(
     expected_evidence = req.expected_evidence
 
     if not claims:
+        # FORGE-698: with no claim, a structured requirement is compared to
+        # what the current design records state (board size, DRC errors, build
+        # errors, ...). One the design does not state stays no_data, with why.
+        measured = measure(req, facts or {})
+        if measured is not None and measured.status != "not_evaluated":
+            return RequirementMatrixRow(
+                requirementId=str(req.id),
+                requirementName=req.name,
+                limitText=limit_text,
+                status=measured.status,
+                detail=f"measured from the design: {measured.detail}",
+                artefactIds=[measured.node_id] if measured.node_id else [],
+                verificationMethod=verification_method,
+                expectedEvidence=expected_evidence,
+            )
+        detail = "no claim recorded against this requirement"
+        if measured is not None:
+            detail += f", and {measured.detail}"
         return RequirementMatrixRow(
             requirementId=str(req.id),
             requirementName=req.name,
             limitText=limit_text,
             status="no_data",
-            detail="no claim recorded against this requirement",
+            detail=detail,
             verificationMethod=verification_method,
             expectedEvidence=expected_evidence,
         )
@@ -268,10 +295,11 @@ async def build_requirement_matrix(twin: TwinAPI, project_id: UUID) -> list[Requ
 
     current = await current_requirements(twin, project_id)
     staleness = StalenessEngine(twin)
+    facts = await read_design_facts(twin, project_id)
     rows: list[RequirementMatrixRow] = []
     for req in current.all():
         row = await _derive_row(
-            twin, staleness, req, await list_claims_for_requirement(twin, req.id)
+            twin, staleness, req, await list_claims_for_requirement(twin, req.id), facts
         )
         row.revisionRef = current.ref_for(req.id)
         rows.append(row)
