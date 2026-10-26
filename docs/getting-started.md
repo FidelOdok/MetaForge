@@ -32,7 +32,7 @@ The extras are additive — pick the subset you need:
 | `knowledge` | LightRAG + asyncpg (pgvector) |
 | `cadquery` | CadQuery CAD kernel |
 | `freecad` | FreeCAD adapter (heavier; only if you need it) |
-| `kicad` | KiCad adapter (read-only in Phase 1) |
+| `kicad` | KiCad adapter: checks and exports, plus schematic and board generation (Phase 2) |
 | `neo4j` | Neo4j driver (real graph backend) |
 
 A bare `pip install -e .` (no extras) still boots, but most adapters
