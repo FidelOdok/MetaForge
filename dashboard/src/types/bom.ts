@@ -5,7 +5,8 @@ export interface BomComponent {
   description: string;
   manufacturer: string;
   quantity: number;
-  unitPrice: number;
+  /** Null when the line has no price (FORGE-700); never read it as 0. */
+  unitPrice: number | null;
   priceCurrency: string;
   status: 'available' | 'low_stock' | 'out_of_stock' | 'alternate_needed';
   category: string;

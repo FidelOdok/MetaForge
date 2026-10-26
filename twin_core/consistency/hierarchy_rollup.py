@@ -20,6 +20,12 @@ fields to WorkProduct/BOMItem):
   3 identical gripper fingers each carrying an upstream assembly of their
   own all multiply through correctly.
 
+FORGE-700: a BOM line with no ``unit_cost`` used to add nothing and say
+nothing, so a branch with 3 of its 7 parts priced reported the price of
+those 3 as its cost. Every line is now listed in ``cost_lines``, the
+unpriced ones in ``unpriced_lines``, and ``cost_partial`` says when ``cost``
+is a lower bound rather than the branch's cost.
+
 A value present but non-numeric is skipped, not coerced (same discipline
 ``metric_total_with_skips`` uses) -- a rollup silently returning 0 for bad
 data would look identical to "genuinely no mass yet," which is exactly the
@@ -66,6 +72,22 @@ class PowerAssumption(BaseModel):
     reason: str = "no output_w declared; dissipation assumed equal to draw"
 
 
+class CostLine(BaseModel):
+    """One BOM line the cost rollup read (FORGE-700).
+
+    ``quantity`` is the product of every CONTAINS quantity from the rollup
+    root down to the position, so ``extended_cost`` is what this line adds
+    to the branch.
+    """
+
+    hierarchy_node_id: UUID
+    bom_item_id: UUID
+    part_number: str
+    quantity: float
+    unit_cost: float | None
+    extended_cost: float | None
+
+
 class HierarchyRollup(BaseModel):
     """The computed mass/cost/power totals for one hierarchy branch."""
 
@@ -94,6 +116,16 @@ class HierarchyRollup(BaseModel):
     power_assumptions: list[PowerAssumption] = []
     """Nodes whose dissipation was assumed from draw for want of an
     ``output_w``. Empty when every contributor declared one."""
+    cost_lines: list[CostLine] = []
+    """Every BOM line in the branch, priced or not (FORGE-700)."""
+    total_lines: int = 0
+    priced_lines: int = 0
+    unpriced_lines: list[CostLine] = []
+    """The lines with no ``unit_cost``. ``cost`` leaves them out."""
+    cost_partial: bool = False
+    """True when any line is unpriced: ``cost`` is then a lower bound, the
+    sum of the priced lines only, and must not be read as the branch's
+    cost."""
 
 
 async def compute_hierarchy_rollup(twin: TwinAPI, root_id: UUID) -> HierarchyRollup:
@@ -123,6 +155,7 @@ async def compute_hierarchy_rollup(twin: TwinAPI, root_id: UUID) -> HierarchyRol
 
     skipped: list[UUID] = []
     assumptions: list[PowerAssumption] = []
+    cost_lines: list[CostLine] = []
     visited_for_count: set[UUID] = set()
 
     def _number(source: dict[str, Any], key: str, node_id: UUID) -> float | None:
@@ -173,8 +206,13 @@ async def compute_hierarchy_rollup(twin: TwinAPI, root_id: UUID) -> HierarchyRol
             dissipation = max(basis - output, 0.0)
         return peak, average, output or 0.0, dissipation
 
-    def _own(node_id: UUID) -> tuple[float, float, float, float, float, float]:
-        """``(mass, cost, peak, average, output, dissipation)`` for one node."""
+    def _own(node_id: UUID, multiplier: float) -> tuple[float, float, float, float, float, float]:
+        """``(mass, cost, peak, average, output, dissipation)`` for one node.
+
+        ``multiplier`` is the node's quantity in the whole branch; it is used
+        only to record each BOM line's extended cost, the totals themselves
+        are multiplied on the way back up in ``_rollup``.
+        """
         mass = 0.0
         cost = 0.0
         peak = average = output = dissipation = 0.0
@@ -202,6 +240,18 @@ async def compute_hierarchy_rollup(twin: TwinAPI, root_id: UUID) -> HierarchyRol
                 continue
             if target.unit_cost is not None:
                 cost += target.unit_cost
+            cost_lines.append(
+                CostLine(
+                    hierarchy_node_id=node_id,
+                    bom_item_id=target_id,
+                    part_number=target.part_number,
+                    quantity=multiplier,
+                    unit_cost=target.unit_cost,
+                    extended_cost=(
+                        target.unit_cost * multiplier if target.unit_cost is not None else None
+                    ),
+                )
+            )
             # And a COTS part carries its own, on the specifications the
             # component-selection path already writes.
             p, a, o, d = _power_of(target.specifications, target_id)
@@ -211,16 +261,19 @@ async def compute_hierarchy_rollup(twin: TwinAPI, root_id: UUID) -> HierarchyRol
             dissipation += d
         return mass, cost, peak, average, output, dissipation
 
-    def _rollup(node_id: UUID) -> tuple[float, float, float, float, float, float]:
+    def _rollup(
+        node_id: UUID, multiplier: float = 1.0
+    ) -> tuple[float, float, float, float, float, float]:
         visited_for_count.add(node_id)
-        totals = list(_own(node_id))
+        totals = list(_own(node_id, multiplier))
         for child_id, qty in contains_children.get(node_id, []):
-            child = _rollup(child_id)
+            child = _rollup(child_id, multiplier * qty)
             for i, value in enumerate(child):
                 totals[i] += value * qty
         return (totals[0], totals[1], totals[2], totals[3], totals[4], totals[5])
 
     mass, cost, peak, average, output, dissipation = _rollup(root_id)
+    unpriced = [line for line in cost_lines if line.unit_cost is None]
     return HierarchyRollup(
         root_id=root_id,
         mass_kg=mass,
@@ -232,4 +285,9 @@ async def compute_hierarchy_rollup(twin: TwinAPI, root_id: UUID) -> HierarchyRol
         node_count=len(visited_for_count),
         skipped_node_ids=skipped,
         power_assumptions=assumptions,
+        cost_lines=cost_lines,
+        total_lines=len(cost_lines),
+        priced_lines=len(cost_lines) - len(unpriced),
+        unpriced_lines=unpriced,
+        cost_partial=bool(unpriced),
     )

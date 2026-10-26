@@ -113,7 +113,7 @@ export function BomAnnotationPanel() {
             <div className="flex justify-between text-xs">
               <dt className="text-zinc-500">Unit Price</dt>
               <dd className="font-medium text-zinc-900 dark:text-zinc-100">
-                ${bomMatch.unitPrice.toFixed(2)}
+                {bomMatch.unitPrice === null ? 'No price' : `$${bomMatch.unitPrice.toFixed(2)}`}
               </dd>
             </div>
             <div className="flex justify-between text-xs">

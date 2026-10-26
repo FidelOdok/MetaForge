@@ -27,6 +27,11 @@ export interface HierarchyNode {
   /** Rolled up over this node's own CONTAINS subtree. */
   massKg: number;
   cost: number;
+  /** FORGE-700: priced BOM lines out of all lines in this branch. When
+   * costPartial is true, `cost` is the priced lines only, a lower bound. */
+  costPricedLines?: number;
+  costTotalLines?: number;
+  costPartial?: boolean;
   /** FORGE-264: set only when a budget entity allocates to this node.
    * null means no allocation targets it -- not "under budget". */
   massBudgetKg: number | null;

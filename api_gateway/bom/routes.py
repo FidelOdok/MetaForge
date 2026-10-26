@@ -47,7 +47,9 @@ class BomComponentResponse(BaseModel):
     description: str
     manufacturer: str
     quantity: int
-    unitPrice: float  # noqa: N815
+    # FORGE-700: None when the line has no price. It used to read 0.0, so a
+    # BOM total summed over it looked complete with most parts unpriced.
+    unitPrice: float | None = None  # noqa: N815
     priceCurrency: str  # noqa: N815 — ISO 4217, e.g. "USD"/"GBP"
     status: Literal["available", "low_stock", "out_of_stock", "alternate_needed"]
     category: str
@@ -76,7 +78,7 @@ def _item_to_component(item: BOMItem) -> BomComponentResponse:
         description=item.description,
         manufacturer=item.manufacturer,
         quantity=item.quantity,
-        unitPrice=float(item.unit_cost) if item.unit_cost is not None else 0.0,
+        unitPrice=float(item.unit_cost) if item.unit_cost is not None else None,
         priceCurrency=item.price_currency or "USD",
         status=status,  # type: ignore[arg-type]
         category=str(specs.get("category", "uncategorized")),

@@ -4645,7 +4645,11 @@ class TwinServer(McpToolServer):
                     "mass_kg from each node's REALIZED_BY-linked cad_model and "
                     "cost from each node's INSTANCE_OF-linked BOMItem -- "
                     "computed live, never cached, so it can't go stale "
-                    "relative to its children."
+                    "relative to its children. Every BOM line is listed in "
+                    "cost_lines; when any has no price, cost_partial is true, "
+                    "unpriced_lines names them and cost is the priced lines "
+                    "only, a lower bound. Never report a partial cost as the "
+                    "branch's cost: say how many of total_lines are priced."
                 ),
                 capability="twin_hierarchy",
                 input_schema={
@@ -4667,6 +4671,11 @@ class TwinServer(McpToolServer):
                         "cost": {"type": "number"},
                         "node_count": {"type": "integer"},
                         "skipped_node_ids": {"type": "array", "items": {"type": "string"}},
+                        "cost_lines": {"type": "array", "items": {"type": "object"}},
+                        "total_lines": {"type": "integer"},
+                        "priced_lines": {"type": "integer"},
+                        "unpriced_lines": {"type": "array", "items": {"type": "object"}},
+                        "cost_partial": {"type": "boolean"},
                     },
                 },
                 phase=1,
