@@ -1480,6 +1480,15 @@ what the server will actually enforce.
 | `web` (requires `BRAVE_API_KEY`) | `web.search` | Ranked public-web results (title/url/snippet) via the Brave Search API — current datasheets, standards, vendor docs, errata. Not registered at all when the key is unset, so an agent never sees a tool that cannot work. A rate-limit or API failure **raises** rather than returning an empty list, so the agent can't report "no results found" for a query that was never answered; 429s are retried with backoff first (MET-7) | live-verified |
 | `web` | `web.fetch` | Fetch one public http(s) URL as readable text — **HTML and PDF** (datasheets, app notes, reference manuals). SSRF-guarded: private/loopback/link-local hosts refused on the initial URL **and every redirect hop**; http/https + ports 80/443 only. HTML capped at 2 MB; a PDF is read up to `max_pages` (default 30) and says so in-band when later pages were skipped, is never byte-truncated (that corrupts the xref table), and an oversize/scanned/encrypted PDF is refused with the reason. Content is returned inside an explicit untrusted-data fence. Pair with `knowledge.ingest` (`source_path=<url>`) to keep a source (MET-7) | live-verified |
 
+The KiCad exports (`export_bom`, `export_netlist`, `export_gerber`,
+`export_drill`, `export_pos`) never overwrite (FORGE-692). With no output path
+each writes a new folder of its own under `exports/` on the adapter workspace; a
+named `output_dir` must be new or empty and a named `output_file` must not
+exist, or the call is refused by name. That makes them producing writes, not
+destructive ones, so a design-flow phase task (server or client mode) may run
+them: as destructive tools they were refused to every phase task, and no flow
+could produce its gerbers, placement file or BOM.
+
 Session capture also runs **server-side** (every tool call → an `action`
 event, MET-496) — see [`session-capture.md`](session-capture.md) for the full
 three-layer model and install.

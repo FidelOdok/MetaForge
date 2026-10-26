@@ -540,10 +540,42 @@ class TestExportGerber:
             await server_with_mocks.export_gerber({"pcb_file": ""})
 
     async def test_gerber_default_output_dir(self, server_with_mocks: KicadServer) -> None:
-        """export_gerber auto-generates output_dir from pcb_file stem."""
+        """FORGE-692: unnamed, each export gets a new folder of its own."""
         await server_with_mocks.export_gerber({"pcb_file": "/designs/board.kicad_pcb"})
+        await server_with_mocks.export_gerber({"pcb_file": "/designs/board.kicad_pcb"})
+        calls = server_with_mocks._execute_gerber_export.call_args_list  # type: ignore[attr-defined]
+        first, second = calls[0][0][1], calls[1][0][1]
+        assert first.startswith("/tmp/kicad/exports/board_gerber-")
+        assert first != second
+
+    async def test_gerber_never_overwrites_a_named_folder(
+        self, server_with_mocks: KicadServer, tmp_path
+    ) -> None:
+        """FORGE-692: a folder that already holds files is refused by name."""
+        (tmp_path / "old.gbr").write_text("G04*")
+        with pytest.raises(ValueError, match="never overwrites"):
+            await server_with_mocks.export_gerber(
+                {"pcb_file": "/designs/board.kicad_pcb", "output_dir": str(tmp_path)}
+            )
+        empty = tmp_path / "new"
+        empty.mkdir()
+        await server_with_mocks.export_gerber(
+            {"pcb_file": "/designs/board.kicad_pcb", "output_dir": str(empty)}
+        )
         call_args = server_with_mocks._execute_gerber_export.call_args  # type: ignore[attr-defined]
-        assert call_args[0][1] == "/tmp/kicad/board_gerber"
+        assert call_args[0][1] == str(empty)
+
+    def test_a_named_export_file_that_exists_is_refused(self, tmp_path) -> None:
+        """FORGE-692: the placement file is refused rather than replaced."""
+        server = KicadServer(KicadConfig(work_dir=str(tmp_path)))
+        existing = tmp_path / "board_pos.csv"
+        existing.write_text("Ref,Val")
+        with pytest.raises(ValueError, match="never overwrites"):
+            server._fresh_file(str(existing), "board", "pos", "board_pos.csv")
+        fresh = server._fresh_file("", "board", "pos", "board_pos.csv")
+        assert fresh.startswith(f"{tmp_path}/exports/board_pos-") and fresh.endswith(
+            "/board_pos.csv"
+        )
 
     async def test_default_layers_include_a_multilayer_boards_inner_copper(
         self, server_with_mocks: KicadServer, tmp_path

@@ -419,6 +419,15 @@ PRODUCING: frozenset[str] = frozenset(
         "kicad.render_pcb",
         # FORGE-687: SVG files on the adapter workspace only.
         "kicad.export_svg",
+        # FORGE-692: never overwrite. Unnamed, each writes a new folder of its
+        # own; a named folder must be new or empty and a named file must not
+        # exist, or the call is refused. As destructive they were refused to
+        # every phase task, so no flow could produce its fabrication files.
+        "kicad.export_bom",
+        "kicad.export_gerber",
+        "kicad.export_drill",
+        "kicad.export_pos",
+        "kicad.export_netlist",
         "kicad.update_components",
         # FORGE-674/677: build output and run logs go to the adapter workspace
         # only; the caller's project is copied, never modified.
@@ -436,8 +445,9 @@ PRODUCING: frozenset[str] = frozenset(
 # "nobody has looked at this" apart from "someone looked and it is
 # dangerous" — the two have the same behaviour and very different meanings.
 #
-# Every ``export_*`` is here because it writes to a caller-supplied path and
-# will happily overwrite what is already there. A harness asking before it
+# Every ``export_*`` here writes to a caller-supplied path and will happily
+# overwrite what is already there (the KiCad exports refuse to, FORGE-692, and
+# are classified as producing). A harness asking before it
 # does that is the correct amount of friction.
 DESTRUCTIVE: frozenset[str] = frozenset(
     {
@@ -466,12 +476,6 @@ DESTRUCTIVE: frozenset[str] = frozenset(
         # keeps being refused it and the model is told so as an observation.
         "freecad.execute_code",
         "freecad.export_geometry",
-        "kicad.export_bom",
-        "kicad.export_gerber",
-        # FORGE-680: write to a caller-supplied path, like the other exports.
-        "kicad.export_drill",
-        "kicad.export_pos",
-        "kicad.export_netlist",
         "omniverse_usd.convert_glb_to_usd",
         "project.delete",
         "project.update",

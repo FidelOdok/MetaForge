@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -515,7 +516,7 @@ class KicadServer(McpToolServer):
     async def export_drill(self, arguments: dict[str, Any]) -> dict[str, Any]:
         pcb_file = self._existing(str(arguments.get("pcb_file") or ""), "board")
         stem = Path(pcb_file).stem
-        output_dir = str(arguments.get("output_dir") or f"{self.config.work_dir}/{stem}_drill")
+        output_dir = self._fresh_dir(str(arguments.get("output_dir") or ""), stem, "drill")
         with tracer.start_as_current_span("kicad.export_drill") as span:
             span.set_attribute("kicad.pcb_file", pcb_file)
             await _check_kicad_cli(self.config.kicad_cli)
@@ -551,7 +552,9 @@ class KicadServer(McpToolServer):
     async def export_pos(self, arguments: dict[str, Any]) -> dict[str, Any]:
         pcb_file = self._existing(str(arguments.get("pcb_file") or ""), "board")
         stem = Path(pcb_file).stem
-        output_file = str(arguments.get("output_file") or f"{self.config.work_dir}/{stem}_pos.csv")
+        output_file = self._fresh_file(
+            str(arguments.get("output_file") or ""), stem, "pos", f"{stem}_pos.csv"
+        )
         with tracer.start_as_current_span("kicad.export_pos") as span:
             span.set_attribute("kicad.pcb_file", pcb_file)
             await _check_kicad_cli(self.config.kicad_cli)
@@ -681,9 +684,7 @@ class KicadServer(McpToolServer):
             # or the fab gets a 4-layer job without its planes.
             layers = [*layers[:1], *_inner_copper_layers(pcb_file), *layers[1:]]
 
-        if not output_dir:
-            stem = Path(pcb_file).stem
-            output_dir = f"{self.config.work_dir}/{stem}_gerber"
+        output_dir = self._fresh_dir(output_dir, Path(pcb_file).stem, "gerber")
 
         logger.info(
             "Exporting Gerber",
@@ -755,6 +756,34 @@ class KicadServer(McpToolServer):
             )
             raise FileNotFoundError(f"no {kind} file at {path}{hint}")
         return str(p)
+
+    def _fresh_dir(self, requested: str, stem: str, kind: str) -> str:
+        """A folder an export can fill without overwriting anything (FORGE-692).
+
+        Unnamed, it is a new folder of its own. Named, it must be new or
+        empty. An export that cannot overwrite or remove is additive, which is
+        what lets a design flow's phase task run it at all.
+        """
+        if requested:
+            p = Path(requested)
+            if p.exists() and (not p.is_dir() or any(p.iterdir())):
+                raise ValueError(
+                    f"{requested} already holds files and an export never overwrites: "
+                    "name a new or empty folder, or leave it out for a new one"
+                )
+            return requested
+        return f"{self.config.work_dir}/exports/{stem}_{kind}-{uuid.uuid4().hex[:8]}"
+
+    def _fresh_file(self, requested: str, stem: str, kind: str, name: str) -> str:
+        """A file path an export can write without overwriting anything (FORGE-692)."""
+        if requested:
+            if Path(requested).exists():
+                raise ValueError(
+                    f"{requested} already exists and an export never overwrites: "
+                    "name a new file, or leave it out for a new folder"
+                )
+            return requested
+        return f"{self._fresh_dir('', stem, kind)}/{name}"
 
     # ------------------------------------------------------------------
     # Internal execution methods
@@ -971,7 +1000,9 @@ class KicadServer(McpToolServer):
             await _check_kicad_cli(self.config.kicad_cli)
 
             stem = Path(schematic_file).stem
-            csv_file = f"{self.config.work_dir}/{stem}_bom.csv"
+            folder = self._fresh_dir("", stem, "bom")
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            csv_file = f"{folder}/{stem}_bom.csv"
             cli_args = [
                 "sch",
                 "export",
@@ -995,7 +1026,7 @@ class KicadServer(McpToolServer):
                 unique_parts = len(parts)
                 output_file = csv_file
                 if output_format == "json":
-                    output_file = f"{self.config.work_dir}/{stem}_bom.json"
+                    output_file = f"{folder}/{stem}_bom.json"
                     Path(output_file).write_text(json.dumps(parts, indent=1), encoding="utf-8")
                 result = {
                     "output_file": output_file,
@@ -1035,6 +1066,7 @@ class KicadServer(McpToolServer):
             span.set_attribute("kicad.layers", ",".join(layers))
 
             await _check_kicad_cli(self.config.kicad_cli)
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
 
             cli_args = [
                 "pcb",
@@ -1098,7 +1130,9 @@ class KicadServer(McpToolServer):
 
             cli_format, ext = NETLIST_FORMATS[output_format]
             stem = Path(schematic_file).stem
-            output_file = f"{self.config.work_dir}/{stem}.{ext}"
+            folder = self._fresh_dir("", stem, "netlist")
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            output_file = f"{folder}/{stem}.{ext}"
 
             cli_args = [
                 "sch",
