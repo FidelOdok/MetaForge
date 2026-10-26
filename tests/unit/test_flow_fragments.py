@@ -305,7 +305,8 @@ def test_the_pcb_checks_are_kicads_own_results() -> None:
     assert checks == {"unrouted_count", "drc_error_count", "parity_issue_count"}
     # FORGE-694: a BOM line with no MPN cannot be bought, so it cannot pass.
     fab = {c.value for c in fragment.task("fabrication_outputs").checks}
-    assert fab == {"missing_copper_gerbers", "bom_lines_without_mpn"}
+    # FORGE-703: an assembled board's fab set is not complete without its stencil.
+    assert fab == {"missing_copper_gerbers", "missing_paste_gerbers", "bom_lines_without_mpn"}
     # FORGE-699: a stand-in symbol passes ERC on its own pins, so a person confirms them.
     sch = {c.value for c in fragment.task("schematic").checks}
     assert sch == {

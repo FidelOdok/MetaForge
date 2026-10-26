@@ -116,7 +116,9 @@ selection, so composed with `electronics_v1` a changed part regenerates the
 schematic, the board and everything after them. Every check is a KiCad
 result: ERC, the netlist match, KiCad's own unconnected-item count (never
 the router's), DRC with schematic parity, the copper layers without a
-gerber, the placed BOM lines with no manufacturer part number
+gerber, the paste (stencil) layers the assembly needs without a gerber
+(`missing_paste_gerbers`, from `kicad.export_gerber`'s `paste_layers`, since
+FORGE-703 and version 1.4.0), the placed BOM lines with no manufacturer part number
 (`bom_lines_without_mpn`, from `kicad.export_bom`, since FORGE-694 and
 version 1.2.0; passives count), the parts drawn with another part's symbol
 whose pinout check is not recorded (`unconfirmed_symbol_substitutions`, since

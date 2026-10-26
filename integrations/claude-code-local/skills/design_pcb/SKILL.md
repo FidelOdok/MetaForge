@@ -111,7 +111,11 @@ Ask for anything missing; do not choose parts, values or the board yourself.
    `drc` (errors, warnings), `schematic_parity`, tracks and vias. `pass`
    means all three checks are zero. Report unrouted nets by name.
 4. **Fabrication and 3D.** On a pass, export Gerbers, drill and positions
-   from the routed board, and the BOM with `kicad.export_bom`. Its
+   from the routed board. The Gerber result's `layers_exported` names only
+   layers a file was written for, `layers_missing` the requested ones that
+   were not, and `paste_layers` the stencil layers: an assembled board needs
+   F.Paste (and B.Paste with parts on the bottom). Export the BOM with
+   `kicad.export_bom`. Its
    `lines_without_mpn` counts placed lines whose symbols have no MPN, and
    `references_without_mpn` names them: source each, set `MPN` and
    `Manufacturer` with `kicad.update_components`, and export again until it
@@ -130,6 +134,7 @@ Ask for anything missing; do not choose parts, values or the board yourself.
 - [ ] Every stand-in symbol named, with its pinout check, and `unconfirmed_symbol_substitutions` 0
 - [ ] "Board done" rests on 0 unrouted, 0 DRC errors, 0 parity issues
 - [ ] "Ready to build" rests on `lines_without_mpn` 0: every placed part, passives too, has an MPN
+- [ ] The Gerber set has its paste layers (`paste_layers`) and nothing in `layers_missing`
 - [ ] DRC warnings listed, not hidden
 - [ ] Placement described as a starting point for review
 

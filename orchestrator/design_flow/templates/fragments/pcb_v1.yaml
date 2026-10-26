@@ -33,9 +33,14 @@
 # pinout check is not recorded. ERC and the netlist match pass on the
 # stand-in's pins, so they cannot catch a pin that differs.
 #
+# FORGE-703: the fabrication task gates on `missing_paste_gerbers`, the paste
+# (stencil) layers an assembled board needs with no gerber in the export. A
+# run's fab package passed with the paste files written but dropped from the
+# export's file list, while the result still named the layers as exported.
+#
 # Bump `version` when a task, its contract or a check changes.
 id: pcb_v1
-version: 1.3.0
+version: 1.4.0
 domain: pcb
 label: PCB design
 description: Schematic generation, board layout, autorouting, fabrication outputs and the 3D board.
@@ -118,8 +123,10 @@ tasks:
     Export the fabrication set from the routed board: gerbers for every copper layer (inner
     planes included), the drill files, the pick-and-place file and the BOM, with
     kicad.export_gerber, kicad.export_drill, kicad.export_pos and kicad.export_bom. Record the
-    number of copper layers without a gerber as `missing_copper_gerbers`, sourced to the export,
-    the BOM in the twin, and the gerber and drill folder (gerber) and the placement file
+    number of copper layers without a gerber as `missing_copper_gerbers`, and the number of paste
+    layers the assembly needs (F.Paste, and B.Paste when parts sit on the bottom) that are not
+    in the export's `paste_layers` as `missing_paste_gerbers`, both sourced to the export; a
+    layer in `layers_missing` was requested and not written. Record the BOM in the twin, and the gerber and drill folder (gerber) and the placement file
     (pick_and_place) with twin.record_design_files, both generated from the board. Record the
     export's `lines_without_mpn` as `bom_lines_without_mpn`: a placed line with no MPN symbol
     field is one the fab house cannot buy. Passives count: source each resistor and capacitor
@@ -130,10 +137,12 @@ tasks:
   - design_value:drc_error_count
   outputs:
   - design_value:missing_copper_gerbers
+  - design_value:missing_paste_gerbers
   - design_value:bom_lines_without_mpn
   records: [bom, gerber, pick_and_place]
   checks:
   - missing_copper_gerbers == 0
+  - missing_paste_gerbers == 0
   - bom_lines_without_mpn == 0
   capabilities: [kicad.export_gerber, kicad.export_drill, kicad.export_pos, kicad.export_bom]
   outcome: a complete fabrication and assembly set from the checked board

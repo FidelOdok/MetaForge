@@ -269,5 +269,25 @@ async def test_drone_flight_controller_routes_complete_on_four_layers(server: Ki
     gerbers = await call(server, "kicad.export_gerber", {"pcb_file": routed["pcb_file"]})
     names = " ".join(gerbers["files_generated"])
     assert "In1_Cu" in names and "In2_Cu" in names
+    # FORGE-703: the stencil layers are written, listed and named, and every
+    # layer reported exported has its file.
+    assert gerbers["paste_layers"] == ["F.Paste", "B.Paste"]
+    assert gerbers["layers_missing"] == []
+    assert set(gerbers["layer_files"].values()) <= set(gerbers["files_generated"])
+    assert any(f.endswith(".gtp") for f in gerbers["files_generated"])
     step = await call(server, "kicad.export_3d", {"pcb_file": routed["pcb_file"], "format": "step"})
     assert step["complete"] and step["models_referenced"] == 34
+
+
+async def test_a_gerber_layer_kicad_skips_is_reported_missing(server: KicadServer) -> None:
+    """FORGE-703: kicad-cli skips a layer name it does not know and exits 0, so
+    the result reads the layers from the files, never from the request."""
+    pcb = await call(server, "kicad.generate_pcb", {"circuit": copy.deepcopy(OPAMP_BUFFER)})
+    gerbers = await call(
+        server,
+        "kicad.export_gerber",
+        {"pcb_file": pcb["pcb_file"], "layers": ["F.Cu", "F.Paste", "Bogus.Layer"]},
+    )
+    assert gerbers["layers_exported"] == ["F.Cu", "F.Paste"]
+    assert gerbers["layers_missing"] == ["Bogus.Layer"]
+    assert gerbers["paste_layers"] == ["F.Paste"]

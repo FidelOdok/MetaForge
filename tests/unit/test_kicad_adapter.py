@@ -16,8 +16,10 @@ from tool_registry.tools.kicad.adapter import (
     KicadServer,
     _check_kicad_cli,
     _count_drc_unconnected,
+    _gerber_file_layer,
     _inner_copper_layers,
     _list_gerber_files,
+    _match_gerber_layers,
     _parse_bom_csv,
     _parse_drc_violations,
     _parse_erc_violations,
@@ -938,6 +940,39 @@ class TestRealKicadExecution:
         assert "board-job.gbrjob" not in files
         assert "board-F_Cu.gtl" in files
         assert "readme.txt" not in files
+        # FORGE-703: the paste layers kicad-cli writes are listed too.
+        (tmp_path / "board-F_Paste.gtp").touch()
+        (tmp_path / "board-B_Paste.gbp").touch()
+        files = _list_gerber_files(str(tmp_path))
+        assert {"board-F_Paste.gtp", "board-B_Paste.gbp"} <= set(files)
+
+    def test_gerber_layers_are_read_from_the_files_written(self) -> None:
+        """FORGE-703: a layer is exported only when a file was written for it.
+
+        File names are kicad-cli 9's own (``<board>-<layer>.<ext>``), and an
+        old layer name (F.SilkS) matches the file of its current one."""
+        files = [
+            "drone-fc-F_Cu.gtl",
+            "drone-fc-F_Paste.gtp",
+            "drone-fc-F_Silkscreen.gto",
+            "drone-fc-In1_Cu.g1",
+            "drone-fc-User_Drawings.gbr",
+            "drone-fc.drl",
+        ]
+        found, missing = _match_gerber_layers(
+            ["F.Cu", "In1.Cu", "F.Paste", "B.Paste", "F.SilkS", "Dwgs.User", "Bogus.Layer"],
+            files,
+        )
+        assert found == {
+            "F.Cu": "drone-fc-F_Cu.gtl",
+            "In1.Cu": "drone-fc-In1_Cu.g1",
+            "F.Paste": "drone-fc-F_Paste.gtp",
+            "F.SilkS": "drone-fc-F_Silkscreen.gto",
+            "Dwgs.User": "drone-fc-User_Drawings.gbr",
+        }
+        assert missing == ["B.Paste", "Bogus.Layer"]
+        assert _gerber_file_layer("drone-fc.drl") is None
+        assert _gerber_file_layer("board-job.gbrjob") is None
 
     def test_list_gerber_files_missing_dir(self) -> None:
         """Missing directory returns empty list."""
@@ -1189,6 +1224,42 @@ class TestRealKicadExecution:
         assert result["total_files"] == 3
         assert "board-F_Cu.gtl" in result["files_generated"]
         assert result["layers_exported"] == ["F.Cu", "B.Cu"]
+        assert result["layers_missing"] == []
+
+    async def test_a_requested_layer_with_no_file_is_not_reported_exported(self, tmp_path) -> None:
+        """FORGE-703: the result named F.Paste and B.Paste as exported while no
+        paste file was listed; kicad-cli also skips an unknown layer and exits 0."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        output_dir = str(tmp_path / "gerber_out")
+        os.makedirs(output_dir, exist_ok=True)
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            for name in ["fc-F_Cu.gtl", "fc-F_Paste.gtp", "fc-job.gbrjob"]:
+                (tmp_path / "gerber_out" / name).touch()
+            return 0, "", ""
+
+        with patch(
+            "tool_registry.tools.kicad.adapter._check_kicad_cli",
+            AsyncMock(return_value="kicad-cli"),
+        ):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_gerber_export(
+                    "/designs/fc.kicad_pcb", output_dir, ["F.Cu", "F.Paste", "B.Paste"]
+                )
+
+        assert result["layers_exported"] == ["F.Cu", "F.Paste"]
+        assert result["layers_missing"] == ["B.Paste"]
+        assert result["paste_layers"] == ["F.Paste"]
+        assert result["layer_files"]["F.Paste"] == "fc-F_Paste.gtp"
+        assert "fc-F_Paste.gtp" in result["files_generated"]
+
+    async def test_default_layers_include_the_paste_layers(
+        self, server_with_mocks: KicadServer
+    ) -> None:
+        """FORGE-703: an assembled board's stencil comes from F.Paste and B.Paste."""
+        await server_with_mocks.export_gerber({"pcb_file": "/designs/board.kicad_pcb"})
+        layers = server_with_mocks._execute_gerber_export.call_args[0][2]  # type: ignore[attr-defined]
+        assert {"F.Paste", "B.Paste"} <= set(layers)
 
     # -- kicad-cli not found during execution --
 
