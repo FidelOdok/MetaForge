@@ -338,6 +338,8 @@ const STATUS_VARIANT: Record<RequirementMatrixStatus, 'success' | 'warning' | 'e
   // state this ticket asks to flag.
   no_data: 'error',
   stale: 'info',
+  // FORGE-701: a claim whose evidence states nothing comparable to the limit.
+  unverified: 'warning',
 };
 
 function formatNumber(n: number | null): string {

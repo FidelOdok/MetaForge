@@ -118,6 +118,8 @@ _MATRIX_STATUS: dict[str, RequirementStatus] = {
     "not_evaluated": RequirementStatus.NOT_EVALUATED,
     "stale": RequirementStatus.STALE,
     "waived": RequirementStatus.WAIVED,
+    # FORGE-701: a claim nothing was compared to the limit for.
+    "unverified": RequirementStatus.INCONCLUSIVE,
 }
 
 

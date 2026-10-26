@@ -691,6 +691,42 @@ and the requirement matrix showed it as `no_data`. Now:
   assumptions, so they verify a requirement only through a claim or the
   analysis check above.
 
+**Measuring tool results (FORGE-701).** A sandbox run still left seven
+requirements `no_data` after FORGE-698, although the emulated boot (7 of 7
+checks), the power budget (12.47 mA against 150 mA) and the parts' datasheet
+ratings were all on record as evidence. Before that, a run had passed every
+requirement on a claim whose evidence carried no value at all. Now:
+
+- After the design records, `design_fact_constraints` reads the current
+  results (`twin.record_evidence`) of the tools that measure the design
+  rather than estimate it: `kicad.*`, `firmware.build`,
+  `firmware.static_check`, `firmware.run_emulated` and `power.check_budget`
+  (a sum of the stated loads), plus any `datasheet` evidence (a published
+  rating). It reads the numbers at the top level of the result, newest result
+  first. A design record wins over a result for the same metric, and a result
+  whose verdict is `not_established` is skipped.
+- The basis travels with the number: the tool and its version, and the
+  result's `basis`, the inputs' `basis`, `basis_accepted_by` and `board` when
+  they are recorded. A pass from typical currents or from a stand-in board
+  says so in its detail.
+- The power budget's own names are accepted for the requirement's metric:
+  `vbus_load_ma` for `total_supply_current` or `vbus_load_current`,
+  `rail_3v3_load_ma` for `rail_3v3_load_current`, `rail_3v3_margin_pct` for
+  `rail_load_margin_pct`, and `checks_failed` for `boot_checks_failed`.
+- Any other tool's result (an FEA or CFD run) is still not read this way; it
+  counts only through a claim that cites it.
+- The gate uses the same facts, so a failed boot check or an over-budget
+  supply current is a violation at the gate, not only in the matrix.
+- A requirement nothing states is reported with the tool call that would close
+  it, for example "boot with firmware.run_emulated and record its result with
+  twin.record_evidence, with 'boot_checks_failed' in it".
+
+The requirement matrix also grades claims (see `docs/twin_schema.md`): a claim
+against a `metric` + `limit` requirement passes only when a number for that
+metric, in the evidence it cites or in the facts above, meets the limit. A
+claim with nothing comparable is `unverified`, and the completion verdict does
+not count it as passing.
+
 The gate skeleton stays hardcoded (versioned code); the criteria come from
 the project's own constraint data. The structured constraint-creation tool
 (MET-582) is what fills that data from the Requirements phase; decision-derived

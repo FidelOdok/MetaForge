@@ -18,15 +18,18 @@ One row per real (non-candidate) Constraint on a project, joining:
   third shape invented), and current **staleness**
   (``twin_core.consistency.staleness.StalenessEngine``).
 
-Status is one of 5 states, derived live every call (same "never a stored,
+Status is one of 6 states, derived live every call (same "never a stored,
 driftable boolean" discipline FORGE-65's own ``evaluate_claim`` already
 established):
 
 - ``no_data``: no claim recorded against this requirement at all, and (for a
-  structured ``metric`` + ``limit`` requirement) no current design record
-  states that metric. FORGE-698: when one does, the requirement is
-  ``pass`` / ``fail`` measured from it (``design_fact_constraints``), with the
-  record named in the detail.
+  structured ``metric`` + ``limit`` requirement) no current design record or
+  measuring tool result states that metric. FORGE-698: when a design record
+  does, the requirement is ``pass`` / ``fail`` measured from it
+  (``design_fact_constraints``), with the record named in the detail.
+  FORGE-701: so is a measuring tool's current result (the emulated boot, the
+  power budget, a datasheet rating), with its basis in the detail; and the
+  detail of a ``no_data`` row names the tool call that would close it.
 - ``stale``: a claim's cited evidence includes at least one entity whose
   current staleness is STALE/SUPERSEDED/INVALID -- flagged even when the
   claim itself is still SUPPORTED by some other current evidence, so
@@ -39,7 +42,13 @@ established):
   check" semantics FORGE-315 already established); otherwise ``pass``.
   A SUPPORTED claim with no extractable margin at all (evidence shape this
   module doesn't recognize) falls back to a bare ``pass`` with a note --
-  never guessed at as fail/uncertain.
+  never guessed at as fail/uncertain -- but only for a free-text requirement.
+- ``unverified`` (FORGE-701): a SUPPORTED claim against a structured
+  ``metric`` + ``limit`` requirement is graded against a comparable value: a
+  number for that metric in the evidence it cites, else in a current design
+  record or measuring tool result. With none, the claim rests on nothing
+  that was compared to the limit, so it is ``unverified``, never ``pass``;
+  the completion verdict counts it as not passing.
 
 FORGE-528: the rows are the project's *current* requirements, read from their
 one home: the current revision of each constraint set item (plus constraints
@@ -55,7 +64,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from api_gateway.runs.design_fact_constraints import DesignFact, measure, read_design_facts
+from api_gateway.runs.design_fact_constraints import (
+    DesignFact,
+    Measurement,
+    how_to_close,
+    measure,
+    read_design_facts,
+    read_evidence_facts,
+)
 from twin_core.api import TwinAPI
 from twin_core.consistency.claims import Claim, ClaimStatus, list_claims_for_requirement
 from twin_core.consistency.staleness import StalenessEngine, StalenessStatus
@@ -80,7 +96,7 @@ class RequirementMatrixRow(BaseModel):
     requirementId: str  # noqa: N815 -- dashboard contract is camelCase
     requirementName: str  # noqa: N815
     limitText: str  # noqa: N815 -- the requirement's own recorded text, e.g. "<= 4.5 kg"
-    status: str  # "pass" | "uncertain" | "fail" | "no_data" | "stale"
+    status: str  # "pass" | "uncertain" | "fail" | "no_data" | "stale" | "unverified"
     detail: str
     artefactIds: list[str] = Field(default_factory=list)  # noqa: N815
     evidence: list[EvidenceSummary] = Field(default_factory=list)
@@ -176,7 +192,7 @@ async def _derive_row(
                 requirementName=req.name,
                 limitText=limit_text,
                 status=measured.status,
-                detail=f"measured from the design: {measured.detail}",
+                detail=f"{_measured_from(measured, facts or {})}: {measured.detail}",
                 artefactIds=[measured.node_id] if measured.node_id else [],
                 verificationMethod=verification_method,
                 expectedEvidence=expected_evidence,
@@ -248,6 +264,38 @@ async def _derive_row(
         for e in evidence_summaries
         if StalenessStatus(e.staleness) in _CURRENT_STATUSES and e.margin is not None
     ]
+    if not current_with_margin and req.metric and req.limit is not None:
+        # FORGE-701: a structured requirement's claim is graded against a
+        # number for its metric, from the cited evidence first, else from the
+        # design records and measuring tools. None found is not a pass.
+        cited = [e for c in claims for e in c.evidence_ids]
+        graded = measure(req, await read_evidence_facts(twin, req.project_id, evidence_ids=cited))
+        source = "the evidence the claim cites"
+        if graded is None or graded.status == "not_evaluated":
+            graded = measure(req, facts or {})
+            by_tool = graded is not None and _measured_from(graded, facts or {}).endswith("tool")
+            source = "a measuring tool's result" if by_tool else "the design records"
+        if graded is not None and graded.status != "not_evaluated":
+            status, detail = graded.status, f"claim graded against {source}: {graded.detail}"
+        else:
+            status = "unverified"
+            detail = (
+                "claim recorded, but nothing it cites, and no current design record or "
+                f"measuring tool result, states '{req.metric}' to compare with the limit; "
+                f"to close it, {how_to_close(str(req.metric))}"
+            )
+        return RequirementMatrixRow(
+            requirementId=str(req.id),
+            requirementName=req.name,
+            limitText=limit_text,
+            status=status,
+            detail=detail,
+            artefactIds=artefact_ids,
+            evidence=evidence_summaries,
+            verificationMethod=verification_method,
+            expectedEvidence=expected_evidence,
+        )
+
     if not current_with_margin:
         return RequirementMatrixRow(
             requirementId=str(req.id),
@@ -288,6 +336,12 @@ async def _derive_row(
         verificationMethod=verification_method,
         expectedEvidence=expected_evidence,
     )
+
+
+def _measured_from(measured: Measurement, facts: dict[str, DesignFact]) -> str:
+    """``measured from the design`` or ``measured by a tool`` (FORGE-701)."""
+    origins = {f.origin for f in facts.values() if f.node_id == measured.node_id}
+    return "measured by a tool" if origins == {"evidence"} else "measured from the design"
 
 
 async def build_requirement_matrix(twin: TwinAPI, project_id: UUID) -> list[RequirementMatrixRow]:
