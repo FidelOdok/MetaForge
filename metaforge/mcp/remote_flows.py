@@ -33,6 +33,7 @@ import httpx
 import structlog
 
 from observability.tracing import get_tracer
+from tool_registry.tools.design_flow.gates import last_gate_decision
 
 logger = structlog.get_logger(__name__)
 tracer = get_tracer("metaforge.mcp.remote_flows")
@@ -373,6 +374,9 @@ class RemoteRunLauncher:
             out["error"] = run["error"]
         if run.get("result"):
             out["result"] = run["result"]
+        last = last_gate_decision(request)
+        if last:
+            out["last_gate_decision"] = last
         return out
 
 
@@ -597,7 +601,11 @@ def build_remote_flow_bindings(
             gate = None
             if status == "awaiting_approval":
                 gate = await gateway.request("GET", f"/v1/approvals/gate:{run_id}")
-        return {"run_status": status, "gate": gate}
+        return {
+            "run_status": status,
+            "gate": gate,
+            "last_decision": last_gate_decision(run.get("request") or {}),
+        }
 
     async def decide_gate(
         approval_id: str,

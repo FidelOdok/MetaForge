@@ -43,10 +43,14 @@ __all__ = [
     "GateDecider",
     "GateReader",
     "await_gate",
+    "describe_decision",
     "gate_question",
+    "last_gate_decision",
 ]
 
-#: ``(run_id) -> {"run_status": str, "gate": <approval item dict> | None}``.
+#: ``(run_id) -> {"run_status": str, "gate": <approval item dict> | None,
+#: "last_decision": <decision record dict> | None}``. ``last_decision`` is the
+#: run's most recent gate decision, wherever it was taken (FORGE-695).
 GateReader = Callable[[str], Awaitable[dict[str, Any]]]
 
 #: ``(approval_id, decision, reason, to_phase, approver, approver_verified)``
@@ -146,6 +150,42 @@ def gate_question(gate: dict[str, Any], answer_seconds: float) -> tuple[str, dic
     return "\n".join(lines), schema
 
 
+def last_gate_decision(request: dict[str, Any]) -> dict[str, Any] | None:
+    """A run's most recent gate decision record, from its request's decision log.
+
+    The approvals service appends every gate decision to ``request["decisions"]``
+    (FORGE-507), whatever surface took it; ``GET /v1/runs/{id}`` returns it.
+    """
+    log = request.get("decisions")
+    if isinstance(log, list) and log and isinstance(log[-1], dict):
+        return dict(log[-1])
+    return None
+
+
+def describe_decision(record: dict[str, Any]) -> str:
+    """One sentence saying who decided a gate, how, and why (FORGE-695)."""
+    who = record.get("approver") or "an unrecorded approver"
+    via = record.get("surface") or "unknown"
+    if via == "agent":
+        how = f"through an agent ({record.get('agent') or 'unnamed'})"
+        if record.get("on_behalf_of"):
+            how += f" on behalf of {record['on_behalf_of']}"
+    else:
+        how = f"through {via}"
+    text = f"'{record.get('decision')}' by {who}, {how}"
+    if record.get("decided_at"):
+        text += f", at {record['decided_at']}"
+    reason = str(record.get("reason") or "").strip()
+    return text + (f". Reason: {reason}" if reason else ". No reason was given.")
+
+
+def _with_last_decision(view: dict[str, Any], record: Any) -> dict[str, Any]:
+    if isinstance(record, dict) and record.get("decision"):
+        view["last_gate_decision"] = record
+        view["message"] += f" The run's most recent gate decision: {describe_decision(record)}"
+    return view
+
+
 def _open_gate_view(gate: dict[str, Any], message: str) -> dict[str, Any]:
     return {
         "status": "awaiting_gate",
@@ -175,27 +215,62 @@ async def await_gate(
         span.set_attribute("run.id", run_id)
         started = clock()
         deadline = started + wait
+        baseline: Any = ...
         while True:
             state = await reader(run_id)
             status = str(state.get("run_status") or "")
             gate = state.get("gate")
+            last = state.get("last_decision")
+            if baseline is ...:
+                baseline = last
             if isinstance(gate, dict) and gate.get("status") == "pending":
                 break
-            if status in _TERMINAL:
+            if isinstance(last, dict) and last.get("decision") and last != baseline:
+                # FORGE-695: decided outside this prompt (dashboard, CLI, API)
+                # while we waited. Say who and how, or the agent reports a gate
+                # that "closed without anyone approving it".
+                logger.info(
+                    "flow_await_gate_decided_elsewhere",
+                    run_id=run_id,
+                    decision=last.get("decision"),
+                    surface=last.get("surface"),
+                )
                 return {
-                    "status": "run_ended",
+                    "status": "decided_elsewhere",
                     "run_status": status,
-                    "message": f"The run is {status}; there is no gate to answer.",
-                }
-            if clock() >= deadline:
-                return {
-                    "status": "no_gate_yet",
-                    "run_status": status,
+                    "decision": last.get("decision"),
+                    "decided_by": last.get("approver"),
+                    "last_gate_decision": last,
                     "message": (
-                        f"No gate opened within {wait:.0f} seconds; the run is {status or 'busy'}. "
-                        "Call flow.await_gate again to keep waiting."
+                        f"The gate was decided outside this prompt: {describe_decision(last)} "
+                        + (
+                            "The run continues; call flow.await_gate again for the next gate."
+                            if status not in _TERMINAL
+                            else f"The run is {status}."
+                        )
                     ),
                 }
+            if status in _TERMINAL:
+                return _with_last_decision(
+                    {
+                        "status": "run_ended",
+                        "run_status": status,
+                        "message": f"The run is {status}; there is no gate to answer.",
+                    },
+                    last,
+                )
+            if clock() >= deadline:
+                return _with_last_decision(
+                    {
+                        "status": "no_gate_yet",
+                        "run_status": status,
+                        "message": (
+                            f"No gate opened within {wait:.0f} seconds; the run is "
+                            f"{status or 'busy'}. Call flow.await_gate again to keep waiting."
+                        ),
+                    },
+                    last,
+                )
             await sleep(poll_seconds)
 
         span.set_attribute("approval.id", str(gate.get("id")))
@@ -262,6 +337,7 @@ async def await_gate(
             "decision": decision,
             "decided_by": record.get("approver") or approver.actor_id,
             "approval_status": item.get("status"),
+            "last_gate_decision": record or None,
             "message": (
                 f"The person chose '{decision}'. "
                 + (

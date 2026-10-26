@@ -457,6 +457,7 @@ def make_gate_reader() -> Any:
         from api_gateway.approvals import service
         from api_gateway.runs import routes as run_routes
         from orchestrator.harness.runs import RunNotFoundError, RunStatus
+        from tool_registry.tools.design_flow.gates import last_gate_decision
 
         try:
             run = run_routes.get_run_store().get(run_id)
@@ -467,7 +468,11 @@ def make_gate_reader() -> Any:
         gate = None
         if run.status is RunStatus.AWAITING_APPROVAL:
             gate = (await service.get_item(None, f"gate:{run_id}")).model_dump()
-        return {"run_status": run.status.value, "gate": gate}
+        return {
+            "run_status": run.status.value,
+            "gate": gate,
+            "last_decision": last_gate_decision(run.request),
+        }
 
     return read_gate
 

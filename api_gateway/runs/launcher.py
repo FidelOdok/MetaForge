@@ -66,6 +66,7 @@ class RunLauncher:
 
     async def status(self, *, run_id: str) -> dict[str, Any]:
         from api_gateway.runs import routes
+        from tool_registry.tools.design_flow.gates import last_gate_decision
 
         run = routes._store.get(run_id)
         out: dict[str, Any] = {
@@ -86,6 +87,9 @@ class RunLauncher:
             out["error"] = run.error
         if run.result:
             out["result"] = run.result
+        last = last_gate_decision(run.request)
+        if last:
+            out["last_gate_decision"] = last
         return out
 
 
