@@ -27,6 +27,7 @@ from tool_registry.tools.web.base import (
     WebSearchProvider,
 )
 from tool_registry.tools.web.pdf import DEFAULT_MAX_PAGES, MAX_PDF_BYTES, pdf_to_text
+from tool_registry.tools.web.refusals import SiteUnreachableError, explain
 from tool_registry.tools.web.safety import (
     MAX_BYTES,
     MAX_REDIRECTS,
@@ -69,6 +70,13 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
 
 
 _USER_AGENT = "MetaForge/0.1 (+https://github.com/FidelOdok/MetaForge)"
+
+# An honest identity, and PDFs asked for by name: datasheets are what this
+# is mostly used for (FORGE-693).
+_FETCH_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept": "text/html,application/pdf,text/plain;q=0.9,*/*;q=0.5",
+}
 
 
 class BraveSearchProvider(WebSearchProvider):
@@ -249,11 +257,25 @@ async def fetch_page(
             span.set_attribute("web.host", urlsplit(current).hostname or "")
             for hop in range(MAX_REDIRECTS + 1):
                 await assert_public_host(current)
-                response = await http.get(
-                    current,
-                    headers={"User-Agent": _USER_AGENT, "Accept": "text/html,text/plain,*/*;q=0.5"},
-                    follow_redirects=False,
-                )
+                try:
+                    response = await http.get(
+                        current, headers=_FETCH_HEADERS, follow_redirects=False
+                    )
+                    if not response.is_redirect:
+                        response.raise_for_status()
+                except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+                    # FORGE-693: a site that refuses automated readers is an
+                    # answer, not a crash. Say which site and how, and where
+                    # the same data can be had.
+                    span.record_exception(exc)
+                    reason = explain(current, exc)
+                    logger.warning(
+                        "web_fetch_site_unreachable",
+                        url=current[:200],
+                        error=type(exc).__name__,
+                        status=getattr(getattr(exc, "response", None), "status_code", None),
+                    )
+                    raise SiteUnreachableError(reason) from exc
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:
@@ -263,7 +285,6 @@ async def fetch_page(
                     # Resolve relative Location values against the current URL.
                     current = validate_url(str(response.url.join(location)))
                     continue
-                response.raise_for_status()
                 return _to_page(response, current, max_bytes=max_bytes, max_pages=max_pages)
             raise UnsafeUrlError(f"too many redirects (>{MAX_REDIRECTS})")
     finally:
