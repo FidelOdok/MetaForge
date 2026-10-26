@@ -180,6 +180,22 @@ async def test_a_part_without_a_3d_model_is_named(server: KicadServer) -> None:
     assert [m["ref"] for m in out["missing_models"]] == ["J1"]
 
 
+async def test_bom_names_the_placed_parts_without_a_part_number(server: KicadServer) -> None:
+    """FORGE-694: only U1 carries an MPN field; every other placed part is
+    counted, passives included, from the columns kicad-cli itself writes."""
+    sch = await call(server, "kicad.generate_schematic", {"circuit": copy.deepcopy(LDO_LED)})
+    bom = await call(
+        server,
+        "kicad.export_bom",
+        {"schematic_file": sch["schematic_file"], "group_by": "reference"},
+    )
+    expected = sorted(c["ref"] for c in LDO_LED["components"] if not c.get("fields", {}).get("MPN"))
+    assert sorted(bom["references_without_mpn"]) == expected
+    assert bom["lines_without_mpn"] == len(expected)
+    u1 = next(p for p in bom["parts"] if p["references"] == ["U1"])
+    assert u1["mpn"] == "AMS1117-3.3"
+
+
 async def test_update_components(server: KicadServer) -> None:
     circuit = {**copy.deepcopy(LDO_LED), "board": BOARD}
     pcb = await call(server, "kicad.generate_pcb", {"circuit": circuit})
@@ -200,6 +216,10 @@ async def test_update_components(server: KicadServer) -> None:
     bom = await call(server, "kicad.export_bom", {"schematic_file": upd["schematic_file"]})
     values = {r for p in bom["parts"] for r in p["references"] if p["value"] == "2.2k"}
     assert values == {"R1"}
+    # FORGE-694: the MPN set here reaches the BOM, so R1 is no longer unsourced.
+    r1 = next(p for p in bom["parts"] if "R1" in p["references"])
+    assert r1["mpn"] == "RC0603FR-072K2L"
+    assert "R1" not in bom["references_without_mpn"]
     # The original schematic is untouched.
     original = Path(pcb["schematic_file"]).read_text()
     assert '"2.2k"' not in original

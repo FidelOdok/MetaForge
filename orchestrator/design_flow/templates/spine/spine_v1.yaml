@@ -9,8 +9,11 @@
 #
 # Bump `version` when a stage's objective, deliverables or gate change: every
 # template that uses the stage changes with it.
+#
+# 1.1.0 (FORGE-694): manufacturing asks for a manufacturer part number on every
+# placed BOM line, passives included, and G8 lists it.
 id: spine_v1
-version: 1.0.0
+version: 1.1.0
 phases:
 - id: intent
   title: Intent
@@ -233,7 +236,9 @@ phases:
   title: Manufacturing Prep
   objective: >-
     Prepare the design for manufacture. Consolidate the BOM with sourceable parts and a cost
-    roll-up, identify the fabrication outputs (gerbers and pick-and-place for the PCB, STEP/drawings
+    roll-up: every placed line, passives included, names a manufacturer part number
+    (kicad.export_bom reports `lines_without_mpn`; record it as `bom_lines_without_mpn`), and
+    identify the fabrication outputs (gerbers and pick-and-place for the PCB, STEP/drawings
     for machined or printed parts), and write the assembly and bring-up plan. Record the manufacturing
     plan and BOM decisions into the twin. (Phase-1 exports read from existing EDA, so capture
     the plan and BOM as decisions.)
@@ -253,6 +258,7 @@ phases:
     name: Manufacturing readiness / Release Gate (G8)
     criteria:
     - BOM complete and costed
+    - Every placed BOM line has a manufacturer part number (bom_lines_without_mpn == 0)
     - Fabrication outputs identified
     - Assembly and bring-up plan written
     - Waivers approved

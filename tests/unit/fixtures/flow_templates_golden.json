@@ -202,7 +202,7 @@
   "version": "1.0.0"
  },
  "hardware_v1": {
-  "content_hash": "845764e0bbd6e97c1dacbfc36f2ae47bd4b7882db050e13296075e8199f4d2bd",
+  "content_hash": "4d92fa7b69a1ad40eb15ac3c22213cd3acc629f2abaa8dea0c1f90a834d35c09",
   "definition": {
    "id": "hardware_v1",
    "name": "",
@@ -582,6 +582,7 @@
       "auto_approve": false,
       "criteria": [
        "BOM complete and costed",
+       "Every placed BOM line has a manufacturer part number (bom_lines_without_mpn == 0)",
        "Fabrication outputs identified",
        "Assembly and bring-up plan written",
        "Waivers approved",
@@ -593,7 +594,7 @@
      },
      "id": "manufacturing",
      "model": null,
-     "objective": "Prepare the design for manufacture. Consolidate the BOM with sourceable parts and a cost roll-up, identify the fabrication outputs (gerbers and pick-and-place for the PCB, STEP/drawings for machined or printed parts), and write the assembly and bring-up plan. Record the manufacturing plan and BOM decisions into the twin. (Phase-1 exports read from existing EDA, so capture the plan and BOM as decisions.)",
+     "objective": "Prepare the design for manufacture. Consolidate the BOM with sourceable parts and a cost roll-up: every placed line, passives included, names a manufacturer part number (kicad.export_bom reports `lines_without_mpn`; record it as `bom_lines_without_mpn`), and identify the fabrication outputs (gerbers and pick-and-place for the PCB, STEP/drawings for machined or printed parts), and write the assembly and bring-up plan. Record the manufacturing plan and BOM decisions into the twin. (Phase-1 exports read from existing EDA, so capture the plan and BOM as decisions.)",
      "outcome": "",
      "required_deliverables": [
       "design_decision"
@@ -603,7 +604,7 @@
     }
    ]
   },
-  "version": "1.1.0"
+  "version": "1.2.0"
  },
  "mech_v1": {
   "content_hash": "52a13880ed28784c144c3d796efaa9ee8f79010a9389394916b6c8b5f901827d",
