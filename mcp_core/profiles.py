@@ -242,16 +242,21 @@ PROFILES: dict[str, frozenset[str]] = {
         # FORGE-680: drill and pick-and-place complete the fabrication set.
         "kicad.export_drill",
         "kicad.export_pos",
-        "kicad.export_netlist",
+        # FORGE-692: kicad.export_netlist and knowledge.populate_bom left this
+        # profile when the exports stopped being refused to phase tasks and
+        # took real slots. Three hardware_v1 phases draw on this profile, and
+        # without the room they lost twin.record_component_selection and
+        # twin.record_design_files. generate_schematic checks its own netlist,
+        # component.search_intent already falls back to populate_bom's search,
+        # and both stay in the full set (and export_netlist in pcb_design).
         "kicad.get_pin_mapping",
         "kicad.run_drc",
         "kicad.run_erc",
-        "knowledge.populate_bom",
         # FORGE-544: the per-rail budget, computed rather than hand-summed.
         "power.check_budget",
         # FORGE-681: battery runtime from the budget's source power.
         "power.runtime",
-        # FORGE-542: simulate the netlist kicad.export_netlist writes.
+        # FORGE-542: simulate a netlist given as text or a workspace path.
         "spice.run_simulation",
         "twin.commit_procurement_record",
         "twin.record_component_selection",
