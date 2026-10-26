@@ -305,7 +305,7 @@ class TestHealthCheckWithoutAHandshake:
             {"name": "health.check", "arguments": {}, "_meta": _meta()},
         )
         text = response["result"]["content"][0]["text"]
-        return dict(json.loads(text)["client"])
+        return dict(json.loads(text)["data"]["client"])
 
     def test_the_request_names_the_client_and_its_revision(self) -> None:
         client = self._client(UnifiedMcpServer(adapters=[]))
