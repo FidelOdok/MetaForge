@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -182,3 +182,35 @@ class AgentSessionEventRow(Base):
         server_default=func.now(),
         default=lambda: datetime.now(UTC),
     )
+
+
+# FORGE-697: the MCP sidecar's OAuth state, so a restart neither signs every
+# client out nor leaves it holding a client_id the server no longer knows.
+
+
+class McpOAuthClientRow(Base):
+    """``mcp_oauth_clients`` table: one dynamically registered client (RFC 7591)."""
+
+    __tablename__ = "mcp_oauth_clients"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    redirect_uris: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    client_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    issued_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class McpOAuthTokenRow(Base):
+    """``mcp_oauth_tokens`` table: one issued access or refresh token.
+
+    Keyed by the token's SHA-256, never the token itself: a database read
+    must not hand out live credentials.
+    """
+
+    __tablename__ = "mcp_oauth_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    scope: Mapped[str] = mapped_column(String(255), nullable=False)
+    client_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    expires_at: Mapped[float] = mapped_column(Float, nullable=False)

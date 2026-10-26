@@ -109,10 +109,13 @@ The web connector UI can't send a static bearer token — it runs OAuth 2.1
    Enter the shared secret to authorize; claude.ai completes the token
    exchange and connects.
 
-Identity is dev-grade (one shared secret, single actor, in-memory tokens
-that reset on restart — claude.ai re-runs the flow transparently).
-Federation to a real IdP and persistent token storage are tracked
-follow-ups on MET-480.
+Identity is dev-grade (one shared secret; the operator name typed at sign-in
+is a label, not a verified identity). Registered clients and issued tokens
+survive a restart of `mcp-http` when `DATABASE_URL` is set (FORGE-697): they
+are kept in Postgres, in the `mcp_oauth_clients` and `mcp_oauth_tokens`
+tables, tokens by their SHA-256 only. Without a database they live in memory
+and a restart signs every client out. Federation to a real IdP is a tracked
+follow-up on MET-480.
 
 The OAuth flow claude.ai runs:
 

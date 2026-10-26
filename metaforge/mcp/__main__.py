@@ -1358,10 +1358,15 @@ async def serve_http_async(
     import uvicorn
 
     from metaforge.mcp.oauth import OAuthConfig
+    from metaforge.mcp.oauth_store import create_oauth_persistence
 
     api_key = os.environ.get("METAFORGE_MCP_API_KEY") or None
     oauth_config = OAuthConfig.from_env()
-    oauth = OAuthProvider(oauth_config) if oauth_config else None
+    oauth = None
+    if oauth_config:
+        # FORGE-697: clients and tokens outlive a restart when DATABASE_URL is set.
+        oauth = OAuthProvider(oauth_config, persistence=await create_oauth_persistence())
+        await oauth.load()
     service_key, service_verifier = _service_auth_from_env()
     app = build_http_app(
         server,

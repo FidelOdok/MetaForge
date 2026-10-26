@@ -126,6 +126,14 @@ Then **Settings → Connectors → Add custom connector**, and enter
 `WWW-Authenticate` header, follows it to the metadata, registers itself, and
 sends you to the sign-in page. Enter the secret and it completes the exchange.
 
+With `DATABASE_URL` set (the standard compose file sets it), registered
+clients and issued tokens are kept in Postgres (`mcp_oauth_clients`,
+`mcp_oauth_tokens`, tokens by their SHA-256 only), so redeploying or
+restarting the sidecar does not sign anyone out (FORGE-697). Without a
+database they are held in memory, and after a restart a client must sign in
+again; a client that keeps reusing its old registration, as Claude Code does,
+then needs that registration cleared before it can.
+
 You do **not** need to set `METAFORGE_OAUTH_ISSUER`. The server works out its
 own public URL from the headers the tunnel sets. Pinning it to a quick tunnel's
 hostname is actively worse, because that hostname changes on the next restart.
