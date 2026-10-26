@@ -174,11 +174,38 @@ def _rules(board: Any, spec: dict[str, Any]) -> None:
             ns.SetNetclassPatternAssignment(name, "Power")
 
 
+def mounting_hole_name(drill: float, names: list[str]) -> str | None:
+    """The plain (unplated, no pad ring) library hole for ``drill``, if there is one.
+
+    KiCad names them ``MountingHole_<d>mm`` with an ``_M<n>`` suffix for the
+    screw it clears (``MountingHole_3.2mm_M3``); the suffixed one is preferred.
+    """
+    best: str | None = None
+    for name in sorted(names):
+        parts = name.split("_")
+        if len(parts) not in (2, 3) or parts[0] != "MountingHole" or not parts[1].endswith("mm"):
+            continue
+        if len(parts) == 3 and not parts[2].startswith("M"):
+            continue
+        try:
+            size = float(parts[1][:-2])
+        except ValueError:
+            continue
+        if abs(size - drill) < 0.05 and (best is None or len(parts) == 3):
+            best = name
+    return best
+
+
 def _mounting_holes(
     board: Any, fp_root: str, drill: float, x0: float, y0: float, w: float, h: float
 ) -> list[tuple[float, float, float, float]]:
     lib = os.path.join(fp_root, "MountingHole.pretty")
-    name = "MountingHole_3.2mm_M3" if abs(drill - 3.2) < 0.05 else None
+    names = (
+        [f[: -len(".kicad_mod")] for f in os.listdir(lib) if f.endswith(".kicad_mod")]
+        if os.path.isdir(lib)
+        else []
+    )
+    name = mounting_hole_name(drill, names)
     boxes = []
     inset = drill / 2 + 2.0
     for i, (cx, cy) in enumerate(
@@ -198,6 +225,10 @@ def _mounting_holes(
             pad.SetDrillSize(pcbnew.VECTOR2I(MM(drill), MM(drill)))
             pad.SetSize(pcbnew.VECTOR2I(MM(drill), MM(drill)))
             fp.Add(pad)
+            # FORGE-691: a footprint with no library id goes into the Specctra
+            # export as a nameless component, and KiCad then refuses the whole
+            # routed session on import.
+            fp.SetFPID(pcbnew.LIB_ID("MountingHole", f"MountingHole_{drill:g}mm"))
         fp.SetReference(f"H{i + 1}")
         # Board-only: not in the schematic, the BOM or the placement file, so
         # schematic parity does not count it as an extra footprint.
@@ -344,8 +375,9 @@ def route(req: dict[str, Any]) -> dict[str, Any]:
     board = pcbnew.LoadBoard(path)
     base = os.path.splitext(path)[0]
     dsn, ses = base + ".dsn", base + ".ses"
+    named = _name_unnamed_footprints(board)
     fanout = _fanout_planes(board)
-    if fanout["vias"]:
+    if fanout["vias"] or named:
         pcbnew.SaveBoard(path, board)
     if not pcbnew.ExportSpecctraDSN(board, dsn):
         return {"ok": False, "errors": ["Specctra DSN export failed"]}
@@ -374,7 +406,17 @@ def route(req: dict[str, Any]) -> dict[str, Any]:
         }
     board = pcbnew.LoadBoard(path)
     if not pcbnew.ImportSpecctraSES(board, ses):
-        return {"ok": False, "errors": ["Specctra session import failed"], "log_tail": log[-3000:]}
+        return {
+            "ok": False,
+            "errors": [
+                "KiCad could not import Freerouting's session, so none of the routing reached "
+                "the board: the board file on disk is unrouted. This is an adapter fault, not a "
+                "routing result; the router's own unrouted count in log_tail does not describe "
+                "the board"
+            ],
+            "router_time_s": elapsed,
+            "log_tail": log[-3000:],
+        }
     pour = req.get("ground_pour")
     if pour:
         _pour(board, pour)
@@ -394,6 +436,20 @@ def route(req: dict[str, Any]) -> dict[str, Any]:
         "plane_fanout": fanout,
         "log_tail": log[-1500:],
     }
+
+
+def _name_unnamed_footprints(board: Any) -> int:
+    """Give every footprint without a library id one, so the session imports back.
+
+    Covers boards generated before FORGE-691, whose non-M3 mounting holes had
+    none. The name is only what the Specctra export calls the part.
+    """
+    named = 0
+    for fp in board.GetFootprints():
+        if not fp.GetFPIDAsString().strip(":"):
+            fp.SetFPID(pcbnew.LIB_ID("MetaForge", f"Unnamed_{fp.GetReference() or named}"))
+            named += 1
+    return named
 
 
 def _fanout_planes(board: Any) -> dict[str, Any]:

@@ -211,6 +211,24 @@ async def test_update_components(server: KicadServer) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "drill", [2.5, 2.2, 2.4], ids=["library_2.5mm", "library_m2", "no_library_hole"]
+)
+async def test_mounting_holes_other_than_m3_keep_the_routing(
+    server: KicadServer, drill: float
+) -> None:
+    """FORGE-691: a hole that was not M3 had no library id, the Specctra export
+    named it nothing, and KiCad refused the routed session: every track lost."""
+    circuit = {**copy.deepcopy(LDO_LED), "board": {**BOARD, "mounting_holes_mm": drill}}
+    await call(server, "kicad.generate_schematic", {"circuit": circuit})
+    pcb = await call(server, "kicad.generate_pcb", {"circuit": circuit})
+    routed = await call(
+        server, "kicad.autoroute_pcb", {"pcb_file": pcb["pcb_file"], "ground_pour": "GND"}
+    )
+    assert routed["verdict"] == "pass", routed
+    assert routed["tracks"] > 0 and routed["unrouted"] == 0
+
+
 DRONE_FC = Path(__file__).resolve().parents[2] / "examples/drone_flight_controller/eda/circuit.json"
 
 
