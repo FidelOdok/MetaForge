@@ -667,6 +667,30 @@ A result linked only to a superseded `cad_model` is not used. The
 `metadata.modelling_assumptions` (for example bonded versus contact joints,
 material approximations), which is shown to the reviewer at the gate.
 
+**Design-record constraints (FORGE-698).** An electronics or firmware
+requirement (`drc_error_count == 0`, `board_length_mm <= 40`,
+`build_error_count == 0`) has no `cad_model` to compare against, so before this
+every one went unchecked: the engine counted its `True` placeholder as a pass
+and the requirement matrix showed it as `no_data`. Now:
+
+- The constraint engine skips a placeholder that stands for a `metric` +
+  `limit` binding (`is_placeholder_bound`), so it is no longer counted as
+  evaluated.
+- `api_gateway/runs/design_fact_constraints.py` reads the numbers the current
+  (head) revision of each design record states about itself: `pcb_layout`,
+  `schematic`, `firmware_source` and `bom`. It compares the one the
+  requirement's `metric` names to the limit. A few tool spellings are accepted
+  for the same fact (`erc_errors` for `erc_error_count`, `drc_errors`,
+  `unrouted`, `layer_count`, `build_errors`). Bookkeeping numbers
+  (`file_count`, `total_bytes`, `item_revision`) are never facts.
+- `TwinConstraintChecker` adds the result to the gate: a broken limit is a
+  violation, and a metric no design record states is listed as not evaluated
+  with the reason. A size metric that a design record states (a board's
+  length) is measured from that record, not reported as "no cad_model".
+- `simulation_result` numbers are not read here. They rest on load cases and
+  assumptions, so they verify a requirement only through a claim or the
+  analysis check above.
+
 The gate skeleton stays hardcoded (versioned code); the criteria come from
 the project's own constraint data. The structured constraint-creation tool
 (MET-582) is what fills that data from the Requirements phase; decision-derived

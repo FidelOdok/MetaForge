@@ -763,7 +763,8 @@ class RequirementMatrixRow(BaseModel):
 
 Status is derived fresh on every call, same "never a stored, driftable boolean" discipline as `evaluate_claim` itself:
 
-- `no_data` -- no claim recorded against the requirement at all.
+- `no_data` -- no claim recorded against the requirement at all, and no current design record states its metric. The detail says which.
+- `pass` / `fail` measured from the design (FORGE-698) -- no claim, but the requirement is a `metric` + `limit` binding and the current revision of a `pcb_layout`, `schematic`, `firmware_source` or `bom` records that metric. The detail starts "measured from the design:" and names the record and the value; `artefactIds` is that record. `simulation_result` numbers are never read this way: they verify a requirement only through a claim.
 - `stale` -- a claim's cited evidence includes at least one entity whose current staleness is STALE/SUPERSEDED/INVALID, flagged even when the claim itself is still SUPPORTED by other current evidence (the ticket's own "flags stale evidence after a change" wording).
 - `fail` / `uncertain` / `pass` -- claim SUPPORTED, no stale evidence; derived from the most current evidence's own margin. Reads either evidence result shape this codebase produces: FORGE-315's tier-0/tier-2 (`value_mm`/`limit_mm`/`margin_mm`/`escalated`) or FORGE-317's sensitivity ranking (`baseline_value`/`limit`/`baseline_margin`, no `escalated` concept of its own). Negative margin is `fail`; a tier-0 result with `escalated=true` is `uncertain` (too close to call without a higher-fidelity check, FORGE-315's own semantics); otherwise `pass`.
 
