@@ -39,6 +39,7 @@ Not for:
 | 3D model, renders | `kicad.export_3d`, `kicad.render_pcb` | pcb_design |
 | Change a part | `kicad.update_components` | pcb_design |
 | Fabrication files | `kicad.export_gerber`, `kicad.export_drill`, `kicad.export_pos` | pcb_design, electronics |
+| Assembly BOM | `kicad.export_bom` | pcb_design, electronics |
 | Record | `twin.record_document`, `twin.record_decision` | core |
 
 The tools run in the `kicad-adapter` container. `-32001` means it is down:
@@ -78,6 +79,11 @@ Ask for anything missing; do not choose parts, values or the board yourself.
   limits, and say which fab.
 - A component may name its own 3D `model` when KiCad's footprint points at a
   model the library does not ship; say so in the report.
+- Every placed part needs `"fields": {"MPN": ..., "Manufacturer": ...}`,
+  passives included: a fab house can only place what it can buy. Source a
+  resistor or capacitor with `component.search_parametric` (categories
+  `resistor`, `capacitor_ceramic`: value, tolerance or voltage, dielectric,
+  package) like any other part, and ask when nothing matches.
 
 ## Procedure
 
@@ -96,7 +102,11 @@ Ask for anything missing; do not choose parts, values or the board yourself.
    `drc` (errors, warnings), `schematic_parity`, tracks and vias. `pass`
    means all three checks are zero. Report unrouted nets by name.
 4. **Fabrication and 3D.** On a pass, export Gerbers, drill and positions
-   from the routed board; `kicad.export_3d` (`step` for the enclosure
+   from the routed board, and the BOM with `kicad.export_bom`. Its
+   `lines_without_mpn` counts placed lines whose symbols have no MPN, and
+   `references_without_mpn` names them: source each, set `MPN` and
+   `Manufacturer` with `kicad.update_components`, and export again until it
+   is 0. Then `kicad.export_3d` (`step` for the enclosure
    designer, `glb` for viewing) and say which parts have no 3D model
    (`missing_models`); `kicad.render_pcb` with `view: iso` and `inline: true`
    to show the person the board.
@@ -109,6 +119,7 @@ Ask for anything missing; do not choose parts, values or the board yourself.
 - [ ] Every part's symbol, footprint and pin numbers come from its datasheet
 - [ ] "Schematic done" rests on ERC with 0 errors and 0 netlist mismatches
 - [ ] "Board done" rests on 0 unrouted, 0 DRC errors, 0 parity issues
+- [ ] "Ready to build" rests on `lines_without_mpn` 0: every placed part, passives too, has an MPN
 - [ ] DRC warnings listed, not hidden
 - [ ] Placement described as a starting point for review
 

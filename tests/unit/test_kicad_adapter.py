@@ -333,6 +333,15 @@ SAMPLE_BOM_CSV = (
     '"U1","STM32F405","LQFP-64","1",""\n'
 )
 
+SAMPLE_BOM_CSV_WITH_MPN = (
+    # FORGE-694: the columns export_bom asks kicad-cli for.
+    '"Refs","Value","Footprint","Qty","DNP","MPN","Manufacturer"\n'
+    '"R1,R2,R3","10k","0402","3","","",""\n'
+    '"C1,C2","100nF","0402","2","","GRM155R71C104KA88D","Murata"\n'
+    '"C9","10uF","0805","1","DNP","",""\n'
+    '"U1","STM32F405","LQFP-64","1","","STM32F405RGT6","STMicroelectronics"\n'
+)
+
 
 def _make_mock_process(returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
     """Create a mock asyncio subprocess."""
@@ -1119,6 +1128,39 @@ class TestRealKicadExecution:
         assert result["format"] == "csv"
         assert result["total_components"] == 6
         assert result["unique_parts"] == 3
+        # FORGE-694: the default sample names no MPN anywhere.
+        assert result["lines_without_mpn"] == 3
+        assert result["components_without_mpn"] == 6
+
+    async def test_bom_export_asks_kicad_for_the_part_numbers(self, tmp_path) -> None:
+        """FORGE-694: MPN and Manufacturer are exported, and grouped on, so a
+        line without a part number is counted and named."""
+        server = KicadServer(config=KicadConfig(work_dir=str(tmp_path)))
+        seen: list[list[str]] = []
+
+        async def mock_run(cli, args, timeout, cwd=None):
+            seen.append(list(args))
+            with open(args[args.index("--output") + 1], "w") as f:
+                f.write(SAMPLE_BOM_CSV_WITH_MPN)
+            return 0, "", ""
+
+        with patch(
+            "tool_registry.tools.kicad.adapter._check_kicad_cli",
+            AsyncMock(return_value="kicad-cli"),
+        ):
+            with patch("tool_registry.tools.kicad.adapter._run_kicad_cli", mock_run):
+                result = await server._execute_bom_export("/designs/test.kicad_sch", "csv", "value")
+
+        args = seen[0]
+        assert args[args.index("--fields") + 1].endswith(",MPN,Manufacturer")
+        assert args[args.index("--labels") + 1].endswith(",MPN,Manufacturer")
+        assert "MPN" in args[args.index("--group-by") + 1].split(",")
+        # R1-R3 have no MPN; the DNP capacitor is not placed, so it does not count.
+        assert result["lines_without_mpn"] == 1
+        assert result["components_without_mpn"] == 3
+        assert result["references_without_mpn"] == ["R1", "R2", "R3"]
+        mcu = next(p for p in result["parts"] if p["value"] == "STM32F405")
+        assert mcu["mpn"] == "STM32F405RGT6" and mcu["manufacturer"] == "STMicroelectronics"
 
     # -- Full Gerber export execution with mocked subprocess --
 

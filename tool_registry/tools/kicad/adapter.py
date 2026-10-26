@@ -28,11 +28,18 @@ tracer = get_tracer("tool_registry.tools.kicad")
 #: Netlist formats: our name -> (kicad-cli 9 --format, file extension). ``kicad``
 #: stays an alias of ``kicadsexpr``; kicad-cli 9 rejects it ("Invalid format").
 #: BOM grouping: our ``group_by`` -> kicad-cli ``--group-by`` fields ("" = one line per symbol).
+#: FORGE-694: MPN is grouped on too, so two parts that share a value and
+#: footprint but not a part number never fold into one line.
 BOM_GROUPING: dict[str, str] = {
-    "value": "Value,Footprint",
-    "footprint": "Footprint",
+    "value": "Value,Footprint,MPN",
+    "footprint": "Footprint,MPN",
     "reference": "",
 }
+
+#: FORGE-694: the BOM carries each symbol's MPN and Manufacturer fields (empty
+#: when the symbol has none), so an assembler's BOM can be checked line by line.
+BOM_FIELDS = "Reference,Value,Footprint,${QUANTITY},${DNP},MPN,Manufacturer"
+BOM_LABELS = "Refs,Value,Footprint,Qty,DNP,MPN,Manufacturer"
 
 NETLIST_FORMATS: dict[str, tuple[str, str]] = {
     "kicad": ("kicadsexpr", "net"),
@@ -321,6 +328,18 @@ class KicadServer(McpToolServer):
                         "total_components": {"type": "integer"},
                         "unique_parts": {"type": "integer"},
                         "format": {"type": "string"},
+                        "lines_without_mpn": {
+                            "type": "integer",
+                            "description": (
+                                "Placed (not DNP) lines whose symbols have no MPN field: "
+                                "lines a fab house cannot buy against (FORGE-694)"
+                            ),
+                        },
+                        "components_without_mpn": {"type": "integer"},
+                        "references_without_mpn": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                     },
                 },
                 phase=1,
@@ -1009,6 +1028,10 @@ class KicadServer(McpToolServer):
                 "bom",
                 "--output",
                 csv_file,
+                "--fields",
+                BOM_FIELDS,
+                "--labels",
+                BOM_LABELS,
             ]
             group_fields = BOM_GROUPING[group_by]
             if group_fields:
@@ -1028,6 +1051,7 @@ class KicadServer(McpToolServer):
                 if output_format == "json":
                     output_file = f"{folder}/{stem}_bom.json"
                     Path(output_file).write_text(json.dumps(parts, indent=1), encoding="utf-8")
+                unsourced = _lines_without_mpn(parts)
                 result = {
                     "output_file": output_file,
                     "total_components": total_components,
@@ -1035,6 +1059,10 @@ class KicadServer(McpToolServer):
                     "group_by": group_by,
                     "parts": parts,
                     "format": output_format,
+                    # FORGE-694: placed lines an assembler cannot buy against.
+                    "lines_without_mpn": len(unsourced),
+                    "components_without_mpn": sum(p["quantity"] for p in unsourced),
+                    "references_without_mpn": [r for p in unsourced for r in p["references"]],
                 }
                 span.set_attribute("kicad.bom.total_components", total_components)
                 span.set_attribute("kicad.bom.unique_parts", unique_parts)
@@ -1473,9 +1501,21 @@ def _parse_bom_rows(file_path: str) -> list[dict[str, Any]]:
                 "footprint": row.get("Footprint", ""),
                 "quantity": qty,
                 "dnp": bool(str(row.get("DNP", "")).strip()),
+                "mpn": str(row.get("MPN") or "").strip(),
+                "manufacturer": str(row.get("Manufacturer") or "").strip(),
             }
         )
     return parts
+
+
+def _lines_without_mpn(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """BOM lines that are placed (not DNP) and name no manufacturer part number.
+
+    FORGE-694: a board's BOM passed every gate with its resistors and
+    capacitors unsourced. A line a fab house is asked to place needs a part
+    it can buy; the MPN symbol field is where the design says which.
+    """
+    return [p for p in parts if not p["dnp"] and not p.get("mpn")]
 
 
 def _parse_bom_csv(file_path: str) -> tuple[int, int]:

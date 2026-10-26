@@ -303,6 +303,9 @@ def test_the_pcb_checks_are_kicads_own_results() -> None:
     assert caps["pcb.board_3d"] == ("kicad.export_3d", "kicad.render_pcb")
     checks = {c.value for c in fragment.task("routing").checks}
     assert checks == {"unrouted_count", "drc_error_count", "parity_issue_count"}
+    # FORGE-694: a BOM line with no MPN cannot be bought, so it cannot pass.
+    fab = {c.value for c in fragment.task("fabrication_outputs").checks}
+    assert fab == {"missing_copper_gerbers", "bom_lines_without_mpn"}
     for task in fragment.tasks:
         assert all(c.limit is None or isinstance(c.limit, str) for c in task.checks)
 

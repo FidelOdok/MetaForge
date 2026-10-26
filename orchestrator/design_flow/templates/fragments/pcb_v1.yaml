@@ -24,9 +24,13 @@
 # file are twin work products (twin.record_design_files), each linked to what
 # it was made from: BOM -> schematic -> board -> gerbers and placement.
 #
+# FORGE-694: the fabrication task gates on `bom_lines_without_mpn`, the
+# placed BOM lines whose symbols name no manufacturer part number. A run's
+# BOM passed every gate with its passives unsourced.
+#
 # Bump `version` when a task, its contract or a check changes.
 id: pcb_v1
-version: 1.1.0
+version: 1.2.0
 domain: pcb
 label: PCB design
 description: Schematic generation, board layout, autorouting, fabrication outputs and the 3D board.
@@ -104,14 +108,21 @@ tasks:
     kicad.export_gerber, kicad.export_drill, kicad.export_pos and kicad.export_bom. Record the
     number of copper layers without a gerber as `missing_copper_gerbers`, sourced to the export,
     the BOM in the twin, and the gerber and drill folder (gerber) and the placement file
-    (pick_and_place) with twin.record_design_files, both generated from the board.
+    (pick_and_place) with twin.record_design_files, both generated from the board. Record the
+    export's `lines_without_mpn` as `bom_lines_without_mpn`: a placed line with no MPN symbol
+    field is one the fab house cannot buy. Passives count: source each resistor and capacitor
+    with component.search_parametric (categories resistor and capacitor_ceramic, by value,
+    tolerance or voltage, dielectric and package), record the choice, set its MPN and
+    Manufacturer fields with kicad.update_components, and export again.
   inputs:
   - design_value:drc_error_count
   outputs:
   - design_value:missing_copper_gerbers
+  - design_value:bom_lines_without_mpn
   records: [bom, gerber, pick_and_place]
   checks:
   - missing_copper_gerbers == 0
+  - bom_lines_without_mpn == 0
   capabilities: [kicad.export_gerber, kicad.export_drill, kicad.export_pos, kicad.export_bom]
   outcome: a complete fabrication and assembly set from the checked board
 - id: board_3d

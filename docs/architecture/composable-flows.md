@@ -116,7 +116,10 @@ selection, so composed with `electronics_v1` a changed part regenerates the
 schematic, the board and everything after them. Every check is a KiCad
 result: ERC, the netlist match, KiCad's own unconnected-item count (never
 the router's), DRC with schematic parity, the copper layers without a
-gerber, and the footprints without a 3D model, each `== 0`. Its ERC value is
+gerber, the placed BOM lines with no manufacturer part number
+(`bom_lines_without_mpn`, from `kicad.export_bom`, since FORGE-694 and
+version 1.2.0; passives count), and the footprints without a 3D model, each
+`== 0`. Its ERC value is
 `generated_erc_error_count`, kept apart from `electronics_v1`'s
 `erc_error_count` on the person's own schematic. All its tasks sit in the
 design stage, so it composes with every spine; `design_v1` has no
