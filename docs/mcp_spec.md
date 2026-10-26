@@ -638,8 +638,9 @@ The same report carries `client.can_elicit` (see
 `auth` (what the transport in front of the server
 enforces: `open`, `api_key`, `oauth`, `api_key+oauth`, or `unknown` when
 the transport declared nothing) and `client` (the `clientInfo` from the
-`initialize` handshake, plus `protocol_skew` when the revision the client
-asked for is not the one the server pinned). Both are described under
+`initialize` handshake, or from the request itself for a handshake-free
+2026-07-28 client (FORGE-696), plus `protocol_skew` when the revision the
+client asked for is not the one the server pinned). Both are described under
 [What is protecting this connection](capability-matrix.md#what-is-protecting-this-connection).
 
 The report also carries `llm_usage_24h` (FORGE-476): calls, prompt,

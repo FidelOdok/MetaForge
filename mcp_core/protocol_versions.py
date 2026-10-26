@@ -190,6 +190,9 @@ class ModernRequest:
 
     version: str
     client_capabilities: dict[str, Any] = field(default_factory=dict)
+    #: ``io.modelcontextprotocol/clientInfo`` from the request's ``_meta``,
+    #: so health.check can name the client without a handshake (FORGE-696).
+    client_info: dict[str, Any] | None = None
 
 
 _CURRENT: ContextVar[ModernRequest | None] = ContextVar("mcp_modern_request", default=None)
