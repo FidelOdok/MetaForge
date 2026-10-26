@@ -355,7 +355,12 @@ class KicadServer(McpToolServer):
                 tool_id="kicad.export_gerber",
                 adapter_id="kicad",
                 name="Export Gerber",
-                description="Export Gerber manufacturing files from a KiCad PCB",
+                description=(
+                    "Export Gerber manufacturing files from a KiCad PCB, the paste (stencil)"
+                    " layers included by default. layers_exported lists only the layers a"
+                    " file was written for; a requested layer with no file is in"
+                    " layers_missing."
+                ),
                 capability="gerber_export",
                 input_schema={
                     "type": "object",
@@ -372,7 +377,8 @@ class KicadServer(McpToolServer):
                             "type": "array",
                             "items": {"type": "string"},
                             "description": (
-                                "Layers to export (default: all copper + mask + silk + edge)"
+                                "Layers to export (default: all copper + paste + mask + silk"
+                                " + edge)"
                             ),
                         },
                     },
@@ -384,7 +390,12 @@ class KicadServer(McpToolServer):
                         "output_dir": {"type": "string"},
                         "files_generated": {"type": "array"},
                         "total_files": {"type": "integer"},
+                        # Only layers a file was written for; a requested
+                        # layer with no file is in layers_missing (FORGE-703).
                         "layers_exported": {"type": "array"},
+                        "layers_missing": {"type": "array"},
+                        "layer_files": {"type": "object"},
+                        "paste_layers": {"type": "array"},
                     },
                 },
                 phase=1,
@@ -687,6 +698,9 @@ class KicadServer(McpToolServer):
             [
                 "F.Cu",
                 "B.Cu",
+                # The stencil layers: an assembled board needs them (FORGE-703).
+                "F.Paste",
+                "B.Paste",
                 "F.Mask",
                 "B.Mask",
                 "F.SilkS",
@@ -1121,15 +1135,31 @@ class KicadServer(McpToolServer):
 
                 # List generated files
                 files_generated = _list_gerber_files(output_dir)
+                # FORGE-703: report the layers from the files on disk, never
+                # from the request. kicad-cli skips a layer name it does not
+                # know and still exits 0.
+                layer_files, layers_missing = _match_gerber_layers(layers, files_generated)
 
                 result = {
                     "output_dir": output_dir,
                     "files_generated": files_generated,
                     "total_files": len(files_generated),
-                    "layers_exported": layers,
+                    "layers_exported": list(layer_files),
+                    "layers_missing": layers_missing,
+                    "layer_files": layer_files,
+                    "paste_layers": [
+                        layer for layer in layer_files if _canonical_layer(layer).endswith(".Paste")
+                    ],
                 }
 
                 span.set_attribute("kicad.gerber.total_files", len(files_generated))
+                span.set_attribute("kicad.gerber.layers_missing", len(layers_missing))
+                if layers_missing:
+                    logger.warning(
+                        "Gerber layers requested but not written",
+                        output_dir=output_dir,
+                        layers_missing=layers_missing,
+                    )
                 logger.info(
                     "Gerber export completed",
                     output_dir=output_dir,
@@ -1529,6 +1559,10 @@ def _list_gerber_files(output_dir: str) -> list[str]:
     gerber_extensions = {
         ".gtl",
         ".gbl",
+        # Paste (stencil) layers: missing here, they were written and then
+        # dropped from the export's file list (FORGE-703).
+        ".gtp",
+        ".gbp",
         ".gts",
         ".gbs",
         ".gto",
@@ -1548,6 +1582,58 @@ def _list_gerber_files(output_dir: str) -> list[str]:
         return sorted(files)
     except FileNotFoundError:
         return []
+
+
+# kicad-cli writes the current name of a layer; older names still select it.
+_LAYER_ALIASES = {
+    "F.SilkS": "F.Silkscreen",
+    "B.SilkS": "B.Silkscreen",
+    "F.Adhes": "F.Adhesive",
+    "B.Adhes": "B.Adhesive",
+    "F.CrtYd": "F.Courtyard",
+    "B.CrtYd": "B.Courtyard",
+    "Dwgs.User": "User.Drawings",
+    "Cmts.User": "User.Comments",
+    "Eco1.User": "User.Eco1",
+    "Eco2.User": "User.Eco2",
+}
+
+
+def _canonical_layer(name: str) -> str:
+    return _LAYER_ALIASES.get(name, name)
+
+
+def _gerber_file_layer(filename: str) -> str | None:
+    """The layer a kicad-cli Gerber was plotted from.
+
+    kicad-cli names each file ``<board>-<layer>.<ext>`` with the layer's dot
+    written as an underscore: F.Paste -> ``board-F_Paste.gtp``.
+    """
+    stem = Path(filename).stem
+    if "-" not in stem:
+        return None
+    token = stem.rsplit("-", 1)[1]
+    if "_" not in token:
+        return None
+    return token.replace("_", ".", 1)
+
+
+def _match_gerber_layers(layers: list[str], files: list[str]) -> tuple[dict[str, str], list[str]]:
+    """({requested layer: file written for it}, requested layers with no file)."""
+    written: dict[str, str] = {}
+    for name in files:
+        layer = _gerber_file_layer(name)
+        if layer:
+            written.setdefault(layer, name)
+    found: dict[str, str] = {}
+    missing: list[str] = []
+    for layer in layers:
+        name = written.get(_canonical_layer(layer))
+        if name:
+            found[layer] = name
+        else:
+            missing.append(layer)
+    return found, missing
 
 
 def _count_excellon_holes(path: Path) -> int:
