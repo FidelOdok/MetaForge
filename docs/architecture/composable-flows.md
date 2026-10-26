@@ -61,7 +61,7 @@ The fragments shipped today:
 | Fragment | Tasks |
 |---|---|
 | `thermal_v1` | heat-load estimation → cooling architecture → heat-transfer analysis (`calculix.run_thermal`) → temperature verification |
-| `electronics_v1` | component selection → power budget (`power.check_budget`) → schematic ERC on the person's own KiCad schematic (KiCad is read-only in Phase 1) → circuit simulation (`spice.run_simulation`) |
+| `electronics_v1` | component selection → power budget (`power.check_budget`) → schematic ERC on the person's own KiCad schematic (checked, not edited; `pcb_v1` generates a new one) → circuit simulation (`spice.run_simulation`) |
 | `packaging_v1` | board material selection → RSC dieline (`packaging.rsc_dieline`) → manufacturing check against the converter's rules → compression strength (`packaging.box_compression`, a McKee estimate) → drop testing, recorded as evidence from a physical test (FORGE-672) |
 | `mobile_robot_v1` | locomotion selection → energy closure (a coupled block: mass roll-up, drive sizing with `robot.size_drive`, battery sizing) → kinematics (`robot.diff_drive_kinematics`) → dynamics in simulation (`gazebo.run_simulation`) → navigation testing (FORGE-671) |
 | `aircraft_v1` | configuration → wing sizing for the stall speed at MTOW (`aircraft.wing_sizing`) → layout (tail volume, CG) → power closure (a coupled block: mass roll-up, cruise aerodynamics with `aircraft.cruise_performance`, battery sizing with `aircraft.electric_endurance`) → trim and static stability (`aircraft.trim_stability`) → flight simulation (FORGE-670) |

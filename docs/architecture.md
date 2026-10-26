@@ -1444,7 +1444,7 @@ Tool adapters wrap engineering tools in MCP-compatible servers. Each adapter run
 |---------|------|-------|-------------|
 | CalculiX | FEA solver | Phase 1 | Mesh validation, stress analysis, thermal analysis |
 | FreeCAD | CAD modeler | Phase 1 | Geometry export, STEP/STL conversion, measurement |
-| KiCad | PCB/Schematic | Phase 1 (read-only), Phase 2 (write) | ERC, DRC, BOM export, Gerber export |
+| KiCad | PCB/Schematic | Phase 1 (read-only), Phase 2 (write) | ERC, DRC, BOM, netlist, Gerber, drill and placement export (Phase 1); schematic and board generation, autorouting, 3D export, renders and component updates (Phase 2, landed) |
 | SPICE | Circuit sim | Phase 1 | DC/AC analysis, transient simulation |
 
 ### 5.7 Digital Twin (Layer 0)

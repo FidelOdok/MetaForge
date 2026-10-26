@@ -78,9 +78,10 @@ decision, consequences) but lighter — one heading per decision.
 ### `eda/kicad/`
 
 KiCad project files (`.kicad_pro`, `.kicad_sch`, `.kicad_pcb`,
-libraries). Phase 1 is **read-only** — the `kicad` MCP adapter
-runs ERC/DRC and exports BOM/Gerber but does not edit the
-schematic. Schematic write-back lands in Phase 2. See
+libraries). The `kicad` MCP adapter runs ERC/DRC and exports
+BOM/Gerber without editing these files. The Phase 2 generation tools
+(`kicad.generate_schematic`, `generate_pcb`, `autoroute_pcb`) write a
+new project folder rather than changing the person's own. See
 [`capability-matrix.md`](capability-matrix.md) for the current
 KiCad tool list.
 
