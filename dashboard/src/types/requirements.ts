@@ -52,7 +52,7 @@ export interface EvidenceSummary {
   staleness: string;
 }
 
-export type RequirementMatrixStatus = 'pass' | 'uncertain' | 'fail' | 'no_data' | 'stale';
+export type RequirementMatrixStatus = 'pass' | 'uncertain' | 'fail' | 'no_data' | 'stale' | 'unverified';
 
 /** One requirement's evidence-backed status (FORGE-318): requirements x
  * claims x evidence, derived live -- never a stored, driftable status. */

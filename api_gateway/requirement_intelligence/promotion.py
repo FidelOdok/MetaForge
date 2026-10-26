@@ -60,6 +60,8 @@ _MATRIX_STATUS_TO_DECISION: dict[str, RequiredClaimDecision] = {
     "pass": RequiredClaimDecision.PASS,
     "uncertain": RequiredClaimDecision.UNCERTAIN,
     "stale": RequiredClaimDecision.UNCERTAIN,
+    # FORGE-701: a claim with nothing compared to the limit is not a pass.
+    "unverified": RequiredClaimDecision.UNCERTAIN,
     "no_data": RequiredClaimDecision.FAIL,
     "fail": RequiredClaimDecision.FAIL,
 }
