@@ -314,6 +314,11 @@ def test_the_pcb_checks_are_kicads_own_results() -> None:
         "netlist_mismatch_count",
         "unconfirmed_symbol_substitutions",
     }
+    # FORGE-705: the thread may not end with a stage linked to nothing.
+    board_3d = {c.value for c in fragment.task("board_3d").checks}
+    assert board_3d == {"missing_3d_models", "unlinked_thread_stages"}
+    fw_build = {c.value for c in load_fragment("firmware_v1").task("build").checks}
+    assert "unlinked_firmware_thread_stages" in fw_build
     for task in fragment.tasks:
         assert all(c.limit is None or isinstance(c.limit, str) for c in task.checks)
 

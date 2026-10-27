@@ -38,9 +38,16 @@
 # run's fab package passed with the paste files written but dropped from the
 # export's file list, while the result still named the layers as exported.
 #
+# FORGE-705: the 3D board task gates on `unlinked_thread_stages`, the stages
+# of the thread (BOM -> schematic -> board -> gerbers, placement and the 3D
+# board) left with no link to the stage before them. A run recorded its
+# schematic and its board STEP with no source, and both showed as not linked.
+# The recorders now link a stage to the one current record before it when no
+# source is given, and report the stages they could not.
+#
 # Bump `version` when a task, its contract or a check changes.
 id: pcb_v1
-version: 1.4.0
+version: 1.5.0
 domain: pcb
 label: PCB design
 description: Schematic generation, board layout, autorouting, fabrication outputs and the 3D board.
@@ -153,13 +160,19 @@ tasks:
     Export the routed board as STEP with kicad.export_3d for the enclosure and the mechanical
     fit, and render it (kicad.render_pcb) for review. Record the number of footprints whose 3D
     model is missing as `missing_3d_models`, sourced to the export, and the STEP as a cad_model
-    work product. A missing model leaves a hole in the enclosure check: name the part.
+    work product with twin.commit_geometry (file_path the export's file, source_tool
+    kicad.export_3d, source_node_ids the routed pcb_layout). A missing model leaves a hole in the
+    enclosure check: name the part. Record the commit's `thread_unlinked_stages` as
+    `unlinked_thread_stages`, sourced to the commit: a stage its `warnings` name has more than
+    one candidate before it, so record that stage again with source_node_ids.
   inputs:
   - design_value:drc_error_count
   outputs:
   - design_value:missing_3d_models
+  - design_value:unlinked_thread_stages
   records: [cad_model]
   checks:
   - missing_3d_models == 0
+  - unlinked_thread_stages == 0
   capabilities: [kicad.export_3d, kicad.render_pcb]
   outcome: the board as a complete STEP model for the mechanical design

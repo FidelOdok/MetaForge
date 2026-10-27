@@ -2711,6 +2711,17 @@ class TwinServer(McpToolServer):
                                 "a tool that never touched it (MET-693)."
                             ),
                         },
+                        "source_node_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "FORGE-705: the work products this geometry was "
+                                "generated from, linked GENERATED_FROM; e.g. the "
+                                "pcb_layout a board STEP from kicad.export_3d came "
+                                "from. For a board model, omitted means the project's "
+                                "one current pcb_layout."
+                            ),
+                        },
                         "model_role": {
                             "type": "string",
                             "enum": ["design", "analysis"],
@@ -2912,6 +2923,20 @@ class TwinServer(McpToolServer):
         # stored script belongs to.
         source_tool = arguments.get("source_tool")
         source_tool = source_tool if isinstance(source_tool, str) and source_tool else None
+        # FORGE-705: kicad.export_3d writes the board to <work_dir>/3d/<board>.step.
+        # A board committed from there without a source_tool was stamped
+        # freecad.export_model, and its link to the layout was never looked for.
+        if source_tool is None and isinstance(file_path, str) and file_path:
+            if Path(file_path).parent.name == "3d" and Path(file_path).suffix.lower() in (
+                ".step",
+                ".stp",
+                ".glb",
+            ):
+                source_tool = "kicad.export_3d"
+        raw_sources = arguments.get("source_node_ids")
+        source_node_ids = (
+            [str(s) for s in raw_sources if s] if isinstance(raw_sources, list) else []
+        )
         # FORGE-245: a caller (e.g. domain_agents.shared.commit_geometry,
         # used by the create_assembly/generate_cad/generate_enclosure
         # skills) has always sent its own 'extra_metadata' argument
@@ -3091,6 +3116,7 @@ class TwinServer(McpToolServer):
             **({"source_tool": source_tool} if source_tool else {}),
             **({"extra_metadata": extra_metadata} if extra_metadata else {}),
             **({"parts": assembly_parts} if assembly_parts else {}),
+            **({"source_node_ids": source_node_ids} if source_node_ids else {}),
             **_item_kwargs(arguments),
         )
 

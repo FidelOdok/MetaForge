@@ -123,7 +123,15 @@ Ask for anything missing; do not choose parts, values or the board yourself.
    to show the person the board.
 5. **Record.** `twin.record_document` with the files, the circuit, the
    KiCad verdicts and their counts; `twin.record_decision` for any part,
-   footprint or board-size choice made on the way.
+   footprint or board-size choice made on the way. Each design file
+   (`twin.record_design_files`) takes `source_node_ids`: the BOM for the
+   schematic, the schematic for the board, the board for the Gerbers and
+   placement. Commit the STEP with `twin.commit_geometry` (`file_path` the
+   export's file, `source_tool: kicad.export_3d`, `source_node_ids` the
+   board). Left out, the stage is linked to the project's one current record
+   before it, and the result says so (`generated_from_inferred`); with more
+   than one candidate it stays unlinked, named in `warnings` and counted by
+   `thread_unlinked_stages`. Record it again with its source.
 
 ## Checks before you report
 
@@ -133,6 +141,7 @@ Ask for anything missing; do not choose parts, values or the board yourself.
 - [ ] "Board done" rests on 0 unrouted, 0 DRC errors, 0 parity issues
 - [ ] "Ready to build" rests on `lines_without_mpn` 0: every placed part, passives too, has an MPN
 - [ ] The Gerber set has its paste layers (`paste_layers`) and nothing in `layers_missing`
+- [ ] Every stage is linked to the one before it: `thread_unlinked_stages` 0
 - [ ] DRC warnings listed, not hidden
 - [ ] Placement described as a starting point for review
 

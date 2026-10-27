@@ -33,6 +33,7 @@ from api_gateway.twin.item_revisions import (
     finish_definition_revision,
     plan_definition_revision,
 )
+from api_gateway.twin.thread_links import infer_upstream, link_thread
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -135,6 +136,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
         supersedes: str | None = None,
         change_reason: str | None = None,
         run_id: str | None = None,
+        source_node_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Persist one geometry commit as the next revision of its item.
 
@@ -154,6 +156,24 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             raise ValueError("twin.commit_geometry: 'step_base64' is not valid base64") from exc
         if not content:
             raise ValueError("twin.commit_geometry: decoded geometry is empty")
+
+        # FORGE-705: the work products this geometry was generated from.
+        sources = [str(s) for s in source_node_ids or []]
+        for s in sources:
+            try:
+                UUID(s)
+            except ValueError as exc:
+                raise ValueError(
+                    f"twin.commit_geometry: source node id '{s}' is not a UUID"
+                ) from exc
+        # A board KiCad exported is a stage of the electronics thread: with no
+        # source named it is linked to the project's one current layout.
+        board = source_tool.startswith("kicad.")
+        source_inferred = False
+        if board and not sources and project_id:
+            upstream = await infer_upstream(twin, project_id, "cad_model")
+            if upstream.node_id is not None:
+                sources, source_inferred = [upstream.node_id], True
 
         # FORGE-511: validate the parts BEFORE any side effect, so a bad
         # reference creates nothing.
@@ -441,6 +461,16 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                         error=str(exc),
                     )
 
+            # FORGE-705: GENERATED_FROM what it was made from.
+            linked_sources: list[str] = []
+            for src in sources:
+                try:
+                    await twin.add_edge(created.id, UUID(src), EdgeType.GENERATED_FROM)
+                    linked_sources.append(src)
+                except Exception as exc:  # noqa: BLE001 - a source edge is best-effort
+                    logger.warning("geometry_source_edge_failed", source=src, error=str(exc))
+            thread = await link_thread(twin, project_id) if board else None
+
             # FORGE-523: this node is the item's new head. SUPERSEDES was
             # added above (with its staleness propagation), so not again here.
             item_fields: dict[str, Any] = {}
@@ -474,7 +504,7 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
                 supersedes=str(prior_step.id) if prior_step is not None else None,
                 item_ref=item_fields.get("item_ref"),
             )
-            out = {
+            out: dict[str, Any] = {
                 "node_id": node_id,
                 "minio_object_key": minio_object_key,
                 "content_hash": content_hash,
@@ -489,6 +519,15 @@ def make_geometry_recorder(twin: Any, project_backend: Any = None, git_registry:
             if prior_step is not None:
                 out["supersedes_node_id"] = str(prior_step.id)
             out.update(item_fields)
+            if sources:
+                out["generated_from"] = linked_sources
+                out["generated_from_inferred"] = source_inferred and bool(linked_sources)
+            if thread is not None:
+                out["thread_unlinked_stages"] = len(thread.unlinked)
+                if thread.inferred:
+                    out["inferred_links"] = thread.inferred
+                if thread.unlinked or thread.missing:
+                    out["warnings"] = thread.unlinked + thread.missing
             # MET-584: soft-warn (never block) when geometry lands in a project
             # with no recorded requirements — the model sees the warning in the
             # tool result and can course-correct; gates enforce, chat nudges.
