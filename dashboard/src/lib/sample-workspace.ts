@@ -415,7 +415,42 @@ const SAMPLE_WORKSPACE_SEED = {
       },
     },
   ],
+  // FORGE-704: the far ends of edges that are not work products, as the gateway
+  // names them, so the demo shows the link switches too.
+  endpoints: {
+    'sample-baseline-rc1': { kind: 'baseline', name: 'Release candidate 1' },
+    'sample-part-imu': { kind: 'bom_item', name: 'ICM-42688-P' },
+    'sample-intent-flight': { kind: 'intent', name: 'Fly indoors for 10 minutes' },
+  } as Record<string, { kind: string; name: string }>,
   relationships: [
+    {
+      id: 'sample-edge-baseline-0',
+      sourceId: 'sample-pcb',
+      targetId: 'sample-baseline-rc1',
+      type: 'included_in_baseline',
+      label: 'included in baseline',
+    },
+    {
+      id: 'sample-edge-baseline-1',
+      sourceId: 'sample-firmware',
+      targetId: 'sample-baseline-rc1',
+      type: 'included_in_baseline',
+      label: 'included in baseline',
+    },
+    {
+      id: 'sample-edge-part-0',
+      sourceId: 'sample-pcb',
+      targetId: 'sample-part-imu',
+      type: 'contains',
+      label: 'contains',
+    },
+    {
+      id: 'sample-edge-intent-0',
+      sourceId: 'sample-intent-flight',
+      targetId: 'sample-battery',
+      type: 'depends_on',
+      label: 'depends on',
+    },
     {
       id: 'sample-edge-0',
       sourceId: 'sample-pcb',
@@ -1452,7 +1487,7 @@ function route(
     if (path === '/projects') return { projects: [s.project], total: 1 };
     if (path === `/projects/${s.project.id}`) return s.project;
     if (path === '/twin/nodes') return { nodes: s.nodes, total: s.nodes.length };
-    if (path === '/twin/relationships') return { relationships: s.relationships };
+    if (path === '/twin/relationships') return { relationships: s.relationships, endpoints: s.endpoints };
     if (/^\/twin\/nodes\/[^/]+$/.test(path)) return s.nodes.find((n) => n.id === segment(path, 3));
     if (path.endsWith('/versions')) {
       return { work_product_id: segment(path, 3), revisions: SAMPLE_REVISIONS, total: SAMPLE_REVISIONS.length };

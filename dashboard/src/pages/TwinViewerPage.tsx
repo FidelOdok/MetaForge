@@ -59,6 +59,7 @@ import { toDownloadHref, type ExportFile } from '../api/endpoints/cad-export';
 import { useExportUrdf, useExportSdf, useExportUsd } from '../hooks/use-cad-export';
 import { useToast } from '../components/ui/Toast';
 import type { TwinNode } from '../types/twin';
+import { DEFAULT_SHOWN, LINK_GROUPS, splitLinks, type LinkGroup } from '../lib/graphLinks';
 import type { ModelManifest, PartInfo, PartTreeNode } from '../types/viewer';
 import { resolveGatewayHref } from '../lib/gatewayConfig';
 import apiClient from '../api/client';
@@ -960,6 +961,64 @@ function GeometryDiffSection({ nodeId }: { nodeId: string }) {
   );
 }
 
+/**
+ * FORGE-704. The graph's link controls: one switch per kind of linked record, and
+ * a plain statement of anything that is not drawn. Before this the graph kept
+ * only work-product to work-product edges and said nothing about the rest.
+ */
+function GraphLinksBar({
+  split,
+  shown,
+  onToggle,
+  failed,
+  skippedNodes,
+}: {
+  split: ReturnType<typeof splitLinks>;
+  shown: ReadonlySet<LinkGroup>;
+  onToggle: (group: LinkGroup) => void;
+  failed: boolean;
+  skippedNodes: number;
+}) {
+  const groups = LINK_GROUPS.filter((g) => split.counts[g.id] > 0);
+  if (!failed && !skippedNodes && !groups.length && !split.offscreen) return null;
+  return (
+    <div className="tw-links" role="group" aria-label="Linked records">
+      {failed && (
+        <span className="tw-links-warn" role="alert">
+          Links unavailable: the relationships request failed, so only the work products are shown.
+        </span>
+      )}
+      {skippedNodes > 0 && (
+        <span className="tw-links-warn" role="status">
+          {skippedNodes} work product{skippedNodes === 1 ? "'s" : "s'"} links could not be read.
+        </span>
+      )}
+      {groups.length > 0 && <span className="tw-links-label">Show links to</span>}
+      {groups.map((g) => (
+        <button
+          key={g.id}
+          type="button"
+          aria-pressed={shown.has(g.id)}
+          onClick={() => onToggle(g.id)}
+          title={shown.has(g.id) ? `Hide links to ${g.label.toLowerCase()}` : `Show links to ${g.label.toLowerCase()}`}
+        >
+          {g.label} <b>{split.counts[g.id]}</b>
+        </button>
+      ))}
+      {split.hidden > 0 && (
+        <span className="tw-links-note" role="status">
+          {split.hidden} link{split.hidden === 1 ? '' : 's'} hidden
+        </span>
+      )}
+      {split.offscreen > 0 && (
+        <span className="tw-links-note" title="Their other end is filtered out of the list, or has not been named">
+          {split.offscreen} off screen
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── TwinViewerPage ────────────────────────────────────────────────────────────
 type ConversionPhase = 'idle' | 'uploading' | 'converting' | 'loading';
 type TwinTab = 'graph' | 'structure' | 'model' | 'sim' | 'asm' | 'mfg' | 'thread';
@@ -1013,6 +1072,8 @@ export function TwinViewerPage() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('overview');
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<NodeScope>('all');
+  // FORGE-704: which kinds of linked record (constraints, baselines...) the graph draws.
+  const [shownLinks, setShownLinks] = useState<ReadonlySet<LinkGroup>>(DEFAULT_SHOWN);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const railMin = useLayoutStore((s) => s.sidebarCollapsed);
@@ -1061,7 +1122,12 @@ export function TwinViewerPage() {
     dataUpdatedAt,
   } = useTwinNodes(activeProjectId ?? undefined);
   const { data: selectedNode } = useTwinNode(selectedId ?? undefined);
-  const { data: relationships = [] } = useTwinRelationships(activeProjectId ?? undefined);
+  const {
+    data: relationships = [],
+    endpoints = {},
+    skippedNodes = 0,
+    isError: relationshipsFailed = false,
+  } = useTwinRelationships(activeProjectId ?? undefined);
   const items = nodes ?? [];
 
   // ── viewer store ──
@@ -1218,6 +1284,15 @@ export function TwinViewerPage() {
       `${n.name} ${n.domain} ${n.id}`.toLowerCase().includes(query),
   );
   const visibleIds = new Set(visible.map((n) => n.id));
+  // FORGE-704: every edge is drawn, hidden by a switch, or off screen; none is dropped silently.
+  const linkSplit = splitLinks({ relationships, endpoints, visibleIds, shown: shownLinks });
+  const toggleLinks = (group: LinkGroup) =>
+    setShownLinks((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
   const domains = [...new Set(items.map((n) => n.domain))];
   const linked = new Set(relationships.flatMap((r) => [r.sourceId, r.targetId]));
   const linkedConstraints = items.filter(
@@ -1358,12 +1433,22 @@ export function TwinViewerPage() {
                 <Link to="/settings">Connection settings ↗</Link>
               </div>
             ) : items.length ? (
-              <TwinGraphCanvas
-                nodes={visible}
-                relationships={relationships.filter((r) => visibleIds.has(r.sourceId) && visibleIds.has(r.targetId))}
-                selectedId={selectedId}
-                onSelectNode={selectNode}
-              />
+              <>
+                <GraphLinksBar
+                  split={linkSplit}
+                  shown={shownLinks}
+                  onToggle={toggleLinks}
+                  failed={relationshipsFailed}
+                  skippedNodes={skippedNodes}
+                />
+                <TwinGraphCanvas
+                  nodes={visible}
+                  relationships={linkSplit.drawn}
+                  ghosts={linkSplit.ghosts}
+                  selectedId={selectedId}
+                  onSelectNode={selectNode}
+                />
+              </>
             ) : (
               <div className="tw-empty">
                 <Network size={32} />

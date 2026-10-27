@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getTwinNodes,
   getTwinNode,
-  getTwinRelationships,
+  getTwinGraph,
   getNodeVersionHistory,
   getRevisionDiff,
   getGeometryDiff,
@@ -50,14 +50,22 @@ export function useTwinNode(id: string | undefined) {
 }
 
 export function useTwinRelationships(projectId?: string) {
-  return useQuery({
+  const query = useQuery({
     // MET-491/MET-653: project scope is part of the cache key so switching
     // projects refetches the scoped relationship list (mirrors useTwinNodes).
     queryKey: twinKeys.relationships(projectId),
-    queryFn: () => getTwinRelationships(projectId),
+    queryFn: () => getTwinGraph(projectId),
     staleTime: TWIN_RELATIONSHIPS_POLL_MS,
     refetchInterval: TWIN_RELATIONSHIPS_POLL_MS,
   });
+  // `data` stays the edge list, as before. FORGE-704 adds the names of the ends
+  // that are not work products, and how many work products could not be read.
+  return {
+    ...query,
+    data: query.data?.relationships,
+    endpoints: query.data?.endpoints,
+    skippedNodes: query.data?.skippedNodes ?? 0,
+  };
 }
 
 export function useNodeVersionHistory(nodeId: string | undefined) {

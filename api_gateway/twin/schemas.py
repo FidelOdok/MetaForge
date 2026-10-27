@@ -146,11 +146,29 @@ class TwinRelationshipResponse(BaseModel):
     label: str
 
 
+class TwinEndpointResponse(BaseModel):
+    """What an edge points at when it is not a listed work product (FORGE-704).
+
+    The relationships view lists work products only, but an edge can run to a
+    constraint, a baseline, a BOM item or an engineering entity. Without a name
+    and kind for those the dashboard could not draw the other end of the edge
+    and dropped the edge, without saying so.
+    """
+
+    kind: str  # node type, or the entity type for an engineering entity
+    name: str
+
+
 class TwinRelationshipListResponse(BaseModel):
     """List of edges for the Digital Twin graph."""
 
     relationships: list[TwinRelationshipResponse]
     total: int
+    #: id -> name and kind, for every edge end that is not a listed work product.
+    endpoints: dict[str, TwinEndpointResponse] = Field(default_factory=dict)
+    #: Work products whose edges could not be read. Reported, not swallowed: a
+    #: non-zero value means the graph shown is incomplete.
+    skipped_nodes: int = 0
 
 
 class BooleanCutRequest(BaseModel):

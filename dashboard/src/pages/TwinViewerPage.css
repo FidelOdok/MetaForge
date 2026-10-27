@@ -1676,3 +1676,41 @@
     gap: 2px;
   }
 }
+
+/* FORGE-704: the graph's link controls. */
+.tw-links {
+  position: absolute;
+  z-index: 7;
+  top: 36px;
+  right: calc(var(--tw-inspector) + var(--tw-chat) + 16px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: min(720px, calc(100% - 300px));
+  padding: 6px 8px;
+  font-size: 12px;
+  background: var(--tw-panel);
+  border: 1px solid var(--tw-line);
+  border-radius: 8px;
+}
+.tw-links-label,
+.tw-links-note {
+  color: var(--tw-muted);
+}
+.tw-links-warn {
+  color: var(--mf-c-f5a623);
+}
+.tw-links button {
+  padding: 2px 8px;
+  color: var(--tw-muted);
+  background: transparent;
+  border: 1px dashed var(--tw-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tw-links button[aria-pressed='true'] {
+  color: var(--tw-ink);
+  background: var(--tw-raised);
+  border-style: solid;
+}

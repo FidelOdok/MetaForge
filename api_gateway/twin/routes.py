@@ -24,6 +24,7 @@ from api_gateway.twin.boolean_ops import (
     NoOverlapError,
     perform_boolean_op,
 )
+from api_gateway.twin.edge_endpoints import resolve_endpoints
 from api_gateway.twin.file_link import (
     FileLink,
     FileLinkCreateRequest,
@@ -338,10 +339,18 @@ async def list_twin_relationships(
         work_products = await _twin.list_work_products(project_id=scoped_project)
         edges = []
         seen: set[str] = set()
+        skipped = 0
         for wp in work_products:
             try:
-                wp_edges = await _twin.get_edges(wp.id)
+                # FORGE-704: both directions. Outgoing only meant an engineering
+                # entity that depends on a work product, or a record generated
+                # from one, was never listed (120 edges on the sandbox).
+                wp_edges = await _twin.get_edges(wp.id, direction="both")
             except Exception:
+                # One unreadable node must not blank the view, but it must not
+                # vanish either: it is counted and reported.
+                skipped += 1
+                logger.warning("twin_relationships_node_skipped", node_id=str(wp.id))
                 continue
             for edge in wp_edges:
                 # FORGE-523: REVISION_OF/HEAD point at Item nodes, which this
@@ -362,9 +371,29 @@ async def list_twin_relationships(
                         label=label,
                     )
                 )
+        # FORGE-704: name the ends that are not listed work products (a
+        # constraint, a baseline, a BOM item, an engineering entity), so a client
+        # can draw them instead of dropping the edge.
+        listed = {str(wp.id) for wp in work_products}
+        unlisted = {
+            end for edge in edges for end in (edge.sourceId, edge.targetId) if end not in listed
+        }
+        endpoints = await resolve_endpoints(_twin, sorted(unlisted))
         span.set_attribute("twin.relationships_count", len(edges))
-        logger.info("twin_relationships_listed", count=len(edges), project_id=project_id)
-        return TwinRelationshipListResponse(relationships=edges, total=len(edges))
+        span.set_attribute("twin.relationship_endpoints", len(endpoints))
+        logger.info(
+            "twin_relationships_listed",
+            count=len(edges),
+            endpoints=len(endpoints),
+            skipped_nodes=skipped,
+            project_id=project_id,
+        )
+        return TwinRelationshipListResponse(
+            relationships=edges,
+            total=len(edges),
+            endpoints=endpoints,
+            skipped_nodes=skipped,
+        )
 
 
 @router.get("/nodes/{node_id}", response_model=TwinNodeResponse)

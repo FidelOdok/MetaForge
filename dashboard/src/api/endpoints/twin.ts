@@ -1,14 +1,7 @@
-import type { TwinNode, TwinRelationship, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription, AssemblyPart, DesignFilesView } from '../../types/twin';
+import type { TwinNode, TwinGraph, ImportWorkProductResponse, FileLink, FileLinkTool, SyncResult, AssemblyDescription, AssemblyPart, DesignFilesView } from '../../types/twin';
 import apiClient from '../client';
 import { apiUrl } from '../../lib/gatewayConfig';
 import { isSampleMode, sampleFileUrl } from '../../lib/sample-workspace';
-
-const MOCK_RELATIONSHIPS: TwinRelationship[] = [
-  { id: 'rel-001', sourceId: 'node-001', targetId: 'node-004', type: 'constrained_by', label: 'Stress constraint' },
-  { id: 'rel-002', sourceId: 'node-002', targetId: 'node-003', type: 'generates', label: 'PCB from schematic' },
-  { id: 'rel-003', sourceId: 'node-003', targetId: 'node-005', type: 'constrained_by', label: 'Clearance constraint' },
-  { id: 'rel-004', sourceId: 'node-002', targetId: 'node-009', type: 'constrained_by', label: 'Power budget' },
-];
 
 interface TwinNodeApiResponse {
   id: string;
@@ -121,20 +114,28 @@ export async function getNodeScript(id: string): Promise<TwinNodeScript | undefi
   }
 }
 
-export async function getTwinRelationships(projectId?: string): Promise<TwinRelationship[]> {
-  // Live edges from the twin graph (backend already returns camelCase fields
-  // matching TwinRelationship). Falls back to mocks if the endpoint is absent.
+/**
+ * The twin's edges, with the names of the ends that are not work products.
+ *
+ * FORGE-704: this used to swallow any error and return built-in mock edges, so a
+ * broken request looked like a graph with odd data. It now throws, and the page
+ * says the links are unavailable.
+ */
+export async function getTwinGraph(projectId?: string): Promise<TwinGraph> {
   // MET-491: scope to a project when one is selected; omit for all projects.
-  try {
-    const params = projectId ? { project_id: projectId } : undefined;
-    const response = await apiClient.get<{ relationships: TwinRelationship[] }>(
-      '/twin/relationships',
-      { params },
-    );
-    return response.data.relationships ?? [];
-  } catch {
-    return MOCK_RELATIONSHIPS;
-  }
+  const params = projectId ? { project_id: projectId } : undefined;
+  const response = await apiClient.get<{
+    relationships?: TwinGraph['relationships'];
+    endpoints?: TwinGraph['endpoints'];
+    skipped_nodes?: number;
+  }>('/twin/relationships', { params });
+  const body = response.data ?? {};
+  return {
+    relationships: body.relationships ?? [],
+    // An older gateway (and the sample workspace) sends no endpoints.
+    endpoints: body.endpoints ?? {},
+    skippedNodes: body.skipped_nodes ?? 0,
+  };
 }
 
 export interface NodeModelResult {

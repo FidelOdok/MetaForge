@@ -28,7 +28,14 @@ describe('sample workspace', () => {
     expect(nodes.data.nodes.map((n: { id: string }) => n.id)).toContain('sample-pcb');
 
     const rels = await client.get('/twin/relationships');
-    expect(rels.data.relationships).toHaveLength(13);
+    expect(rels.data.relationships).toHaveLength(17);
+    // FORGE-704: every edge end that is not a work product is named, so none is dropped.
+    const nodeIds = new Set(nodes.data.nodes.map((n: { id: string }) => n.id));
+    const unnamed = rels.data.relationships.flatMap((r: { sourceId: string; targetId: string }) =>
+      [r.sourceId, r.targetId].filter((id) => !nodeIds.has(id) && !(id in rels.data.endpoints)),
+    );
+    expect(unnamed).toEqual([]);
+    expect(Object.keys(rels.data.endpoints)).toHaveLength(3);
 
     const project = await client.get(`/projects/${SAMPLE_PROJECT_ID}`);
     expect(project.data.name).toBe('Drone FC · sample');
