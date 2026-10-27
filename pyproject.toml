@@ -14,9 +14,13 @@ packages = ["cli", "twin_core", "mcp_core", "skill_registry", "tool_registry", "
 # ``import metaforge`` still works -- this is only the distribution name
 # people type after ``pip install``.
 name = "metaforge-hw"
-# The release workflow tags every push to main and derives that tag from
-# the repository history, never from here, so the patch number lives on the
-# tag. This tracks the minor line those tags are cut from.
+# The release workflow tags every push to main and derives that tag from the
+# repository history, never from here, so the patch number lives on the tag.
+# This tracks the minor line those tags are cut from, and is a floor rather
+# than the truth: `scripts/stamp_version.py` writes the resolved version in
+# before the gateway image is built, so the installed distribution -- and
+# therefore `/health` -- reports the release it came from. A source checkout
+# that nothing stamped reports this number.
 version = "0.3.0"
 description = "Local-first control plane for hardware design"
 readme = "README.md"
