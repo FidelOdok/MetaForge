@@ -75,7 +75,7 @@ describe('TwinGraphCanvas', () => {
     const ref = container.querySelectorAll('.react-flow__node-ref');
     expect(ref).toHaveLength(1);
     expect(getByText('Max mass 250 g')).toBeInTheDocument();
-    expect(ref[0].querySelectorAll('.react-flow__handle')).toHaveLength(2);
+    expect(ref[0]?.querySelectorAll('.react-flow__handle')).toHaveLength(2);
   });
 
   it('names the kind of a linked record', () => {
