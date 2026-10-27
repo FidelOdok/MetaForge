@@ -135,7 +135,13 @@ the twin, kept by `twin.record_design_files` and required at the gate
 the STEP `cad_model`). Each is linked `GENERATED_FROM` what it was made
 from, BOM to schematic to board to gerbers and placement, so the thread
 from a part choice to the files a fab receives is in the graph, and a
-schematic or board carries SVG previews for the dashboard.
+schematic or board carries SVG previews for the dashboard. Since FORGE-705
+(version 1.5.0) a stage recorded with no `source_node_ids` is linked to the
+project's one current record of the stage before it, and the board STEP from
+`kicad.export_3d` to the routed board; the 3D board task gates on
+`unlinked_thread_stages == 0`, the stages left with more than one candidate
+before them. A run had recorded its schematic and its STEP with no source,
+and both showed as not linked.
 
 `firmware_v1` takes its MCU from the component selection, so composed with
 `electronics_v1` the firmware follows the board: a changed part re-runs the
@@ -145,7 +151,10 @@ flash and RAM limits (`max_flash_pct`, `max_ram_pct`) are inputs from the
 requirements. Every firmware result is a tool run on the real toolchain in
 the firmware adapter: a build that does not link records an error and no
 size, so its size checks are no data, and a board neither emulator models
-leaves the boot unrecorded rather than passed. Its end-to-end test runs the
+leaves the boot unrecorded rather than passed. Since FORGE-705 (version
+1.2.0) the build task also gates on `unlinked_firmware_thread_stages == 0`,
+so the pin map and the firmware source end linked to the schematic and the
+pin map; a firmware-only project with no schematic is reported, not counted. Its end-to-end test runs the
 generated FreeRTOS app's real recorded results: a 160 KB heap overflows the
 STM32F407's RAM by 34592 bytes, the V&V gate is not ready, the configuration
 is reworked to 16 KB, and the build fits at 12.7 % of RAM and boots. Since

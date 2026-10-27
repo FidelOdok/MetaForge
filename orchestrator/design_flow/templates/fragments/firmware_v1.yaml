@@ -22,9 +22,15 @@
 # (twin.record_design_files): schematic -> pinmap -> firmware_source, with the
 # build output kept beside the sources.
 #
+# FORGE-705: the build task gates on `unlinked_firmware_thread_stages`, the
+# stages left with no link to the stage before them. A record given no source
+# is linked to the one current record before it; with more than one, the
+# result's warnings name the stage, and it is recorded again with its source.
+# A firmware-only project has no schematic: that is reported, not counted.
+#
 # Bump `version` when a task, its contract or a check changes.
 id: firmware_v1
-version: 1.1.0
+version: 1.2.0
 domain: firmware
 label: Firmware
 description: Pin map, RTOS configuration, build, static analysis and emulated boot.
@@ -77,16 +83,19 @@ tasks:
     `flash_used_pct` and `ram_used_pct` (%), all sourced to the build, the build as a
     simulation_result naming the toolchain versions, and the project with its build output as
     firmware_source (twin.record_design_files, generated from the pin map). A build that did not
-    link has no size: say so rather than estimating it.
+    link has no size: say so rather than estimating it. Record that result's
+    `thread_unlinked_stages` as `unlinked_firmware_thread_stages`, sourced to the record.
   inputs:
   - design_value:rtos_ram_estimate_bytes
   outputs:
   - design_value:build_error_count
   - design_value:flash_used_pct
   - design_value:ram_used_pct
+  - design_value:unlinked_firmware_thread_stages
   records: [simulation_result, firmware_source]
   checks:
   - build_error_count == 0
+  - unlinked_firmware_thread_stages == 0
   - flash_used_pct <= max_flash_pct
   - ram_used_pct <= max_ram_pct
   capabilities: [firmware.build]

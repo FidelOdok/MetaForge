@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "metaforge-local",
   "displayName": "MetaForge (local)",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "description": "MetaForge on your own machine: the same digital-twin tools, run as a local process with no gateway, no account and no network.",
   "author": {
     "name": "MetaForge",

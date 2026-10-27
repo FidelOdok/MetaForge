@@ -23,6 +23,13 @@ The primary file is the node's blob; every file is also a named blob under
 schematic a board came from, the board its gerbers came from), and to its
 project under its own type, which is what a flow's ``records:`` counts.
 
+FORGE-705: a record given no ``source_node_ids`` is linked to the current
+record of the stage before it in the same project when there is exactly one
+(``api_gateway.twin.thread_links``), and the result says it was inferred.
+After every record the project's other stages are swept the same way, so a
+schematic recorded before its BOM is linked once the BOM exists. What still
+has no link comes back in ``warnings`` and ``thread_unlinked_stages``.
+
 A schematic or board also gets an SVG preview from ``kicad.export_svg`` (one
 per sheet, or the board's top side), under ``metadata.image_files``. The
 preview is best effort: if KiCad is not reachable the files are recorded
@@ -49,6 +56,7 @@ from api_gateway.twin.item_revisions import (
     finish_definition_revision,
     plan_definition_revision,
 )
+from api_gateway.twin.thread_links import infer_upstream, link_thread
 from observability.tracing import get_tracer
 
 logger = structlog.get_logger(__name__)
@@ -299,6 +307,14 @@ def make_design_files_recorder(
             except ValueError as exc:
                 raise ValueError(f"source node id '{s}' is not a UUID") from exc
 
+        # FORGE-705: no source named -> the stage before this one, if clear.
+        warnings: list[str] = []
+        source_inferred = False
+        if not sources and project_id:
+            upstream = await infer_upstream(twin, project_id, work_product_type)
+            if upstream.node_id is not None:
+                sources, source_inferred = [upstream.node_id], True
+
         path = resolve_in_workspace(file_path, root)
         folder, files = select_files(work_product_type, path)
         if len(files) > MAX_FILES:
@@ -366,6 +382,8 @@ def make_design_files_recorder(
                 "design_files": design_files,
                 "source_work_product_ids": sources,
             }
+            if source_inferred:
+                meta["source_inferred"] = True
             if primary_key:
                 meta["minio_object_key"] = primary_key
             if image_files:
@@ -413,6 +431,10 @@ def make_design_files_recorder(
                 except Exception as exc:  # noqa: BLE001 -- an edge is best effort
                     logger.warning("design_files_source_edge_failed", source=s, error=str(exc))
 
+            # FORGE-705: link the project's other stages that are still loose.
+            thread = await link_thread(twin, project_id)
+            warnings += thread.unlinked + thread.missing
+
             linked = False
             if project_id and project_backend is not None:
                 try:
@@ -431,9 +453,15 @@ def make_design_files_recorder(
                 "primary_file": primary_name,
                 "previews": sorted(image_files),
                 "generated_from": linked_sources,
+                "generated_from_inferred": source_inferred and bool(linked_sources),
                 "project_linked": linked,
                 "content_hash": content_hash,
+                "thread_unlinked_stages": len(thread.unlinked),
             }
+            if thread.inferred:
+                result["inferred_links"] = thread.inferred
+            if warnings:
+                result["warnings"] = warnings
             if preview_error:
                 result["preview_error"] = preview_error
             if store_error:
