@@ -22,22 +22,10 @@ colours, because WebGL can't read CSS variables.
 
 ## Layout shell
 
-Every page except the full-width twin renders inside the same shell:
+Every page except the full-width twin renders inside the same shell,
+here with the rail expanded to show its labels:
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ [≡] Section › Details     project ▾  ☀  Sample  👤  ● Gateway    │
-├────┬─────────────────────────────────────────────────────────────┤
-│ ◆  │                                                             │
-│    │                                                             │
-│ ▣  │  WORKSPACE: Projects · Agent sessions · Runs · Approvals    │
-│ ▣  │                                                             │
-│ ▣  │  ENGINEERING: Digital twin · Bill of materials ·            │
-│ ▣  │               Files & artifacts · Knowledge · Compliance    │
-│    │                                                             │
-│ ⚙  │  Page content                                               │
-└────┴─────────────────────────────────────────────────────────────┘
-```
+![The dashboard shell: an expanded nav rail grouped into Workspace and Engineering, a topbar carrying the breadcrumb, project switcher, theme control, Sample link and a green Connected gateway chip, and the Projects page in the content area](assets/dashboard/layout-shell.png)
 
 - **Nav rail.** A floating rail with icon tooltips, in two groups
   (*Workspace* and *Engineering*), with **Settings & connection** and a
@@ -52,8 +40,10 @@ Every page except the full-width twin renders inside the same shell:
   `GET /health`.
 - A **Skip to main content** link is the first focusable element.
 
-Sidebar entries map 1-to-1 to the routes below. The default landing
-page is `/projects`; unknown paths show a *Page not found* screen.
+Every route below has a sidebar entry. Two entries run the other way —
+**Requirements** (`/requirements`) and **Evals** (`/evals`) are in the
+rail but have no section here yet. The default landing page is
+`/projects`; unknown paths show a *Page not found* screen.
 
 ```mermaid
 flowchart LR
@@ -95,22 +85,7 @@ flowchart LR
 
 The home of the dashboard.
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ YOUR ENGINEERING WORKSPACE                                        │
-│ Projects.                                         [+ New project]│
-├───────────────┬───────────────┬───────────────┬──────────────────┤
-│ Active        │ Runs in       │ Awaiting      │ Work products    │
-│ projects  03  │ progress  01  │ review    02  │             14   │
-├───────────────┴───────────────┴───────────┬───┴──────────────────┤
-│ Project library   [▦ grid | ☰ list]       │ Review queue         │
-│ [search…]              [Recently updated] │ Recent artifacts     │
-│ All · Active · Draft · Archived           │ The engineering loop │
-│ ┌──────────┐ ┌──────────┐ ┌──────────┐    │                      │
-│ │ Drone FC │ │ Sensor   │ │ …        │    │                      │
-│ └──────────┘ └──────────┘ └──────────┘    │                      │
-└───────────────────────────────────────────┴──────────────────────┘
-```
+![The Projects page: four metric cards reading 05 active projects, 01 run in progress, 00 awaiting review and 380 work products, a searchable project library of cards below them, and a right column holding the review queue and recent artifacts](assets/dashboard/projects.png)
 
 - **Backed by:** `GET /v1/projects`, `POST /v1/projects`,
   `GET /v1/runs`, `GET /health`.
@@ -171,6 +146,8 @@ opened.
 Each row is one captured agent session: status, owning agent, project,
 last activity.
 
+![The agent sessions page: one design-lifecycle workflow running in the DAG executor, an agent roster listing claude-code with one running session, an execution log line and the all-sessions list below](assets/dashboard/sessions.png)
+
 - **Backed by:** `GET /v1/sessions?project_id=…`.
 - **Use it to:** find the session you want to dig into. Same data as
   `python -m cli.forge_cli status <id>` but in a clickable list.
@@ -219,25 +196,16 @@ status filter, and a **New design run** action.
 
 A two-step wizard: **Define the intent**, then **Review & launch**.
 
-```
-┌───────────────────────────────────────────┬──────────────────────┐
-│ What are you building?                    │ PLANNED LIFECYCLE    │
-│ Project        [Choose a project ▾]       │ Hardware & robotics  │
-│ Engineering intent                        │ 01 Intent            │
-│ [Design a compact actuator to lift …]     │ 02 Stakeholder needs │
-│ Engineering workflow                      │ 03 Requirements      │
-│ (•) Hardware & robotics                   │ …                    │
-│ ( ) Mechanical design                     │ each: Human review   │
-│                   [Cancel] [Review run →] │ gate                 │
-└───────────────────────────────────────────┴──────────────────────┘
-```
+![The start-a-design-run wizard on step one: a project picker, an engineering-intent box, a workflow choice with General design selected, and a planned-lifecycle panel listing six phases from Intent to Simulation and V&V, each with its sign-off gate](assets/dashboard/runs-new.png)
 
 - **Backed by:** `GET /v1/projects`, and on launch
-  `POST /v1/runs` with a `design_flow` request (`hardware_v1` or
-  `mech_v1`) and `start: true`. On success it opens `/runs/:id`.
-- The lifecycle panel lists the selected flow's real phases from
-  `orchestrator/design_flow/spec.py`; every phase has a human review
-  gate. `/runs/new?project=<id>` preselects a project.
+  `POST /v1/runs` with a `design_flow` request and `start: true`. On
+  success it opens `/runs/:id`.
+- **The flow choice is fetched, not hardcoded.** The page lists whatever
+  `orchestrator/design_flow/templates/*.yaml` defines — today `design_v1`
+  (*General design*, the default), `hardware_v1` and `mech_v1`.
+- The lifecycle panel lists the selected flow's real phases; every phase
+  has a human review gate. `/runs/new?project=<id>` preselects a project.
 
 ## `/runs/:id`: run detail
 
@@ -289,6 +257,8 @@ and prices in their own currency. Exports to CSV. Each component that is an
 item revision shows its `@n` (marked *old* when it is not current); clicking
 it opens the item's history. The Requirements page's matrix does the same
 for each requirement, with its constraint set's revision.
+
+![The bill of materials for a flight-sensor board: twelve components with part numbers, descriptions, manufacturers, quantities and unit prices, headed by a partial total of GBP 13.66 that notes five of twelve lines are priced](assets/dashboard/bom.png)
 
 A line with no price shows *no price*, not $0.00. When any line is
 unpriced, the header total is labelled partial and says how many lines
@@ -506,6 +476,8 @@ fuller view for now (see [`cli-reference.md`](cli-reference.md)).
 
 Regulatory coverage for the active project.
 
+![The compliance page for a flight-sensor board: UKCA and CE coverage bars reading zero of eleven and zero of eighteen requirements, beside a missing-evidence list naming each one, from the Low Voltage Directive safety assessment to REACH SVHC screening](assets/dashboard/compliance.png)
+
 - **Backed by:** `GET /v1/compliance/{project_id}/checklist` and
   `/coverage`, plus evidence under `/v1/compliance/{project_id}/evidence`.
 
@@ -513,6 +485,8 @@ Regulatory coverage for the active project.
 
 Reached from **Settings & connection** at the foot of the nav rail, or
 the account icon in the topbar.
+
+![The settings page: a gateway address and port with a Test connection button, a line reporting the gateway in use and where that value came from, and a bring-your-own-API-key panel naming the active provider and model](assets/dashboard/settings.png)
 
 **Gateway.** Which gateway the dashboard sends its API calls to, as an
 address and a port, with a **Test connection** button that probes
