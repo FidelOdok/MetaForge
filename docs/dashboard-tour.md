@@ -283,8 +283,13 @@ drawer for asking an agent about that node.
 On the **Graph**, a work product is linked to more than other work
 products: to the constraints it satisfies, the intent and evidence behind
 it, the parts it contains and the baselines it belongs to (FORGE-704).
-Those records are drawn as lighter, dashed nodes in a column at the right,
-and a row of switches above the graph, *Show links to*, turns each kind on
+Work products are laid out in layers by dependency, left to right, so a
+link mostly runs to the next column; a layer of more than eight wraps into
+further columns rather than one tall stack. A link is named only when it
+touches the node you have selected, and is otherwise told apart by colour.
+Those records are drawn as lighter, dashed nodes in columns at the right,
+and a row of switches above the graph, *Show links to* (its own row, not
+floating over the nodes), turns each kind on
 or off with how many links go to it. Links to baselines start off, because
 baseline membership is one link per member and drowns the rest; the row
 says how many links are hidden. Links that point *into* a work product (an

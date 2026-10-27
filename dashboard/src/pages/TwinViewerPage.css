@@ -224,6 +224,9 @@
   bottom: 155px;
   top: 24px;
   right: 18px;
+  /* The links bar is a row above the canvas, not a float over its top nodes. */
+  display: flex;
+  flex-direction: column;
 }
 .tw-render-area > .react-flow {
   background: transparent !important;
@@ -1131,6 +1134,11 @@
     left: var(--tw-rail);
     bottom: 12px;
   }
+  /* The canvas runs under the nav and the explorer here; the bar must not. */
+  .tw-render-area > .tw-links {
+    margin-left: var(--tw-rail);
+    margin-right: 12px;
+  }
   .tw-chat-position {
     left: calc(var(--tw-rail) + 12px);
   }
@@ -1679,15 +1687,14 @@
 
 /* FORGE-704: the graph's link controls. */
 .tw-links {
-  position: absolute;
+  position: relative;
   z-index: 7;
-  top: 36px;
-  right: calc(var(--tw-inspector) + var(--tw-chat) + 16px);
+  flex: none;
+  margin: 0 0 6px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  max-width: min(720px, calc(100% - 300px));
   padding: 6px 8px;
   font-size: 12px;
   background: var(--tw-panel);

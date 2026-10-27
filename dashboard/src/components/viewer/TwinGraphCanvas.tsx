@@ -252,24 +252,61 @@ const DETAIL_PANEL_RESERVED_PX = 392;
 const DEFAULT_NODE_WIDTH = 180; // TwinNode's min/maxWidth midpoint, if unmeasured
 const DEFAULT_NODE_HEIGHT = 52;
 
-function layoutNodes(twinNodes: TwinNode[]): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>();
-  // Group by domain for visual clustering
-  const byDomain: Record<string, TwinNode[]> = {};
+/** A column holds at most this many work products before it wraps to the next. */
+const MAX_ROWS = 8;
+/** Linked records are shorter, so a column of them holds more. */
+const GHOST_ROWS = 12;
+
+/**
+ * Work products go in layers by dependency depth, so an edge mostly runs one
+ * column to the right instead of up and down a domain's tall column. A layer
+ * longer than MAX_ROWS wraps into more columns. Cycles are tolerated: depth is
+ * relaxed in a bounded number of passes, so a loop cannot run away.
+ */
+function layoutNodes(
+  twinNodes: TwinNode[],
+  relationships: TwinRelationship[],
+): { positions: Map<string, { x: number; y: number }>; columns: number } {
+  const ids = new Set(twinNodes.map((n) => n.id));
+  const depth = new Map<string, number>(twinNodes.map((n) => [n.id, 0]));
+  const edges = relationships.filter(
+    (r) => r.sourceId !== r.targetId && ids.has(r.sourceId) && ids.has(r.targetId),
+  );
+  for (let pass = 0; pass < Math.min(twinNodes.length, 12); pass++) {
+    let moved = false;
+    for (const r of edges) {
+      const want = (depth.get(r.sourceId) ?? 0) + 1;
+      if (want > (depth.get(r.targetId) ?? 0) && want <= twinNodes.length) {
+        depth.set(r.targetId, want);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  const layers = new Map<number, TwinNode[]>();
   for (const n of twinNodes) {
-    (byDomain[n.domain] ??= []).push(n);
+    const d = depth.get(n.id) ?? 0;
+    const layer = layers.get(d);
+    if (layer) layer.push(n);
+    else layers.set(d, [n]);
   }
+
+  const positions = new Map<string, { x: number; y: number }>();
   let col = 0;
-  for (const nodes of Object.values(byDomain)) {
-    nodes.forEach((n, row) => {
-      positions.set(n.id, { x: col * COL_W, y: row * ROW_H });
+  for (const d of [...layers.keys()].sort((a, b) => a - b)) {
+    const layer = (layers.get(d) ?? []).sort(
+      (a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name),
+    );
+    layer.forEach((n, i) => {
+      positions.set(n.id, { x: (col + Math.floor(i / MAX_ROWS)) * COL_W, y: (i % MAX_ROWS) * ROW_H });
     });
-    col++;
+    col += Math.max(1, Math.ceil(layer.length / MAX_ROWS));
   }
-  return positions;
+  return { positions, columns: col };
 }
 
-/** Linked records go in one column to the right of the work products, grouped by kind. */
+/** Linked records go in columns to the right of the work products, grouped by kind. */
 function layoutGhosts(
   ghosts: Record<string, TwinEndpoint>,
   workProductColumns: number,
@@ -278,8 +315,13 @@ function layoutGhosts(
   const ordered = Object.entries(ghosts).sort(
     ([, a], [, b]) => groupOf(a.kind).localeCompare(groupOf(b.kind)) || a.name.localeCompare(b.name),
   );
-  const x = (workProductColumns + 0.4) * COL_W;
-  ordered.forEach(([id], row) => positions.set(id, { x, y: row * (ROW_H * 0.6) }));
+  const x0 = (workProductColumns + 0.4) * COL_W;
+  ordered.forEach(([id], i) =>
+    positions.set(id, {
+      x: x0 + Math.floor(i / GHOST_ROWS) * COL_W,
+      y: (i % GHOST_ROWS) * (ROW_H * 0.6),
+    }),
+  );
   return positions;
 }
 
@@ -303,11 +345,12 @@ export function TwinGraphCanvas({
 }: TwinGraphCanvasProps) {
   const rfInstanceRef = useRef<ReactFlowInstance<Node<TwinNodeData | RefNodeData>, Edge> | null>(null);
 
-  const positions = useMemo(() => layoutNodes(twinNodes), [twinNodes]);
+  const layout = useMemo(() => layoutNodes(twinNodes, relationships), [twinNodes, relationships]);
+  const positions = layout.positions;
   const ghostMap = useMemo(() => ghosts ?? {}, [ghosts]);
   const ghostPositions = useMemo(
-    () => layoutGhosts(ghostMap, new Set(twinNodes.map((n) => n.domain)).size),
-    [ghostMap, twinNodes],
+    () => layoutGhosts(ghostMap, layout.columns),
+    [ghostMap, layout.columns],
   );
 
   const workProductNodes: Node<TwinNodeData>[] = useMemo(
@@ -360,7 +403,9 @@ export function TwinGraphCanvas({
           id: r.id,
           source: r.sourceId,
           target: r.targetId,
-          label: r.label,
+          // Labels on 140 edges are clutter; name only the links of the selected
+          // node. The rest are told apart by colour.
+          label: selectedId && (r.sourceId === selectedId || r.targetId === selectedId) ? r.label : undefined,
           labelStyle: { fill: KC.onSurfaceVariant, fontSize: 10, fontFamily: 'monospace' },
           labelBgStyle: { fill: KC.surface, fillOpacity: 0.85 },
           style: {
@@ -378,7 +423,7 @@ export function TwinGraphCanvas({
           animated: r.type === 'produced_by' || r.type === 'validates',
         };
       }),
-    [relationships, ghostMap],
+    [relationships, ghostMap, selectedId],
   );
 
   const onNodeClick: NodeMouseHandler = useCallback(
@@ -412,7 +457,7 @@ export function TwinGraphCanvas({
   }, [selectedId, positions]);
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div style={{ width: '100%', flex: 1, minHeight: 0 }}>
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
