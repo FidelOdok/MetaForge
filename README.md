@@ -13,13 +13,21 @@ keeps every step versioned and auditable.
 
 ### See it in action
 
+The digital twin holding an enclosure built through the CAD adapter —
+every part named, carrying the material it was assigned and the
+dimensions it came out at, over the STEP file the geometry was read
+from and that file's hash.
+
+![The MetaForge dashboard's digital twin viewer: a Raspberry Pi 5 enclosure rendered on a workplane, with the inspector listing its two parts, their PLA material, their dimensions and the hash of the STEP file behind them](docs/assets/dashboard/pi5-enclosure.png)
+
 A real turn in the interactive `forge` TUI — the assistant calls a
 tool, then answers from what it returned:
 
 ![Animated capture of a forge TUI chat turn: typing a question, a tool call streaming in with a spinner, then the final formatted answer](docs/assets/tui/chat-demo.gif)
 
-More screenshots (welcome screen, the Runs pane) in the
-[CLI reference](docs/cli-reference.md#what-it-looks-like).
+More screenshots: the [dashboard tour](docs/dashboard-tour.md#twin-digital-twin)
+walks every route, and the [CLI reference](docs/cli-reference.md#what-it-looks-like)
+has the TUI's welcome screen and Runs pane.
 
 ```mermaid
 flowchart LR

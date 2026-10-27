@@ -308,6 +308,8 @@ with a **Start design run** shortcut. Selecting a node opens the
 inspector (*Overview*, *Constraints*, *History*) and a conversation
 drawer for asking an agent about that node.
 
+![The twin's Model tab holding a ducted indoor drone: four ducts and a stacked flight-controller core standing on the workplane, with the inspector open on the assembly and its twenty-four named parts](assets/dashboard/indoor-drone.png)
+
 The **Electronics** tab (FORGE-687) draws the electronics and firmware
 thread: BOM, schematic, board, then gerbers and pick and place, and from
 the schematic the pin map and the firmware. Each stage shows the current
@@ -380,6 +382,8 @@ Selecting a part highlights it in the tree and in the 3D viewer. The
 Explorer rail pins a **Latest assembly** shortcut for the project above the
 node list. The node's `assemblyParts` field in `GET /v1/twin/nodes` carries
 the list.
+
+![The same tab on a table assembly: a plywood top on four steel legs, with the inspector listing each part against the library material it was assigned](assets/dashboard/table.png)
 
 Selecting a `simulation_result` node adds an **FEA result** panel to the
 inspector: max von Mises and max displacement with their units, the
