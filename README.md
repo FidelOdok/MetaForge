@@ -172,9 +172,9 @@ exists because stdio has nowhere to send a hold. Either way the rule is
 enforced by the server, not by the client.
 
 A third package, `metaforge-cloud`, is the HTTP one with the hosted
-gateway's address written in rather than asked for. It belongs to the
-hosted service and is not in this marketplace —
-<https://www.metaforge.uk> says how to get it.
+gateway's address written in rather than asked for
+(`/plugin install metaforge-cloud`). It belongs to the hosted service and
+will move to a marketplace of its own; until then it is listed here.
 
 Codex and the per-client details are in
 [`docs/integrations/`](docs/integrations/claude-code.md).

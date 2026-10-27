@@ -182,10 +182,11 @@ a literal, so there is nothing to enter. It carries the same tools, skills,
 commands, agents and hooks. The connector is the bare address with no `?profile=`
 query and no `${user_config.*}` reference, and no bearer header.
 
-It is not in the `FidelOdok/MetaForge` marketplace, which catalogs the two
-open-core packages. This one belongs to the hosted service, since the only
-thing it adds is that service's address — <https://www.metaforge.uk> says how
-to get it.
+It is listed in the `FidelOdok/MetaForge` marketplace beside the two open-core
+packages, so `/plugin install metaforge-cloud` installs it. It belongs to the
+hosted service, since the only thing it adds is that service's address, and
+FORGE-707 moves it to a marketplace in the Cloud repo. Until that marketplace is
+published it stays listed here.
 
 Once it is installed, run `/mcp` in Claude Code, choose `metaforge`, and sign in
 with the access secret. The gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set, as

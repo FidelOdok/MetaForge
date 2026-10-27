@@ -6,7 +6,12 @@ The same skills, commands, agents and hooks as `claude-code/`, with the connecto
 
 ## Install
 
-This package is **not** listed in the `FidelOdok/MetaForge` marketplace. That catalog is open core, and all this package adds to `metaforge` is the hosted gateway's address; metaforge.uk says how to get it. What follows is how it is installed once you have it.
+```
+/plugin marketplace add FidelOdok/MetaForge
+/plugin install metaforge-cloud
+```
+
+It is listed in the open-core marketplace until the hosted service publishes a marketplace of its own (FORGE-707).
 
 Run `/mcp`, choose `metaforge`, and sign in with the access secret your administrator gave you. There is no token field: the gateway answers 401 and Claude Code runs OAuth. The gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set.
 
