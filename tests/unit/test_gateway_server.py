@@ -6,6 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from api_gateway.server import ACTION_WORKFLOWS, create_app
+from api_gateway.version import gateway_version
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from orchestrator.dependency_engine import DependencyGraph
@@ -81,7 +82,7 @@ class TestCreateApp:
     def test_create_app_returns_fastapi(self):
         app = create_app()
         assert app.title == "MetaForge Gateway"
-        assert app.version == "0.1.0"
+        assert app.version == gateway_version()
 
     def test_create_app_custom_cors(self):
         app = create_app(cors_origins=["http://localhost:3000"])
@@ -125,7 +126,7 @@ class TestHealthEndpoint:
         data = response.json()
         assert data["status"] in ("healthy", "degraded", "unhealthy")
         assert "uptime_seconds" in data
-        assert data["version"] == "0.1.0"
+        assert data["version"] == gateway_version()
 
 
 class TestChatEndpoints:
