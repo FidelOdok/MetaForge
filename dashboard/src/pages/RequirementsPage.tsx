@@ -1188,7 +1188,7 @@ function DesignLoopSection({ projectId }: { projectId?: string }) {
                 disabled={approve.isPending}
                 onClick={() =>
                   approve.mutate(
-                    { loopId, approvedBy: 'fidel.odok@idroneinnovations.com' },
+                    { loopId, approvedBy: 'dashboard' },
                     {
                       onSuccess: () => toast.success('Design loop winner approved'),
                       onError: () => toast.error('Could not approve the design loop'),

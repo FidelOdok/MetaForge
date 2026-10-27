@@ -433,11 +433,9 @@ class TestMakeDesignLoopApprover:
             work_product_id=str(wp.id), load_n=100.0, deflection_limit_mm=0.5, sf_limit=2.0
         )
         approve = make_design_loop_approver(twin)
-        out = await approve(
-            loop_id=started["loop_id"], approved_by="fidel.odok@idroneinnovations.com"
-        )
+        out = await approve(loop_id=started["loop_id"], approved_by="approver@example.com")
         assert out["approved"] is True
-        assert out["approved_by"] == "fidel.odok@idroneinnovations.com"
+        assert out["approved_by"] == "approver@example.com"
         assert out["approved_at"] is not None
 
     async def test_raises_when_loop_never_converged(self, twin: InMemoryTwinAPI) -> None:

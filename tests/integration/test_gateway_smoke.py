@@ -11,6 +11,8 @@ from uuid import uuid4
 
 from httpx import AsyncClient
 
+from api_gateway.version import gateway_version
+
 # ---------------------------------------------------------------------------
 # Health endpoint
 # ---------------------------------------------------------------------------
@@ -28,7 +30,7 @@ class TestHealthEndpoint:
     async def test_health_includes_version(self, http_client: AsyncClient):
         resp = await http_client.get("/health")
         data = resp.json()
-        assert data["version"] == "0.1.0"
+        assert data["version"] == gateway_version()
 
 
 # ---------------------------------------------------------------------------

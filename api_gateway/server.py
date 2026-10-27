@@ -86,6 +86,7 @@ from api_gateway.twin.prd_routes import router as twin_prd_router
 from api_gateway.twin.repeatability_routes import router as repeatability_router
 from api_gateway.twin.routes import router as twin_router
 from api_gateway.vendors.routes import router as vendors_router
+from api_gateway.version import gateway_version
 from domain_agents.electronics.agent import ElectronicsAgent
 from domain_agents.mechanical.agent import MechanicalAgent
 from mcp_core.live_events import set_live_event_publisher
@@ -109,6 +110,7 @@ from tool_registry.bootstrap import bootstrap_tool_registry
 from twin_core.api import InMemoryTwinAPI
 
 logger = structlog.get_logger(__name__)
+
 tracer = get_tracer("api_gateway.server")
 
 
@@ -1961,7 +1963,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown lifecycle handler."""
     configure_logging(_otel_config)
     _reattach_otel_log_handler()
-    logger.info("gateway_starting", version="0.1.0", otel_active=_otel_state.is_active)
+    logger.info("gateway_starting", version=gateway_version(), otel_active=_otel_state.is_active)
     # FORGE-477: a bad model route refuses to boot, rather than failing on the
     # first call that happens to use it. Raises RoutingConfigError.
     from orchestrator.harness.providers.routing import routing_problems, routing_table
@@ -2127,7 +2129,7 @@ def create_app(
 
     app = FastAPI(
         title="MetaForge Gateway",
-        version="0.1.0",
+        version=gateway_version(),
         description="HTTP/WebSocket front door for the MetaForge platform",
         lifespan=lifespan,
     )

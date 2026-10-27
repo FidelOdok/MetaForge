@@ -30,18 +30,6 @@
         "simulation",
         "local-first"
       ]
-    },
-    {
-      "name": "metaforge-cloud",
-      "source": "./integrations/claude-code-cloud",
-      "description": "For the hosted gateway. The same tools, skills, commands, agents and hooks as metaforge, with the address already written in: nothing to enter, sign in once.",
-      "category": "engineering",
-      "tags": [
-        "hardware",
-        "cad",
-        "simulation",
-        "hosted"
-      ]
     }
   ]
 }

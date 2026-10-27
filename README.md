@@ -152,15 +152,29 @@ the dashboard. There are two packages, and you install **one**:
 
 ```
 pipx install "git+https://github.com/FidelOdok/MetaForge.git"
+/plugin marketplace add FidelOdok/MetaForge
 /plugin install metaforge-local    # runs on this machine, no gateway
 ```
 
 The HTTP package asks for your gateway's MCP endpoint on first enable, so
 it needs one running and reachable — the installer above does not start
 one by default (`docker compose up -d mcp-http` in a checkout does). The
-local package needs no gateway at all, and no network. Either way, a tool
-that writes is held for a human; held calls land on the dashboard's
-Approvals page.
+local package needs no gateway at all, and no network, but it does need
+the distribution installed before it is enabled — the plugin launches
+`metaforge-mcp` as a subprocess, so that has to be on your PATH first.
+
+Where a write stops differs between the two. Over HTTP a tool that writes
+is held for a human, and held calls land on the dashboard's Approvals
+page. The local package treats a stdio session as the engineer sitting at
+the machine, so its writes run without being held — unless your client
+supports MCP elicitation, in which case it asks you inline. The exemption
+exists because stdio has nowhere to send a hold. Either way the rule is
+enforced by the server, not by the client.
+
+A third package, `metaforge-cloud`, is the HTTP one with the hosted
+gateway's address written in rather than asked for. It belongs to the
+hosted service and is not in this marketplace —
+<https://www.metaforge.uk> says how to get it.
 
 Codex and the per-client details are in
 [`docs/integrations/`](docs/integrations/claude-code.md).
@@ -176,6 +190,9 @@ Codex and the per-client details are in
   [troubleshooting](docs/troubleshooting.md)
 - **Integrations:** [Claude Code](docs/integrations/claude-code.md) ·
   [Codex](docs/integrations/codex.md) ·
+  [hosted harness](docs/integrations/hosted-harness.md) — claude.ai and
+  ChatGPT run in someone else's datacentre and cannot reach `localhost`,
+  so read this before pointing one at your gateway ·
   [MCP config examples](docs/integrations/mcp-config-examples.md) ·
   [LightRAG UI](docs/integrations/lightrag-ui.md)
 - **Reference example:** [drone flight controller](examples/drone_flight_controller/README.md)

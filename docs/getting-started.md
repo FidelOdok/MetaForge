@@ -31,9 +31,14 @@ The extras are additive — pick the subset you need:
 | `dev` | pytest, ruff, mypy |
 | `knowledge` | LightRAG + asyncpg (pgvector) |
 | `cadquery` | CadQuery CAD kernel |
-| `freecad` | FreeCAD adapter (heavier; only if you need it) |
-| `kicad` | KiCad adapter: checks and exports, plus schematic and board generation (Phase 2) |
 | `neo4j` | Neo4j driver (real graph backend) |
+
+`freecad` and `kicad` are **not** extras, because neither tool installs
+from PyPI. Those adapters run as their own containers
+(`freecad-adapter`, `kicad-adapter`) and the gateway reaches them over
+HTTP — `docker compose up freecad-adapter kicad-adapter`. Run in-process
+they would find no `FreeCAD` module and no `kicad-cli` binary, and every
+call would fail.
 
 A bare `pip install -e .` (no extras) still boots, but most adapters
 will silently drop. See

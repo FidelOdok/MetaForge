@@ -182,15 +182,14 @@ a literal, so there is nothing to enter. It carries the same tools, skills,
 commands, agents and hooks. The connector is the bare address with no `?profile=`
 query and no `${user_config.*}` reference, and no bearer header.
 
-In Claude Code:
+It is not in the `FidelOdok/MetaForge` marketplace, which catalogs the two
+open-core packages. This one belongs to the hosted service, since the only
+thing it adds is that service's address — <https://www.metaforge.uk> says how
+to get it.
 
-```
-/plugin marketplace add FidelOdok/MetaForge
-/plugin install metaforge-cloud
-```
-
-Then run `/mcp`, choose `metaforge`, and sign in with the access secret. The
-gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set, as above.
+Once it is installed, run `/mcp` in Claude Code, choose `metaforge`, and sign in
+with the access secret. The gateway needs `METAFORGE_OAUTH_LOGIN_SECRET` set, as
+above.
 
 Install one MetaForge package, not several: the manifest has no way to switch a
 connector off, so two would offer every tool twice.

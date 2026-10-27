@@ -3,7 +3,10 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway", "observability", "digital_twin", "metaforge"]
+# "cli" is load-bearing: [project.scripts] exposes `forge` as
+# cli.forge_cli.main:main, so a wheel without it installs a console script
+# that dies on import (FORGE-648).
+packages = ["cli", "twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_agents", "orchestrator", "api_gateway", "observability", "digital_twin", "metaforge"]
 
 [project]
 # Not "metaforge": that name on PyPI belongs to an unrelated job-shop
@@ -11,13 +14,16 @@ packages = ["twin_core", "mcp_core", "skill_registry", "tool_registry", "domain_
 # ``import metaforge`` still works -- this is only the distribution name
 # people type after ``pip install``.
 name = "metaforge-hw"
-version = "0.1.0"
+# The release workflow tags every push to main and derives that tag from
+# the repository history, never from here, so the patch number lives on the
+# tag. This tracks the minor line those tags are cut from.
+version = "0.3.0"
 description = "Local-first control plane for hardware design"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "iDrone Images Ltd" }]
+authors = [{ name = "Fidel Odok" }]
 keywords = ["hardware", "cad", "simulation", "digital-twin", "engineering", "mcp"]
 classifiers = [
     "Development Status :: 3 - Alpha",
