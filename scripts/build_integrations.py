@@ -528,11 +528,12 @@ def build_claude_code(*, default_gateway_url: str) -> Path:
         "```\n\n"
         "### On claude.ai\n\n"
         "claude.ai ignores a connector whose URL contains a `${user_config.*}` "
-        "reference, so this package's connector never appears there. For the "
-        f"hosted gateway install `{CLOUD_PLUGIN_NAME}`, whose address is written "
-        "in. For your own gateway, install this package for the skills and "
-        "commands, and add a custom connector with your gateway's address "
-        "under **Customize \u2192 Connectors** for the tools.\n\n"
+        "reference, so this package's connector never appears there. Install "
+        "this package for the skills and commands, and add a custom connector "
+        "with your gateway's address under **Customize \u2192 Connectors** for "
+        "the tools. The hosted service writes its address in instead, which is "
+        f"why `{CLOUD_PLUGIN_NAME}` exists; it is not in this marketplace, and "
+        "metaforge.uk says how to get it.\n\n"
         "## Commands\n\n" + "\n".join(f"- `{c}`" for c in commands) + "\n\n"
         f"## Skills\n\n{len(skills)} skills are bundled: the engineering skills "
         "MetaForge's agents follow (each shipped from its detailed `PLUGIN.md`), "
@@ -571,6 +572,17 @@ def build_marketplace() -> Path:
     from the same root. Putting it anywhere else would need each user to
     declare it in ``extraKnownMarketplaces`` by hand, which is not a
     one-step install.
+
+    Two packages, not three. ``metaforge-cloud`` is still built by
+    :func:`build_claude_code_cloud`, but it belongs to the hosted service
+    rather than to open core -- its whole content is the hosted gateway's
+    address written in as a literal, and this catalog is what someone
+    installing MetaForge itself reads. Listing it here offered the hosted
+    product as a third way to install the open-source one.
+
+    It needs a home on metaforge.uk, which the docs now point at. Nothing
+    serves it yet: the Cloud repo carries no marketplace of its own, so
+    until one exists the package is built here and published nowhere.
     """
     root = REPO / ".claude-plugin"
     root.mkdir(exist_ok=True)
@@ -605,17 +617,6 @@ def build_marketplace() -> Path:
                 ),
                 "category": "engineering",
                 "tags": ["hardware", "cad", "simulation", "local-first"],
-            },
-            {
-                "name": CLOUD_PLUGIN_NAME,
-                "source": "./integrations/claude-code-cloud",
-                "description": (
-                    "For the hosted gateway. The same tools, skills, commands, agents "
-                    "and hooks as metaforge, with the address already written in: "
-                    "nothing to enter, sign in once."
-                ),
-                "category": "engineering",
-                "tags": ["hardware", "cad", "simulation", "hosted"],
             },
         ],
     }
@@ -718,9 +719,11 @@ def build_claude_code_cloud() -> Path:
         "is a literal so claude.ai does not ignore the connector, and so it can "
         "match a connector you added with the same address.\n\n"
         "## Install\n\n"
-        "```\n/plugin marketplace add FidelOdok/MetaForge\n"
-        f"/plugin install {CLOUD_PLUGIN_NAME}\n```\n\n"
-        "Then run `/mcp`, choose `metaforge`, and sign in with the access secret "
+        "This package is **not** listed in the `FidelOdok/MetaForge` marketplace. "
+        "That catalog is open core, and all this package adds to `metaforge` is "
+        "the hosted gateway's address; metaforge.uk says how to get it. What "
+        "follows is how it is installed once you have it.\n\n"
+        "Run `/mcp`, choose `metaforge`, and sign in with the access secret "
         "your administrator gave you. There is no token field: the gateway answers "
         "401 and Claude Code runs OAuth. The gateway needs "
         "`METAFORGE_OAUTH_LOGIN_SECRET` set.\n\n"

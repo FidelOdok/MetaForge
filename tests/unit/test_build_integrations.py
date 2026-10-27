@@ -439,11 +439,16 @@ class TestMarketplace:
         assert catalog["owner"]["name"]
         assert catalog["plugins"]
 
-    def test_it_lists_every_package(self) -> None:
+    def test_it_lists_the_open_core_packages_and_not_the_hosted_one(self) -> None:
+        """Two packages, not three. `metaforge-cloud` is still built, but
+        all it adds to `metaforge` is the hosted gateway's address, and this
+        catalog is what someone installing MetaForge itself reads -- listing
+        it offered the hosted product as a third way to install open core."""
         from scripts.build_integrations import CLOUD_PLUGIN_NAME, LOCAL_PLUGIN_NAME, PLUGIN_NAME
 
         names = {p["name"] for p in self._catalog()["plugins"]}
-        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME, CLOUD_PLUGIN_NAME}
+        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME}
+        assert CLOUD_PLUGIN_NAME not in names
 
     def test_each_source_is_a_relative_path_that_exists(self) -> None:
         """A relative source resolves from the marketplace root, and must
@@ -932,12 +937,17 @@ class TestCloudPackage:
             main / "hooks" / "hooks.json"
         ).read_text()
 
-    def test_the_readme_says_how_to_install_and_sign_in(self, root: Path) -> None:
+    def test_the_readme_says_where_it_comes_from_and_how_to_sign_in(self, root: Path) -> None:
+        """It used to print `/plugin install metaforge-cloud`. That command
+        cannot work now the catalog does not carry the package, and a
+        documented install path with nothing behind it is worse than none,
+        so the README says where it does come from instead."""
         from scripts.build_integrations import CLOUD_PLUGIN_NAME
 
         readme = (root / "README.md").read_text(encoding="utf-8")
-        assert f"/plugin install {CLOUD_PLUGIN_NAME}" in readme
-        assert "FidelOdok/MetaForge" in readme
+        assert f"/plugin install {CLOUD_PLUGIN_NAME}" not in readme
+        assert "not** listed in the `FidelOdok/MetaForge` marketplace" in readme
+        assert "metaforge.uk" in readme
         assert "/mcp" in readme
         assert "METAFORGE_OAUTH_LOGIN_SECRET" in readme
 

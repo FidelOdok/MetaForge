@@ -23,7 +23,7 @@ claude mcp add --transport http metaforge https://your-gateway.example.com/mcp -
 
 ### On claude.ai
 
-claude.ai ignores a connector whose URL contains a `${user_config.*}` reference, so this package's connector never appears there. For the hosted gateway install `metaforge-cloud`, whose address is written in. For your own gateway, install this package for the skills and commands, and add a custom connector with your gateway's address under **Customize → Connectors** for the tools.
+claude.ai ignores a connector whose URL contains a `${user_config.*}` reference, so this package's connector never appears there. Install this package for the skills and commands, and add a custom connector with your gateway's address under **Customize → Connectors** for the tools. The hosted service writes its address in instead, which is why `metaforge-cloud` exists; it is not in this marketplace, and metaforge.uk says how to get it.
 
 ## Commands
 
