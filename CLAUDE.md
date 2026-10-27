@@ -57,7 +57,7 @@ All project tracking lives in **Jira** (migrated from Linear — `MET-*` referen
 ### Access
 
 - **CLI** (preferred): [`jira-cli`](https://github.com/ankitpokhrel/jira-cli), already configured at `~/.config/.jira/.config.yml` (site/project/login). It needs an API token the config doesn't store — export `JIRA_API_TOKEN` before use (the repo's `.env` carries it under `JIRA_API`: `export JIRA_API_TOKEN=$(grep '^JIRA_API=' .env | cut -d= -f2-)`). Verify with `jira me`.
-- **Cloud MCP** (Atlassian tools): only use this if it resolves to the `metaforge-team.atlassian.net` site specifically — `getAccessibleAtlassianResources` may instead surface an unrelated org's Jira (e.g. `idroneinnovations.atlassian.net`), which has no `FORGE`/MetaForge project at all. Confirm the `cloudId` before creating or citing an issue through it.
+- **Cloud MCP** (Atlassian tools): only use this if it resolves to the `metaforge-team.atlassian.net` site specifically — `getAccessibleAtlassianResources` may instead surface an unrelated org's Jira, which has no `FORGE`/MetaForge project at all. Confirm the `cloudId` before creating or citing an issue through it.
 
 ### Workflow
 
@@ -147,9 +147,12 @@ npm run build                    # Production build
 ```
 
 The CLI lives at `cli/forge_cli/` (argparse-based, see `main.py`).
-There is no `forge` binary in `[project.scripts]` yet — invoke via
-`python -m cli.forge_cli`. See [`docs/cli-reference.md`](docs/cli-reference.md)
-for the full command catalog.
+`[project.scripts]` exposes it as `forge`, so an installed package has the
+binary on PATH; `python -m cli.forge_cli` does the same from a checkout.
+Keep `cli` in `[tool.hatch.build.targets.wheel] packages` — without it the
+wheel ships a `forge` script whose first import fails (FORGE-648). See
+[`docs/cli-reference.md`](docs/cli-reference.md) for the full command
+catalog.
 
 ## Git Workflow
 

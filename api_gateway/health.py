@@ -23,7 +23,9 @@ from enum import StrEnum
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from api_gateway.version import gateway_version
 
 # ---------------------------------------------------------------------------
 # Models
@@ -51,7 +53,7 @@ class HealthResponse(BaseModel):
     """Top-level response from ``GET /health``."""
 
     status: DependencyStatus
-    version: str = "0.1.0"
+    version: str = Field(default_factory=gateway_version)
     uptime_seconds: float
     components: list[ComponentHealth] = []
     timestamp: datetime

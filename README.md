@@ -158,9 +158,15 @@ pipx install "git+https://github.com/FidelOdok/MetaForge.git"
 The HTTP package asks for your gateway's MCP endpoint on first enable, so
 it needs one running and reachable — the installer above does not start
 one by default (`docker compose up -d mcp-http` in a checkout does). The
-local package needs no gateway at all, and no network. Either way, a tool
-that writes is held for a human; held calls land on the dashboard's
-Approvals page.
+local package needs no gateway at all, and no network.
+
+Where a write stops differs between the two. Over HTTP a tool that writes
+is held for a human, and held calls land on the dashboard's Approvals
+page. The local package treats a stdio session as the engineer sitting at
+the machine, so its writes run without being held — unless your client
+supports MCP elicitation, in which case it asks you inline. The exemption
+exists because stdio has nowhere to send a hold. Either way the rule is
+enforced by the server, not by the client.
 
 Codex and the per-client details are in
 [`docs/integrations/`](docs/integrations/claude-code.md).
@@ -176,6 +182,9 @@ Codex and the per-client details are in
   [troubleshooting](docs/troubleshooting.md)
 - **Integrations:** [Claude Code](docs/integrations/claude-code.md) ·
   [Codex](docs/integrations/codex.md) ·
+  [hosted harness](docs/integrations/hosted-harness.md) — claude.ai and
+  ChatGPT run in someone else's datacentre and cannot reach `localhost`,
+  so read this before pointing one at your gateway ·
   [MCP config examples](docs/integrations/mcp-config-examples.md) ·
   [LightRAG UI](docs/integrations/lightrag-ui.md)
 - **Reference example:** [drone flight controller](examples/drone_flight_controller/README.md)
