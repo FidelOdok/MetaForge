@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { fetchDerivedPrd, type DerivedPrd } from '../../../api/endpoints/twin';
 import { parseInline, parseMarkdown, type MdBlock, type MdInline } from '../parsers/markdown';
+import { MermaidDiagram } from './MermaidDiagram';
 import { parseConstraintSet, parseDecision } from '../parsers/records';
 import { PC } from '../tokens';
 import type { TwinNode } from '../../../types/twin';
@@ -57,6 +58,7 @@ function Block({ block }: { block: MdBlock }): ReactNode {
     case 'paragraph':
       return <p style={{ margin: '0 0 0.8em' }}><InlineText text={block.text} /></p>;
     case 'code':
+      if (block.lang === 'mermaid') return <MermaidDiagram code={block.text} />;
       return (
         <pre className="font-mono" style={{ margin: '0 0 0.9em', padding: 12, fontSize: 11, lineHeight: 1.55, background: PC.surfaceLow, border: `1px solid ${PC.border}`, borderRadius: 6, overflowX: 'auto' }}>
           {block.text}
