@@ -273,6 +273,25 @@ jobs:
             echo "EOF"
           } >>"$GITHUB_OUTPUT"
 
+      # The image installs the package (`pip install .`), so `/health` reports
+      # whatever `[project].version` said at build time. That literal is a
+      # committed floor and does not move with the tags, so a released image
+      # claimed a version no release had carried. Stamp the resolved one in
+      # before the context is sent. Builds that are not releases get the last
+      # version plus their commit, because they are after that release rather
+      # than being it. Deriving this from git instead is not open to us here:
+      # `.dockerignore` excludes `.git`.
+      - name: Stamp the version into the package
+        env:
+          SHOULD_RELEASE: ${{ needs.version.outputs.should_release }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [ "$SHOULD_RELEASE" = "true" ]; then
+            python3 scripts/stamp_version.py "$VERSION"
+          else
+            python3 scripts/stamp_version.py "$VERSION" --sha "${{ github.sha }}"
+          fi
+
       - name: Build + push
         id: build
         uses: docker/build-push-action@v6
