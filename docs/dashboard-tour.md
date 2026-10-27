@@ -280,6 +280,19 @@ drawer for asking an agent about that node.
 
 ![The twin's Model tab holding a ducted indoor drone: four ducts and a stacked flight-controller core standing on the workplane, with the inspector open on the assembly and its twenty-four named parts](assets/dashboard/indoor-drone.png)
 
+On the **Graph**, a work product is linked to more than other work
+products: to the constraints it satisfies, the intent and evidence behind
+it, the parts it contains and the baselines it belongs to (FORGE-704).
+Those records are drawn as lighter, dashed nodes in a column at the right,
+and a row of switches above the graph, *Show links to*, turns each kind on
+or off with how many links go to it. Links to baselines start off, because
+baseline membership is one link per member and drowns the rest; the row
+says how many links are hidden. Links that point *into* a work product (an
+intent that depends on a CAD model) are drawn too. If the relationships
+request fails the graph says so and shows only the work products, never
+stand-in links, and if some work products' links could not be read it
+says how many.
+
 The **Electronics** tab (FORGE-687) draws the electronics and firmware
 thread: BOM, schematic, board, then gerbers and pick and place, and from
 the schematic the pin map and the firmware. Each stage shows the current

@@ -13829,6 +13829,25 @@
         "title": "TraceabilityCoverage",
         "type": "object"
       },
+      "TwinEndpointResponse": {
+        "description": "What an edge points at when it is not a listed work product (FORGE-704).\n\nThe relationships view lists work products only, but an edge can run to a\nconstraint, a baseline, a BOM item or an engineering entity. Without a name\nand kind for those the dashboard could not draw the other end of the edge\nand dropped the edge, without saying so.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "title": "TwinEndpointResponse",
+        "type": "object"
+      },
       "TwinNodeListResponse": {
         "description": "Paginated list of twin nodes.",
         "properties": {
@@ -14092,12 +14111,24 @@
       "TwinRelationshipListResponse": {
         "description": "List of edges for the Digital Twin graph.",
         "properties": {
+          "endpoints": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TwinEndpointResponse"
+            },
+            "title": "Endpoints",
+            "type": "object"
+          },
           "relationships": {
             "items": {
               "$ref": "#/components/schemas/TwinRelationshipResponse"
             },
             "title": "Relationships",
             "type": "array"
+          },
+          "skipped_nodes": {
+            "default": 0,
+            "title": "Skipped Nodes",
+            "type": "integer"
           },
           "total": {
             "title": "Total",

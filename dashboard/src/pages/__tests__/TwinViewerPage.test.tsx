@@ -75,9 +75,20 @@ vi.mock('../../components/viewer/TwinAgentChat', () => ({
 }));
 
 vi.mock('../../components/viewer/TwinGraphCanvas', () => ({
-  TwinGraphCanvas: ({ nodes }: { nodes: { name: string }[] }) => (
-    <div data-testid="twin-graph-canvas">
+  TwinGraphCanvas: ({
+    nodes,
+    relationships = [],
+    ghosts = {},
+  }: {
+    nodes: { name: string }[];
+    relationships?: unknown[];
+    ghosts?: Record<string, { name: string; kind: string }>;
+  }) => (
+    <div data-testid="twin-graph-canvas" data-edges={relationships.length}>
       {nodes.map((n) => <span key={n.name}>{n.name}</span>)}
+      {Object.entries(ghosts).map(([id, g]) => (
+        <span key={id} data-testid="linked-record">{g.name}</span>
+      ))}
     </div>
   ),
 }));
@@ -850,5 +861,98 @@ describe('TwinViewerPage — inspector preview from the registry (FORGE-531)', (
     selectWp({ wp_type: 'manufacturing_file', format: 'weird' });
     const section = screen.getByTestId('node-preview-section');
     expect(within(section).getByText('No preview engine for .weird files')).toBeInTheDocument();
+  });
+});
+
+describe('TwinViewerPage graph links (FORGE-704)', () => {
+  // Two work products, and edges to a constraint, an intent and a baseline. The
+  // gateway names the far ends in `endpoints`; before this the page kept only the
+  // work-product to work-product edge and dropped the rest without a word.
+  const wps = [
+    { id: 'w1', name: 'Arm', type: 'work_product', domain: 'mechanical', status: 'valid', properties: {}, updatedAt: '2026-09-22T12:00:00Z' },
+    { id: 'w2', name: 'Bracket', type: 'work_product', domain: 'mechanical', status: 'valid', properties: {}, updatedAt: '2026-09-22T11:00:00Z' },
+  ];
+  const relationships = [
+    { id: 'r1', sourceId: 'w1', targetId: 'w2', type: 'depends_on', label: 'depends on' },
+    { id: 'r2', sourceId: 'w1', targetId: 'c1', type: 'constrained_by', label: 'constrained by' },
+    { id: 'r3', sourceId: 'i1', targetId: 'w1', type: 'depends_on', label: 'depends on' },
+    { id: 'r4', sourceId: 'w1', targetId: 'b1', type: 'included_in_baseline', label: 'included in baseline' },
+    { id: 'r5', sourceId: 'w2', targetId: 'b1', type: 'included_in_baseline', label: 'included in baseline' },
+  ];
+  const endpoints = {
+    c1: { kind: 'constraint', name: 'Max mass 250 g' },
+    i1: { kind: 'intent', name: 'Hover indoors' },
+    b1: { kind: 'baseline', name: 'Release candidate' },
+  };
+
+  function mountWith(extra: Record<string, unknown> = {}) {
+    mockUseTwinNodes.mockReturnValue({ data: wps, isLoading: false, isError: false, refetch: vi.fn() } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: undefined, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseTwinRelationships.mockReturnValue({
+      data: relationships,
+      endpoints,
+      skippedNodes: 0,
+      isError: false,
+      ...extra,
+    } as unknown as ReturnType<typeof useTwinRelationships>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    useProjectStore.setState({ activeProjectId: 'proj-a', hasSelected: true });
+    render(<TwinViewerPage />);
+    return screen.queryByRole('group', { name: 'Linked records' }) as HTMLElement;
+  }
+
+  it('offers a switch per kind of linked record, with how many edges go to it', () => {
+    const bar = mountWith();
+    expect(within(bar).getByRole('button', { name: /Constraints 1/ })).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: /Intent & evidence 1/ })).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: /Baselines 2/ })).toBeInTheDocument();
+  });
+
+  it('draws links to constraints and intent by default, and names those records', () => {
+    mountWith();
+    const canvas = screen.getByTestId('twin-graph-canvas');
+    // the work-product edge, the constraint link and the intent link
+    expect(canvas).toHaveAttribute('data-edges', '3');
+    expect(within(canvas).getByText('Max mass 250 g')).toBeInTheDocument();
+    expect(within(canvas).getByText('Hover indoors')).toBeInTheDocument();
+  });
+
+  it('keeps baseline membership off to start and says how many links are hidden', () => {
+    const bar = mountWith();
+    expect(within(bar).getByRole('button', { name: /Baselines 2/ })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(bar).getByText('2 links hidden')).toBeInTheDocument();
+    expect(within(screen.getByTestId('twin-graph-canvas')).queryByText('Release candidate')).not.toBeInTheDocument();
+  });
+
+  it('draws the baseline links when that switch is turned on, and the hidden count clears', () => {
+    const bar = mountWith();
+    fireEvent.click(within(bar).getByRole('button', { name: /Baselines 2/ }));
+    const canvas = screen.getByTestId('twin-graph-canvas');
+    expect(canvas).toHaveAttribute('data-edges', '5');
+    expect(within(canvas).getByText('Release candidate')).toBeInTheDocument();
+    expect(within(bar).queryByText(/links? hidden/)).not.toBeInTheDocument();
+  });
+
+  it('turns a kind of link off again', () => {
+    const bar = mountWith();
+    fireEvent.click(within(bar).getByRole('button', { name: /Constraints 1/ }));
+    expect(screen.getByTestId('twin-graph-canvas')).toHaveAttribute('data-edges', '2');
+    // the constraint link, plus the two baseline links that start off
+    expect(within(bar).getByText('3 links hidden')).toBeInTheDocument();
+  });
+
+  it('says so when the relationships request failed, instead of showing stand-in edges', () => {
+    mountWith({ isError: true, data: undefined, endpoints: undefined });
+    expect(screen.getByText(/Links unavailable/)).toBeInTheDocument();
+  });
+
+  it('reports work products whose links could not be read', () => {
+    const bar = mountWith({ skippedNodes: 2 });
+    expect(within(bar).getByText("2 work products' links could not be read.")).toBeInTheDocument();
+  });
+
+  it('shows no link controls when there is nothing to say', () => {
+    mountWith({ data: [], endpoints: {} });
+    expect(screen.queryByRole('group', { name: 'Linked records' })).not.toBeInTheDocument();
   });
 });

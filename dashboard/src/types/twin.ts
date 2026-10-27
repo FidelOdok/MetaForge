@@ -97,6 +97,21 @@ export interface TwinRelationship {
   label: string;
 }
 
+/** FORGE-704: what an edge points at when it is not a listed work product (a
+ * constraint, a baseline, a BOM item, an engineering entity). */
+export interface TwinEndpoint {
+  kind: string;
+  name: string;
+}
+
+/** The relationships view: the edges, the names of their unlisted ends, and how
+ * many work products' links could not be read. */
+export interface TwinGraph {
+  relationships: TwinRelationship[];
+  endpoints: Record<string, TwinEndpoint>;
+  skippedNodes: number;
+}
+
 export interface ImportWorkProductResponse {
   id: string;
   name: string;
