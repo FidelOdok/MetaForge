@@ -114,6 +114,8 @@ class FirmwareBrain:
             ).read_text()
             errors = [d for d in parse_diagnostics(log) if d["severity"] == "error"]
             rec("build_error_count", len(errors), "firmware.build run")
+            # FORGE-705: the firmware_source record's thread_unlinked_stages.
+            rec("unlinked_firmware_thread_stages", 0, "twin.record_design_files firmware_source")
             size = parse_size(log)
             if size["flash"] and size["ram"]:
                 rec("flash_used_pct", size["flash"]["used_pct"], "firmware.build run")
