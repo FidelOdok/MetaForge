@@ -83,6 +83,31 @@ describe('TwinGraphCanvas', () => {
     expect(getByText('bom item')).toBeInTheDocument();
   });
 
+  it('wraps a long layer into columns instead of one tall stack, and tolerates a cycle', () => {
+    const many = Array.from({ length: 20 }, (_, i) => node(`n${i}`, `Part ${i}`));
+    const { container } = render(
+      <div style={{ width: 800, height: 600 }}>
+        <TwinGraphCanvas
+          nodes={many}
+          relationships={[rel('a', 'n0', 'n1'), rel('b', 'n1', 'n0')]}
+          selectedId={null}
+          onSelectNode={() => {}}
+        />
+      </div>,
+    );
+    const xs = new Set<string>();
+    const ys = new Set<string>();
+    container.querySelectorAll<HTMLElement>('.react-flow__node-twin').forEach((n) => {
+      const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(n.style.transform);
+      if (m) {
+        xs.add(m[1] ?? '');
+        ys.add(m[2] ?? '');
+      }
+    });
+    expect(ys.size).toBeLessThanOrEqual(8);
+    expect(xs.size).toBeGreaterThan(1);
+  });
+
   it('draws no linked-record node when none is shown', () => {
     const { container } = mount({});
     expect(container.querySelectorAll('.react-flow__node-ref')).toHaveLength(0);
