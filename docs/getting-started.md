@@ -62,17 +62,7 @@ back to in-memory mode (data evaporates on restart).
 These are alternatives, not steps. Use whichever matches how you
 like to work.
 
-```mermaid
-flowchart TD
-    start([git clone + pip install]) --> backends["docker compose up<br/>postgres neo4j"]
-    backends --> pick{Pick a track}
-    pick -->|A| cli["CLI<br/>python -m cli.forge_cli ingest<br/>+ sources list"]
-    pick -->|B| mcp["Claude Code<br/>knowledge.ingest tool<br/>via .mcp.json"]
-    pick -->|C| dash["Dashboard<br/>localhost:5173/knowledge"]
-    cli --> demo["Run the drone example<br/>examples/drone_flight_controller/"]
-    mcp --> demo
-    dash --> demo
-```
+![Three tracks after install: the CLI, Claude Code through .mcp.json, or the dashboard, all leading to the drone example](assets/diagrams/getting-started-tracks.png)
 
 ### Track A — CLI
 
@@ -119,7 +109,7 @@ Boot the gateway + dashboard and explore the UI.
 docker compose up gateway dashboard
 ```
 
-Then open `http://localhost:5173/knowledge`. If you ingested
+Then open `http://localhost:3000/knowledge`. If you ingested
 anything via Track A, it shows up in the sources table.
 
 What each route does: [`dashboard-tour.md`](dashboard-tour.md).

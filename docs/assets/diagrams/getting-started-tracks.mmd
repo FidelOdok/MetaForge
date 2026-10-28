@@ -1,0 +1,9 @@
+flowchart TD
+    start(["git clone and pip install"]) --> backends["docker compose up<br/>postgres neo4j"]
+    backends --> pick{"Pick a track"}
+    pick -->|A| cli["CLI<br/>forge ingest, then<br/>forge sources list"]
+    pick -->|B| mcp["Claude Code<br/>knowledge.ingest tool<br/>through .mcp.json"]
+    pick -->|C| dash["Dashboard<br/>localhost:5173/knowledge"]
+    cli --> demo["Run the drone example<br/>examples/drone_flight_controller"]
+    mcp --> demo
+    dash --> demo

@@ -1,0 +1,13 @@
+flowchart LR
+    you["You<br/>a goal and constraints<br/>(dashboard, CLI or<br/>your own agent)"]
+    flow["Design flow<br/>phases, each with<br/>a review gate"]
+    agents["Specialist agents<br/>one per discipline"]
+    tools["Engineering tools<br/>KiCad · FreeCAD<br/>CadQuery · CalculiX<br/>SPICE · OpenFOAM<br/>Blender"]
+    twin[("Digital twin<br/>versioned record of<br/>everything produced")]
+    out["Deliverables<br/>you review"]
+
+    you --> flow --> agents
+    agents -->|"call, over MCP"| tools
+    agents <-->|"read, propose"| twin
+    twin --> out
+    flow -. "a person approves each gate" .-> you

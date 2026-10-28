@@ -1192,90 +1192,7 @@ paths replayable rather than best-effort.
 
 ### Architecture Diagram
 
-```mermaid
-graph TB
-    subgraph "Layer 7: Human Interface"
-        CLI["forge CLI<br/>(Node.js/TypeScript)"]
-        IDE["IDE Extensions<br/>(VS Code, KiCad, FreeCAD)"]
-    end
-
-    subgraph "Layer 6: Gateway"
-        GW["Gateway Service<br/>(FastAPI + Uvicorn)"]
-        AUTH["Auth Middleware"]
-        WS["WebSocket Handler"]
-    end
-
-    subgraph "Layer 5: Orchestrator"
-        TEMP["Temporal Workers"]
-        DAG["Workflow DAGs"]
-        SCHED["Agent Scheduler"]
-        ITER["Iteration Controller<br/>(propose → validate → refine)"]
-    end
-
-    subgraph "Layer 4: Domain Agents"
-        MECH["Mechanical Agent"]
-        ELEC["Electronics Agent"]
-        FW["Firmware Agent"]
-        SIM["Simulation Agent"]
-        ID["Industrial Design Agent"]
-        MORE["... (1 per discipline)"]
-    end
-
-    subgraph "Layer 3: Skill System"
-        REG["Skill Registry"]
-        LOAD["Skill Loader"]
-        SCHEMA["Schema Validator<br/>(Pydantic)"]
-        BRIDGE["MCP Bridge"]
-    end
-
-    subgraph "Layer 2: MCP Protocol"
-        CLIENT["MCP Client"]
-        PROTO["Wire Protocol<br/>(JSON-RPC 2.0)"]
-        TREG["Tool Registry"]
-    end
-
-    subgraph "Layer 1: Tool Adapters"
-        CALC["CalculiX<br/>(FEA)"]
-        FCAD["FreeCAD<br/>(CAD)"]
-        KICAD["KiCad<br/>(PCB/Schematic)"]
-        SPICE["SPICE<br/>(Circuit Sim)"]
-    end
-
-    subgraph "Layer 0: Digital Twin"
-        NEO["Neo4j Graph"]
-        VER["Version Engine"]
-        CONST["Constraint Engine"]
-    end
-
-    KAFKA["Apache Kafka<br/>(Event Bus)"]
-    OBS["OpenTelemetry<br/>+ Prometheus + Grafana"]
-
-    CLI --> GW
-    IDE --> GW
-    GW --> AUTH
-    GW --> WS
-    GW --> TEMP
-    TEMP --> DAG
-    TEMP --> SCHED
-    TEMP --> ITER
-    SCHED --> MECH & ELEC & FW & SIM & ID & MORE
-    MECH & ELEC & FW & SIM & ID --> REG
-    REG --> LOAD
-    REG --> SCHEMA
-    REG --> BRIDGE
-    BRIDGE --> CLIENT
-    CLIENT --> PROTO
-    PROTO --> TREG
-    TREG --> CALC & FCAD & KICAD & SPICE
-    MECH & ELEC & FW & SIM & ID --> NEO
-    NEO --> VER
-    NEO --> CONST
-    GW -.-> KAFKA
-    TEMP -.-> KAFKA
-    MECH -.-> KAFKA
-    GW -.-> OBS
-    TEMP -.-> OBS
-```
+![Architecture: clients reach the gateway and the MCP sidecar; the gateway runs design flows on Temporal, which drive domain agents and skills; every tool call goes through the MCP registry to containerised adapters; state lives in the twin, Postgres and an object store](assets/diagrams/architecture-layers.png)
 
 ---
 
@@ -1469,42 +1386,7 @@ through one API; see [Unified approvals API](approvals.md).
 
 ### Request Lifecycle
 
-```mermaid
-sequenceDiagram
-    participant H as Human
-    participant CLI as forge CLI
-    participant GW as Gateway (FastAPI)
-    participant O as Orchestrator (Temporal)
-    participant A as Agent (PydanticAI)
-    participant S as Skill
-    participant MCP as MCP Client
-    participant T as Tool (Docker)
-    participant TW as Digital Twin (Neo4j)
-    participant K as Kafka
-
-    H->>CLI: forge run validate-stress model.step
-    CLI->>GW: POST /v1/runs
-    GW->>O: Start workflow
-    O->>A: Schedule mechanical agent
-    A->>TW: Read current work_product state
-    TW-->>A: WorkProduct graph subgraph
-    A->>S: Invoke validate_stress skill
-    S->>MCP: tool/call (calculix.run_fea)
-    MCP->>T: Execute in container
-    T-->>MCP: tool/result (stress data)
-    MCP-->>S: Parsed result
-    S-->>A: Validated output (Pydantic)
-    A->>TW: Propose work_product update
-    TW-->>A: Proposal staged in branch
-    A->>K: Emit design_change event
-    O-->>GW: Workflow result
-    GW-->>CLI: Response (approval required)
-    CLI-->>H: Show results + approval prompt
-    H->>CLI: Approve
-    CLI->>GW: POST /v1/runs/{run_id}/approval
-    GW->>TW: Merge branch to main
-    TW->>K: Emit artifact_committed event
-```
+![Sequence of a design run: the user starts a run, the gateway starts a Temporal workflow, each phase's agent calls tools and records drafts in the twin, the gate opens, the user decides, and approved drafts become the baseline](assets/diagrams/run-sequence.png)
 
 ### Propose → Validate → Refine Loop
 

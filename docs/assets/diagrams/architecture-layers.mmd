@@ -1,0 +1,35 @@
+flowchart TB
+    subgraph clients["Clients"]
+        direction LR
+        cli["forge CLI and TUI"]
+        dash["Dashboard"]
+        harness["Claude Code and Codex plugins"]
+    end
+
+    subgraph entry["Entry points"]
+        direction LR
+        gw["Gateway (FastAPI)<br/>REST and server-sent events"]
+        side["MCP sidecar<br/>HTTP MCP transport"]
+    end
+
+    orch["Orchestrator: design flows on Temporal"]
+    agents["Domain agents and skills<br/>mechanical, electronics, firmware, simulation, industrial design and more"]
+    reg["MCP tool registry: every tool call passes through here"]
+    adapters["Tool adapters, one container each<br/>KiCad, FreeCAD, CadQuery, CalculiX, SPICE, OpenFOAM, Blender, firmware"]
+
+    subgraph state["State"]
+        direction LR
+        twin[("Digital twin<br/>Neo4j graph")]
+        pg[("Postgres<br/>projects, runs, sessions")]
+        blobs[("Object store<br/>work-product files")]
+    end
+
+    bus["Kafka event bus · OpenTelemetry · Prometheus · Grafana"]
+
+    cli --> gw
+    dash --> gw
+    harness --> side
+    gw --> orch --> agents --> reg --> adapters
+    side --> reg
+    agents <--> state
+    gw -.-> bus
