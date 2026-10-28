@@ -68,10 +68,21 @@ export interface FieldDelta {
   to_value: unknown;
 }
 
-export interface FeatureDiff {
+/** A node that has never been superseded answers with hasPreviousVersion
+ * false rather than a 404 (FORGE-709), so the discriminant is what tells
+ * "nothing to compare against" from "compared, nothing changed". */
+export interface NoFeatureDiff {
   currentWorkProductId: string;
+  hasPreviousVersion: false;
+}
+
+export interface FeatureDiffResult {
+  currentWorkProductId: string;
+  hasPreviousVersion: true;
   previousWorkProductId: string;
   changed: Record<string, FieldDelta>;
   added: Record<string, unknown>;
   removed: Record<string, unknown>;
 }
+
+export type FeatureDiff = FeatureDiffResult | NoFeatureDiff;

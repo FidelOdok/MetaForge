@@ -10,6 +10,11 @@ vi.mock('../../hooks/use-twin', () => ({
   useGeometryDiff: vi.fn(() => ({ data: undefined, isLoading: false })),
 }));
 
+vi.mock('../../hooks/use-features', () => ({
+  useFeatureDiff: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useGenerateFeature: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+}));
+
 // FORGE-531: the inspector's inline preview reads the node's file.
 vi.mock('../../api/endpoints/twin', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/endpoints/twin')>()),
@@ -102,6 +107,7 @@ import {
   useRevisionDiff,
   useGeometryDiff,
 } from '../../hooks/use-twin';
+import { useFeatureDiff } from '../../hooks/use-features';
 import { fireEvent, act, within } from '@testing-library/react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../../store/project-store';
@@ -114,6 +120,7 @@ const mockUseTwinRelationships = vi.mocked(useTwinRelationships);
 const mockUseNodeVersionHistory = vi.mocked(useNodeVersionHistory);
 const mockUseRevisionDiff = vi.mocked(useRevisionDiff);
 const mockUseGeometryDiff = vi.mocked(useGeometryDiff);
+const mockUseFeatureDiff = vi.mocked(useFeatureDiff);
 
 // MET-686: a harness for simulating an in-SPA navigation that changes the
 // ?node= query string on the SAME /twin path -- react-router does not
@@ -313,6 +320,7 @@ describe('TwinViewerPage', () => {
     mockUseGeometryDiff.mockReturnValue({
       data: {
         current_work_product_id: 'n1',
+        has_previous_version: true,
         previous_work_product_id: 'n0',
         current_volume_mm3: 1500,
         previous_volume_mm3: 1000,
@@ -353,12 +361,85 @@ describe('TwinViewerPage', () => {
     } as unknown as ReturnType<typeof useTwinNodes>);
     mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
     mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
-    mockUseGeometryDiff.mockReturnValue({ data: undefined, isLoading: false } as unknown as ReturnType<typeof useGeometryDiff>);
+    // FORGE-709: the gateway now says "no predecessor" with a 200 carrying
+    // the discriminant, not a 404 the client turned into undefined -- so the
+    // panel has to hide on THAT shape, which is what this asserts.
+    mockUseGeometryDiff.mockReturnValue({
+      data: { current_work_product_id: 'n1', has_previous_version: false },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useGeometryDiff>);
 
     render(<TwinViewerPage />);
     fireEvent.click(screen.getByRole('button', { name: /bracket-v1\.step/ }));
 
     expect(screen.queryByTestId('geometry-version-diff')).not.toBeInTheDocument();
+  });
+
+  it('renders the parameter diff when a feature has a SUPERSEDES predecessor', () => {
+    const node = {
+      id: 'n1',
+      name: 'rib-v2.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseFeatureDiff.mockReturnValue({
+      data: {
+        currentWorkProductId: 'n1',
+        hasPreviousVersion: true,
+        previousWorkProductId: 'n0',
+        changed: { thickness_mm: { from_value: 2, to_value: 3 } },
+        added: {},
+        removed: {},
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useFeatureDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /rib-v2\.step/ }));
+
+    expect(screen.getByTestId('feature-version-diff')).toBeInTheDocument();
+  });
+
+  it('renders nothing for the parameter diff when there is no predecessor', () => {
+    // FORGE-709: "no predecessor" arrives as a 200 with the discriminant
+    // false rather than a 404, so the panel must hide on that shape.
+    const node = {
+      id: 'n1',
+      name: 'rib-v1.step',
+      type: 'work_product',
+      domain: 'mechanical',
+      status: 'valid',
+      properties: {},
+      updatedAt: new Date().toISOString(),
+    };
+    mockUseTwinNodes.mockReturnValue({
+      data: [node],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useTwinNodes>);
+    mockUseTwinNode.mockReturnValue({ data: node, isLoading: false } as unknown as ReturnType<typeof useTwinNode>);
+    mockUseNodeVersionHistory.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useNodeVersionHistory>);
+    mockUseFeatureDiff.mockReturnValue({
+      data: { currentWorkProductId: 'n1', hasPreviousVersion: false },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useFeatureDiff>);
+
+    render(<TwinViewerPage />);
+    fireEvent.click(screen.getByRole('button', { name: /rib-v1\.step/ }));
+
+    expect(screen.queryByTestId('feature-version-diff')).not.toBeInTheDocument();
   });
 
   it('clears the selected node (detail panel + breadcrumb) when the active project changes', () => {

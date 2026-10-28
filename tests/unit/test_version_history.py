@@ -406,11 +406,37 @@ class TestGeometryDiffEndpoint:
             )
         assert resp.status_code == 503
 
-    async def test_lookup_error_returns_404(self, client):
+    async def test_no_previous_version_returns_empty_200(self, client):
+        """FORGE-709: the dashboard asks this for every selected node, and
+        almost none have a predecessor -- that answer must not read as an
+        error, so it is a 200 carrying has_previous_version false."""
+        from api_gateway.twin.geometry_diff import NoPreviousVersion
         from api_gateway.twin.routes import init_geometry_diff
 
         async def fake_diff(*, work_product_id: str) -> dict:
-            raise LookupError("work product has no prior version (no SUPERSEDES edge)")
+            raise NoPreviousVersion(
+                f"work product {work_product_id} has no prior version (no SUPERSEDES edge)"
+            )
+
+        init_geometry_diff(fake_diff)
+        async with client:
+            resp = await client.get(
+                "/v1/twin/nodes/00000000-0000-0000-0000-000000000099/geometry-diff"
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["has_previous_version"] is False
+        assert body["current_work_product_id"] == "00000000-0000-0000-0000-000000000099"
+        assert body["previous_work_product_id"] is None
+        assert body["volume_delta_mm3"] is None
+
+    async def test_missing_predecessor_still_returns_404(self, client):
+        """A SUPERSEDES edge pointing at a node that is gone is a real
+        integrity failure, not the ordinary empty answer above."""
+        from api_gateway.twin.routes import init_geometry_diff
+
+        async def fake_diff(*, work_product_id: str) -> dict:
+            raise LookupError("superseded work product no longer exists")
 
         init_geometry_diff(fake_diff)
         async with client:

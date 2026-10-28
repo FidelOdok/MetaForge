@@ -213,16 +213,25 @@ class TestFeatureDiffRoute:
         assert resp.status_code == 200
         body = resp.json()
         assert body["currentWorkProductId"] == v2_id
+        assert body["hasPreviousVersion"] is True
         assert body["previousWorkProductId"] == v1_id
         assert body["changed"]["thickness_mm"] == {"from_value": 2.0, "to_value": 3.0}
         assert body["added"] == {}
         assert body["removed"] == {}
 
-    async def test_diff_on_first_version_404s(self, twin, client) -> None:
+    async def test_diff_on_first_version_is_an_empty_200(self, twin, client) -> None:
+        """FORGE-709: no predecessor is the ordinary answer for almost every
+        node, so it is a 200 the dashboard can render as "nothing to show",
+        not a 404 its error log picks up on every selection."""
         v1_id, _v2_id = await self._seed_two_versions(twin)
         async with client:
             resp = await client.get(f"/v1/features/{v1_id}/diff")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["hasPreviousVersion"] is False
+        assert body["currentWorkProductId"] == v1_id
+        assert body["previousWorkProductId"] is None
+        assert body["changed"] == {}
 
     async def test_diff_on_unknown_node_404s(self, client) -> None:
         async with client:

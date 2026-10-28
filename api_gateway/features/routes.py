@@ -119,11 +119,18 @@ async def generate_feature(payload: GenerateFeatureRequest, request: Request) ->
 
 
 class FeatureDiffResponse(BaseModel):
+    """``hasPreviousVersion`` is false for a work product that has never been
+    superseded -- almost all of them. That is the ordinary answer, not an
+    error, so it comes back as an empty 200 (FORGE-709), matching
+    ``/twin/nodes/{id}/versions``, which reports an empty history the same
+    way. A 404 from this route now means only that the node is unknown."""
+
     currentWorkProductId: str  # noqa: N815 -- dashboard contract is camelCase
-    previousWorkProductId: str  # noqa: N815
-    changed: dict[str, FieldDelta]
-    added: dict[str, Any]
-    removed: dict[str, Any]
+    hasPreviousVersion: bool = True  # noqa: N815
+    previousWorkProductId: str | None = None  # noqa: N815
+    changed: dict[str, FieldDelta] = {}
+    added: dict[str, Any] = {}
+    removed: dict[str, Any] = {}
 
 
 @router.get("/{work_product_id}/diff", response_model=FeatureDiffResponse)
@@ -139,10 +146,7 @@ async def get_feature_diff(work_product_id: str) -> FeatureDiffResponse:
 
     edges = await _twin.get_edges(node_id, direction="outgoing", edge_type=EdgeType.SUPERSEDES)
     if not edges:
-        raise HTTPException(
-            status_code=404,
-            detail=f"work product {work_product_id} has no prior version (no SUPERSEDES edge)",
-        )
+        return FeatureDiffResponse(currentWorkProductId=work_product_id, hasPreviousVersion=False)
     previous = await _twin.graph.get_node(edges[0].target_id)
     if previous is None:
         raise HTTPException(status_code=404, detail="superseded work product no longer exists")
