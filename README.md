@@ -563,15 +563,17 @@ provider-neutral seams: the `metaforge.auth` entry-point group on the gateway an
 
 ## 16. Roadmap
 
-The plan is in the [roadmap](docs/roadmap.md): Phase 2 widens the agent set and adds
-fuller KiCad write, Phase 3 aims at broad discipline coverage. That page records the
-original plan. **No delivery dates are currently agreed**, and nothing on it should be
-read as released.
+The [roadmap](docs/roadmap.md) says what is released, in progress, planned and not
+started, and how the original four-phase plan compares with what was built. **No
+delivery dates are currently agreed.** Nothing on the roadmap should be read as
+released unless it is also in the [capability matrix](docs/capability-matrix.md).
 
-**Released today:** see [section 8](#8-features-available-today). **Planned, not
-released:** more specialist agents; turbulence validation for airflow; deriving fluid
-surfaces from solid models; multi-user collaboration (hosted service); a better graph
-layout for large twins.
+**In progress:** work product identity and baselines, skill fidelity, airflow
+validation, generative simulation and headless CAD authoring.
+**Planned, no date:** manufacturing and vendor integration, a reference library,
+policy-based approvals for external agents, the next versions of the Claude Code and
+Codex plugins, robot-grade simulation, and a layout that scales to large twins.
+**Not started:** most of the 25 engineering disciplines; seven have agents today.
 
 ## 17. Contributing
 
