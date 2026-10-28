@@ -55,8 +55,8 @@ The table above states the *chosen* technologies. This section states which of
 them a running deployment actually uses, because the two diverged for six
 months and the docs did not say so.
 
-Both Temporal and Kafka were built in March 2026 (MET-186, MET-197) and were
-**dead in every deployment** until they were wired (MET-197/MET-186 wiring):
+Both Temporal and Kafka were built in March 2026 and were
+**dead in every deployment** until they were wired:
 the image installed only the `[gateway]` extra, so `aiokafka` and `temporalio`
 were absent, and both modules were written to degrade gracefully without their
 SDK. Measured on the live stack before the fix: the Kafka broker had **zero
@@ -68,13 +68,13 @@ gateway and read by no Python code.
 | --- | --- | --- |
 | **Event bus** | ✅ wired | `create_kafka_bus()` when `KAFKA_BOOTSTRAP_SERVERS` is set — dispatches in-process to every subscriber **and** persists to the topic. Falls back to the in-process bus if the broker is unreachable. |
 | **Consolidation cadence** | ✅ two drivers, pick one | the gateway's asyncio `ConsolidationScheduler` (default), or `ConsolidationWorkflow` on the Temporal worker with `METAFORGE_CONSOLIDATION_INTERVAL_SECONDS=0` |
-| **Design-flow runs** (`/v1/runs`) | ✅ wired (FORGE-401) | `DesignFlowWorkflow` on the `metaforge-design-flows` queue, served by the `design-flow-worker` service. Runs survive a gateway or worker restart, including runs parked at a gate. The in-process executor remains as the test double behind `METAFORGE_FLOW_ENGINE=in_process`, and there is **no automatic fallback** to it. |
+| **Design-flow runs** (`/v1/runs`) | ✅ wired | `DesignFlowWorkflow` on the `metaforge-design-flows` queue, served by the `design-flow-worker` service. Runs survive a gateway or worker restart, including runs parked at a gate. The in-process executor remains as the test double behind `METAFORGE_FLOW_ENGINE=in_process`, and there is **no automatic fallback** to it. |
 
 So Temporal is **runnable and registered**, owns the consolidation pass when
-you hand it over, and as of FORGE-401 is the execution path for design-flow
+you hand it over, and is now the execution path for design-flow
 runs.
 
-### Gate announcements (FORGE-489)
+### Gate announcements
 
 When a design-flow run reaches a gate, the workflow's `announce_gate` activity
 tells the gateway. The `design-flow-worker` binds a real announcer that calls
@@ -94,9 +94,9 @@ Announcing never approves. A gate is answered only by `POST /v1/runs/{id}/approv
 and `failed` (the gateway could not be reached). The
 `DesignFlowGateUnannounced` alert fires on the last two.
 
-### Where a held write actually waits (FORGE-406)
+### Where a held write actually waits
 
-FORGE-359 built an approval gate. Nothing outside the test suite ever
+An approval gate was built. Nothing outside the test suite ever
 constructed one, so the MCP sidecar ran with `approval_gate=None` and **every
 write from a plugin was refused** with *"no approval gate is configured"*.
 The guardrail was present, correct, thoroughly tested and unreachable.
@@ -109,7 +109,7 @@ So the sidecar parks held calls in the gateway's ledger over HTTP
 (`POST /v1/chat/tool_approvals`), and polls for the decision. There is
 exactly **one** ledger.
 
-A decided hold is closed at the decision (FORGE-639). The decision, with the
+A decided hold is closed at the decision. The decision, with the
 approver, its verification and the surface, is logged on the hold's
 `request` (`decisions`), which the ledger persists on every transition, and
 an approved hold moves straight to `completed`. Before this an approved hold
@@ -123,7 +123,7 @@ were decided through `/v1/approvals`; ones answered in a client's prompt
 before the fix logged nothing and still read `canceled`. Waiters take
 `running` and `completed` alike as approved.
 
-A hold is closed by whichever side stops waiting (FORGE-466). The sidecar
+A hold is closed by whichever side stops waiting. The sidecar
 calls `POST /v1/chat/tool_approvals/{id}/resolve` with `timed_out` when its
 window closes and `canceled` when the call is cancelled; the in-process wait
 (chat harness, in-gateway MCP gate) does the same on its own store. The
@@ -145,10 +145,10 @@ wrong in a sidecar — and **logs that choice on every start-up**, because the
 whole reason this went unnoticed is that the absence was only observable at
 the moment somebody tried to write.
 
-The approver comes back off the ledger entry (FORGE-393), so identity
+The approver comes back off the ledger entry, so identity
 survives the process boundary without anything being asserted across it.
 
-### Flows through the harness plugins (FORGE-400)
+### Flows through the harness plugins
 
 Flows were dashboard-only: an agent in Claude Code or Codex could not see
 that any of it existed. Four MCP tools and a run resource change that.
@@ -156,9 +156,9 @@ that any of it existed. Four MCP tools and a run resource change that.
 | Tool | |
 | --- | --- |
 | `flow.list` | the catalogue, as the gateway will run it (read) |
-| `flow.propose` | tailor a template to an intent; the version it writes is **held** for a person, the call is not (FORGE-471) |
+| `flow.propose` | tailor a template to an intent; the version it writes is **held** for a person, the call is not |
 | `flow.status` | phase state for one run (read) |
-| `flow.start_run` | start a run on an **approved** version; refused with 409 otherwise, so the call is not held (FORGE-471) |
+| `flow.start_run` | start a run on an **approved** version; refused with 409 otherwise, so the call is not held |
 
 Plus `metaforge://flow/run/{id}`, the run as markdown for a client with no
 canvas, and a `/metaforge:flow` prompt.
@@ -168,14 +168,14 @@ own call.** `flow.propose` returns a proposal and an approval id and stops.
 There is no `flow.approve`. An agent that could both propose and approve has
 an approval step in name only — and the name is worse than nothing, because
 it appears in the audit trail. Approving happens where a human is: the
-dashboard queue, or inline elicitation (FORGE-360), both through the same
-ledger, with the approver taken from that record (FORGE-393).
+dashboard queue, or inline elicitation, both through the same
+ledger, with the approver taken from that record.
 
 `flow.status` is deliberately *not* held. An agent following a run calls it
 repeatedly; holding every poll for a human would make following a run
 impossible.
 
-**Served by the sidecar too (FORGE-462).** Until FORGE-462 only the gateway
+**Served by the sidecar too.** Originally only the gateway
 passed the flow bindings to `bootstrap_tool_registry`. The adapters register
 only when a binding is supplied, so the HTTP sidecar (which every harness
 plugin talks to) skipped both `design_flow` and `run`, and none of `flow.*`
@@ -200,18 +200,18 @@ move the approval and nothing else: the flow version stayed `proposed` and
 not be completed from anywhere. `POST /v1/chat/tool_approvals/{id}` now
 carries the decision to the version for `design_flow_proposal` and
 `design_flow_version` approvals, with the approver taken from the approval
-record (FORGE-393).
+record.
 
 **What checking this found.** A catalogue-wide test — "no tool lets a caller
 answer its own approval", matched on behaviour rather than on one forbidden
-name — turned up two tools with the identical FORGE-393 bug:
+name — turned up two tools with the identical bug:
 `twin.approve_design_loop` took `approved_by` as an argument and
-`twin.approve_engineering_change` took `approver`. FORGE-393 had fixed
+`twin.approve_engineering_change` took `approver`. An earlier fix covered
 promotion and guarded `ect.approve` against a *blank* approver, which is not
 the same as guarding it against a supplied one. Both now read the approver
 from the approval record, and both are in `HUMAN_AUTHORITY_TOOLS`.
 
-### Client intelligence mode and gates in the chat (FORGE-581, FORGE-582)
+### Client intelligence mode and gates in the chat
 
 A run can have its phase work done by the connected MCP client (Claude Code,
 Codex) instead of a model the gateway calls. The mode is per run:
@@ -231,8 +231,7 @@ after a server phase: a deliverable described in the summary but not
 recorded fails it. `phase.submit` also takes `outcome` (`complete`, the
 default, or `incomplete`). A client that did not meet the phase's objective
 submits `incomplete`; the phase then finishes with status `incomplete` and
-its gate reads not ready with that finding, whatever the twin holds
-(FORGE-590). Before this, a summary saying "objective NOT met" still reached
+its gate reads not ready with that finding, whatever the twin holds. Before this, a summary saying "objective NOT met" still reached
 the person as an approvable gate.
 
 - The task id is `run:phase:attempt`, so a retried activity finds the task
@@ -247,8 +246,7 @@ the person as an approvable gate.
 - The `ClientTasksUnanswered` alert fires when tasks were posted for two
   hours and none came back.
 
-**Writes during a client phase: held, unless the owner opts in
-(FORGE-584).** By default a remote client's twin writes go through the
+**Writes during a client phase: held, unless the owner opts in.** By default a remote client's twin writes go through the
 ordinary guardrail, so each is held for a person (answered in the chat where
 the client supports elicitation). The owner can set
 `METAFORGE_CLIENT_TASK_WRITES=on` on the MCP sidecar (it also needs
@@ -275,11 +273,11 @@ for the run's next gate and asks the person through MCP elicitation, with
 only the decisions the gate allows. The decision is recorded through the
 same approval service as a dashboard click, with `surface: "chat"` and the
 person from the authenticated MCP session as approver. Dismissing the prompt
-leaves the gate open. This keeps the FORGE-400 rule intact: the agent still
+leaves the gate open. This keeps the no-self-approval rule intact: the agent still
 has no tool that approves anything; the tool asks. See
 [Gates in the client chat](approvals.md#gates-in-the-client-chat).
 
-### The run record follows the workflow (FORGE-485)
+### The run record follows the workflow
 
 The gateway's run record is a cache of the workflow. A Temporal run used to
 stay `queued` for its whole life (the workflow runs in another process and
@@ -297,7 +295,7 @@ boot). Status, and for a gate the `approval_reason` (the gate name and its
 check summary), are taken from the workflow's `state` query. The approval route
 reconciles first and then signals the workflow, so a decision is accepted
 whenever the workflow is waiting at a gate, whatever the local record said.
-The approver is read from the request (FORGE-393) and relayed with the signal.
+The approver is read from the request and relayed with the signal.
 
 Reconciling is read-only toward Temporal and never guesses: if the workflow
 cannot be queried (no worker, engine down) the record is left untouched, and
@@ -305,7 +303,7 @@ an approval against a record that still says `queued` is refused rather than
 sent to a gate nobody has seen. A run already terminal in the record is never
 reopened, and in-process runs are not reconciled.
 
-### Watching a run (FORGE-396)
+### Watching a run
 
 `GET /v1/runs/{id}/flow-state` returns phase-by-phase state, queried from the
 Temporal workflow rather than from a projection of it. A cache that can be
@@ -327,7 +325,7 @@ the shape), and every status reads `unknown`.
 
 Known gaps, stated rather than papered over:
 
-- **The activity lane shows tool calls (FORGE-645) but not yet decisions,
+- **The activity lane shows tool calls but not yet decisions,
   evidence or token cost.** Those come from session capture and twin commits, which the
   workflow's event log does not carry. The panel names what is missing instead
   of rendering empty headings — an empty "Tool calls" section reads as "this
@@ -339,7 +337,7 @@ Known gaps, stated rather than papered over:
   SSE subscription that silently only updated on status changes would look
   live and not be.
 
-#### Tool progress on the run stream (FORGE-643, FORGE-644)
+#### Tool progress on the run stream
 
 `GET /v1/runs/{id}/events` now carries a second event, `tool.progress`, next to
 `run.status`. Each one is a tool call edge: `started`, then `finished` or
@@ -372,7 +370,7 @@ The stream is built so a slow or dropped client cannot hurt the gateway:
 Events are a view, not the record: the 2s `flow-state` poll stays the source of
 truth, and a missed event costs a viewer a moment, not correctness.
 
-The run page draws them (FORGE-645). The browser's `EventSource` cannot send an
+The run page draws them. The browser's `EventSource` cannot send an
 `Authorization` header, so `useRunToolEvents` reads the stream with `fetch`
 (`dashboard/src/lib/sse.ts`), which can. It asks for `Last-Event-ID: 0` on
 first connect so a viewer that opens a run already underway gets the history
@@ -384,7 +382,7 @@ make no harness tool calls in the gateway, so they emit none. Tools that run
 inside one call, such as a CadQuery script or a CalculiX solve, show `started`
 and `finished` only.
 
-**Why a CalculiX solve shows no percentage (FORGE-646 spike).** A real linear
+**Why a CalculiX solve shows no percentage.** A real linear
 static solve on the sandbox leaves a `.sta` with a single increment line
 (`STEP 1, INC 1, total time 1.0`) and a `.cvg` with headers and no rows. CalculiX
 writes those files per increment, and a linear static or modal analysis has one,
@@ -398,7 +396,7 @@ increment through a gateway callback, as the worker does for tool events; the
 adapter has no gateway address or key today, and the call's `run_id` would
 come from the request headers.
 
-### Watching an assembly come together (FORGE-647)
+### Watching an assembly come together
 
 An agent can put a committed assembly together in front of a person.
 `twin.place_part` takes one committed part, an assembly name, a position (mm)
@@ -451,15 +449,15 @@ return only session object ids, so neither has a part in the twin to draw
 until it is committed. The panel says when it is not connected, because a view
 that cannot see and an assembly with no parts must not read the same.
 
-### Editing a flow, and where an edited flow lives (FORGE-399)
+### Editing a flow, and where an edited flow lives
 
-FORGE-398 generated a proposal, held it for approval, and stored only a *text
+The first version generated a proposal, held it for approval, and stored only a *text
 diff* of it — so approving one gave nobody a flow to start. `versions.py`
 closes that, and it is shared: an edited flow needs exactly the same thing,
 and two stores would have been two answers to "which flow did this run use".
 
 **A version is immutable.** Editing produces a new version with a new id,
-never a mutation, because a run pins the version it started on (FORGE-401
+never a mutation, because a run pins the version it started on (
 freezes it into the workflow input and verifies its hash), so a version
 changing underneath would make a completed run's provenance a lie — and an
 approval that can be edited afterwards is not an approval. That is also what
@@ -473,7 +471,7 @@ policy somebody has to observe.
 | `POST /v1/design-flows/versions` | save an edit as a new version, held for approval |
 | `GET /v1/design-flows/versions/{id}` | fetch a stored version |
 
-Versions are durable (FORGE-482). The store used to be process memory, so a
+Versions are durable. The store used to be process memory, so a
 gateway reload lost every proposal and every human approval while the Temporal
 run using the version survived, and `flow.start_run` then answered "no flow
 version". Each version is now written through to SQLite
@@ -483,7 +481,7 @@ with its status, frozen definition, content hash, template and version,
 approval id, approver and timestamps, and restored at startup. A restored row
 whose hash no longer matches its content is skipped and logged, never run.
 Approved and rejected versions are immutable; the approval ledger still
-drives the decision (FORGE-462). The in-memory store remains the test double.
+drives the decision. The in-memory store remains the test double.
 
 `POST /v1/runs` accepts a `flow_version_id`. An unapproved version is refused
 there with a 409 rather than at the gate: starting work on a flow nobody
@@ -507,7 +505,7 @@ person deciding whether to approve. Relaxations are shouted —
 loosening one is the change most worth attention and easiest to lose in a long
 list.
 
-### Tailoring a flow to a project (FORGE-398)
+### Tailoring a flow to a project
 
 `POST /v1/design-flows/propose` takes a project's intent and returns a
 tailored flow held for a human.
@@ -527,7 +525,7 @@ they must catch everything — and "the validator will catch it" is the
 reasoning that ends with a release gate quietly missing because somebody added
 a rule later than the flow that broke it. Removing a gate, removing a
 deliverable and switching enforcement off are **not expressible**. The
-FORGE-397 validator still runs, as a backstop rather than the only line.
+proposal validator still runs, as a backstop rather than the only line.
 
 Note the asymmetry: tailoring may make a flow **stricter, never laxer**. A
 model that thinks a simulation is unnecessary can drop the whole phase —
@@ -545,7 +543,7 @@ the same ledger the dashboard Approvals page already watches, and this
 endpoint has no ability to create a run — which is how "nothing starts before
 approval" is made true rather than asserted.
 
-**Every proposal names the model that wrote it (FORGE-468).** The configured
+**Every proposal names the model that wrote it.** The configured
 primary and the model that answered can differ, because the provider pipeline
 falls back when the primary fails. The propose response carries
 `generatedBy: {provider, model, fellBackFrom}` (`fellBackFrom` is
@@ -559,7 +557,7 @@ is no untailored fallback: a flow the human believes was tailored, and was
 not, is worse than being told the generator is down, because they would
 approve it on the strength of a tailoring that never happened.
 
-#### The generator asks before it tailors (FORGE-463)
+#### The generator asks before it tailors
 
 An intent alone is not enough to tailor a flow. `"A wall shelf I can make
 with what I have."` used to come back as `mech_v1` with simulation dropped
@@ -598,7 +596,7 @@ of the first geometry phase, rather than letting the generator pick a route.
 That operation (`add_route_selection`) is server-only: a model cannot add
 phases.
 
-**The route gate needs a decision, not a deferral by default (FORGE-608).**
+**The route gate needs a decision, not a deferral by default.**
 The phase's decision is recorded with `twin.record_decision` and a typed
 `manufacturing_route`: either `route` (`in_house` or `vendor`) with
 `process` and `material_class`, or `deferred: true` with a `reason`. The
@@ -618,7 +616,7 @@ This closed the gap the Table run showed: its route phase recorded "route
 NOT SELECTED (deferred)" as prose, the gate passed, and the design went ahead
 on assumed materials without the gate saying so.
 
-**Process before design, DFM after it (FORGE-611).** `mech_v1` (template
+**Process before design, DFM after it.** `mech_v1` (template
 1.2.0) now has two manufacturing phases on every run, both with the
 `manufacturing` discipline (its own tool profile and skill cards):
 
@@ -661,7 +659,7 @@ the envelope, volume and mass (`twin.get_node`, `freecad.measure`) and the
 3D-printing overhang (`twin.evaluate_overhang_metric`). The `hardware_v1`
 `manufacturing` phase (electronics, G8) is unchanged.
 
-**Industrial design before mechanical design (FORGE-634).** `hardware_v1`
+**Industrial design before mechanical design.** `hardware_v1`
 (template 1.1.0) and `mech_v1` (template 1.3.0) have an `industrial_design`
 phase, with the `industrial_design` discipline (its tool profile and skill
 cards), placed where the Planner puts the discipline: before mechanical
@@ -682,7 +680,7 @@ other required deliverable. There is no product-type fact yet, so the phase
 runs on every `mech_v1` run as well; a part nobody handles records that, and
 tailoring can drop the phase.
 
-**Vendor connectors (FORGE-427).** Quotes and orders from outside vendors
+**Vendor connectors.** Quotes and orders from outside vendors
 go through connectors on the gateway (`api_gateway/vendors/`). Every
 connector is built on one base that guarantees typed failures (never an
 empty success), a credential named by a `METAFORGE_VENDOR_*` environment
@@ -697,21 +695,21 @@ runs against every connector; only a fake, sandbox-only vendor is wired so
 far (`METAFORGE_VENDOR_FAKE=on`), and real vendors (JLC, then PCBWay) join
 it once their API access is approved.
 
-Vendors with no ordering API are handed off instead (FORGE-614):
+Vendors with no ordering API are handed off instead:
 `vendor.handoffs` reads a small catalogue (`api_gateway/vendors/handoffs.py`:
 AISLER, Craftcloud, Xometry, SendCutSend) and, for a service and some work
 products, returns each vendor's upload page, accepted formats, the files
 that fit and their gateway download paths. It sends nothing; the person
 uploads.
 
-Before any quote exists, `cost.estimate_manufacturing` (FORGE-615) gives the
+Before any quote exists, `cost.estimate_manufacturing` gives the
 route phase a rough cost for CNC milling or sheet metal from figures the
 caller supplies with their sources (shop rate, setup hours, material density
 and price, stock or blank size, removal or cut rate). It is in-process
 arithmetic, always labelled an estimate and never a price, and a missing
 figure leaves what needs it unknown.
 
-**Processes and materials (FORGE-451, FORGE-446).** Beside the machines,
+**Processes and materials.** Beside the machines,
 the library holds manufacturing techniques and materials
 (`twin_core/library/catalog.py`, the same store file). A *process* has a
 family, the machine kinds that run it, the material families it makes, and
@@ -736,7 +734,7 @@ processes, materials by the stated stock names), or failing that the
 library's entries up to fifteen, and says which of the three it did. A
 library with no entries leaves the context text as it was.
 
-**Blender renders, and the GPL boundary (FORGE-627, FORGE-628).** Industrial
+**Blender renders, and the GPL boundary.** Industrial
 design reviews need to see a product, so MetaForge renders models with
 Blender 5.2.2 LTS in its own container (`blender-adapter`, port 8202):
 `blender.render` returns studio PNGs (named views and a turntable, Cycles on
@@ -763,7 +761,7 @@ your sole property", blender.org). Models are meshes: a STEP is converted to
 GLB first (the OCCT converter), and OBJ, STL and PLY are read Z-up, the CAD
 convention.
 
-`twin.render_work_product` (FORGE-630) renders a work product in the twin:
+`twin.render_work_product` renders a work product in the twin:
 it resolves the stored model, converts a STEP with the same OCCT converter
 the dashboard viewer uses, calls `blender.render` over MCP, and keeps the
 PNGs as a `render` work product linked to the model (`GENERATED_FROM`, with
@@ -771,10 +769,10 @@ the model's content hash). The tool is wired in both the gateway and the MCP
 sidecar (`api_gateway/twin/render_recorder.py`). The sidecar's standard
 `tools/call` reply turns any `images[].png_base64` in a result into MCP image
 content, so a harness such as Claude Code or Codex shows the renders in chat
-instead of reading base64 as text (FORGE-373); the gateway's own bridge uses
+instead of reading base64 as text; the gateway's own bridge uses
 the legacy dialect and still receives the base64.
 
-A render can show parts in their library appearances (FORGE-632):
+A render can show parts in their library appearances:
 `appearances` maps a part name to an appearance, which the renderer reads with
 `library.get_appearance` over the same bridge. The appearance's screen colour
 (sRGB, converted to Blender's scene-linear values in the GPL script) and its
@@ -782,7 +780,7 @@ render roughness and metallic set the part's surface, and the render node
 records the appearance and its version, so a render made before the
 appearance changed is recognisably stale.
 
-**Mechanical components (FORGE-449).** The library also holds mechanical
+**Mechanical components.** The library also holds mechanical
 parts, in the pattern CAD tools use for them. A *standard* part is built from
 its standard's dimension table (`twin_core/library/standard_parts.py`: ISO
 4762 socket head cap screws, ISO 4032 hex nuts, ISO 7089 plain washers, deep
@@ -796,7 +794,7 @@ whose OCCT build conflicts with CadQuery's in the CAD adapter. A seed of 69
 common parts (26 screws, 6 nuts, 6 washers, 31 bearings) builds from the
 tables.
 
-**Appearances: colour, material and finish (FORGE-627, FORGE-631).** A fourth
+**Appearances: colour, material and finish.** A fourth
 library kind holds what an industrial designer specifies for a surface: the
 finish (as made, painted, powder coated, anodised, plated, moulded-in colour,
 printed, textured, polished, brushed, bead blasted), the colour, a texture
@@ -811,8 +809,8 @@ figure and an assumed one is flagged for review. Entries follow the
 library's rules (fixed units, a source on every value, every change
 versioned) and are filtered by finish. No colours ship built in.
 
-**Plugin geometry always carries part colours (FORGE-637).** The 3D viewer
-shows only the colours written into a model's STEP (MET-537), and headless
+**Plugin geometry always carries part colours.** The 3D viewer
+shows only the colours written into a model's STEP, and headless
 FreeCAD and CadQuery write none unless told, so a table designed through the
 Claude Code plugin arrived grey. Now a `twin.commit_geometry` call from an
 external MCP client (a harness plugin: stdio, HTTP, or a client-mode phase
@@ -831,7 +829,7 @@ part name the STEP does not have is refused rather than skipped.
 finish from the library (the `colour-material-finish` skill) and to ask the
 person when none is chosen.
 
-**Ergonomic limits (FORGE-635).** A fifth kind holds design limits for the
+**Ergonomic limits.** A fifth kind holds design limits for the
 features people touch, press, reach or lift, in `check_ergonomics`' own
 vocabulary and units (grip diameter and width, handle length, finger
 clearance, button size, operating height, reach in mm; actuation force in
@@ -851,7 +849,7 @@ applying it silently. Paywalled standards (ISO 7250, EN 894) are not
 seeded; ANSUR II body measurements are measurements, not limits, and are
 not seeded either.
 
-**Material figures come only from the library (FORGE-446, FORGE-457).** The
+**Material figures come only from the library.** The
 hard-coded material tables are gone (they held sixteen generic names with no
 sources, and an unknown material silently got the density of water). Every
 material name a tool call carries is resolved against the library before the
@@ -874,7 +872,7 @@ closest entries, so a grade is never picked silently; a missing property is
 refused naming the entry and the fix (record it with its source, or pass the
 figure explicitly). An explicit figure from the caller always wins.
 
-**The machine library (FORGE-451).** Process ranking and DFM need a
+**The machine library.** Process ranking and DFM need a
 machine's real limits, so machines are recorded once, outside any project,
 in the gateway's SQLite store (`METAFORGE_MACHINE_LIBRARY_PATH`, default
 `~/.metaforge/machine_library.db`, code in `twin_core/library/machines.py`).
@@ -914,7 +912,7 @@ registers nothing. The controller's key stays on the gateway in an
 environment variable whose name must start `METAFORGE_MACHINE_`, so no
 other gateway secret can be sent to a machine URL.
 
-Jobs (FORGE-427/440, first slice). `library.dispatch_job` sends a G-code
+Jobs (first slice). `library.dispatch_job` sends a G-code
 work product to an idle in-house OctoPrint or Moonraker printer and starts
 it. It is the only physical action in MetaForge, so it is annotated
 destructive and held for a person on every call. The part's revision is
@@ -938,18 +936,18 @@ unknown is refused with `422 physical-verification-kept`.
 returns the questions and tells the agent to ask the user rather than answer
 them itself.
 
-### Caller-proposed tailoring (FORGE-481)
+### Caller-proposed tailoring
 
 `POST /v1/design-flows/propose` (and the `flow.propose` tool) optionally
 accepts `template` and `operations` written by the caller's own model, each
 operation being `drop_phase`, `add_deliverable`, `set_disciplines`,
-`set_model` or `declare_items` (FORGE-524: the named parts a phase writes, see
-[deliverable slots](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys-forge-524))
+`set_model` or `declare_items` (the named parts a phase writes, see
+[deliverable slots](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys))
 on a phase of the template, with a `rationale`. When either is
 supplied the server makes **no generator model call**, not even for the
 optional product-specific questions: it applies the operations with the same
 deterministic generator (`parse_caller_operations` then `build_proposal`),
-runs the same invariants (including FORGE-463's physical-verification rule),
+runs the same invariants (including the physical-verification rule),
 and holds the same single approval. Unlike the lenient server-model path, an
 unknown operation, template or phase, or an operation without a rationale, is
 refused with `422` and the reason, because a caller can read the refusal and
@@ -958,9 +956,9 @@ missing manufacturing route, target maturity or loads still returns
 `needs_input`. Provenance is recorded as `proposed_by` (`client`, `model`, from
 the optional `caller` object) on the approval and the response, the stored
 version has `origin: "caller"`, and `generatedBy` stays empty. Because no
-generator call is made, FORGE-476 usage records no `flow_generator` tokens.
+generator call is made, usage accounting records no `flow_generator` tokens.
 
-### The flow catalogue is served, not copied (FORGE-395)
+### The flow catalogue is served, not copied
 
 `GET /v1/design-flows` returns every launchable flow as the gateway will run
 it: phases, gate criteria, required deliverables, disciplines, the template
@@ -988,7 +986,7 @@ hidden and not silently offered. Offering it and refusing at `POST /v1/runs`
 reads as the gateway being broken rather than the flow being wrong; hiding it
 makes a flow that exists and cannot be seen.
 
-### Design flows on Temporal (FORGE-401)
+### Design flows on Temporal
 
 `/v1/runs` used to start a design flow as an `asyncio.create_task` in the
 gateway process against an `InMemoryRunStore`. A restart lost every in-flight
@@ -1014,16 +1012,16 @@ Four things are worth knowing about the shape:
 - **The flow is frozen and hashed at approval.** The workflow verifies the
   hash before it starts. Editing `spec.py` cannot change what an in-flight
   run is doing, and a completed run stays replayable.
-- **A gate that is not ready parks; it does not end the run** (FORGE-495). The
+- **A gate that is not ready parks; it does not end the run**. The
   reviewer can retry the phase, with the gate's findings and a reason given to
   the phase brain first, or reject. Earlier approved phases are kept. See
-  [Retrying a phase](architecture/design-flow-harness.md#retrying-a-phase-from-its-gate-forge-495).
-- **A gate can send the run back to an earlier phase** (FORGE-500). A verdict
+  [Retrying a phase](architecture/design-flow-harness.md#retrying-a-phase-from-its-gate).
+- **A gate can send the run back to an earlier phase**. A verdict
   that is really about earlier work (a failed safety factor needs a design
   change) takes a `rework` decision naming that phase: it and every later phase
   re-run with the reason and findings first, earlier approvals stand, and a
   per-run cap bounds the loops. See
-  [Sending a run back](architecture/design-flow-harness.md#sending-a-run-back-to-an-earlier-phase-forge-500).
+  [Sending a run back](architecture/design-flow-harness.md#sending-a-run-back-to-an-earlier-phase).
 - **A gate that expires is a rejection**, on a durable timer. Not "carry on",
   which would promote work nobody read; not "wait forever", which leaves a
   run that reads as live.
@@ -1031,7 +1029,7 @@ Four things are worth knowing about the shape:
   `continue_as_new` with the new frozen flow. No phase is in flight there, so
   nothing half-done is orphaned.
 
-### Flow templates and invariants (FORGE-397)
+### Flow templates and invariants
 
 The built-in flows live in `orchestrator/design_flow/templates/*.yaml`, one
 file per flow, each carrying a `version`. They were 530 lines of Python
@@ -1054,8 +1052,8 @@ at once rather than the first:
 | `no-pass-without-data` | a gate with no required deliverables cannot tell an empty phase from a complete one, and neither can the human answering it |
 | `gates-enforce-what-they-require` | `enforce_deliverables: false` under a gate is a decorative gate — worse than none, because the approval then looks like evidence |
 | `deliverable-is-producible` | a gate requiring `simulation_result` before any simulation phase is not a strict flow, it is one that always fails — and it fails at the gate rather than where somebody could have seen it |
-| `requirements-are-verified` | a twin full of claims nothing checks reads, on every dashboard, exactly like a product that passed. A phase with id `requirements` counts as recording requirements whatever artifact it uses, so a flow cannot pass this vacuously (FORGE-463) |
-| `physical-verification-kept` | a flow that commits a `cad_model` must keep a phase producing `simulation_result` or `verification_report`, or require a `test_plan` at a gate as the recorded alternative. While the loads are unknown, not even a test plan may replace it (FORGE-463) |
+| `requirements-are-verified` | a twin full of claims nothing checks reads, on every dashboard, exactly like a product that passed. A phase with id `requirements` counts as recording requirements whatever artifact it uses, so a flow cannot pass this vacuously |
+| `physical-verification-kept` | a flow that commits a `cad_model` must keep a phase producing `simulation_result` or `verification_report`, or require a `test_plan` at a gate as the recorded alternative. While the loads are unknown, not even a test plan may replace it |
 | `unique-phase-ids` | readiness, activity history and the live view all key on the phase id |
 | `has-phases` | — |
 
@@ -1071,7 +1069,7 @@ work. `METAFORGE_FLOW_ENGINE=in_process` selects the old executor explicitly,
 warns on every run start that runs are not durable, and is there for tests and
 for contributors without Docker.
 
-**Both engines run exactly the approved version** (FORGE-474). A run started
+**Both engines run exactly the approved version**. A run started
 with `flow_version_id` (what `flow.start_run` sends) is pinned to that stored
 version on either engine: Temporal receives its frozen flow as workflow input,
 and the in-process executor walks a definition rebuilt from the same frozen
@@ -1095,7 +1093,7 @@ with the reason when there are none. No run record is created. `health.check`
 reports the same thing under `design_flow_worker` (`ok`, `absent`, `unknown`).
 
 In dev, `docker-compose.override.yml` mounts the source into `design-flow-worker`
-the same way it does for the gateway and `temporal-worker` (FORGE-493), so a
+the same way it does for the gateway and `temporal-worker`, so a
 worker fix takes effect on `docker compose restart design-flow-worker` with no
 image pull. There is no auto reload, because a reload would kill a phase
 mid-turn; Temporal retries an activity a restart interrupts, but restart
@@ -1115,7 +1113,7 @@ opaquely; the flow state carries it as `error`, the failing phase shows
 `failed`, and the error is repeated in the phase summary.
 
 The worker is a separate process from the gateway, so it wires the two things
-a phase brain needs itself (FORGE-475):
+a phase brain needs itself:
 
 - **Tools.** It has no tool registry of its own. On the first phase it connects
   an MCP client to the `mcp-http` sidecar at `METAFORGE_MCP_URL` (default
@@ -1124,7 +1122,7 @@ a phase brain needs itself (FORGE-475):
   carry the run's project, actor `agent:design-flow` and one session per run.
   An unreachable sidecar, or one listing no tools, fails the phase with that
   reason rather than running it toolless.
-- **Writes (FORGE-487).** The sidecar would otherwise classify the worker as
+- **Writes.** The sidecar would otherwise classify the worker as
   `untrusted` and hold every write for a dashboard click. With
   `METAFORGE_MCP_SERVICE_KEY` set on both services (and nowhere else) the
   sidecar treats a call carrying it as `Caller.SERVICE`, but only after asking
@@ -1133,7 +1131,7 @@ a phase brain needs itself (FORGE-475):
   per-call hold; project, flow and run administration, human-authority tools
   and destructive tools are refused. Provenance carries run id, phase and
   model. With the key unset the worker stays untrusted and its writes are held.
-  See [Claude Code integration](integrations/claude-code.md#the-design-flow-worker-is-not-held-per-call-forge-487).
+  See [Claude Code integration](integrations/claude-code.md#the-design-flow-worker-is-not-held-per-call).
 - **Model.** It reads the same `METAFORGE_LLM_*` env and mounts the same
   `metaforge-home` and `codex-home` volumes as the gateway, so a phase resolves
   the provider and model a chat turn would. A phase whose every provider failed
@@ -1142,8 +1140,7 @@ a phase brain needs itself (FORGE-475):
   being retried.
 
 Both cadence drivers build the tier through one factory,
-`digital_twin.memory.consolidation.bootstrap.build_consolidation_stack()`
-(MET-723). Before that existed the wiring lived inside the gateway's lifespan,
+`digital_twin.memory.consolidation.bootstrap.build_consolidation_stack()`. Before that existed the wiring lived inside the gateway's lifespan,
 so a worker would accept `ConsolidationWorkflow` and then fail its activity with
 *"orchestrator was not bound before activity ran"* — the workflow was
 registered but could not run. A worker-driven pass is now measured end to end:
@@ -1151,12 +1148,12 @@ eight experiences fetched from pgvector, grouped, synthesized, and the
 execution `COMPLETED`.
 
 Because the worker synthesizes in its own process, it needs the same
-`OPEN_ROUTER_API_KEY` the gateway has (MET-724). Without it the tier degrades to
+`OPEN_ROUTER_API_KEY` the gateway has. Without it the tier degrades to
 `StubLLMClient`, which answers confidence `0.0`; the validator then rejects
 every insight, so a pass fetches and synthesizes and still accepts nothing.
 
 The event bus is additive by design: adopting Kafka does not change dispatch
-semantics, it adds a durable log, which is what makes the MET-567 deposit
+semantics, it adds a durable log, which is what makes the memory-tier deposit
 paths replayable rather than best-effort.
 
 ---
@@ -1384,7 +1381,7 @@ Each agent is a specialist for exactly one engineering discipline (1:1 ratio). A
 | State | Stateless — all persistent state lives in the Digital Twin |
 | Communication | Via Temporal workflows (agent-to-agent) and Kafka events |
 
-**Industrial design (FORGE-627, FORGE-633).** The Planner's discipline #2
+**Industrial design.** The Planner's discipline #2
 (form factor, ergonomics, DFM-aware aesthetics), scheduled there for Phase 2,
 now has its agent: `domain_agents/industrial_design/`. Its three skills are
 deterministic and carry no built-in data:
@@ -1702,7 +1699,7 @@ All tool adapters run in Docker containers with strict isolation:
 | Commit to Twin | Blocked | Requires explicit approval |
 | Execute tools | Allowed (sandboxed) | — |
 
-**Approval gates fail closed (FORGE-469).** The orchestrator's
+**Approval gates fail closed.** The orchestrator's
 `wait_for_approval` activity (used by `HardwareDesignWorkflow`) needs a
 Temporal runtime to wait for a human decision. When `temporalio` cannot be
 imported it raises `ApprovalRuntimeUnavailableError` and the run fails; it
@@ -1713,7 +1710,7 @@ missing dependency silently passed every human gate. Each refusal logs
 critical `ApprovalGateNoTemporalRuntime` alert. Tests that need a decided gate
 inject an explicit test double rather than relying on a missing runtime.
 
-**Iteration gates fail closed too (FORGE-470).** `IterationController`
+**Iteration gates fail closed too.** `IterationController`
 (the propose-validate-refine loop in `orchestrator/iteration_controller.py`)
 used to approve and merge a converged branch whenever no approval workflow was
 configured, even with `auto_approve` off. It now ends that loop `BLOCKED`,

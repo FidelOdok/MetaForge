@@ -148,11 +148,11 @@ Streamable HTTP at `/mcp`:
 |---|---|
 | `POST /mcp` with a JSON-RPC request | dispatches it; the answer is `application/json`, or `204` for a notification. `initialize` issues an `Mcp-Session-Id` the client echoes afterwards |
 | `POST /mcp` with a JSON-RPC response | the client answering a request the server sent (`elicitation/create`), routed by id and acknowledged `202` |
-| `GET /mcp` with `Mcp-Session-Id` | a long-lived SSE stream the server pushes requests down (FORGE-423) |
+| `GET /mcp` with `Mcp-Session-Id` | a long-lived SSE stream the server pushes requests down |
 | `DELETE /mcp` with `Mcp-Session-Id` | ends the session |
 
 A `tools/call` that is held for approval can also be answered as
-`text/event-stream` on its own POST (FORGE-464). This happens only when
+`text/event-stream` on its own POST. This happens only when
 the session declared form `elicitation` at `initialize` on revision
 `2025-06-18` or later, has no `GET /mcp` stream open, and sent the call
 with `text/event-stream` in `Accept`. The stream carries the
@@ -162,7 +162,7 @@ that is not held keeps its JSON response, so clients that never open
 rules and outcomes are in
 [Over HTTP: which stream carries the question](capability-matrix.md#over-http-which-stream-carries-the-question).
 
-#### Browser origins (FORGE-604)
+#### Browser origins
 
 Every request to `/mcp` (POST, GET and DELETE) and `/mcp/sse` has its
 `Origin` header checked, as the Streamable HTTP transport requires. A
@@ -188,10 +188,10 @@ rebinding defeats: a page re-points its own name at this machine, and its
 `Origin` and the request's `Host` then agree. `/health`, the OAuth pages and
 `/.well-known/*` are not checked.
 
-#### Protocol revisions (FORGE-599)
+#### Protocol revisions
 
 The server speaks the handshake revisions `2024-11-05`, `2025-06-18` and
-`2025-11-25`, and the handshake-free revision `2026-07-28` (FORGE-592).
+`2025-11-25`, and the handshake-free revision `2026-07-28`.
 `initialize` echoes the handshake revision a client asks for when it is one
 of these; a client ahead of us gets `2025-11-25`. The lists live in
 `mcp_core/protocol_versions.py`.
@@ -214,7 +214,7 @@ same endpoint:
 `2026-07-28` is served by default. `METAFORGE_MCP_MODERN=off` on the
 sidecar stops serving it (a rollback switch); a client asking for it then
 gets the error above and a dual-era client falls back to the handshake. The
-FORGE-600 preview switch, `METAFORGE_MCP_MODERN_PREVIEW`, no longer changes
+preview switch, `METAFORGE_MCP_MODERN_PREVIEW`, no longer changes
 anything.
 
 A `2026-07-28` request is served on its own, without a session:
@@ -241,7 +241,7 @@ A `2026-07-28` request is served on its own, without a session:
   revision forbids server-initiated requests. The question comes back inside
   the result instead (below).
 
-#### Session handles instead of `Mcp-Session-Id` (FORGE-602)
+#### Session handles instead of `Mcp-Session-Id`
 
 `2026-07-28` has no protocol session, so nothing ties one call to the next.
 Two things used to ride on the session: the project `project.open` scopes
@@ -260,7 +260,7 @@ caller they ride on a handle instead:
   authority, exactly as `X-MetaForge-Session` does. That header still works
   for any client that sends it, and handshake clients keep `Mcp-Session-Id`.
 
-#### `subscriptions/listen` (FORGE-603)
+#### `subscriptions/listen`
 
 `2026-07-28` replaced the `GET /mcp` stream and `resources/subscribe` with
 `subscriptions/listen`. Nothing this server offers changes while it is up:
@@ -274,7 +274,7 @@ for is supported), then closes the subscription gracefully with a
 as one `text/event-stream` response; on stdio the acknowledgement is written
 first. A malformed filter is `-32602`.
 
-#### Error codes for `2026-07-28` (FORGE-607)
+#### Error codes for `2026-07-28`
 
 `2026-07-28` marks `-32000` to `-32019` as legacy, and this server's own
 codes all sit there: tool execution `-32001`, unavailable `-32003`, read
@@ -292,7 +292,7 @@ gets them:
 
 Handshake clients keep the codes in the table above.
 
-#### Questions returned inside results (FORGE-601)
+#### Questions returned inside results
 
 For a `2026-07-28` `tools/call`, `prompts/get` or `resources/read` that
 needs a person, the call returns early with `resultType: "input_required"`:
@@ -310,7 +310,7 @@ order asked) and `params.requestState` echoed unchanged. The retry runs the
 call again from the start; each question finds its answer.
 
 - **Held writes.** The approval entry is opened on the first pass, before
-  the question, as for any inline approval (FORGE-473). The retry closes the
+  the question, as for any inline approval. The retry closes the
   same entry with the person's answer and an approver, then runs or refuses
   the write. A decision made in the dashboard in between wins. A retry
   without the answer asks again on the same entry.
@@ -332,7 +332,7 @@ From `2025-11-25` a client can declare elicitation as `{"form": {}}`,
 server asks is a form, so a client that declares only `url` is not asked
 inline and its held calls go to the dashboard.
 
-#### Held calls report themselves (FORGE-465)
+#### Held calls report themselves
 
 A `tools/call` held for the **dashboard** (the client cannot be asked
 inline) is not silent until it ends:
@@ -354,7 +354,7 @@ inline) is not silent until it ends:
   waits `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100), below common client
   tool timeouts (Claude Code: 120), so the server answers before the client
   gives up. The window travels on the approval ask and sets the hold's
-  ledger deadline (FORGE-466). A gate constructed with an explicit
+  ledger deadline. A gate constructed with an explicit
   `timeout_seconds` caps it.
 * **Outcome.** An unapproved call is a JSON-RPC error with
   `data.code = "approval_required"` and `data.outcome` one of `rejected`,
@@ -363,7 +363,7 @@ inline) is not silent until it ends:
   `window_seconds` when known. `message` states the same facts, because it
   is what a client shows the model.
 
-#### Expired inline questions are withdrawn (FORGE-472)
+#### Expired inline questions are withdrawn
 
 An inline (`elicitation`) hold uses the same window rule as a dashboard
 hold: `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100) without a progress
@@ -509,7 +509,7 @@ For long-running tools, the server can send progress updates:
 ### 4.4 `tool/error` — Error Response
 
 > **On the MCP dialect (`tools/call`), a tool that ran and refused is not an
-> error response at all (FORGE-419).** It comes back as a normal result with
+> error response at all.** It comes back as a normal result with
 > `isError: true`, the reason as text content, and `_meta.error` carrying
 > `toolId / details / durationMs` — plus `_meta.callId`, so a failed call
 > stays as citable as a successful one. See §4.4.1. The envelope below is the
@@ -532,7 +532,7 @@ For long-running tools, the server can send progress updates:
 }
 ```
 
-#### 4.4.1 `tools/call` — a tool that ran and refused (FORGE-419)
+#### 4.4.1 `tools/call` — a tool that ran and refused
 
 ```json
 {
@@ -569,7 +569,7 @@ is not something the model can fix by changing its arguments, and the
 unknown-tool error already carries a did-you-mean. The split is "did the
 tool run?", not "was there a problem".
 
-#### 4.4.2 Next-step hints and missing-field errors (FORGE-518)
+#### 4.4.2 Next-step hints and missing-field errors
 
 `twin.stage_work_product_file` returns its staged `file_path` plus a
 `next_step` string naming `freecad.import_step` (with that `file_path`) and
@@ -639,17 +639,17 @@ The same report carries `client.can_elicit` (see
 enforces: `open`, `api_key`, `oauth`, `api_key+oauth`, or `unknown` when
 the transport declared nothing) and `client` (the `clientInfo` from the
 `initialize` handshake, or from the request itself for a handshake-free
-2026-07-28 client (FORGE-696), plus `protocol_skew` when the revision the
+2026-07-28 client, plus `protocol_skew` when the revision the
 client asked for is not the one the server pinned). Both are described under
 [What is protecting this connection](capability-matrix.md#what-is-protecting-this-connection).
 
-The report also carries `llm_usage_24h` (FORGE-476): calls, prompt,
+The report also carries `llm_usage_24h`: calls, prompt,
 completion and cached-input tokens and cost over the trailing 24 hours, with
 `by_phase`, `by_role` and `by_model` breakdowns. `available: false` plus a
 `reason` means the usage store could not be read, which is not the same as
 nothing having been spent; a non-zero `calls_unpriced` means `cost_usd` is a
 lower bound. Details are in
-[Token and cost accounting](architecture/robust-harness-design.md#token-and-cost-accounting-forge-476).
+[Token and cost accounting](architecture/robust-harness-design.md#token-and-cost-accounting).
 
 `status` is `healthy` only if every adapter answered, `degraded`
 otherwise. `tools_registered` is a registry count and does not shrink
@@ -1057,7 +1057,7 @@ ENTRYPOINT ["python", "server.py"]
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `ghcr.io/fidelodok/metaforge-calculix-adapter`, published by CI (FORGE-587) |
+| Docker Image | `ghcr.io/fidelodok/metaforge-calculix-adapter`, published by CI |
 | Base Image | `python:3.11-slim` + `calculix-ccx` |
 | Transport | stdio |
 | Tools | `calculix.run_fea`, `calculix.run_thermal`, `calculix.validate_mesh` |
@@ -1074,7 +1074,7 @@ ENTRYPOINT ["python", "server.py"]
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `ghcr.io/fidelodok/metaforge-cadquery-adapter`, published by CI (FORGE-593) |
+| Docker Image | `ghcr.io/fidelodok/metaforge-cadquery-adapter`, published by CI |
 | Base Image | `python:3.11-slim` (multi-stage) |
 | Transport | stdio |
 | Tools | `cadquery.create_parametric`, `cadquery.boolean_operation`, `cadquery.get_properties`, `cadquery.export_geometry`, `cadquery.execute_script`, `cadquery.create_assembly`, `cadquery.generate_enclosure` |
@@ -1100,7 +1100,7 @@ ENTRYPOINT ["python", "server.py"]
 | Transport | stdio |
 | Tools | Stateful session API (`open_session`, `create_body`, `create_sketch`, `pad_sketch`, `execute_code`, `measure`, `export_model`, assembly joints, and more — 27 tools) plus a separate stateless legacy file-based surface (`export_geometry`, `generate_mesh`, `boolean_operation`, `get_properties`, `describe_step_file`, `create_parametric` — 6 tools) |
 
-#### Adapter images are built in CI (FORGE-513)
+#### Adapter images are built in CI
 
 The freecad and calculix adapters copy `mcp_core/`, `tool_registry/` and
 `observability/` into their images, so a fix in those packages reaches an
@@ -1122,7 +1122,7 @@ the published ones. `METAFORGE_ADAPTER_TAG` pins a commit SHA instead of
 
 :::note[This used to need a manual retag]
 
-Until FORGE-587 the compose file named `metaforge/<adapter>-adapter`, which
+The compose file used to name `metaforge/<adapter>-adapter`, which
 nothing published, so every host built locally — including the dev host whose
 load this workflow exists to remove. The documented fix was to `docker tag` the
 pulled image to the name compose expected. That step is gone: the names match
@@ -1146,7 +1146,7 @@ call also carried a `step_base64`.** The stashed value came straight off the
 adapter; anything carried back in is a copy of it, and a copy can only be equal
 or wrong. This precedence used to be the other way round, which let a single
 mistyped character in a 30,000-character base64 string silently replace a
-pristine blob (MET-684): a committed STEP contained `NAMED_URIT(*)` where the
+pristine blob: a committed STEP contained `NAMED_URIT(*)` where the
 fixed OCCT boilerplate reads `NAMED_UNIT(*)`, and the OCCT converter crashed
 parsing it. A divergence is repaired and logged as
 `geometry_commit_blob_diverged`, never silently.
@@ -1160,7 +1160,7 @@ must still commit.
 all — they just return a `cad_file` path on the shared adapter workspace both
 the gateway process and the adapter container mount. For these, pass that same
 path as `twin.commit_geometry`'s `file_path` argument instead: the server reads
-it directly off disk and base64-encodes it itself (FORGE-224), mirroring
+it directly off disk and base64-encodes it itself, mirroring
 `domain_agents.shared.commit_geometry.commit_geometry`'s own relative-path
 resolution (against `ADAPTER_WORKSPACE_DIR`, default `/workspace`) that the
 skill layer already used internally — this just makes the same ergonomics
@@ -1168,12 +1168,12 @@ available to a model calling `twin.commit_geometry` directly. `step_base64`
 still wins when given alongside `file_path`, same precedence as the
 session/obj_id path.
 
-### Twin adapter: item keys and revision history (FORGE-523)
+### Twin adapter: item keys and revision history
 
 The definition write tools (`twin.commit_geometry`, `twin.record_constraint_set`,
 `twin.record_engineering_entity` for `intent`/`stakeholder_need`/`objective`, and
 `twin.record_component_selection`) write each call as the next revision of an
-item (see [twin_schema.md section 2.30](twin_schema.md#230-items-and-revisions-definitions-vs-records-forge-522-forge-523)).
+item (see [twin_schema.md section 2.30](twin_schema.md#230-items-and-revisions-definitions-vs-records)).
 They accept three optional arguments, none of which the normal path needs.
 Each is a string or `null`; `null` or an empty string means not given.
 
@@ -1189,11 +1189,11 @@ carries `item_key`, `revision` and `item_ref` (`KEY@n`). The revision's author
 is the call context's `actor_id` and its `run_id` the context's design-flow run;
 agents never number revisions themselves.
 
-Inside a design-flow run (FORGE-525) a definition write is a **draft** in the
+Inside a design-flow run a definition write is a **draft** in the
 run's change set: its result adds `revision_status: "draft"` and a one-line
 `draft_note`, and the item's head does not move until the run's gate approves.
 The run's own reads see its drafts; other callers see approved heads only (see
-[twin_schema.md, Drafts, approval and closed drafts](twin_schema.md#drafts-approval-and-closed-drafts-forge-525)).
+[twin_schema.md, Drafts, approval and closed drafts](twin_schema.md#drafts-approval-and-closed-drafts)).
 
 `twin.item_history` (read-only, registered when the gateway or sidecar injects
 `item_history_reader`) takes `item_key` or the `node_id` of any revision, plus an
@@ -1216,7 +1216,7 @@ optional `project_id` when a key exists in several projects, and returns:
 An unknown key, or a node that is not a revision of any item (a record, or an
 unclassified type), is a tool error naming the reference.
 
-FORGE-525 read semantics. Both reads follow the calling run (the call
+Read semantics. Both reads follow the calling run (the call
 context's `run_id`):
 
 - `twin.item_history` lists the caller's own open drafts and never another
@@ -1232,11 +1232,11 @@ context's `run_id`):
   it), with an optional `project_id` when the key exists in several projects.
   `node_id` is no longer required when `item_key` is given.
 
-### Twin adapter: one home for requirements (FORGE-528)
+### Twin adapter: one home for requirements
 
 Requirement values live only in the constraint set (`twin.record_constraint_set`).
 No tool name or required argument changed; two tools behave differently (see
-[twin_schema.md, One home for requirements](twin_schema.md#one-home-for-requirements-forge-528)).
+[twin_schema.md, One home for requirements](twin_schema.md#one-home-for-requirements)).
 
 **`twin.record_document` with `document_type='prd'`** records the text as the
 prd's *prose* (background, scope, what is out of scope), as the next revision of
@@ -1266,11 +1266,11 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `ghcr.io/fidelodok/metaforge-kicad-adapter`, published by CI (FORGE-593) |
+| Docker Image | `ghcr.io/fidelodok/metaforge-kicad-adapter`, published by CI |
 | Base Image | `python:3.11-slim` (Debian trixie) + KiCad 9 (`kicad`, `kicad-symbols`, `kicad-footprints`, STEP models for the common families from `kicad-packages3d`), OpenJDK 25, Freerouting 2.5.0 (pinned, checksummed) |
 | Transport | HTTP JSON-RPC on port 8103 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_KICAD_URL` |
 | Phase 1 Tools | Read-only: `kicad.run_erc`, `kicad.run_drc`, `kicad.export_bom`, `kicad.export_netlist`, `kicad.get_pin_mapping`, `kicad.export_gerber`, `kicad.export_drill`, `kicad.export_pos` |
-| Phase 2 Tools | Write (a new project folder each, never the caller's files): `kicad.generate_schematic`, `kicad.generate_pcb`, `kicad.autoroute_pcb` (FORGE-683), `kicad.export_3d`, `kicad.render_pcb`, `kicad.update_components` (FORGE-684) |
+| Phase 2 Tools | Write (a new project folder each, never the caller's files): `kicad.generate_schematic`, `kicad.generate_pcb`, `kicad.autoroute_pcb`, `kicad.export_3d`, `kicad.render_pcb`, `kicad.update_components` |
 
 **Phase 1 tools (read-only)**:
 
@@ -1281,7 +1281,7 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 | `kicad.export_bom` | `bom_export` | Export BOM from schematic |
 | `kicad.export_gerber` | `gerber_export` | Export Gerber manufacturing files |
 
-**Phase 2 tools (write, FORGE-683)**:
+**Phase 2 tools (write)**:
 
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
@@ -1296,13 +1296,13 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `ghcr.io/fidelodok/metaforge-spice-adapter`, published by CI (FORGE-593; `tool_registry/tools/spice/Dockerfile`) |
+| Docker Image | `ghcr.io/fidelodok/metaforge-spice-adapter`, published by CI (`tool_registry/tools/spice/Dockerfile`) |
 | Base Image | `python:3.11-slim` + Debian `ngspice` |
 | Transport | HTTP JSON-RPC on port 8104 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_SPICE_URL` |
 | Workspace | Shares `adapter-workspace` with the KiCad adapter, so a netlist from `kicad.export_netlist` is simulated by path |
 | Tools | `spice.run_simulation` |
 
-**Tools provided** (FORGE-542):
+**Tools provided**:
 
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
@@ -1314,14 +1314,14 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `ghcr.io/fidelodok/metaforge-openfoam-adapter`, published by CI (FORGE-557; `tool_registry/tools/openfoam/Dockerfile`) |
+| Docker Image | `ghcr.io/fidelodok/metaforge-openfoam-adapter`, published by CI (`tool_registry/tools/openfoam/Dockerfile`) |
 | Base Image | `openfoam/openfoam11-paraview510` (OpenFOAM Foundation, Ubuntu 20.04), pinned by digest; Python 3.11 added with `uv` |
 | Transport | HTTP JSON-RPC on port 8300 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_OPENFOAM_URL` |
 | Workspace | Shares `adapter-workspace` with the CAD adapters; surfaces are read by path and cases are written under `openfoam/<run id>/case` |
 | Compose | Opt-in under the `cfd` profile; limited to 8 CPUs and 12 GB, one run at a time |
 | Tools | `openfoam.run_internal_flow` |
 
-**Tools provided** (FORGE-557):
+**Tools provided**:
 
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
@@ -1331,7 +1331,7 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 
 | Property | Details |
 |----------|---------|
-| Docker Image | `ghcr.io/fidelodok/metaforge-firmware-adapter`, published by CI (FORGE-674/677; `tool_registry/tools/firmware/Dockerfile`) |
+| Docker Image | `ghcr.io/fidelodok/metaforge-firmware-adapter`, published by CI (`tool_registry/tools/firmware/Dockerfile`) |
 | Base Image | `python:3.11-slim`, with PlatformIO 6.2.0 and its ST STM32 20.0.0 (STM32Cube for F4, F7, H7) and Espressif 32 7.1.3 (ESP-IDF) platforms installed at image build by building seed projects, and cppcheck and clang-tidy by checking one; Renode 1.17.0 (portable); Espressif QEMU 9.2.2 (xtensa); FreeRTOS-Kernel V11.3.1 sources |
 | Transport | HTTP JSON-RPC on port 8105 (`POST /mcp`, `GET /health`); the gateway and sidecar reach it through `METAFORGE_ADAPTER_FIRMWARE_URL` |
 | Workspace | Shares `adapter-workspace`; a project is copied to `firmware/<run id>/project` and built there, and emulator runs write under `firmware/emulation/<run id>` |
@@ -1339,7 +1339,7 @@ requirements: link `CS-...@n` instead of restating its values in the rationale.
 | Network | None needed at run time: toolchains, frameworks and Renode's SVD files are in the image, board data is read from the platforms' manifests, and PlatformIO's upgrade check is pushed out (offline it otherwise waits a minute per call). A build needing a package that is not in the image is `not_established`, naming the package |
 | Tools | `firmware.build`, `firmware.static_check`, `firmware.run_emulated` |
 
-**Tools provided** (FORGE-674, FORGE-675, FORGE-677):
+**Tools provided**:
 
 | Tool ID | Capability | Description |
 |---------|-----------|-------------|
@@ -1405,7 +1405,7 @@ All MCP errors use standard JSON-RPC 2.0 error codes plus MetaForge-specific app
 | `-32007` | `AUTH_DENIED` | A credential was rejected |
 
 These live in one place, `mcp_core/protocol.py`, and every module imports
-them. FORGE-388 found **three** tables that disagreed: `-32002` meant
+them. **Three** tables once disagreed: `-32002` meant
 `TOOL_TIMEOUT` in one, auth-denied in another, and the adapters emitted
 `-32004` for a missing resource — while the spec reserves `-32002` for
 exactly that. A client branching on `-32002` could not tell a missing
@@ -1469,7 +1469,7 @@ class ToolUnavailableError(McpError):
         )
 ```
 
-### Session edits persist; tool results (FORGE-512)
+### Session edits persist; tool results
 
 A session is one live FreeCAD document, so an edit made in one call is visible to the next.
 
@@ -1478,14 +1478,14 @@ A session is one live FreeCAD document, so an edit made in one call is visible t
 - `freecad.execute_code` returns the script's `result` variable as plain data under `result`: Vectors, Placements, bounding boxes and document objects are converted, anything else falls back to `repr`, and the value is capped at 20000 serialized characters (`result_truncated: true` when cut). When `result` is a document object it is still registered and returned as `obj_id`.
 - A script that assigns `obj.Shape` on a parametric object (for example a `Part::Box` primitive) used to lose the edit to the recompute that follows. The new shape is now pinned, and survives later `transform_object` calls.
 
-### Mesh coordinate frame (FORGE-505)
+### Mesh coordinate frame
 
 `freecad.generate_mesh` returns a mesh in the Digital Twin's coordinate frame: node coordinates equal the committed work product's `bounding_box` axes. If the STEP carries a Placement as an assembly transform (a part authored on a rotated plane), which gmsh's reader drops, the placement is baked into the geometry before meshing (`placement_baked: true`). The result also carries `surface_sets` (named surface set to `bbox_mm`, `centroid_mm`, `area_mm2`, `normal`), `mesh_bbox_mm` and `coordinate_frame: "twin"`, so a caller picks fixed and load faces by position. `calculix.run_fea`'s `load_force_n` is expressed in this same frame.
 
-`freecad.export_model` keeps the stored STEP in the same frame the twin records (FORGE-505). `Import.export` stores an object's Placement (from `transform_object`, or a sketch on a rotated plane) as an assembly transform that gmsh and `Part.Shape.read` drop, so the stored file's own axes used to differ from the committed `bounding_box` (cycled axes). Export now checks the file read placement-blind against the live placed bounding box and, on a mismatch, re-exports with placements baked into the geometry (Labels kept). The `volume_mm3`, `surface_area_mm2` and `bounding_box` it returns are measured from the exported bytes. The mesh-time bake above still covers STEPs stored before this fix.
+`freecad.export_model` keeps the stored STEP in the same frame the twin records. `Import.export` stores an object's Placement (from `transform_object`, or a sketch on a rotated plane) as an assembly transform that gmsh and `Part.Shape.read` drop, so the stored file's own axes used to differ from the committed `bounding_box` (cycled axes). Export now checks the file read placement-blind against the live placed bounding box and, on a mismatch, re-exports with placements baked into the geometry (Labels kept). The `volume_mm3`, `surface_area_mm2` and `bounding_box` it returns are measured from the exported bytes. The mesh-time bake above still covers STEPs stored before this fix.
 
-`freecad.export_model` can write part colours into the STEP (FORGE-517). Headless FreeCAD has no `ViewObject`, so `Import.export` writes no colours and parts rendered uniform grey, while the viewer takes colours only from the model's STEP (MET-537: no render-time palette). Pass `material` (a recorded material string such as `18 mm birch plywood` or `PETG`), `color` (`[r, g, b]`, 0-1 or 0-255) or `part_materials` (an assembly part Label mapped to its material, for per-part colours). The colour is authored into the final STEP bytes as `COLOUR_RGB` / `STYLED_ITEM` entities, after the FORGE-505 placement bake, so the bake's re-export cannot drop it. An explicit `color` wins over `material`; an unknown material (or none) leaves the part uncoloured, since no colour is invented. The table lives in `tool_registry/tools/freecad/materials_appearance.py` (case-insensitive whole-word match, first row wins, so `birch plywood` is matched before `plywood`) and is meant to move into the materials library (FORGE-445). The STEP-to-GLB converter keeps these colours (it reads them through XCAF), and the viewer renders the GLB's own materials. The colour chain is STEP `COLOUR_RGB` (sRGB, the table value) to GLB `baseColorFactor` (linear, as glTF requires; OCCT returns linear, so 0.87 is stored as about 0.73, which is correct and not a darkening) to renderer output (sRGB). The viewer pins `outputColorSpace` to sRGB and uses Neutral tone mapping (`dashboard/src/components/viewer/viewerColor.ts`) instead of ACES Filmic, which had been darkening and desaturating flat part colours, so a 0.87 table value displays as about 0.87. A converter test (`tools/occt-converter/test_convert.py`, `TestColourChain`) and a viewer test pin the chain.
+`freecad.export_model` can write part colours into the STEP. Headless FreeCAD has no `ViewObject`, so `Import.export` writes no colours and parts rendered uniform grey, while the viewer takes colours only from the model's STEP (no render-time palette). Pass `material` (a recorded material string such as `18 mm birch plywood` or `PETG`), `color` (`[r, g, b]`, 0-1 or 0-255) or `part_materials` (an assembly part Label mapped to its material, for per-part colours). The colour is authored into the final STEP bytes as `COLOUR_RGB` / `STYLED_ITEM` entities, after the placement bake, so the bake's re-export cannot drop it. An explicit `color` wins over `material`; an unknown material (or none) leaves the part uncoloured, since no colour is invented. The table lives in `tool_registry/tools/freecad/materials_appearance.py` (case-insensitive whole-word match, first row wins, so `birch plywood` is matched before `plywood`) and is meant to move into the materials library. The STEP-to-GLB converter keeps these colours (it reads them through XCAF), and the viewer renders the GLB's own materials. The colour chain is STEP `COLOUR_RGB` (sRGB, the table value) to GLB `baseColorFactor` (linear, as glTF requires; OCCT returns linear, so 0.87 is stored as about 0.73, which is correct and not a darkening) to renderer output (sRGB). The viewer pins `outputColorSpace` to sRGB and uses Neutral tone mapping (`dashboard/src/components/viewer/viewerColor.ts`) instead of ACES Filmic, which had been darkening and desaturating flat part colours, so a 0.87 table value displays as about 0.87. A converter test (`tools/occt-converter/test_convert.py`, `TestColourChain`) and a viewer test pin the chain.
 
-`freecad.import_step` keeps each part's STEP colour (FORGE-519). Headless `Import.insert` keeps geometry and Labels but drops colours, so a coloured part imported and exported again used to come out grey. The import reads the source file's colours per PRODUCT name (`read_step_colours` in `materials_appearance.py`, following `STYLED_ITEM` through the presentation style chain to `COLOUR_RGB`), records each component's colour on its session object (`metadata.color`, `metadata.color_source: imported_step`), and returns it per part as `parts[].color` (`[r, g, b]` 0-1, or `null` when the file has none). A component matches its product by Label (FreeCAD's `001` de-duplication suffix allowed); a single-component import whose file has exactly one colour takes that colour. `freecad.export_model` then uses the recorded colour as the lowest-priority source: `part_materials` first, then `color` / `material`, then the imported colour. A single imported part exports in its own colour, and an assembly built from imported parts gives each part (matched by its live Label) its recorded colour, so no colour arguments are needed to keep them.
+`freecad.import_step` keeps each part's STEP colour. Headless `Import.insert` keeps geometry and Labels but drops colours, so a coloured part imported and exported again used to come out grey. The import reads the source file's colours per PRODUCT name (`read_step_colours` in `materials_appearance.py`, following `STYLED_ITEM` through the presentation style chain to `COLOUR_RGB`), records each component's colour on its session object (`metadata.color`, `metadata.color_source: imported_step`), and returns it per part as `parts[].color` (`[r, g, b]` 0-1, or `null` when the file has none). A component matches its product by Label (FreeCAD's `001` de-duplication suffix allowed); a single-component import whose file has exactly one colour takes that colour. `freecad.export_model` then uses the recorded colour as the lowest-priority source: `part_materials` first, then `color` / `material`, then the imported colour. A single imported part exports in its own colour, and an assembly built from imported parts gives each part (matched by its live Label) its recorded colour, so no colour arguments are needed to keep them.
 
 `freecad.export_model` also returns `stored_properties` (`volume_mm3`, `surface_area_mm2`, `center_of_mass`, `bounding_box`), measured from the exact STEP it wrote. The geometry stash threads it into `twin.commit_geometry`, which records it in preference to the session object's measurement (`bbox_mm`, `volume_mm3`, `surface_area_mm2`, `center_of_mass_mm`). If the session's bounding box differs from the stored one by more than 0.01 mm, a `commit_geometry_session_stored_bbox_diverge` warning is logged and the session values are kept as `metadata.session_properties`.

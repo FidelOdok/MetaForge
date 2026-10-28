@@ -4,7 +4,7 @@
 > CLI grows new flags or transports.
 
 External MCP harnesses (Claude Code, Codex CLI, custom clients) drive
-MetaForge tools through the standalone server shipped in MET-337:
+MetaForge tools through the standalone server shipped:
 
 ```bash
 python -m metaforge.mcp --transport {stdio,http,sse} [--port N] [--adapters …]
@@ -38,7 +38,7 @@ automatically. Verify with `/mcp` — MetaForge should appear as
 connected. Tool ids look like `cadquery.create_parametric`,
 `knowledge.search`, etc.
 
-### Optional auth (MET-338)
+### Optional auth
 
 For non-local deployments, set `METAFORGE_MCP_API_KEY` on the launcher
 side and a matching `METAFORGE_MCP_CLIENT_KEY` in the harness env:
@@ -121,7 +121,7 @@ python -m metaforge.mcp --transport sse --port 8765
 ## Connecting MetaForge's own gateway to an external MCP server
 
 The reverse direction — pointing the gateway's agents at an external
-MCP server — uses the bridge factory shipped in MET-306:
+MCP server — uses the bridge factory shipped:
 
 ```bash
 # Gateway connects to a remote stdio MCP server (e.g. another
@@ -148,13 +148,13 @@ standalone server skips it when no service is supplied.
 
 ## Related
 
-- [MET-337](https://linear.app/metaforge/issue/MET-337) — standalone
+- — standalone
   MCP server entrypoint.
-- [MET-306](https://linear.app/metaforge/issue/MET-306) — gateway-side
+- — gateway-side
   bridge factory + StdioTransport.
-- [MET-338](https://linear.app/metaforge/issue/MET-338) — optional
+- — optional
   API-key auth on both transports.
-- `docs/integrations/claude-code.md` (MET-341) — full Claude Code
+- `docs/integrations/claude-code.md` — full Claude Code
   walkthrough.
-- `docs/integrations/codex.md` (MET-342) — full Codex/generic
+- `docs/integrations/codex.md` — full Codex/generic
   walkthrough.

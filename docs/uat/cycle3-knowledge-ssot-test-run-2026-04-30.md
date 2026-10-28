@@ -1,7 +1,7 @@
 # Cycle 3 — Knowledge + SSOT Test Run (2026-04-30)
 
 Layered run per the strategy in `~/.claude/plans/glowing-hatching-pascal.md`.
-Scope: knowledge service + Digital Twin / SSOT (MET-410, MET-411, MET-412, MET-413, MET-416, MET-419).
+Scope: knowledge service + Digital Twin / SSOT.
 
 ## Layer 1 — static + unit (PASS)
 
@@ -20,7 +20,7 @@ Files exercised:
 
 | Test file | Result | Notes |
 |---|---|---|
-| `tests/integration/test_cycle3_full_flow.py` (MET-402) | ✅ **10/10 passed** | All 9 cross-cutting Cycle 3 contracts hold (MET-382 through MET-389) |
+| `tests/integration/test_cycle3_full_flow.py` | ✅ **10/10 passed** | All 9 cross-cutting Cycle 3 contracts hold |
 | `tests/integration/test_agent_twin_integration.py` | ✅ passed | 8 tests, in-memory Twin |
 | `tests/integration/test_neo4j_startup.py` | ❌ 3/3 failed | `bolt://localhost:7687` unreachable — needs `docker compose up neo4j` |
 | `tests/integration/test_knowledge_service.py` | ⏸ blocked | needs live `pgvector` on `localhost:5432` |
@@ -28,15 +28,15 @@ Files exercised:
 | `tests/integration/test_knowledge_event_flow.py` | ⏸ blocked | same |
 | `tests/integration/test_knowledge_mcp_bootstrap.py` | ⏸ blocked | same |
 
-**Validated cross-cutting contracts (MET-402, all green)**:
-- MET-382 — Twin tools registered and reachable (5 tools)
-- MET-383 — Constraint tool returns structured `ConstraintEvaluationResult`
-- MET-384 — Resources surface lists and reads in same server
-- MET-385 — Standardised error envelope round-trips through `McpToolError`
-- MET-386 — OTel root span opened per `tool/call`
-- MET-387 — Per-call context (`project_id`+`actor_id`) propagates to handlers
-- MET-388 — Streaming progress events reach configured sink
-- MET-389 — Versioning helpers produce stable wire-format strings
+**Validated cross-cutting contracts (all green)**:
+- Twin tools registered and reachable (5 tools)
+- Constraint tool returns structured `ConstraintEvaluationResult`
+- Resources surface lists and reads in same server
+- Standardised error envelope round-trips through `McpToolError`
+- OTel root span opened per `tool/call`
+- Per-call context (`project_id`+`actor_id`) propagates to handlers
+- Streaming progress events reach configured sink
+- Versioning helpers produce stable wire-format strings
 - Resource URI scheme locked to `metaforge://`
 
 ## Layer 3 — live MCP smoke (BLOCKED)
@@ -65,64 +65,64 @@ curl -sX POST http://127.0.0.1:8765/mcp \
 Once gateway is reachable, run (in this order — Twin scenarios assume sources are ingested):
 
 ```
-/uat-cycle12 --tier 1 --scenario ingest        # MET-410
-/uat-cycle12 --tier 1 --scenario retrieval     # MET-411
-/uat-cycle12 --tier 1 --scenario twin-hp       # MET-412
-/uat-cycle12 --tier 1 --scenario constraint-hp # MET-413
-/uat-cycle12 --tier 1 --scenario resources-hp  # MET-416
+/uat-cycle12 --tier 1 --scenario ingest        #
+/uat-cycle12 --tier 1 --scenario retrieval     #
+/uat-cycle12 --tier 1 --scenario twin-hp       #
+/uat-cycle12 --tier 1 --scenario constraint-hp #
+/uat-cycle12 --tier 1 --scenario resources-hp  #
 /uat-cycle12 --tier 2 --scenario otel-continuity-probe
 /uat-cycle12 --tier 2 --scenario error-envelope-probe
 /uat-cycle12 --tier 2 --scenario versioning-probe
-/uat-cycle12 --tier 1 --scenario e2e-hp        # MET-419 — closes MET-409
+/uat-cycle12 --tier 1 --scenario e2e-hp        # closes
 ```
 
-Report lands at `docs/uat/uat-claude-driven-report-2026-04-30.md`. The agent auto-files Linear FAILs under MET-409.
+Report lands at `docs/uat/uat-claude-driven-report-2026-04-30.md`. The agent auto-files Linear FAILs under.
 
 ---
 
-## Linear follow-up tickets to file under MET-409
+## Linear follow-up tickets to file under
 
-These were surfaced during exploration of the codebase. They are *gaps in coverage*, not regressions — file them as children of MET-409 so UAT scenarios that hit these gaps can SKIP/BLOCK rather than register as red FAILs.
+These were surfaced during exploration of the codebase. They are *gaps in coverage*, not regressions — file them as children of the Cycle 3 UAT item so UAT scenarios that hit these gaps can SKIP/BLOCK rather than register as red FAILs.
 
 ### 1. Knowledge: project isolation enforcement
-- **Title**: `Enforce project_id scoping on knowledge.ingest + knowledge.search (MET-401 follow-through)`
+- **Title**: `Enforce project_id scoping on knowledge.ingest + knowledge.search (project isolation follow-through)`
 - **Labels**: `P1: MVP`, `area: knowledge`, `type: feature`
-- **Parent**: MET-409
-- **Description**: `digital_twin/knowledge/lightrag_service.py:235–276` has TODOs for MET-401. Ingest should auto-stamp the active `ctx.project_id`; search must filter by it. Without this, HP-INGEST-08, HP-RETR-09, HP-TWIN-10 cannot pass — they assert dual-project isolation.
+- **Parent**:
+- **Description**: `digital_twin/knowledge/lightrag_service.py:235–276` has TODOs for project isolation. Ingest should auto-stamp the active `ctx.project_id`; search must filter by it. Without this, HP-INGEST-08, HP-RETR-09, HP-TWIN-10 cannot pass — they assert dual-project isolation.
 - **Acceptance**: integration test that ingests under project A, searches under project B context, asserts zero hits.
 
 ### 2. Knowledge: reranker capability
 - **Title**: `Implement hybrid-search reranker for knowledge.search (HP-RETR-06)`
 - **Labels**: `P2`, `area: knowledge`, `type: feature`
-- **Parent**: MET-409
+- **Parent**:
 - **Description**: `tests/uat/scenarios/tier1/retrieval.md` HP-RETR-06 references a reranker step that has no implementation. Decide between LLM-based and cross-encoder approach (bge-reranker-base is the standard local option). UAT should mark SKIP until shipped.
 - **Acceptance**: `knowledge.search` accepts `rerank: true` flag; results re-ordered using a deterministic scorer; latency budget documented.
 
 ### 3. Knowledge + Constraint: latency SLO automation
 - **Title**: `Auto-gate latency SLOs in HP-RETR-08 and HP-CONS-09`
 - **Labels**: `P2`, `area: observability`, `type: test`
-- **Parent**: MET-409
+- **Parent**:
 - **Description**: HP-RETR-08 says `knowledge.search` p95 < 200ms at 1k docs. HP-CONS-09 says constraint p95 < 500ms at 1k nodes / 50 rules. Today the scenarios capture wall-clock but don't gate. Wire `metaforge_pgvector_search_duration_seconds` and the constraint engine histogram into a pytest assertion.
 - **Acceptance**: pytest fixture that pre-loads N samples, then asserts the Prometheus histogram p95 stays under threshold.
 
 ### 4. Twin: Neo4j ↔ in-memory parity test
 - **Title**: `Backend-parity test: same query, identical output across InMemory and Neo4j graph engines`
 - **Labels**: `P2`, `area: twin`, `type: test`
-- **Parent**: MET-409
+- **Parent**:
 - **Description**: `twin_core/api.py:182–226` chooses backend from env. No test asserts that `InMemoryGraphEngine` and `Neo4jGraphEngine` produce byte-identical results for the same `twin.find_by_property` / `twin.thread_for` / `twin.constraint_violations` inputs. Regression risk when switching backends in prod vs dev.
 - **Acceptance**: parametrised pytest that runs the same fixture-built scenario through both backends, diffs outputs.
 
 ### 5. Twin: AAS / SysML export round-trip
 - **Title**: `Add round-trip test coverage for twin_core/aas and twin_core/sysml exporters`
 - **Labels**: `P3`, `area: twin`, `type: test`
-- **Parent**: MET-409
+- **Parent**:
 - **Description**: `twin_core/aas/{exporter,mapper,packager}.py` and `twin_core/sysml/{mapper,evaluation,serializer}.py` exist with no test files. AASX and SysML v2 exports should be schema-validated.
 - **Acceptance**: pytest that exports a sample WorkProduct graph to AASX + SysML v2, validates each against published schema.
 
 ### 6. MCP: knowledge adapter standalone factory
 - **Title**: `Allow python -m metaforge.mcp to register knowledge adapter without gateway`
 - **Labels**: `P2`, `area: mcp`, `type: feature`
-- **Parent**: MET-409
+- **Parent**:
 - **Description**: `tool_registry/bootstrap.py:262–286` skips the knowledge adapter when no `KnowledgeService` is injected — that path only fires from the gateway. For dev-loop testing of the unified MCP, expose a `--enable-knowledge` flag (or env var) on `python -m metaforge.mcp` that constructs a default `LightRAGKnowledgeService` from `DATABASE_URL`. Removes the "must boot gateway to test knowledge" friction.
 - **Acceptance**: `python -m metaforge.mcp --transport http --enable-knowledge` registers `knowledge.search` + `knowledge.ingest` when `DATABASE_URL` is set; clean error if not.
 

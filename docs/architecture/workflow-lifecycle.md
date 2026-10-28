@@ -1,4 +1,4 @@
-# Workflow Lifecycle (FORGE-539)
+# Workflow Lifecycle
 
 A design flow used to be an ordered list of gated phases: a template tailored
 by a closed set of operations, run phase after phase, with a rework that sent
@@ -37,7 +37,7 @@ person did not state.
 - `POST /v1/design-flows/intent`, MCP `flow.compile_intent`
 - Every proposal carries it as `intentModel`.
 
-The compiler also reads (FORGE-569):
+The compiler also reads:
 
 - **Named dimensionless quantities**, such as "a factor of safety of at
   least 2" or "safety factor >= 1.5". They become criteria in their own unit
@@ -51,7 +51,7 @@ The compiler also reads (FORGE-569):
 - **Delivery requests.** "Deliver CAD, a drawing and validation evidence"
   fills `requested_deliverables` rather than becoming a constraint.
 
-**Reuse (FORGE-571).** When a proposal names a project, the gateway reads
+**Reuse.** When a proposal names a project, the gateway reads
 which reusable items (`intent`, `stakeholder_need`, `constraint_set`)
 already have a current revision. The phase that produces each such item
 becomes conditional on `<type>_current == false`, so a run skips it and the
@@ -62,7 +62,7 @@ The engineering phases are never skipped on the strength of old work.
 When a proposal is told the loads and the flow designs a physical part, the
 generator makes the analysis result (`simulation_result`) *required* at the
 gate whose phase only expected it, as a server change in the diff with its
-reason (FORGE-570). Before, a template's V&V gate required only a decision, so
+reason. Before, a template's V&V gate required only a decision, so
 a factor-of-safety requirement could be signed off with no analysis. A phase
 the caller dropped (choosing a required `test_plan` instead) or already
 tailored is left alone, and unknown loads change nothing, since there is no
@@ -114,7 +114,7 @@ The twin's own tools (`twin.record_document`, `twin.stage_work_product_file`,
 `twin.commit_geometry`, ...) record, stage or persist what another tool
 produced. When a deliverable has a non-twin producer (a solver, a CAD kernel,
 a component search), it is `UNAVAILABLE` unless one of those can run: the
-twin storing a result nobody produced does not count (FORGE-572). The twin's
+twin storing a result nobody produced does not count. The twin's
 tools still count towards `FULL`, since a result that cannot be recorded
 cannot reach the gate either. A deliverable only the twin produces (a
 decision, an intent) is judged on the twin's tools.
@@ -131,7 +131,7 @@ retried as-is; a design failure calls for replanning, a missing key for
 fixing configuration. Temporal records the class on the failed result
 (`forge-539-failure-class` patch); the in-process engine adds it to the error.
 
-## A repair that stops improving (FORGE-573)
+## A repair that stops improving
 
 Retries and reworks are capped (3 each), but a repair that changes nothing
 would use every one of them first. Each phase keeps its not-ready gate
@@ -173,7 +173,7 @@ Each phase gets four separate answers: `execution_status` (did it run),
 when a twin item it approved has since been superseded, `POTENTIALLY_INVALID`
 downstream of that) and `objective_status` (did its gate find the objective
 met). A pending phase with a blocking capability gap is `BLOCKED`, with the
-gap in its reasons, rather than `ELIGIBLE` (FORGE-572). The run gets a
+gap in its reasons, rather than `ELIGIBLE`. The run gets a
 completion verdict against the requirement matrix:
 
 | Classification | Meaning |
@@ -196,7 +196,7 @@ repeats verbatim.
 | `flow.patch` | Propose (held) or apply (approved) a patch. Downstream-approved, like `flow.propose`. On `core`. |
 | `workflow-lifecycle` skill | The reasoning contract, with a MetaForge binding table and the runtime gaps to report. |
 | `intent-to-verified-design` skill | The procedure, using the tools above. |
-| `source-engineering-values` skill | How a missing value is found and recorded with its source: a `design_value` entity whose `source` the twin checks, and a `limit_source` on each requirement (FORGE-586). |
+| `source-engineering-values` skill | How a missing value is found and recorded with its source: a `design_value` entity whose `source` the twin checks, and a `limit_source` on each requirement. |
 | Hooks (Claude Code) | SessionStart gives the working rules; PostToolUse on `flow.propose`/`flow.patch` restates that the result is held for a person. Stdlib only; `METAFORGE_PLUGIN_HOOKS=off` disables. |
 | Agents (Claude Code) | `metaforge-flow-planner` (plans and stops at the approval), `metaforge-run-verifier` (reports the verdict honestly). |
 | `/metaforge:verify`, `/metaforge:replan` | New workflows; on Codex, every workflow ships as a `<name>-workflow` skill. |

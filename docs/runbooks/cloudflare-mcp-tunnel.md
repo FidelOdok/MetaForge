@@ -5,8 +5,8 @@ Exposes the dev MCP HTTP sidecar (`mcp-http`, port `8765`) to **Claude cloud**
 public HTTPS hostname. No inbound ports are opened on the host; `cloudflared`
 makes an outbound-only connection to Cloudflare's edge.
 
-Tracking: **MET-482**. Builds on MET-479 (sidecar) and MET-338 (API-key auth).
-OAuth for the claude.ai connector is separate (MET-480) — this runbook covers
+Builds on the sidecar and the API-key auth.
+OAuth for the claude.ai connector is separate — this runbook covers
 the token-based static-key path.
 
 ## Architecture
@@ -81,8 +81,8 @@ local dev — use the public URL only in environments that need it.)
 ### claude.ai web connector
 
 The web connector UI can't send a static bearer token — it runs OAuth 2.1
-+ PKCE against the MCP server, which is implemented in **MET-480**
-(`metaforge/mcp/oauth.py`). To enable it:
++ PKCE against the MCP server, which is implemented in
+`metaforge/mcp/oauth.py`. To enable it:
 
 1. In `.env`, set `METAFORGE_OAUTH_LOGIN_SECRET` — the shared access secret
    the `/authorize` page asks for. Restart `mcp-http`.
@@ -111,11 +111,11 @@ The web connector UI can't send a static bearer token — it runs OAuth 2.1
 
 Identity is dev-grade (one shared secret; the operator name typed at sign-in
 is a label, not a verified identity). Registered clients and issued tokens
-survive a restart of `mcp-http` when `DATABASE_URL` is set (FORGE-697): they
+survive a restart of `mcp-http` when `DATABASE_URL` is set: they
 are kept in Postgres, in the `mcp_oauth_clients` and `mcp_oauth_tokens`
 tables, tokens by their SHA-256 only. Without a database they live in memory
 and a restart signs every client out. Federation to a real IdP is a tracked
-follow-up on MET-480.
+follow-up on.
 
 The OAuth flow claude.ai runs:
 

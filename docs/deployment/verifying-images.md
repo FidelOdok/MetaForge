@@ -21,7 +21,7 @@ repository's CI built.
 | `ghcr.io/fidelodok/metaforge-firmware-adapter` | Firmware build and emulation adapter (opt-in, `firmware` compose profile; PlatformIO with the STM32 and ESP32 platforms, Renode, Espressif QEMU) |
 | `ghcr.io/fidelodok/metaforge-occt` | STEP to GLB converter for the viewer |
 | `ghcr.io/fidelodok/metaforge-dashboard` | The production dashboard (static build behind nginx) |
-| `ghcr.io/fidelodok/metaforge-seaweedfs` | The object store: a byte-for-byte copy of the signed SeaweedFS release, mirrored by `mirror-images.yml` (FORGE-577) |
+| `ghcr.io/fidelodok/metaforge-seaweedfs` | The object store: a byte-for-byte copy of the signed SeaweedFS release, mirrored by `mirror-images.yml` |
 
 ## Verify a signature
 
@@ -105,7 +105,7 @@ SBOM is what you feed to a scanner to ask the second question.
 
 The image-only host update, `scripts/host_update.sh`, verifies every MetaForge
 image it pulls by digest, with the two flags above, and restarts nothing if any
-check fails (FORGE-593). See [Running a host from images](image-only-host.md).
+check fails. See [Running a host from images](image-only-host.md).
 Nothing else refuses an unverified image: `docker compose up` on a checkout
 still runs whatever it has.
 

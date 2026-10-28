@@ -400,7 +400,7 @@
         "type": "object"
       },
       "ApproveSketchRequest": {
-        "description": "Human sign-off on a design_sketch work product (follow-up to MET-740/747).",
+        "description": "Human sign-off on a design_sketch work product.",
         "properties": {
           "approved_by": {
             "anyOf": [
@@ -443,7 +443,7 @@
         "type": "object"
       },
       "ApproveTechnicalDrawingRequest": {
-        "description": "Human sign-off on a technical_drawing work product (FORGE-293).",
+        "description": "Human sign-off on a technical_drawing work product.",
         "properties": {
           "approved_by": {
             "anyOf": [
@@ -486,7 +486,7 @@
         "type": "object"
       },
       "AssemblyJoint": {
-        "description": "One mate/joint between two committed parts (FORGE-271).\n\nSame shape as ``AssemblyDescription['joints'][n]`` (``types/twin.ts``) /\nthe export panel's own ``JointRow`` -- a joint authored here and one\nauthored via the URDF/SDF/USD export form are structurally identical.",
+        "description": "One mate/joint between two committed parts.\n\nSame shape as ``AssemblyDescription['joints'][n]`` (``types/twin.ts``) /\nthe export panel's own ``JointRow`` -- a joint authored here and one\nauthored via the URDF/SDF/USD export form are structurally identical.",
         "properties": {
           "anchor": {
             "default": [
@@ -1512,7 +1512,7 @@
         "type": "object"
       },
       "BooleanCutRequest": {
-        "description": "Real boolean CSG operation between two committed CAD work products (MET-612).",
+        "description": "Real boolean CSG operation between two committed CAD work products.",
         "properties": {
           "cutter_node_id": {
             "minLength": 1,
@@ -1708,7 +1708,7 @@
         "type": "object"
       },
       "CallerOperation": {
-        "description": "One tailoring operation from the caller's model (FORGE-481).",
+        "description": "One tailoring operation from the caller's model.",
         "properties": {
           "op": {
             "title": "Op",
@@ -2084,7 +2084,7 @@
         "type": "object"
       },
       "ConfidenceTier": {
-        "description": "Provenance tier for a memory record.\n\nAligned with MET-462 property-extraction tiers so the same vocabulary\nflows from L1 extraction through to L3 reasoning:\n\n* ``VERBATIM`` \u2014 copied directly from a structured event field (1.0)\n* ``LLM_INFERRED`` \u2014 produced by an LLM synthesis step (0.6-0.8)\n* ``DERIVED`` \u2014 computed from other records (0.4-0.6)",
+        "description": "Provenance tier for a memory record.\n\nAligned with the property-extraction tiers so the same vocabulary\nflows from L1 extraction through to L3 reasoning:\n\n* ``VERBATIM`` \u2014 copied directly from a structured event field (1.0)\n* ``LLM_INFERRED`` \u2014 produced by an LLM synthesis step (0.6-0.8)\n* ``DERIVED`` \u2014 computed from other records (0.4-0.6)",
         "enum": [
           "verbatim",
           "llm_inferred",
@@ -2747,7 +2747,7 @@
         "type": "object"
       },
       "CreateProposalRequest": {
-        "description": "Body for ``POST /api/v1/assistant/proposals`` (MET-630).\n\nLets a human create a design-change proposal directly from the\ndashboard (e.g. a parameter-panel \"Regenerate\" button) \u2014 previously\nproposals could only be created by an agent calling the\n``twin.propose_change`` MCP tool.",
+        "description": "Body for ``POST /api/v1/assistant/proposals``.\n\nLets a human create a design-change proposal directly from the\ndashboard (e.g. a parameter-panel \"Regenerate\" button) \u2014 previously\nproposals could only be created by an agent calling the\n``twin.propose_change`` MCP tool.",
         "properties": {
           "agent_code": {
             "default": "human",
@@ -3110,7 +3110,7 @@
         "type": "object"
       },
       "DecisionRecord": {
-        "description": "Who decided, and through what (FORGE-507).",
+        "description": "Who decided, and through what.",
         "properties": {
           "agent": {
             "anyOf": [
@@ -3223,7 +3223,7 @@
         "type": "object"
       },
       "DeltaTransform": {
-        "description": "Delta of a dragged group: translation (mm), or \u2014 additively, MET-611 \u2014\na single-axis rotation or scale. Exactly one kind is populated per request,\nmatching whichever gizmo mode produced it on the client.",
+        "description": "Delta of a dragged group: translation (mm), or, additively,\na single-axis rotation or scale. Exactly one kind is populated per request,\nmatching whichever gizmo mode produced it on the client.",
         "properties": {
           "dx": {
             "default": 0.0,
@@ -3383,7 +3383,7 @@
                 "type": "null"
               }
             ],
-            "description": "For an agent decision, the agent that took it (FORGE-510)",
+            "description": "For an agent decision, the agent that took it",
             "title": "Decision Agent"
           },
           "decision_on_behalf_of": {
@@ -3395,7 +3395,7 @@
                 "type": "null"
               }
             ],
-            "description": "For an agent decision, the human it acted for (FORGE-507)",
+            "description": "For an agent decision, the human it acted for",
             "title": "Decision On Behalf Of"
           },
           "decision_reason": {
@@ -3419,7 +3419,7 @@
                 "type": "null"
               }
             ],
-            "description": "dashboard, cli or agent: where the decision was made (FORGE-507)",
+            "description": "dashboard, cli or agent: where the decision was made",
             "title": "Decision Surface"
           },
           "description": {
@@ -3443,7 +3443,7 @@
                 "type": "null"
               }
             ],
-            "description": "Project this proposal belongs to (for dashboard scoping, MET-518)",
+            "description": "Project this proposal belongs to (for dashboard scoping)",
             "title": "Project Id"
           },
           "requires_approval": {
@@ -3466,7 +3466,7 @@
           },
           "reviewer_verified": {
             "default": false,
-            "description": "Whether the reviewer identity was verified (FORGE-507)",
+            "description": "Whether the reviewer identity was verified",
             "title": "Reviewer Verified",
             "type": "boolean"
           },
@@ -3840,7 +3840,7 @@
         "type": "object"
       },
       "EmittedJoint": {
-        "description": "What was actually written for one joint, post type-resolution\n(FORGE-240) -- e.g. a revolute joint with caller-supplied limits is\nemitted as a real bounded ``revolute`` type, not the unlimited\n``continuous``/``PhysicsRevoluteJoint``-without-limits a caller might\notherwise assume from the input alone. Lets the reporting agent state\nwhat the file actually contains instead of guessing or fabricating.",
+        "description": "What was actually written for one joint, post type-resolution\n -- e.g. a revolute joint with caller-supplied limits is\nemitted as a real bounded ``revolute`` type, not the unlimited\n``continuous``/``PhysicsRevoluteJoint``-without-limits a caller might\notherwise assume from the input alone. Lets the reporting agent state\nwhat the file actually contains instead of guessing or fabricating.",
         "properties": {
           "limits": {
             "anyOf": [
@@ -4100,7 +4100,7 @@
         "type": "object"
       },
       "FeatureDiffResponse": {
-        "description": "``hasPreviousVersion`` is false for a work product that has never been\nsuperseded -- almost all of them. That is the ordinary answer, not an\nerror, so it comes back as an empty 200 (FORGE-709), matching\n``/twin/nodes/{id}/versions``, which reports an empty history the same\nway. A 404 from this route now means only that the node is unknown.",
+        "description": "``hasPreviousVersion`` is false for a work product that has never been\nsuperseded -- almost all of them. That is the ordinary answer, not an\nerror, so it comes back as an empty 200, matching\n``/twin/nodes/{id}/versions``, which reports an empty history the same\nway. A 404 from this route now means only that the node is unknown.",
         "properties": {
           "added": {
             "additionalProperties": true,
@@ -4605,7 +4605,7 @@
         "type": "object"
       },
       "FlowRunState": {
-        "description": "Live state of a design-flow run (FORGE-396).\n\nRead from the workflow itself rather than a cache of it. A projection that\ncan be stale is a live view that is sometimes wrong, and nothing on the\npage would say which.",
+        "description": "Live state of a design-flow run.\n\nRead from the workflow itself rather than a cache of it. A projection that\ncan be stale is a live view that is sometimes wrong, and nothing on the\npage would say which.",
         "properties": {
           "attempt": {
             "default": 1,
@@ -5337,7 +5337,7 @@
         "type": "object"
       },
       "GeneratedByView": {
-        "description": "The provider and model that actually produced a proposal (FORGE-468).",
+        "description": "The provider and model that actually produced a proposal.",
         "properties": {
           "fellBackFrom": {
             "anyOf": [
@@ -5367,7 +5367,7 @@
         "type": "object"
       },
       "GeometryDiffResponse": {
-        "description": "Real volume/area/bounding-box delta vs. a SUPERSEDES predecessor\n(FORGE-301) -- distinct from ``RevisionDiff`` above, which diffs one\nnode's own metadata revisions and never sees geometry changes.\n\n``has_previous_version`` is false for a work product that has never\nbeen superseded, which is almost all of them: that is an ordinary\nanswer, not an error, so the route returns it as a 200 with the\nmeasured fields left unset (FORGE-709), the same way\n``/nodes/{id}/versions`` answers an empty history with ``200`` and an\nempty list rather than a 404.",
+        "description": "Real volume/area/bounding-box delta vs. a SUPERSEDES predecessor\n -- distinct from ``RevisionDiff`` above, which diffs one\nnode's own metadata revisions and never sees geometry changes.\n\n``has_previous_version`` is false for a work product that has never\nbeen superseded, which is almost all of them: that is an ordinary\nanswer, not an error, so the route returns it as a 200 with the\nmeasured fields left unset, the same way\n``/nodes/{id}/versions`` answers an empty history with ``200`` and an\nempty list rather than a 404.",
         "properties": {
           "area_delta_mm2": {
             "anyOf": [
@@ -5965,7 +5965,7 @@
         "type": "object"
       },
       "HoldToolCallRequest": {
-        "description": "Park a tool call from another process in this ledger (FORGE-406).",
+        "description": "Park a tool call from another process in this ledger.",
         "properties": {
           "arguments": {
             "additionalProperties": true,
@@ -6169,7 +6169,7 @@
         "type": "object"
       },
       "IngestDocumentRequest": {
-        "description": "Request body for L1 document ingestion via ``KnowledgeService`` (MET-336).",
+        "description": "Request body for L1 document ingestion via ``KnowledgeService``.",
         "properties": {
           "content": {
             "minLength": 1,
@@ -6223,7 +6223,7 @@
         "type": "object"
       },
       "IngestDocumentResponse": {
-        "description": "L1 ingest result \u2014 mirrors ``IngestResult`` (MET-336).",
+        "description": "L1 ingest result \u2014 mirrors ``IngestResult``.",
         "properties": {
           "chunksIndexed": {
             "title": "Chunksindexed",
@@ -6330,7 +6330,7 @@
         "type": "object"
       },
       "InlineDecisionRequest": {
-        "description": "Body for ``POST /v1/approvals/{id}/inline-decision`` (FORGE-582).\n\nA person answered a gate in the MCP client's own prompt. The sidecar that\nasked records it here. ``approver`` is who the sidecar's authenticated\nMCP session says answered; it is recorded as verified only when this\nrequest itself is authenticated, the same rule a held tool call's inline\nanswer follows (FORGE-473).",
+        "description": "Body for ``POST /v1/approvals/{id}/inline-decision``.\n\nA person answered a gate in the MCP client's own prompt. The sidecar that\nasked records it here. ``approver`` is who the sidecar's authenticated\nMCP session says answered; it is recorded as verified only when this\nrequest itself is authenticated, the same rule a held tool call's inline\nanswer follows.",
         "properties": {
           "approver": {
             "anyOf": [
@@ -6485,7 +6485,7 @@
         "type": "object"
       },
       "InsightStatus": {
-        "description": "Lifecycle state of a stored insight (MET-455).\n\n* ``ACTIVE`` \u2014 trusted; surfaced to agents normally.\n* ``STALE_WARN`` \u2014 confidence has decayed (or re-validation failed);\n  flagged for review. Still readable, but consumers should treat it\n  with caution / prefer fresher insights.",
+        "description": "Lifecycle state of a stored insight.\n\n* ``ACTIVE`` \u2014 trusted; surfaced to agents normally.\n* ``STALE_WARN`` \u2014 confidence has decayed (or re-validation failed);\n  flagged for review. Still readable, but consumers should treat it\n  with caution / prefer fresher insights.",
         "enum": [
           "active",
           "stale_warn"
@@ -6581,7 +6581,7 @@
         "type": "object"
       },
       "InterferenceCheckResponse": {
-        "description": "Real boolean-intersection result between two named parts (FORGE-272)\n-- a pairwise clearance/interference check, not an ISO 286 fit\nclassification (which this capability deliberately does not attempt;\nsee ``api_gateway.twin.interference_check``'s module docstring).",
+        "description": "Real boolean-intersection result between two named parts\n-- a pairwise clearance/interference check, not an ISO 286 fit\nclassification (which this capability deliberately does not attempt;\nsee ``api_gateway.twin.interference_check``'s module docstring).",
         "properties": {
           "interference_area_mm2": {
             "title": "Interference Area Mm2",
@@ -6798,7 +6798,7 @@
         "type": "object"
       },
       "ItemLessonResponse": {
-        "description": "A rejected revision, kept as \"already tried, failed because\" (FORGE-530).",
+        "description": "A rejected revision, kept as \"already tried, failed because\".",
         "properties": {
           "lesson": {
             "title": "Lesson",
@@ -7290,7 +7290,7 @@
         "type": "object"
       },
       "JointSpec": {
-        "description": "One joint between two parts \u2014 the same shape FreeCAD's\n``add_assembly_joint``/``list_joints`` already produce, so a caller can\npass through what MET-721 reads from a live session, or supply a saved\njoint list manually.",
+        "description": "One joint between two parts \u2014 the same shape FreeCAD's\n``add_assembly_joint``/``list_joints`` already produce, so a caller can\npass through what is read from a live session, or supply a saved\njoint list manually.",
         "properties": {
           "anchor": {
             "description": "Anchor point (mm).",
@@ -7828,7 +7828,7 @@
         "type": "object"
       },
       "MalformedBudgetResponse": {
-        "description": "A budget this response had to ignore, and why (FORGE-414).\n\nPreviously these were a server-side warning only, so the tab rendered no\nbudget row and the reader concluded nobody had set one. Six of the ten\nbudgets in the live twin were in that state. Naming them here costs one\nfield and turns \"there is no budget\" into \"your budget is unusable, here\nis what it needs\".",
+        "description": "A budget this response had to ignore, and why.\n\nPreviously these were a server-side warning only, so the tab rendered no\nbudget row and the reader concluded nobody had set one. Six of the ten\nbudgets in the live twin were in that state. Naming them here costs one\nfield and turns \"there is no budget\" into \"your budget is unusable, here\nis what it needs\".",
         "properties": {
           "detail": {
             "title": "Detail",
@@ -7904,7 +7904,7 @@
         "type": "object"
       },
       "ManufacturingContextBody": {
-        "description": "What the project can actually be made with (FORGE-463).",
+        "description": "What the project can actually be made with.",
         "properties": {
           "machineIds": {
             "items": {
@@ -8726,7 +8726,7 @@
         "type": "object"
       },
       "NamedFace": {
-        "description": "One geometric face of a generated mesh (FORGE-277).\n\nMirrors ``freecad.list_named_faces``'/``generate_mesh``'s ``faces``\ntable (FORGE-239) in the dashboard's camelCase shape -- real\ncoordinates for a face, not just its opaque gmsh-assigned name.",
+        "description": "One geometric face of a generated mesh.\n\nMirrors ``freecad.list_named_faces``'/``generate_mesh``'s ``faces``\ntable in the dashboard's camelCase shape -- real\ncoordinates for a face, not just its opaque gmsh-assigned name.",
         "properties": {
           "areaMm2": {
             "title": "Areamm2",
@@ -10222,7 +10222,7 @@
         "type": "object"
       },
       "RecordPinResponse": {
-        "description": "One item revision a record depends on (FORGE-527).",
+        "description": "One item revision a record depends on.",
         "properties": {
           "itemKey": {
             "title": "Itemkey",
@@ -10319,7 +10319,7 @@
         "type": "object"
       },
       "RecordStalenessResponse": {
-        "description": "Whether a record is still valid evidence (FORGE-527, spec section 20).",
+        "description": "Whether a record is still valid evidence (spec section 20).",
         "properties": {
           "reason": {
             "anyOf": [
@@ -10873,7 +10873,7 @@
         "type": "object"
       },
       "ResolveHoldRequest": {
-        "description": "Close a hold nobody is waiting for any more (FORGE-466).",
+        "description": "Close a hold nobody is waiting for any more.",
         "properties": {
           "approver": {
             "anyOf": [
@@ -11180,7 +11180,7 @@
         "type": "object"
       },
       "RotationDelta": {
-        "description": "Single-axis rotation delta of a dragged group (MET-611).",
+        "description": "Single-axis rotation delta of a dragged group.",
         "properties": {
           "angle_deg": {
             "title": "Angle Deg",
@@ -11661,7 +11661,7 @@
         "type": "object"
       },
       "ScaleDelta": {
-        "description": "Single-axis scale delta of a dragged group (MET-611).",
+        "description": "Single-axis scale delta of a dragged group.",
         "properties": {
           "axis": {
             "enum": [
@@ -11717,7 +11717,7 @@
           },
           "persist": {
             "default": true,
-            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the pre-MET-740 throwaway-only behavior.",
+            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the earlier throwaway-only behavior.",
             "title": "Persist",
             "type": "boolean"
           },
@@ -12279,7 +12279,7 @@
         "type": "object"
       },
       "SessionEventCreateRequest": {
-        "description": "Append one event to a session timeline.\n\n``type`` is the normalized capture vocabulary shared by every client\nadapter (MET-497): thought / action / decision / observation / error /\nresult.",
+        "description": "Append one event to a session timeline.\n\n``type`` is the normalized capture vocabulary shared by every client\nadapter: thought / action / decision / observation / error /\nresult.",
         "properties": {
           "data": {
             "additionalProperties": true,
@@ -12739,7 +12739,7 @@
         "type": "object"
       },
       "SimulationResultResponse": {
-        "description": "One FEA result, in the dashboard's camelCase shape (FORGE-279).",
+        "description": "One FEA result, in the dashboard's camelCase shape.",
         "properties": {
           "analysedGeometry": {
             "anyOf": [
@@ -12941,7 +12941,7 @@
         "type": "object"
       },
       "SlotView": {
-        "description": "A deliverable slot: one item the phase writes (FORGE-524).",
+        "description": "A deliverable slot: one item the phase writes.",
         "properties": {
           "derived": {
             "default": false,
@@ -13060,7 +13060,7 @@
         "type": "object"
       },
       "SourceSummaryResponse": {
-        "description": "One row from ``GET /knowledge/sources`` \u2014 mirrors ``SourceSummary`` (MET-411).",
+        "description": "One row from ``GET /knowledge/sources`` \u2014 mirrors ``SourceSummary``.",
         "properties": {
           "fragmentCount": {
             "title": "Fragmentcount",
@@ -13346,7 +13346,7 @@
         "type": "string"
       },
       "TechnicalDrawingDimension": {
-        "description": "One toleranced dimension on a technical_drawing (FORGE-293).",
+        "description": "One toleranced dimension on a technical_drawing.",
         "properties": {
           "feature": {
             "title": "Feature",
@@ -13375,7 +13375,7 @@
         "type": "object"
       },
       "TechnicalDrawingGdtCallout": {
-        "description": "One GD&T callout (ASME Y14.5 style) on a technical_drawing (FORGE-293).",
+        "description": "One GD&T callout (ASME Y14.5 style) on a technical_drawing.",
         "properties": {
           "datum_refs": {
             "items": {
@@ -13406,7 +13406,7 @@
         "type": "object"
       },
       "TechnicalDrawingListResponse": {
-        "description": "A part's real recorded technical drawings, oldest first (FORGE-293).",
+        "description": "A part's real recorded technical drawings, oldest first.",
         "properties": {
           "drawings": {
             "items": {
@@ -13511,7 +13511,7 @@
         "type": "object"
       },
       "TechnicalDrawingSurfaceFinish": {
-        "description": "One surface-finish requirement on a technical_drawing (FORGE-293).",
+        "description": "One surface-finish requirement on a technical_drawing.",
         "properties": {
           "feature": {
             "title": "Feature",
@@ -13900,7 +13900,7 @@
         "type": "object"
       },
       "TwinEndpointResponse": {
-        "description": "What an edge points at when it is not a listed work product (FORGE-704).\n\nThe relationships view lists work products only, but an edge can run to a\nconstraint, a baseline, a BOM item or an engineering entity. Without a name\nand kind for those the dashboard could not draw the other end of the edge\nand dropped the edge, without saying so.",
+        "description": "What an edge points at when it is not a listed work product.\n\nThe relationships view lists work products only, but an edge can run to a\nconstraint, a baseline, a BOM item or an engineering entity. Without a name\nand kind for those the dashboard could not draw the other end of the edge\nand dropped the edge, without saying so.",
         "properties": {
           "kind": {
             "title": "Kind",
@@ -14133,7 +14133,7 @@
         "type": "object"
       },
       "TwinNodeScriptResponse": {
-        "description": "The current generation script text for a CAD_MODEL node (MET-630).",
+        "description": "The current generation script text for a CAD_MODEL node.",
         "properties": {
           "git_commit_sha": {
             "anyOf": [
@@ -14358,7 +14358,7 @@
         "type": "object"
       },
       "UpdateThreadScopeRequest": {
-        "description": "Body for ``PATCH /api/v1/chat/threads/{id}/scope`` (MET-580).\n\nRescopes an EXISTING thread in place, preserving its conversation \u2014 unlike\n``CreateThreadRequest``, which always starts a fresh thread.",
+        "description": "Body for ``PATCH /api/v1/chat/threads/{id}/scope``.\n\nRescopes an EXISTING thread in place, preserving its conversation \u2014 unlike\n``CreateThreadRequest``, which always starts a fresh thread.",
         "properties": {
           "scope_entity_id": {
             "description": "ID of the scoped entity",
@@ -14437,7 +14437,7 @@
           },
           "persist": {
             "default": true,
-            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the pre-MET-740 throwaway-only behavior.",
+            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the earlier throwaway-only behavior.",
             "title": "Persist",
             "type": "boolean"
           },
@@ -14681,7 +14681,7 @@
           },
           "persist": {
             "default": true,
-            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the pre-MET-740 throwaway-only behavior.",
+            "description": "Commit this export as a robot_description Twin work product (default on). Set false to keep the earlier throwaway-only behavior.",
             "title": "Persist",
             "type": "boolean"
           },
@@ -15230,7 +15230,7 @@
     },
     "/v1/approvals/{approval_id}/inline-decision": {
       "post": {
-        "description": "Record a gate decision a person gave in the MCP client's chat (FORGE-582).\n\nGates only: a held tool call's inline answer has its own route\n(``/v1/tool-approvals/{id}/resolve``). The decision goes through the same\n``service.decide`` as a dashboard click, so a gate that is not ready\nstill cannot be approved, and retry and rework caps still apply.",
+        "description": "Record a gate decision a person gave in the MCP client's chat.\n\nGates only: a held tool call's inline answer has its own route\n(``/v1/tool-approvals/{id}/resolve``). The decision goes through the same\n``service.decide`` as a dashboard click, so a gate that is not ready\nstill cannot be approved, and retry and rework caps still apply.",
         "operationId": "decide_inline_v1_approvals__approval_id__inline_decision_post",
         "parameters": [
           {
@@ -15348,7 +15348,7 @@
         ]
       },
       "post": {
-        "description": "Create a design-change proposal directly from a human (MET-630).\n\nSame underlying ``ApprovalWorkflow.propose_change`` an agent's\n``twin.propose_change`` MCP call uses \u2014 a human (e.g. via a dashboard\nparameter panel) can submit one just as well, and it goes through the\nidentical review/apply pipeline (``decide`` \u2192 apply executor).",
+        "description": "Create a design-change proposal directly from a human.\n\nSame underlying ``ApprovalWorkflow.propose_change`` an agent's\n``twin.propose_change`` MCP call uses \u2014 a human (e.g. via a dashboard\nparameter panel) can submit one just as well, and it goes through the\nidentical review/apply pipeline (``decide`` \u2192 apply executor).",
         "operationId": "create_proposal_v1_assistant_proposals_post",
         "requestBody": {
           "content": {
@@ -15615,7 +15615,7 @@
     },
     "/v1/bom": {
       "get": {
-        "description": "List BOM components, optionally scoped to a project and/or filtered\nby ``category`` (case-insensitive exact match against\n``BOMItem.specifications.category``, e.g. ``category=fastener`` for a\nfastener list -- FORGE-294, gap G-H2).\n\nEmpty (``{components: [], total: 0}``) when the project has no BOM \u2014 not a\n404, so the dashboard renders a clean empty state.",
+        "description": "List BOM components, optionally scoped to a project and/or filtered\nby ``category`` (case-insensitive exact match against\n``BOMItem.specifications.category``, e.g. ``category=fastener`` for a\nfastener list, gap G-H2).\n\nEmpty (``{components: [], total: 0}``) when the project has no BOM \u2014 not a\n404, so the dashboard renders a clean empty state.",
         "operationId": "list_bom_v1_bom_get",
         "parameters": [
           {
@@ -15681,7 +15681,7 @@
     },
     "/v1/bom/hierarchical": {
       "get": {
-        "description": "Derive the hierarchical BOM (EBOM) -- FORGE-267, gap G-C3 -- from\nevery \"product\"-kind HierarchyNode's CONTAINS tree in a project.\n\nEmpty (not an error) when the project has no product hierarchy yet\n(FORGE-260's tools haven't been used for it) -- matches the flat BOM's\nown convention.",
+        "description": "Derive the hierarchical BOM (EBOM) from\nevery \"product\"-kind HierarchyNode's CONTAINS tree in a project.\n\nEmpty (not an error) when the project has no product hierarchy yet\n(the hierarchy tools haven't been used for it) -- matches the flat BOM's\nown convention.",
         "operationId": "list_hierarchical_bom_v1_bom_hierarchical_get",
         "parameters": [
           {
@@ -16687,7 +16687,7 @@
     },
     "/v1/chat/threads/{thread_id}/scope": {
       "patch": {
-        "description": "Rescope an EXISTING thread in place (MET-580).\n\nUnlike ``POST /threads``, this preserves the conversation \u2014 the same\nthread continues, and its next turn's project brief (if scoped to a\nproject) reflects the new scope. The agent-callable ``chat.set_project_scope``\nnative tool goes through the same ``apply_thread_scope`` helper, so a human\nhitting this endpoint and the agent switching scope mid-turn behave\nidentically and both broadcast the same ``scope.changed`` SSE event.",
+        "description": "Rescope an EXISTING thread in place.\n\nUnlike ``POST /threads``, this preserves the conversation \u2014 the same\nthread continues, and its next turn's project brief (if scoped to a\nproject) reflects the new scope. The agent-callable ``chat.set_project_scope``\nnative tool goes through the same ``apply_thread_scope`` helper, so a human\nhitting this endpoint and the agent switching scope mid-turn behave\nidentically and both broadcast the same ``scope.changed`` SSE event.",
         "operationId": "update_thread_scope_v1_chat_threads__thread_id__scope_patch",
         "parameters": [
           {
@@ -16781,7 +16781,7 @@
     },
     "/v1/chat/tool_approvals": {
       "get": {
-        "description": "Tool-call approvals: the ones awaiting a decision, or every one.\n\nOverdue holds are expired first, so nothing listed as pending is a call\nwhose waiter has already given up (FORGE-466). ``status=all`` is the audit\nview (FORGE-473): every entry whichever route answered it, each carrying\nits ``route``, outcome and approver.\n\n``project_id`` scopes the queue. Unscoped before, so a reviewer working\non one project saw every project's held writes in one list -- and a held\nwrite names a tool and a caller, not a product, so there was no way to\ntell from the row which one it belonged to. Approvals whose tool call\ncarried no project are counted rather than dropped: an approval that\nquietly disappears is the one nobody answers.",
+        "description": "Tool-call approvals: the ones awaiting a decision, or every one.\n\nOverdue holds are expired first, so nothing listed as pending is a call\nwhose waiter has already given up. ``status=all`` is the audit\nview: every entry whichever route answered it, each carrying\nits ``route``, outcome and approver.\n\n``project_id`` scopes the queue. Unscoped before, so a reviewer working\non one project saw every project's held writes in one list -- and a held\nwrite names a tool and a caller, not a product, so there was no way to\ntell from the row which one it belonged to. Approvals whose tool call\ncarried no project are counted rather than dropped: an approval that\nquietly disappears is the one nobody answers.",
         "operationId": "list_pending_approvals_v1_chat_tool_approvals_get",
         "parameters": [
           {
@@ -16843,7 +16843,7 @@
         ]
       },
       "post": {
-        "description": "Create a held approval and return it.\n\nThis exists because the approval store is process-level (an\n``InMemoryRunStore`` in *this* process), and the MCP sidecar is a\ndifferent process. Before FORGE-406 a sidecar could only hold calls in\nits own memory, where the dashboard \u2014 served from here \u2014 would never see\nthem. So the sidecar parks them here instead, and there is exactly one\nledger rather than one per process.\n\nA second store would have been the more obvious fix and the wrong one:\ntwo queues means a reviewer clearing one while the other fills, and no\npage that shows both.",
+        "description": "Create a held approval and return it.\n\nThis exists because the approval store is process-level (an\n``InMemoryRunStore`` in *this* process), and the MCP sidecar is a\ndifferent process. A sidecar used to hold calls only in\nits own memory, where the dashboard \u2014 served from here \u2014 would never see\nthem. So the sidecar parks them here instead, and there is exactly one\nledger rather than one per process.\n\nA second store would have been the more obvious fix and the wrong one:\ntwo queues means a reviewer clearing one while the other fills, and no\npage that shows both.",
         "operationId": "hold_tool_call_v1_chat_tool_approvals_post",
         "requestBody": {
           "content": {
@@ -16925,7 +16925,7 @@
         ]
       },
       "post": {
-        "description": "Record the decision, attributed to whoever made this request.\n\nThe identity comes from the request, not the body (FORGE-393). A client\ncannot nominate the approver, which is the whole point: some tools write\nthe approver's name down as their result.",
+        "description": "Record the decision, attributed to whoever made this request.\n\nThe identity comes from the request, not the body. A client\ncannot nominate the approver, which is the whole point: some tools write\nthe approver's name down as their result.",
         "operationId": "submit_tool_approval_v1_chat_tool_approvals__run_id__post",
         "parameters": [
           {
@@ -17617,7 +17617,7 @@
     },
     "/v1/constraint/synthesize": {
       "post": {
-        "description": "Turn a drag delta into a parametric constraint, and \u2014 when the dragged\ngroup maps to a live FreeCAD session object (``session_id`` + ``obj_id``) \u2014\n**bind it into the model** so Apply re-parameterizes and re-solves (MET-531).\n\nWithout a session/object it stays a suggestion-only stub (MET-519). Binding\nis best-effort: an adapter error leaves the suggestion intact with\n``bound=False`` and a ``binding_error``.",
+        "description": "Turn a drag delta into a parametric constraint, and \u2014 when the dragged\ngroup maps to a live FreeCAD session object (``session_id`` + ``obj_id``) \u2014\n**bind it into the model** so Apply re-parameterizes and re-solves.\n\nWithout a session/object it stays a suggestion-only stub. Binding\nis best-effort: an adapter error leaves the suggestion intact with\n``bound=False`` and a ``binding_error``.",
         "operationId": "synthesize_constraint_v1_constraint_synthesize_post",
         "requestBody": {
           "content": {
@@ -18074,7 +18074,7 @@
     },
     "/v1/design-flows/propose": {
       "post": {
-        "description": "Tailor a template to a project's intent, and hold it for a human.\n\nThe response carries an ``approvalId``, not a run. FORGE-398's rule is\nthat nothing starts before approval, and the way to make that true is for\nthe endpoint that generates a flow to have no ability to start one.\n\nIf the manufacturing route, target maturity or loads are missing, the\nanswer is ``200`` with ``status: \"needs_input\"`` and the questions to\nanswer -- no flow, no stored version, no held approval (FORGE-463). A\ngenerator that guesses those produces a flow that reads as tailored and\nis not.",
+        "description": "Tailor a template to a project's intent, and hold it for a human.\n\nThe response carries an ``approvalId``, not a run. The rule is\nthat nothing starts before approval, and the way to make that true is for\nthe endpoint that generates a flow to have no ability to start one.\n\nIf the manufacturing route, target maturity or loads are missing, the\nanswer is ``200`` with ``status: \"needs_input\"`` and the questions to\nanswer -- no flow, no stored version, no held approval. A\ngenerator that guesses those produces a flow that reads as tailored and\nis not.",
         "operationId": "propose_flow_v1_design_flows_propose_post",
         "requestBody": {
           "content": {
@@ -19074,7 +19074,7 @@
     },
     "/v1/knowledge/documents": {
       "post": {
-        "description": "Ingest a document (markdown / plain text) via the L1 ``KnowledgeService``.\n\nBacks the ``forge ingest <path>`` CLI (MET-336). Heading-aware\nchunking, dedup, and citation metadata are handled by the\nunderlying provider \u2014 the route is a thin pass-through.",
+        "description": "Ingest a document (markdown / plain text) via the L1 ``KnowledgeService``.\n\nBacks the ``forge ingest <path>`` CLI. Heading-aware\nchunking, dedup, and citation metadata are handled by the\nunderlying provider \u2014 the route is a thin pass-through.",
         "operationId": "ingest_document_v1_knowledge_documents_post",
         "requestBody": {
           "content": {
@@ -19116,7 +19116,7 @@
     },
     "/v1/knowledge/ingest": {
       "post": {
-        "description": "Manually ingest a knowledge entry.\n\nRoutes through ``KnowledgeService`` when available so the chunk\npipeline, dedup, and citation-field round-trip apply consistently\nwith ``/documents`` and ``/search`` (MET-390).",
+        "description": "Manually ingest a knowledge entry.\n\nRoutes through ``KnowledgeService`` when available so the chunk\npipeline, dedup, and citation-field round-trip apply consistently\nwith ``/documents`` and ``/search``.",
         "operationId": "ingest_knowledge_v1_knowledge_ingest_post",
         "requestBody": {
           "content": {
@@ -19158,7 +19158,7 @@
     },
     "/v1/knowledge/search": {
       "get": {
-        "description": "Semantic search over indexed knowledge.\n\nRoutes through ``KnowledgeService`` when available so it shares\nthe same backend as ``/ingest`` and ``/documents`` (MET-390).\n\n``project_id`` (MET-670) mirrors the ``projectId`` filter already\non ``/sources`` and ``/ingest``: without it, ``KnowledgeService.search``\nfalls back to the ``default`` tenant, so a project-scoped ingest was\nnever searchable from a project-scoped UI \u2014 the search box silently\nreturned whatever unrelated content happened to live under\n``default`` instead of the active project's own sources.",
+        "description": "Semantic search over indexed knowledge.\n\nRoutes through ``KnowledgeService`` when available so it shares\nthe same backend as ``/ingest`` and ``/documents``.\n\n``project_id`` mirrors the ``projectId`` filter already\non ``/sources`` and ``/ingest``: without it, ``KnowledgeService.search``\nfalls back to the ``default`` tenant, so a project-scoped ingest was\nnever searchable from a project-scoped UI \u2014 the search box silently\nreturned whatever unrelated content happened to live under\n``default`` instead of the active project's own sources.",
         "operationId": "search_knowledge_v1_knowledge_search_get",
         "parameters": [
           {
@@ -19255,7 +19255,7 @@
     },
     "/v1/knowledge/sources": {
       "get": {
-        "description": "List ingested knowledge sources via ``KnowledgeService.list_sources()``.\n\nBacks the ``forge sources list`` CLI (MET-411). Mirrors the schema\nsurfaced by the ``metaforge://knowledge/sources`` MCP resource.",
+        "description": "List ingested knowledge sources via ``KnowledgeService.list_sources()``.\n\nBacks the ``forge sources list`` CLI. Mirrors the schema\nsurfaced by the ``metaforge://knowledge/sources`` MCP resource.",
         "operationId": "list_knowledge_sources_v1_knowledge_sources_get",
         "parameters": [
           {
@@ -19353,7 +19353,7 @@
     },
     "/v1/knowledge/sources/{source_path}": {
       "delete": {
-        "description": "Delete every chunk for a source via ``KnowledgeService.delete_by_source()``.\n\nBacks the ``forge sources delete`` CLI (MET-411). Returns the\nchunk count the backend removed; ``0`` when the source was already\nabsent \u2014 callers treat that as a no-op rather than an error.",
+        "description": "Delete every chunk for a source via ``KnowledgeService.delete_by_source()``.\n\nBacks the ``forge sources delete`` CLI. Returns the\nchunk count the backend removed; ``0`` when the source was already\nabsent \u2014 callers treat that as a no-op rather than an error.",
         "operationId": "delete_knowledge_source_v1_knowledge_sources__source_path__delete",
         "parameters": [
           {
@@ -19500,7 +19500,7 @@
     },
     "/v1/library/appearances": {
       "get": {
-        "description": "Appearances (FORGE-631): colour, material and finish; family is the finish.",
+        "description": "Appearances: colour, material and finish; family is the finish.",
         "operationId": "list_appearances_v1_library_appearances_get",
         "parameters": [
           {
@@ -19691,7 +19691,7 @@
     },
     "/v1/library/components": {
       "get": {
-        "description": "Mechanical components (FORGE-449): standard and purchased parts.",
+        "description": "Mechanical components: standard and purchased parts.",
         "operationId": "list_components_v1_library_components_get",
         "parameters": [
           {
@@ -19996,7 +19996,7 @@
     },
     "/v1/library/ergonomic-limits": {
       "get": {
-        "description": "Ergonomic design limits (FORGE-635); family is the feature kind they bound.",
+        "description": "Ergonomic design limits; family is the feature kind they bound.",
         "operationId": "list_ergonomic_limits_v1_library_ergonomic_limits_get",
         "parameters": [
           {
@@ -20728,7 +20728,7 @@
     },
     "/v1/library/materials/resolve": {
       "get": {
-        "description": "The figures a tool call carries for ``name`` (FORGE-446); 422 with candidates.",
+        "description": "The figures a tool call carries for ``name``; 422 with candidates.",
         "operationId": "resolve_material_v1_library_materials_resolve_get",
         "parameters": [
           {
@@ -21173,7 +21173,7 @@
     },
     "/v1/memory/components/{name}": {
       "get": {
-        "description": "Component usage / relationship knowledge for ``name`` (MET-471).\n\nWraps ``MemoryClient.get_component_context``: a typed convenience\nover the L1 knowledge base keyed off ``KnowledgeType.COMPONENT``.\nEmpty / whitespace ``name`` returns 422 \u2014 that's a client bug, not\na backend gap.",
+        "description": "Component usage / relationship knowledge for ``name``.\n\nWraps ``MemoryClient.get_component_context``: a typed convenience\nover the L1 knowledge base keyed off ``KnowledgeType.COMPONENT``.\nEmpty / whitespace ``name`` returns 422 \u2014 that's a client bug, not\na backend gap.",
         "operationId": "get_component_context_v1_memory_components__name__get",
         "parameters": [
           {
@@ -21401,7 +21401,7 @@
     },
     "/v1/memory/search": {
       "post": {
-        "description": "Semantic search over design-decision knowledge (MET-471).\n\nWraps ``MemoryClient.search_design_rationale``: a typed convenience\nover the L1 knowledge base that asks \"why was X decided?\" and\nreturns ranked hits keyed off ``KnowledgeType.DESIGN_DECISION``.\nRequires the gateway to have wired a knowledge_service on\n``app.state.knowledge_service``; the 503 from ``_get_client``\ncovers the case where the service hasn't initialised.",
+        "description": "Semantic search over design-decision knowledge.\n\nWraps ``MemoryClient.search_design_rationale``: a typed convenience\nover the L1 knowledge base that asks \"why was X decided?\" and\nreturns ranked hits keyed off ``KnowledgeType.DESIGN_DECISION``.\nRequires the gateway to have wired a knowledge_service on\n``app.state.knowledge_service``; the 503 from ``_get_client``\ncovers the case where the service hasn't initialised.",
         "operationId": "search_design_rationale_v1_memory_search_post",
         "requestBody": {
           "content": {
@@ -21633,7 +21633,7 @@
     },
     "/v1/projects/{project_id}/work-products/{work_product_id}": {
       "delete": {
-        "description": "Remove a work-product link from a project (MET-484).\n\nLets callers clean up duplicate/stale work-product references without\ndeleting the project. 404 if no matching link exists.",
+        "description": "Remove a work-product link from a project.\n\nLets callers clean up duplicate/stale work-product references without\ndeleting the project. 404 if no matching link exists.",
         "operationId": "unlink_work_product_v1_projects__project_id__work_products__work_product_id__delete",
         "parameters": [
           {
@@ -21720,7 +21720,7 @@
     },
     "/v1/promotion/attempt": {
       "post": {
-        "description": "Promote (or veto), attributed to whoever made this request.\n\nA dashboard click is a human act, so this route needs no separate\napproval hop the way the MCP path does \u2014 but the authority is still read\noff the request rather than the body (FORGE-393).",
+        "description": "Promote (or veto), attributed to whoever made this request.\n\nA dashboard click is a human act, so this route needs no separate\napproval hop the way the MCP path does \u2014 but the authority is still read\noff the request rather than the body.",
         "operationId": "attempt_promotion_route_v1_promotion_attempt_post",
         "requestBody": {
           "content": {
@@ -21843,7 +21843,7 @@
     },
     "/v1/requirements/constraints": {
       "post": {
-        "description": "FORGE-259: create one structured constraint (metric/operator/limit/\nunit/target_node_type) from the dashboard's constraint editor. Live\npass/fail/no_data status for it then comes from the existing\nGET /v1/requirements/matrix, computed from real Claim/Evidence data --\nthis route only ever records the requirement's own declaration.",
+        "description": "create one structured constraint (metric/operator/limit/\nunit/target_node_type) from the dashboard's constraint editor. Live\npass/fail/no_data status for it then comes from the existing\nGET /v1/requirements/matrix, computed from real Claim/Evidence data --\nthis route only ever records the requirement's own declaration.",
         "operationId": "create_constraint_v1_requirements_constraints_post",
         "requestBody": {
           "content": {
@@ -21885,7 +21885,7 @@
     },
     "/v1/requirements/coverage": {
       "get": {
-        "description": "FORGE-297 (gap G-I1): the 5 traceability coverage percentages\n(needs->requirements, requirements->architecture, requirements->\nverification, verification->evidence, critical_requirements->evidence),\ncomputed live by ``TraceabilityAgent`` (FORGE-56/73) -- previously real,\ntested code with no gateway route exposing it at all.",
+        "description": "the 5 traceability coverage percentages\n(needs->requirements, requirements->architecture, requirements->\nverification, verification->evidence, critical_requirements->evidence),\ncomputed live by ``TraceabilityAgent`` -- previously real,\ntested code with no gateway route exposing it at all.",
         "operationId": "get_requirement_coverage_v1_requirements_coverage_get",
         "parameters": [
           {
@@ -21928,7 +21928,7 @@
     },
     "/v1/requirements/matrix": {
       "get": {
-        "description": "FORGE-318: requirements x claims x evidence, one row per real\nrequirement -- status (pass/uncertain/fail/no_data/stale) derived live\nfrom current claim + evidence staleness state, never cached.",
+        "description": "requirements x claims x evidence, one row per real\nrequirement -- status (pass/uncertain/fail/no_data/stale) derived live\nfrom current claim + evidence staleness state, never cached.",
         "operationId": "get_requirement_matrix_v1_requirements_matrix_get",
         "parameters": [
           {
@@ -22196,7 +22196,7 @@
     },
     "/v1/runs/usage/summary": {
       "get": {
-        "description": "LLM tokens and cost across all runs for the trailing window (FORGE-476).",
+        "description": "LLM tokens and cost across all runs for the trailing window.",
         "operationId": "get_usage_summary_v1_runs_usage_summary_get",
         "parameters": [
           {
@@ -22284,7 +22284,7 @@
     },
     "/v1/runs/{run_id}/approval": {
       "post": {
-        "description": "Answer the gate this run is parked at.\n\nAsync so the store transition \u2014 which resolves the in-process executor's\ngate future via the coordinator \u2014 runs on the event-loop thread (future\nresolution is not thread-safe from FastAPI's sync worker pool).\n\nOn Temporal the decision is also *signalled* into the workflow, which is\nwhat actually resumes it (FORGE-401). The store transition stays, because\nthe run list, the SSE stream and the ledger all read from it.\n\nThe deciding human comes from the request, never the body (FORGE-393).",
+        "description": "Answer the gate this run is parked at.\n\nAsync so the store transition \u2014 which resolves the in-process executor's\ngate future via the coordinator \u2014 runs on the event-loop thread (future\nresolution is not thread-safe from FastAPI's sync worker pool).\n\nOn Temporal the decision is also *signalled* into the workflow, which is\nwhat actually resumes it. The store transition stays, because\nthe run list, the SSE stream and the ledger all read from it.\n\nThe deciding human comes from the request, never the body.",
         "operationId": "submit_approval_v1_runs__run_id__approval_post",
         "parameters": [
           {
@@ -22337,7 +22337,7 @@
     },
     "/v1/runs/{run_id}/events": {
       "get": {
-        "description": "SSE stream of a run: status transitions plus tool progress (FORGE-644).\n\n``run.status`` frames carry the run's state and end the stream when the run\nis terminal. ``tool.progress`` frames (FORGE-643) carry an ``id:`` so a\nclient that reconnects with ``Last-Event-ID`` is sent the ones it missed.",
+        "description": "SSE stream of a run: status transitions plus tool progress.\n\n``run.status`` frames carry the run's state and end the stream when the run\nis terminal. ``tool.progress`` frames carry an ``id:`` so a\nclient that reconnects with ``Last-Event-ID`` is sent the ones it missed.",
         "operationId": "stream_run_events_v1_runs__run_id__events_get",
         "parameters": [
           {
@@ -22437,7 +22437,7 @@
     },
     "/v1/runs/{run_id}/gate-opened": {
       "post": {
-        "description": "Record that a run's workflow has opened a gate (FORGE-489).\n\nCalled by the design-flow worker's announcer. The workflow is the\nauthority on whether a gate is open, so this first re-reads it\n(``_reconcile_run``). Only when the workflow cannot be asked does it fall\nback to the worker's word. Either way it moves the *record* to\n``awaiting_approval``, which is what lists the run on the Approvals page\nand publishes the change on its SSE stream. It never approves: a decision\nstill has to come through ``/approval``, and the workflow ignores one for\na gate that is not open.",
+        "description": "Record that a run's workflow has opened a gate.\n\nCalled by the design-flow worker's announcer. The workflow is the\nauthority on whether a gate is open, so this first re-reads it\n(``_reconcile_run``). Only when the workflow cannot be asked does it fall\nback to the worker's word. Either way it moves the *record* to\n``awaiting_approval``, which is what lists the run on the Approvals page\nand publishes the change on its SSE stream. It never approves: a decision\nstill has to come through ``/approval``, and the workflow ignores one for\na gate that is not open.",
         "operationId": "gate_opened_v1_runs__run_id__gate_opened_post",
         "parameters": [
           {
@@ -22638,7 +22638,7 @@
     },
     "/v1/runs/{run_id}/tool-events": {
       "post": {
-        "description": "Accept a tool event from the design-flow worker or the MCP sidecar (FORGE-643).\n\nThose run in their own processes and cannot reach the gateway's stream, so\nthey post here. The route needs the same gateway key as every other route,\nand it takes no arguments or results, only the tool's name, phase, status\nand duration. An unknown run is a 404, so the stream cannot be filled for a\nrun that does not exist.",
+        "description": "Accept a tool event from the design-flow worker or the MCP sidecar.\n\nThose run in their own processes and cannot reach the gateway's stream, so\nthey post here. The route needs the same gateway key as every other route,\nand it takes no arguments or results, only the tool's name, phase, status\nand duration. An unknown run is a 404, so the stream cannot be filled for a\nrun that does not exist.",
         "operationId": "ingest_tool_event_v1_runs__run_id__tool_events_post",
         "parameters": [
           {
@@ -22695,7 +22695,7 @@
     },
     "/v1/sessions": {
       "get": {
-        "description": "List all agent sessions.\n\nMerges internal Temporal ``WorkflowRun``s with externally-recorded\nagent sessions (MET-493) so MCP/CLI-driven work shows up alongside\nautonomous runs. Most-recent-first.\n\n``project_id`` scopes to one project (MET-516). Internal Temporal runs\ncarry no project, so they're excluded when a project filter is set.",
+        "description": "List all agent sessions.\n\nMerges internal Temporal ``WorkflowRun``s with externally-recorded\nagent sessions so MCP/CLI-driven work shows up alongside\nautonomous runs. Most-recent-first.\n\n``project_id`` scopes to one project. Internal Temporal runs\ncarry no project, so they're excluded when a project filter is set.",
         "operationId": "list_sessions_v1_sessions_get",
         "parameters": [
           {
@@ -23022,7 +23022,7 @@
     },
     "/v1/simulation/named-faces": {
       "post": {
-        "description": "Named-face geometry for an already-generated mesh (FORGE-277).\n\nBacks the dashboard's geometric boundary-condition face picker: given a\nmesh file path (from an earlier ``freecad.generate_mesh`` call, e.g.\nsurfaced in a forge chat turn), returns each named surface group's real\ncentroid/normal/area/bbox so the dashboard can render pickable face\npatches instead of a blind \"type the gmsh group name\" text field.",
+        "description": "Named-face geometry for an already-generated mesh.\n\nBacks the dashboard's geometric boundary-condition face picker: given a\nmesh file path (from an earlier ``freecad.generate_mesh`` call, e.g.\nsurfaced in a forge chat turn), returns each named surface group's real\ncentroid/normal/area/bbox so the dashboard can render pickable face\npatches instead of a blind \"type the gmsh group name\" text field.",
         "operationId": "list_named_faces_v1_simulation_named_faces_post",
         "requestBody": {
           "content": {
@@ -23064,7 +23064,7 @@
     },
     "/v1/simulation/results": {
       "get": {
-        "description": "List FEA results, optionally scoped to a project (FORGE-279).\n\nEmpty (not a 404) when the project has none yet, matching\n``list_load_cases``. Creation is agent-driven only (see module\ndocstring) \u2014 there is no corresponding POST.",
+        "description": "List FEA results, optionally scoped to a project.\n\nEmpty (not a 404) when the project has none yet, matching\n``list_load_cases``. Creation is agent-driven only (see module\ndocstring) \u2014 there is no corresponding POST.",
         "operationId": "list_simulation_results_v1_simulation_results_get",
         "parameters": [
           {
@@ -23114,7 +23114,7 @@
     },
     "/v1/simulation/results/{result_id}/field": {
       "get": {
-        "description": "Serve a simulation_result's 3D result field (FORGE-532).\n\n404 ``field not stored`` for a result recorded without one (every\nresult before FORGE-532, or one whose MinIO write failed); the\ndashboard treats that as \"show the numbers only\".",
+        "description": "Serve a simulation_result's 3D result field.\n\n404 ``field not stored`` for a result recorded without one (every\nolder result, or one whose MinIO write failed); the\ndashboard treats that as \"show the numbers only\".",
         "operationId": "get_simulation_result_field_v1_simulation_results__result_id__field_get",
         "parameters": [
           {
@@ -23751,7 +23751,7 @@
     },
     "/v1/twin/interference-check": {
       "get": {
-        "description": "Real boolean-intersection clearance/interference check between two\nnamed parts' committed STEP geometry (FORGE-272, gap G-D4).\n\nDeliberately a pairwise check on two caller-named parts, not an\nall-pairs sweep across an entire assembly, and deliberately not an ISO\n286 tolerance-grade/fit classification -- see\n``api_gateway.twin.interference_check``'s module docstring for why\nboth are out of scope here.",
+        "description": "Real boolean-intersection clearance/interference check between two\nnamed parts' committed STEP geometry (gap G-D4).\n\nDeliberately a pairwise check on two caller-named parts, not an\nall-pairs sweep across an entire assembly, and deliberately not an ISO\n286 tolerance-grade/fit classification -- see\n``api_gateway.twin.interference_check``'s module docstring for why\nboth are out of scope here.",
         "operationId": "check_interference_v1_twin_interference_check_get",
         "parameters": [
           {
@@ -24120,7 +24120,7 @@
     },
     "/v1/twin/links": {
       "get": {
-        "description": "List file links with live sync status, optionally scoped to a project.\n\nA link has no project of its own; scoping (MET-517) keeps only links whose\nlinked work product belongs to ``project_id``.",
+        "description": "List file links with live sync status, optionally scoped to a project.\n\nA link has no project of its own; scoping keeps only links whose\nlinked work product belongs to ``project_id``.",
         "operationId": "list_file_links_v1_twin_links_get",
         "parameters": [
           {
@@ -24174,7 +24174,7 @@
     },
     "/v1/twin/nodes": {
       "get": {
-        "description": "List work-product nodes in the Digital Twin.\n\n``project_id`` scopes the view to a single project (MET-491). Omitted\nor empty returns every node (including unscoped legacy nodes) \u2014\npreserving the prior global behaviour. A specific ``project_id``\nreturns only that project's nodes; unscoped nodes are excluded.\n\nFORGE-525: a design-flow run's drafts are left out until its gate\napproves them (and for good if it never does); ``include_drafts=true``\nlists them too.",
+        "description": "List work-product nodes in the Digital Twin.\n\n``project_id`` scopes the view to a single project. Omitted\nor empty returns every node (including unscoped legacy nodes) \u2014\npreserving the prior global behaviour. A specific ``project_id``\nreturns only that project's nodes; unscoped nodes are excluded.\n\na design-flow run's drafts are left out until its gate\napproves them (and for good if it never does); ``include_drafts=true``\nlists them too.",
         "operationId": "list_twin_nodes_v1_twin_nodes_get",
         "parameters": [
           {
@@ -24250,7 +24250,7 @@
     },
     "/v1/twin/nodes/boolean-cut": {
       "post": {
-        "description": "Real CSG boolean-cut between two committed STEP work products (MET-612).\n\nA direct-commit endpoint, not the ``twin.propose_change``/apply HITL\npipeline \u2014 a human cutting their own open model is not meaningfully\ndifferent from clicking Save (same rationale as ``twin.record_document``,\nwhose apply executor doesn't fit this action either). Drives the\ncontainerized CadQuery adapter via the shared MCP bridge, then commits the\nresult through the geometry recorder with provenance edges to both inputs.",
+        "description": "Real CSG boolean-cut between two committed STEP work products.\n\nA direct-commit endpoint, not the ``twin.propose_change``/apply HITL\npipeline \u2014 a human cutting their own open model is not meaningfully\ndifferent from clicking Save (same rationale as ``twin.record_document``,\nwhose apply executor doesn't fit this action either). Drives the\ncontainerized CadQuery adapter via the shared MCP bridge, then commits the\nresult through the geometry recorder with provenance edges to both inputs.",
         "operationId": "boolean_cut_nodes_v1_twin_nodes_boolean_cut_post",
         "requestBody": {
           "content": {
@@ -24292,7 +24292,7 @@
     },
     "/v1/twin/nodes/{node_id}": {
       "delete": {
-        "description": "Delete a work-product node, its project links, and its MinIO blob (MET-484).\n\nWithout ``cascade`` a delete that would orphan dependents returns 409.\nBest-effort on the blob (a storage failure doesn't block the delete).",
+        "description": "Delete a work-product node, its project links, and its MinIO blob.\n\nWithout ``cascade`` a delete that would orphan dependents returns 409.\nBest-effort on the blob (a storage failure doesn't block the delete).",
         "operationId": "delete_node_v1_twin_nodes__node_id__delete",
         "parameters": [
           {
@@ -24381,7 +24381,7 @@
     },
     "/v1/twin/nodes/{node_id}/approve-sketch": {
       "post": {
-        "description": "Human sign-off on a design_sketch work product (follow-up to MET-740/747).\n\nThe forge/agent side creates a sketch as unapproved (twin.commit_design_sketch);\nthis is the dashboard's side of the gate \u2014 a human explicitly approving it\nbefore the calling agent is expected to proceed to real CAD/build work.",
+        "description": "Human sign-off on a design_sketch work product.\n\nThe forge/agent side creates a sketch as unapproved (twin.commit_design_sketch);\nthis is the dashboard's side of the gate \u2014 a human explicitly approving it\nbefore the calling agent is expected to proceed to real CAD/build work.",
         "operationId": "approve_design_sketch_v1_twin_nodes__node_id__approve_sketch_post",
         "parameters": [
           {
@@ -24435,7 +24435,7 @@
     },
     "/v1/twin/nodes/{node_id}/approve-technical-drawing": {
       "post": {
-        "description": "Human sign-off on a technical_drawing work product (FORGE-293, gap G-H1).\n\nMirrors ``approve_design_sketch`` above -- a real work product, a real\napproval gate, not a dashboard-local checkbox.",
+        "description": "Human sign-off on a technical_drawing work product (gap G-H1).\n\nMirrors ``approve_design_sketch`` above -- a real work product, a real\napproval gate, not a dashboard-local checkbox.",
         "operationId": "approve_technical_drawing_v1_twin_nodes__node_id__approve_technical_drawing_post",
         "parameters": [
           {
@@ -24489,7 +24489,7 @@
     },
     "/v1/twin/nodes/{node_id}/assembly-joints": {
       "patch": {
-        "description": "Add/edit/delete mates+joints on an already-committed assembly node (FORGE-271).\n\nWhole-list replace -- matches how the URDF/SDF/USD export panel's own\nmanual joint-list form already works (FORGE-245/MET-740). Persisted\ndirectly onto ``metadata.assembly.joints``: a joint is a logical\nannotation, not new geometry, so this deliberately skips the full\n``VersionService`` revision machinery ``/nodes/{id}/iterate`` uses for\nan actual re-export -- editing joints here never touches the underlying\ncommitted blob.\n\nUnlike the export panel, this does NOT require a live FreeCAD session or\nre-running an export -- it works on any already-committed node, any\ntime, which is the whole point (FORGE-245's own fix only got joints\npersisted onto the node at commit time; this is what makes them\neditable afterward).",
+        "description": "Add/edit/delete mates+joints on an already-committed assembly node.\n\nWhole-list replace -- matches how the URDF/SDF/USD export panel's own\nmanual joint-list form already works. Persisted\ndirectly onto ``metadata.assembly.joints``: a joint is a logical\nannotation, not new geometry, so this deliberately skips the full\n``VersionService`` revision machinery ``/nodes/{id}/iterate`` uses for\nan actual re-export -- editing joints here never touches the underlying\ncommitted blob.\n\nUnlike the export panel, this does NOT require a live FreeCAD session or\nre-running an export -- it works on any already-committed node, any\ntime, which is the whole point (joints are persisted onto the node at commit time; this is what\nmakes them editable afterward).",
         "operationId": "update_assembly_joints_v1_twin_nodes__node_id__assembly_joints_patch",
         "parameters": [
           {
@@ -24658,7 +24658,7 @@
     },
     "/v1/twin/nodes/{node_id}/files/{filename}": {
       "get": {
-        "description": "Stream one of a work product's NAMED blobs (MET-740 follow-up).\n\n``GET /nodes/{id}/file`` only ever serves the primary blob. A\n``robot_description`` node stores N additional mesh blobs (one per\nURDF link) under ``metadata[\"mesh_files\"]`` (link filename -> MinIO\nobject key) \u2014 this resolves any of THOSE by filename, or falls back to\nthe primary blob if ``filename`` matches it, so the dashboard's\nexisting URDF preview (which expects every mesh reachable at\n``{some_base_url}/{filename}``, exactly like a fresh export's\n``_cad_exports/{export_id}/`` directory) can point straight at a\npersisted node with zero re-export round trip.",
+        "description": "Stream one of a work product's NAMED blobs.\n\n``GET /nodes/{id}/file`` only ever serves the primary blob. A\n``robot_description`` node stores N additional mesh blobs (one per\nURDF link) under ``metadata[\"mesh_files\"]`` (link filename -> MinIO\nobject key) \u2014 this resolves any of THOSE by filename, or falls back to\nthe primary blob if ``filename`` matches it, so the dashboard's\nexisting URDF preview (which expects every mesh reachable at\n``{some_base_url}/{filename}``, exactly like a fresh export's\n``_cad_exports/{export_id}/`` directory) can point straight at a\npersisted node with zero re-export round trip.",
         "operationId": "download_node_named_file_v1_twin_nodes__node_id__files__filename__get",
         "parameters": [
           {
@@ -24708,7 +24708,7 @@
     },
     "/v1/twin/nodes/{node_id}/geometry-diff": {
       "get": {
-        "description": "Diff a work product's real geometry against its SUPERSEDES predecessor.\n\nUnlike ``/diff`` above (a metadata-revision diff on the SAME node --\n``/iterate`` never changes the underlying blob, so no two revisions of one\nnode ever have different geometry), this walks the real SUPERSEDES edge a\nre-committed, same-named CAD_MODEL gets (``api_gateway.twin.geometry_\nrecorder``) and compares the two NODES' actual STEP files.\n\nA node that has never been superseded gets a 200 saying so rather than\na 404 (FORGE-709): the dashboard asks this for every selected node, so\nthe common answer must not read as an error in the console or in\ntelemetry. A 404 here now means only that the node itself is unknown.",
+        "description": "Diff a work product's real geometry against its SUPERSEDES predecessor.\n\nUnlike ``/diff`` above (a metadata-revision diff on the SAME node --\n``/iterate`` never changes the underlying blob, so no two revisions of one\nnode ever have different geometry), this walks the real SUPERSEDES edge a\nre-committed, same-named CAD_MODEL gets (``api_gateway.twin.geometry_\nrecorder``) and compares the two NODES' actual STEP files.\n\nA node that has never been superseded gets a 200 saying so rather than\na 404: the dashboard asks this for every selected node, so\nthe common answer must not read as an error in the console or in\ntelemetry. A 404 here now means only that the node itself is unknown.",
         "operationId": "diff_geometry_v1_twin_nodes__node_id__geometry_diff_get",
         "parameters": [
           {
@@ -24989,7 +24989,7 @@
     },
     "/v1/twin/nodes/{node_id}/script": {
       "get": {
-        "description": "The current git-versioned generation script for a CAD_MODEL node (MET-630).\n\nLets a dashboard parameter panel seed a regeneration proposal with the\nscript as it stands today, rather than the user retyping it from scratch.\n404 when the node has no linked script (imported geometry, or the git\nbackend isn't configured).",
+        "description": "The current git-versioned generation script for a CAD_MODEL node.\n\nLets a dashboard parameter panel seed a regeneration proposal with the\nscript as it stands today, rather than the user retyping it from scratch.\n404 when the node has no linked script (imported geometry, or the git\nbackend isn't configured).",
         "operationId": "get_node_script_v1_twin_nodes__node_id__script_get",
         "parameters": [
           {
@@ -25438,7 +25438,7 @@
     },
     "/v1/twin/relationships": {
       "get": {
-        "description": "List edges in the Digital Twin graph.\n\n``project_id`` scopes the view to a single project (MET-491), matching\n``list_twin_nodes``. Omitted or empty returns every edge (including\nunscoped legacy nodes) \u2014 preserving the prior global behaviour.",
+        "description": "List edges in the Digital Twin graph.\n\n``project_id`` scopes the view to a single project, matching\n``list_twin_nodes``. Omitted or empty returns every edge (including\nunscoped legacy nodes) \u2014 preserving the prior global behaviour.",
         "operationId": "list_twin_relationships_v1_twin_relationships_get",
         "parameters": [
           {

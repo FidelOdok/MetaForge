@@ -297,7 +297,7 @@ def hold_tool_call(body: HoldToolCallRequest) -> RunResponse:
 
     This exists because the approval store is process-level (an
     ``InMemoryRunStore`` in *this* process), and the MCP sidecar is a
-    different process. Before FORGE-406 a sidecar could only hold calls in
+    different process. A sidecar used to hold calls only in
     its own memory, where the dashboard — served from here — would never see
     them. So the sidecar parks them here instead, and there is exactly one
     ledger rather than one per process.

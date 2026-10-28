@@ -5,19 +5,19 @@ title: Running a host from images
 # Running a host from images
 
 A MetaForge host does not need the source. Every image the stack runs is
-published to GitHub Container Registry and signed (FORGE-593):
+published to GitHub Container Registry and signed:
 
 | Image | Published by |
 |---|---|
 | `metaforge-gateway` (also runs the MCP server and both workers) | `release.yml`, every push to `main` |
 | `metaforge-freecad-adapter`, `-calculix-adapter`, `-cadquery-adapter`, `-kicad-adapter`, `-spice-adapter`, `-openfoam-adapter`, `-firmware-adapter` | `adapter-images.yml`, when their code changes |
 
-The OpenFOAM adapter (FORGE-557) is opt-in. Its image is about 4 GB, so it runs only
+The OpenFOAM adapter is opt-in. Its image is about 4 GB, so it runs only
 under the `cfd` compose profile: add `cfd` to `COMPOSE_PROFILES` in the host's `.env`
 to have the update pull and start it. Until then the gateway lists
 `openfoam.run_internal_flow` but a call says the adapter is not running.
 
-The firmware adapter (FORGE-674/677) is opt-in the same way. Its image carries the STM32
+The firmware adapter is opt-in the same way. Its image carries the STM32
 and ESP32 toolchains, ESP-IDF, Renode and Espressif QEMU, about 5.5 GB, so it runs only under
 the `firmware` compose profile: add `firmware` to `COMPOSE_PROFILES` to have the update pull
 and start it. Until then the gateway lists `firmware.build` and `firmware.run_emulated`, and
@@ -90,7 +90,7 @@ same databases.
 ## The object store
 
 Blobs (knowledge documents, CAD files, simulation fields) live in the
-`object-store` service, SeaweedFS (FORGE-577). It replaced MinIO, whose
+`object-store` service, SeaweedFS. It replaced MinIO, whose
 community images were discontinued and then deleted from Docker Hub, which
 broke every host that pulled them. The image is our own GHCR copy of the
 signed upstream release, pinned by tag and digest, so an upstream deletion
@@ -107,7 +107,7 @@ cannot happen to it.
   lifecycle step as failed on this store. Use an external S3 service that
   supports transitions if you need cold-tier archiving.
 - The gateway sets up the `metaforge-kb` bucket itself when it starts
-  (FORGE-594): it creates the bucket, turns versioning on and reads the
+: it creates the bucket, turns versioning on and reads the
   setting back. It runs in the background and retries for about five
   minutes, so an object store that starts after the gateway is fine. If it
   still fails, the gateway logs `kb_storage_init_failed`, counts it on

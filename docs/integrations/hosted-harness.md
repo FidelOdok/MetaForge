@@ -95,7 +95,7 @@ URL on first use:
 /plugin install metaforge
 ```
 
-The plugin has no token field (FORGE-659). When the gateway needs a login it
+The plugin has no token field. When the gateway needs a login it
 answers 401, Claude Code flags `metaforge` in `/mcp`, and you sign in there with
 OAuth: run `/mcp`, choose `metaforge`, and follow the browser prompt. This needs
 `METAFORGE_OAUTH_LOGIN_SECRET` set on the gateway, as for claude.ai below.
@@ -129,7 +129,7 @@ sends you to the sign-in page. Enter the secret and it completes the exchange.
 With `DATABASE_URL` set (the standard compose file sets it), registered
 clients and issued tokens are kept in Postgres (`mcp_oauth_clients`,
 `mcp_oauth_tokens`, tokens by their SHA-256 only), so redeploying or
-restarting the sidecar does not sign anyone out (FORGE-697). Without a
+restarting the sidecar does not sign anyone out. Without a
 database they are held in memory, and after a restart a client must sign in
 again; a client that keeps reusing its old registration, as Claude Code does,
 then needs that registration cleared before it can.
@@ -175,7 +175,7 @@ So the honest summary is per-mechanism, not per-product: a connector is tools
 and prompts; a bundle is tools, prompts and skills; only Claude Code's own
 plugin format carries agents and hooks as well.
 
-### The hosted-gateway package, `metaforge-cloud` (FORGE-658, FORGE-661)
+### The hosted-gateway package, `metaforge-cloud`
 
 `metaforge-cloud` is `metaforge` with the hosted gateway's address written in as
 a literal, so there is nothing to enter. It carries the same tools, skills,
@@ -184,8 +184,8 @@ query and no `${user_config.*}` reference, and no bearer header.
 
 It is listed in the `FidelOdok/MetaForge` marketplace beside the two open-core
 packages, so `/plugin install metaforge-cloud` installs it. It belongs to the
-hosted service, since the only thing it adds is that service's address, and
-FORGE-707 moves it to a marketplace in the Cloud repo. Until that marketplace is
+hosted service, since the only thing it adds is that service's address, and it
+is due to move to a marketplace in the Cloud repo. Until that marketplace is
 published it stays listed here.
 
 Once it is installed, run `/mcp` in Claude Code, choose `metaforge`, and sign in
@@ -195,12 +195,12 @@ above.
 Install one MetaForge package, not several: the manifest has no way to switch a
 connector off, so two would offer every tool twice.
 
-**This is an experiment (FORGE-661).** FORGE-660 had removed the address so that
+**This is an experiment.** The address had been removed so that
 none of ours was in the public repository. But claude.ai chat ignores a connector
 whose URL has a `${user_config.*}` reference, and a custom connector at the same
 address showed **Connected** while the plugin's own row did not recognise it. The
 literal is back to find out whether claude.ai matches a plugin's connector to one
-on the account by address. If it does not help, the FORGE-660 form (address from
+on the account by address. If it does not help, the earlier form (address from
 user configuration) is the one to restore.
 
 ### Connecting on claude.ai

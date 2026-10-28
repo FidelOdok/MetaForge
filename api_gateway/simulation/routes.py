@@ -30,7 +30,7 @@ stored (``hasField``) and what it holds, which geometry it analysed, its
 boundary conditions and any mesh-convergence verdict; ``GET
 /v1/simulation/results/{id}/field`` serves the field itself (gzipped
 ``metaforge.sim_field`` JSON, ``Content-Encoding: gzip`` so a browser
-inflates it transparently). A result recorded before FORGE-532 has no
+inflates it transparently). An older result recorded without one has no
 field: the list says ``hasField: false`` and the route answers 404 with
 ``field not stored``, which the dashboard shows as a note rather than an
 error.
@@ -346,7 +346,7 @@ async def get_simulation_result_field(result_id: str) -> Response:
     """Serve a simulation_result's 3D result field (FORGE-532).
 
     404 ``field not stored`` for a result recorded without one (every
-    result before FORGE-532, or one whose MinIO write failed); the
+    older result, or one whose MinIO write failed); the
     dashboard treats that as "show the numbers only".
     """
     with tracer.start_as_current_span("simulation.get_result_field") as span:

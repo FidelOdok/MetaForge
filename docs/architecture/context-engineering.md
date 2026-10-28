@@ -1,10 +1,10 @@
 # Context Engineering — Specification
 
-> **Status:** P1.13 foundation shipped (MET-315 / 316 / 317 / 322 / 323).
-> Wired into the live chat path per turn since MET-566 — see
-> [Live chat wiring](#live-chat-wiring-met-566) below. The deposit side
-> (what fills the memory tier the assembler reads) landed in MET-567 —
-> see [Filling the memory tier](#filling-the-memory-tier-met-567).
+> **Status:** P1.13 foundation shipped.
+> Wired into the live chat path per turn, see
+> [Live chat wiring](#live-chat-wiring) below. The deposit side
+> (what fills the memory tier the assembler reads) is described in
+> [Filling the memory tier](#filling-the-memory-tier).
 > Keep this doc as the canonical reference; update inline rather than
 > forking when extending the protocol.
 
@@ -40,7 +40,7 @@ The L1 contract lives in `digital_twin/context/` and is exported via
 | `compute_staleness`          | 0–1 freshness score per fragment                                    |
 | `get_role_knowledge_types`   | Per-role allow-list lookup                                          |
 
-The assembler depends on `KnowledgeService` (Protocol — MET-346) and
+The assembler depends on `KnowledgeService` (Protocol) and
 `TwinAPI` (ABC — twin_core). Concrete backends (LightRAG, Neo4j) live
 behind those interfaces.
 
@@ -95,7 +95,7 @@ arrive without a similarity and use synthetic priority constants
 (`_GRAPH_NODE_PRIORITY=0.95`, `_GRAPH_EDGE_PRIORITY=0.55`) so they
 compete fairly with strong knowledge hits.
 
-## Scoping rules — role-based (MET-316)
+## Scoping rules — role-based
 
 `digital_twin/context/role_scope.py` maps each agent role to a
 `frozenset[KnowledgeType]`:
@@ -117,7 +117,7 @@ Role narrowing is post-applied: one `search` call with no server-side
 type filter, over-fetched at `top_k * 4`, then trimmed against the
 role allow-list. Avoids one round-trip per allowed type.
 
-## Token budget management (MET-317)
+## Token budget management
 
 Token counts come from `tiktoken` (default model `gpt-4o-mini`,
 fallback `cl100k_base`, final fallback `len // 4`). Budget enforcement
@@ -140,7 +140,7 @@ Tie-break: newer `created_at` first; smaller `token_count` first
 
 When the budget cuts, the assembler emits a `context_truncated`
 structlog event with a `dropped_sources` per-source-kind tally that
-MET-326 wires to a Prometheus counter.
+is wired to a Prometheus counter.
 
 ## Attribution mechanism
 
@@ -161,7 +161,7 @@ The invariant is enforced in tests
 (`tests/unit/test_context_assembler.py::TestAttribution::test_every_fragment_has_source_id`):
 **every fragment has a non-empty `source_id`.**
 
-## Freshness policy (MET-323)
+## Freshness policy
 
 `compute_staleness(metadata)` returns a `[0, 1]` score (0 fresh, 1
 stale) by combining three signals via `max`:
@@ -172,9 +172,9 @@ stale) by combining three signals via `max`:
    `source_id` carry `metadata["shadowed_by"]` ≥ 1 (each shadow
    contributes 0.5).
 
-**Revision state first (FORGE-530).** A fragment whose metadata carries
-`item_key`/`item_revision` (every definition revision is stamped with them,
-FORGE-523) is scored by revision state *before* age decay, and the three
+**Revision state first.** A fragment whose metadata carries
+`item_key`/`item_revision` (every definition revision is stamped with them)
+is scored by revision state *before* age decay, and the three
 signals above do not apply to it:
 
 | Revision state | Score |
@@ -188,7 +188,7 @@ signals above do not apply to it:
 `annotate_revision_state(fragments, twin)` runs in the assembler before the
 shadowing pass and fills `revision_status`, `revision_run`,
 `item_current_revision`, `item_head_revision` and `rejection_reason` from the
-twin (`twin_core/items/state.py`). It reads FORGE-525's `REVISION_OF` edge
+twin (`twin_core/items/state.py`). It reads the `REVISION_OF` edge
 fields: `status` (`committed` and `approved` are the baseline, a missing status
 is `committed`, an unknown one is treated as a draft), `change_set` (the run)
 and `status_reason`. The current revision is the item's HEAD. A fragment
@@ -201,11 +201,11 @@ drop. `0.5` keeps roughly the last 30 days of decisions; `0.2` is
 freshness-only.
 
 The "auto-link old chunk superseded by new chunk" persistence is
-deferred — LightRAG deletes the prior row on re-ingest (MET-307), so
+deferred — LightRAG deletes the prior row on re-ingest, so
 callers set `metadata["superseded"]` explicitly when they have
 business logic for it.
 
-## Conflict resolution (MET-322)
+## Conflict resolution
 
 `ConflictDetector` scans the kept fragment set for tracked fields
 that disagree across sources sharing a grouping key (default `mpn`).
@@ -231,15 +231,14 @@ action and escalate.
 
 Per-skill expectations live next to the agent definition:
 
-- **Mechanical** — `docs/agents/mechanical-context-spec.md` (MET-319).
-- **Electronics** — `docs/agents/electronics-context-spec.md`
-  (MET-332).
+- **Mechanical** — `docs/agents/mechanical-context-spec.md`.
+- **Electronics** — `docs/agents/electronics-context-spec.md`.
 
 Each per-agent spec lists the Twin nodes, knowledge types, prior tool
 results, and constraints required for every skill. They are the
 canonical input for `RoleScope` map updates.
 
-## Live chat wiring (MET-566)
+## Live chat wiring
 
 The assembler runs on every harness chat turn via the layer-4 adapter
 `api_gateway/chat/context_adapter.py`:
@@ -266,14 +265,14 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   *retrieved context block* is volatile per turn and is therefore a
   trailing `[retrieved context]` history pair on both paths, just
   before the user's message.
-- **Requirements-discovery directive (MET-584)** — when the project
+- **Requirements-discovery directive** — when the project
   has no `prd` or `constraint_set` work product, the brief instructs
   the agent to elicit quantified requirements and record them
   (`twin.record_constraint_set`) before substantive design work, and
   `twin.commit_geometry` soft-warns (never blocks) when geometry lands
   in an unconstrained project. Chat nudges; the design-flow gates
-  (MET-582/583) enforce.
-- **Requirement doc content excerpts (FORGE-86)** — the brief used to
+ enforce.
+- **Requirement doc content excerpts** — the brief used to
   list every work product as a bare `name — type (status)` line, so a
   recorded `prd`/`constraint_set`'s actual content was invisible to the
   agent short of a separate mid-turn twin lookup nothing prompted it to
@@ -284,7 +283,7 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   to 3), so the agent actually sees stated requirements instead of just
   their names. Best-effort: any resolution failure falls back to the
   name-only line.
-- **Geometry-commit directive (MET-615)** — both harness system prompts
+- **Geometry-commit directive** — both harness system prompts
   (native and ReAct) and the project brief now state explicitly that
   `freecad.*`/`cadquery.*` tools only write to a local, ephemeral
   adapter workspace, and that any turn which generates or modifies
@@ -292,8 +291,8 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   Before this, the only mention was a soft how-to clause in the brief;
   a full session could generate a CAD model and never persist it as a
   work product without the agent — or the user — noticing.
-- **Design-flow discoverability nudge (FORGE-90)** — `run.start_design_flow`
-  (MET-587) was real and callable but only mentioned itself, via its own
+- **Design-flow discoverability nudge** — `run.start_design_flow`
+ was real and callable but only mentioned itself, via its own
   tool description, when the user's phrasing already matched "start/run
   the full design process" closely. A user who just stated a broad
   product goal ("design a weather station") got ad-hoc single-skill work
@@ -302,7 +301,7 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   `run.start_design_flow` for that shape of ask rather than waiting for
   matching phrasing — the tool already gates every phase on human
   approval, so surfacing it costs nothing if the user declines.
-- **Brief from the item baseline (FORGE-530)**: for a project that has
+- **Brief from the item baseline**: for a project that has
   items, `build_project_brief` lists **one line per item** at its current
   revision instead of the newest work products: `KEY@n`, type, name and key
   facts (bounding box, material, volume and mass for a part; constraint count
@@ -310,16 +309,16 @@ The assembler runs on every harness chat turn via the layer-4 adapter
   need), plus the evidence state of a part (`FEA @3 ok`, `FEA @3 fail`, or
   `FEA stale (@2, not re-run on @3)` when the newest simulation result
   analysed an older revision). The dependency is the result's
-  `analysed_geometry` pin (FORGE-532): a result pinned to another node is not
+  `analysed_geometry` pin: a result pinned to another node is not
   evidence for this one, whatever other edges point here; a result recorded
   before the pin existed counts by its `DERIVES_FROM` edge. The current revision is the item's HEAD
-  (FORGE-525 moves it only on gate approval), so a superseded, rejected,
+  (it moves only on gate approval), so a superseded, rejected,
   abandoned or other run's draft revision never appears. Then: rejected revisions as "already tried, failed because" lessons
   (up to 5), recent real design decisions (up to 5, de-duplicated by title,
   never the design-flow "phase summary" backstops), a one-line count of other
   records, and an excerpt of the *current* constraint set and prd prose
-  (FORGE-86 picked the three newest, which on the shelf project were three
-  revisions of one set; FORGE-528 made the prd prose an item, so it has one
+  (an earlier version picked the three newest, which on the shelf project were three
+  revisions of one set; the prd prose is now an item, so it has one
   line and one excerpt like any other).
   When the call belongs to a design-flow run (`run_id` from the MCP call
   context, or passed explicitly), that run's own draft revisions are listed
@@ -341,10 +340,10 @@ current date → tool-family capability summary (from the runtime's
 registry) → project brief → response guidance (cite bracketed source
 ids).
 
-## Filling the memory tier (MET-567)
+## Filling the memory tier
 
 Retrieval is only half of context engineering: something has to *deposit*
-what gets retrieved. Until MET-567 the deposit side was wired in one
+what gets retrieved. The deposit side used to be wired in one
 place only — `MechanicalAgent` — and consolidation read from a fetcher
 that a pgvector deployment never populates, so `agent_experiences` and
 `memory.list_insights` were near-empty in every real deployment no
@@ -381,8 +380,8 @@ Design points worth keeping:
 - **Every deposit is best-effort.** A memory-tier failure never fails a
   chat turn, a session completion, or a decision recording.
 
-`WORK_PRODUCT_CREATED` is the event `KnowledgeConsumer` has subscribed
-to since MET-307 while nothing published one. `twin.record_decision`
+`WORK_PRODUCT_CREATED` is the event `KnowledgeConsumer` subscribes
+to, though nothing used to publish one. `twin.record_decision`
 now publishes it (returning `knowledge_indexed` in its result), which is
 what makes a just-recorded decision findable via
 `knowledge.search(knowledge_type=DESIGN_DECISION)`.
@@ -394,7 +393,7 @@ gateway lifespan. It is an asyncio task rather than a Temporal schedule
 because the gateway runs no Temporal worker today
 (`orchestrator/temporal_worker.py` registers the agent workflows only),
 so a Temporal schedule would have left consolidation dormant — the exact
-failure being fixed. The interval reuses the MET-454 spec's
+failure being fixed. The interval reuses the consolidation spec's
 `DEFAULT_INTERVAL_SECONDS` (30 min) so the two drivers of the same
 pipeline cannot drift; each pass looks back twice the interval so an
 experience written near a boundary still falls inside the next window.
@@ -403,7 +402,7 @@ experience written near a boundary still falls inside the next window.
 | --- | --- | --- |
 | `METAFORGE_CONSOLIDATION_INTERVAL_SECONDS` | `1800` | Seconds between passes; `0` (or a negative value) disables the loop — set this when handing the job to a Temporal worker |
 
-**Handing the cadence to Temporal.** `ConsolidationWorkflow` (MET-454) is now
+**Handing the cadence to Temporal.** `ConsolidationWorkflow` is now
 registered on the worker (`orchestrator/temporal_worker.py`), which runs as
 its own `temporal-worker` compose service. To hand over: start the worker,
 start a `ConsolidationWorkflow` (its own loop owns the interval), and set
@@ -416,7 +415,7 @@ bootstraps (gateway and MCP sidecar). Omitting it left
 `POST /v1/memory/search` and `GET /v1/memory/components/{name}`
 answering 503 on every deployment.
 
-## Context budget (FORGE-479)
+## Context budget
 
 Every model call re-sends the tool schemas, the brief and every earlier tool
 result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
@@ -434,13 +433,13 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   its existing observation truncation.
 - **The project brief is capped.** `build_project_brief` stops at
   `METAFORGE_BRIEF_CHAR_LIMIT` characters (default 10,000), keeps the newest
-  work products (FORGE-244 ordering; a project with items lists one line per
-  item instead, see FORGE-530 under Live chat wiring), re-appends the closing `project_id`
+  work products (a project with items lists one line per
+  item instead, see Live chat wiring), re-appends the closing `project_id`
   directives, and points at `metaforge://twin/brief/<project_id>`, which
   serves the uncapped brief.
 - **Design-flow phases carry a scoped tool set, driven by what they deliver.**
   `ReActPhaseBrain` passes `mcp_core.profiles.tools_for_phase(phase.disciplines,
-  deliverables)` (FORGE-497), where `deliverables` is every required and
+  deliverables)`, where `deliverables` is every required and
   expected deliverable of the phase. The set is a common base (project,
   session, twin reads and records, `twin.record_document`,
   `twin.record_engineering_entity`, `twin.record_constraint_set`,
@@ -471,7 +470,7 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   registered. When the cap is reached it answers that the tool exists but is
   not available to this phase, instead of implying the tool is missing.
 
-- **Chat turns keep companion tools together (FORGE-518).** Plain chat has no
+- **Chat turns keep companion tools together.** Plain chat has no
   phase allowlist, so the provider's tools-array cap (128 on OpenAI) is applied
   by `_select_tools`. It keeps tool groups that only work as a set
   (`twin.stage_work_product_file` with `freecad.import_step` and
@@ -487,7 +486,7 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   `twin.stage_work_product_file` is always visible. See
   [robust-harness-design](robust-harness-design.md).
 
-- **Rework and retry briefs name the turned-down revisions (FORGE-530).**
+- **Rework and retry briefs name the turned-down revisions.**
   `orchestrator/design_flow/rework_context.py` takes a phase and its rejected
   or failed revisions (node ids or `KEY@n` refs) and returns prompt lines: the
   revision ref, the gate's reason (the revision's own, else the one passed
@@ -502,7 +501,7 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
   `build_retry_feedback(..., revisions=...)` call.
 
   Both engines use it on every retry and rework. The gate decision closes the
-  phase's drafts first (`decide_run_gate`, FORGE-525: `abandoned` on a retry
+  phase's drafts first (`decide_run_gate`: `abandoned` on a retry
   or rework), then `phase_revision_notes` reads the drafts of that phase in the
   run's change set from the latest close (`closed_phase_revisions`, which includes items with no head yet, so a new item the gate turned down is reported too), so a third
   attempt hears about the second attempt's work only. The gate's reason is its
@@ -517,7 +516,7 @@ result. A live design-flow intent phase spent 61,937 prompt tokens over 3 calls
 Measurement: `tests/unit/test_context_budget.py::test_phase_prompt_tokens_before_and_after`
 scripts one 3-call phase (two large reads, then an answer) against a 121-tool
 bridge, with and without the limits, and reads prompt tokens back from the
-FORGE-476 usage store.
+usage store.
 
 ## Observability hooks
 
@@ -556,15 +555,15 @@ Adding a tracked conflict field:
 ## References
 
 - [Knowledge Ingestion Playbook](knowledge-ingestion-playbook.md) — how
-  to add a new `KnowledgeType` end-to-end (MET-314).
+  to add a new `KnowledgeType` end-to-end.
 - ADR-008 (planner repo) — L1 framework choice (LightRAG behind
   `KnowledgeService`).
-- MET-312 — Context Engineering epic.
-- MET-315 — Foundation (`ContextAssembler`).
-- MET-316 — Role-based scoping.
-- MET-317 — Token budgets + composite priority.
-- MET-322 — Conflict detection.
-- MET-323 — Staleness aging.
-- MET-567 — Memory deposit paths + consolidation cadence.
-- MET-569 — Tool-call hardening (see
-  [robust-harness-design.md](robust-harness-design.md#tool-call-hardening-met-569)).
+- Context Engineering epic.
+- Foundation (`ContextAssembler`).
+- Role-based scoping.
+- Token budgets + composite priority.
+- Conflict detection.
+- Staleness aging.
+- Memory deposit paths + consolidation cadence.
+- Tool-call hardening (see
+  [robust-harness-design.md](robust-harness-design.md#tool-call-hardening)).

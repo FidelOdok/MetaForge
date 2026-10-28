@@ -31,20 +31,20 @@ acceptance criteria.
 
 | Layer | Tests | PASS | SKIP | FAIL | Issues validated |
 |---|---|---|---|---|---|
-| L0 Persistence | 5 | 1 | 4 (env) | 0 | MET-292, 304, 305 |
-| L1 Retrieval | 5 | 1 | 4 (env) | 0 | MET-293, 307, 335, 336, 346 |
-| L2 Context assembly | 7 | 7 | 0 | 0 | MET-313, 315, 316, 317, 319, 320, 332 |
-| L3 Quality signals | 8 | 8 | 0 | 0 | MET-322, 323, 324, 326, 333, 334 |
-| L4 Extension recipes | 5 | 5 | 0 | 0 | MET-314, 329, 331 |
+| L0 Persistence | 5 | 1 | 4 (env) | 0 | - |
+| L1 Retrieval | 5 | 1 | 4 (env) | 0 | - |
+| L2 Context assembly | 7 | 7 | 0 | 0 | - |
+| L3 Quality signals | 8 | 8 | 0 | 0 | - |
+| L4 Extension recipes | 5 | 5 | 0 | 0 | - |
 
 ### Cycle 2
 
 | Layer | Tests | PASS | SKIP | FAIL | Issues validated |
 |---|---|---|---|---|---|
-| L1 MCP server + bridge | 4 | 4 | 0 | 0 | MET-306, 337 |
-| L2 Auth + `.mcp.json` | 11 | 11 | 0 | 0 | MET-338, 339 |
-| L3 External-harness E2E | 1 | 1 | 0 | 0 | MET-340 |
-| L4 Integration docs | 5 | 5 | 0 | 0 | MET-341, 342 |
+| L1 MCP server + bridge | 4 | 4 | 0 | 0 | - |
+| L2 Auth + `.mcp.json` | 11 | 11 | 0 | 0 | - |
+| L3 External-harness E2E | 1 | 1 | 0 | 0 | - |
+| L4 Integration docs | 5 | 5 | 0 | 0 | - |
 
 ### Golden flow
 
@@ -57,7 +57,7 @@ acceptance criteria.
 Pulled from `docs/uat/cycle-1-2-acceptance-matrix.md`. **0 of 30
 issues** showed an acceptance failure. The 9 environment-skipped
 tests cover bullets validated by other passing assertions (e.g.
-MET-307's consumer-imports-protocol assertion passes; the
+The consumer-imports-protocol assertion passes; the
 event-flow round-trip needs the live LightRAG backend so it's
 skipped here and runs in CI).
 
@@ -66,13 +66,13 @@ skipped here and runs in CI).
 While drafting the UAT, two **assertion bugs** surfaced (not
 implementation gaps — UAT bugs):
 
-1. **MET-316** — initial assertion expected `mechanical_agent` to
+1. **Role scope** — initial assertion expected `mechanical_agent` to
    *not* receive `COMPONENT` knowledge. Inspecting
    `digital_twin/context/role_scope.py:65-71` showed the role's
    allow-list deliberately *includes* `COMPONENT` (mechanical agents
    need component info, e.g. fasteners). Assertion corrected to
    check `SESSION` exclusion instead — which is correctly enforced.
-2. **MET-323** — initial assertion used metadata key `superseded_at`.
+2. **Staleness key** — initial assertion used metadata key `superseded_at`.
    Inspecting `digital_twin/context/staleness.py:91` showed the real
    key is `superseded` (boolean). Assertion corrected; superseded
    fragment correctly scores 1.0.

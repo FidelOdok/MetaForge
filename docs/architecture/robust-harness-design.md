@@ -1,4 +1,4 @@
-# Robust Agent Harness — Design (MET-547)
+# Robust Agent Harness — Design
 
 Design doc for the production-grade agent harness: a unified LLM provider
 pipeline, first-class MCP integration, and a portable `SKILL.md` skills system,
@@ -9,41 +9,40 @@ and **OpenClaw** (OpenClaw Foundation).
 | Field | Value |
 |:------|:------|
 | **Status** | Accepted (supersedes the deferral in ADR-008 for the harness scope) |
-| **Linear** | MET-547 |
-| **Supersedes/revives** | MET-308 (in-house harness, deferred by ADR-008) |
+| **Supersedes/revives** | The in-house harness, deferred by ADR-008 |
 | **Deciders** | Fidel (project lead — also ADR-008 decider) |
-| **Builds on** | `orchestrator/harness/` (three-agent loop, MET-474/MET-475) |
+| **Builds on** | `orchestrator/harness/` (three-agent loop) |
 
 ---
 
 ## Why this doc exists
 
-MET-547 originally linked a design doc on an unmerged working branch
+The issue that proposed this harness originally linked a design doc on an unmerged working branch
 (`claude/evaluate-knowledge-base-rIb9d`) that was never pushed to a reachable
 remote — it 404s under both `FidelOdok/MetaForge-Planner` and
 `MetaForge-HA/MetaForge-Planner`, and is absent from the local Planner clone.
 This document replaces that phantom reference as the authoritative design, and
-is grounded in three real sources: (1) the MET-547 issue body, (2) ADR-008, and
+is grounded in three real sources: (1) that issue's body, (2) ADR-008, and
 (3) the existing harness code in `orchestrator/harness/`.
 
 ## ADR-008 reconciliation
 
 ADR-008 (Accepted, 2026-04-26) **deferred** MetaForge's in-house L3 ReAct loop
-(MET-308) and L4 multi-agent DAG, choosing to let external harnesses (Claude
+ and L4 multi-agent DAG, choosing to let external harnesses (Claude
 Code, Codex) act as the reasoning brain while MetaForge exposed L1 (knowledge)
 + L2 (MCP tools). ADR-008 explicitly reserved the right to revisit:
 
 > "This ADR defers, doesn't cancel. A future ADR will revisit if dogfood
 > reveals external-harness limits."
 
-MET-547 invokes exactly that clause. The harness here is **not** a rejection of
+This work invokes exactly that clause. The harness here is **not** a rejection of
 the external-harness strategy — it is complementary:
 
 - **External harness route stays intact.** Phase 2 ships `metaforge mcp serve`,
   keeping MetaForge drivable *by* Claude Code/Codex over MCP (the ADR-008 win).
 - **In-house runtime is additive.** The provider pipeline + agent loop give
   MetaForge a *provider-agnostic* runtime it can run standalone (Anthropic,
-  OpenAI, OpenRouter, local vLLM/Ollama) for the MET-524 live-generation
+  OpenAI, OpenRouter, local vLLM/Ollama) for the live-generation
   orchestrator, where an external harness is not in the loop.
 - **Bidirectional MCP** (client *and* server) means the same tool surface
   serves both directions.
@@ -67,7 +66,7 @@ ADR-008 is preserved, not reversed.
   stub the model call: `coding/agents.py` "the real coding generator would
   invoke a model; here we just …").
 
-MET-547 makes those stubbed model calls real (via the provider pipeline), adds
+This work makes those stubbed model calls real (via the provider pipeline), adds
 MCP tools to the agents' toolbelt, and makes the loop configurable by
 `SKILL.md` playbooks.
 
@@ -111,7 +110,7 @@ for resolution before Phase 2 lands; Phase 1 is unaffected.
 | OpenAI-compatible REST + SSE, Runs API + `/approval` | WebSocket real-time streaming; bidirectional MCP |
 | SQLite session ledger (FTS5) + context compression | Session write-lock + `before_tool_call` hooks; local-first Markdown artifacts |
 
-### Provider surface (verified against Hermes docs, MET-549)
+### Provider surface (verified against Hermes docs)
 
 Hermes integrates **~35 provider ids** — but they collapse into a few **API
 families**, which is what the adapter layer keys on:
@@ -126,15 +125,14 @@ families**, which is what the adapter layer keys on:
 - **Gemini-native:** gemini (google-genai).
 - **AWS Bedrock (Converse):** bedrock.
 - **Codex subscription (Responses API):** openai-codex — drives a ChatGPT
-  Plus/Pro subscription with no API key by reusing `~/.codex/auth.json`
-  (MET-550). See [Using a ChatGPT subscription with the harness](../harness-codex-subscription.md).
+  Plus/Pro subscription with no API key by reusing `~/.codex/auth.json`. See [Using a ChatGPT subscription with the harness](../harness-codex-subscription.md).
 - **Deferred (later slices):** Google Vertex (OAuth2), GitHub Copilot, and the
   remaining OAuth portals (Nous Portal, qwen/minimax/xai OAuth, ollama-cloud).
 
 Implemented as `orchestrator/harness/providers/registry.py` (`resolve_provider`)
 + four adapters in `adapters.py`; `default_invoke` dispatches by family.
 Providers with account/region-specific endpoints read `base_url` from
-`HARNESS_<ID>_BASE_URL` so no guessed URL ships. See MET-549.
+`HARNESS_<ID>_BASE_URL` so no guessed URL ships. See.
 
 ## Phased plan
 
@@ -160,7 +158,7 @@ Providers with account/region-specific endpoints read `base_url` from
 - SQLite session ledger (FTS5) + Markdown artifact store
 - Context compression + session lineage
 - Cron/heartbeat re-validation
-- WebSocket real-time streaming (10 Hz artifacts, per MET-524)
+- WebSocket real-time streaming (10 Hz artifacts)
 
 ## Phase 1 component design — `ProviderPipeline`
 
@@ -184,14 +182,14 @@ This satisfies the success criteria "same loop runs against any provider with
 zero code change" and "automatic failover on 429: fall to next model, session
 preserved."
 
-### Provider/model pairs are checked before any call (FORGE-468)
+### Provider/model pairs are checked before any call
 
 A pair the provider's API family cannot serve is caught when the
 configuration is resolved, not discovered as a 400 on every call.
 `registry.model_family_mismatch(provider, model)` is a conservative family
 check, not a model catalogue:
 
-- `openai-codex` rejects a `vendor/model` slug (FORGE-93).
+- `openai-codex` rejects a `vendor/model` slug.
 - A first-party family serves only its own vendor's models: `anthropic`
   rejects `gpt-*` / `o1` / `o3` / `o4` slugs, `openai-codex` rejects
   `claude-*` / `gemini*`, `gemini` rejects `claude-*` / `gpt-*`.
@@ -206,7 +204,7 @@ candidate from the chain with a `harness_provider_model_mismatch` warning
 (and raises `InvalidModelError` if no candidate survives). Dropping the
 primary counts as a fallback, below.
 
-### Falling back is an alarm (FORGE-468)
+### Falling back is an alarm
 
 Whenever a role is served by anything other than its primary, the harness:
 
@@ -230,7 +228,7 @@ Callers that need to know which model answered wrap the call in
 `provenance.capture_served()`; the flow generator uses it to record
 `generatedBy` on every proposal.
 
-### Token and cost accounting (FORGE-476)
+### Token and cost accounting
 
 Every model call the pipeline makes records one usage event: prompt,
 completion and cached-input tokens, cost, provider and model, attributed to a
@@ -253,7 +251,7 @@ never recorded as zero, and a model missing from
 `calls_without_usage` and `calls_unpriced`, so a cost with either non-zero is a
 lower bound.
 
-A total's `cost_usd` follows the same rule (FORGE-486): it is `null`, never
+A total's `cost_usd` follows the same rule: it is `null`, never
 `0.0`, when no call in the total was priced, because a zero reads as "free" in
 a live view and slips under any budget check. When only some calls were priced
 it covers those, with `calls_unpriced` beside it. Subscription-billed
@@ -283,13 +281,13 @@ run's accumulated spend crosses `METAFORGE_RUN_SPEND_ALERT_USD` (default 5) and
 logs `llm_run_spend_exceeded` with the run id. The `LlmRunawaySpendPerRun`
 alert fires on it.
 
-### Per-role model routing (FORGE-477)
+### Per-role model routing
 
 One provider and model used to serve every role. A routing table
 (`providers/routing.py`, data in `providers/model_routes.json`) now maps a role
 to a `provider:model` route. Roles are `flow_generator`, `phase_brain`,
 `phase_brain:<discipline>`, `gate_check`, `classification`, `summarisation` and
-`chat`; the role is the one FORGE-476's `usage_scope` already attributes.
+`chat`; the role is the one the usage accounting's `usage_scope` already attributes.
 
 Routing is opt-in per deployment. The shipped `model_routes.json` has no
 routes, so every role runs on the durable harness selection
@@ -321,7 +319,7 @@ Configuration:
   verify) and shows in the version diff.
 
 Validation: every route, env override, project route and phase model is checked
-with `model_family_mismatch` (FORGE-468) plus provider and role names. A bad
+with `model_family_mismatch` plus provider and role names. A bad
 route raises `RoutingConfigError` and is never dropped quietly: the gateway
 refuses to start on a bad table, a hand-edited or generated flow whose phase
 model cannot work fails the `phase-model-routable` invariant (the generator
@@ -341,12 +339,12 @@ the same list.
 Provenance: each resolution logs `llm_route_resolved` with role, source
 (`phase`, `project` or `table`), provider and model, and the usage event for the
 call carries the role and the provider/model that served it, so
-`by_role` and `by_model` in FORGE-476's totals show the cheap and strong models
+`by_role` and `by_model` in the usage totals show the cheap and strong models
 side by side. `GET /v1/harness/routing[?project_id=]` and `health.check`
 (`model_routing`) show the effective routes; roles absent from the response run
 on `default_provider` / `default_model`.
 
-## Success criteria (from MET-547)
+## Success criteria
 
 - Same agent loop runs against Anthropic, OpenAI, OpenRouter, and local
   (vLLM/Ollama) with zero code change.
@@ -375,11 +373,11 @@ zero network. Integration tests (Level 5) wire the pipeline into the existing
 ## Related
 
 - ADR-008 — External Harness Strategy (the decision this revisits)
-- MET-524 — MCP-Driven Live Product Generation Orchestrator (this is its runtime)
-- MET-543 — Server API MCP client for simulators (tools this harness consumes)
-- MET-474 / MET-475 — the existing three-agent harness this wraps
+- MCP-Driven Live Product Generation Orchestrator (this is its runtime)
+- Server API MCP client for simulators (tools this harness consumes)
+- the existing three-agent harness this wraps
 
-## Auth model (MET-551) — multi-credential + rotation + dead-token handling
+## Auth model — multi-credential + rotation + dead-token handling
 
 Mirrors Hermes's auth surface:
 
@@ -390,7 +388,7 @@ Mirrors Hermes's auth surface:
 
 **Remote/headless auth (fidel-dev):** the harness runs where the gateway runs. Do the one-time `codex login --device-auth` on that host (or SSH-forward `:1455`, or copy `~/.codex/auth.json`); token refresh thereafter is pure HTTPS (no browser). `chmod 600` the auth file on shared boxes.
 
-## Context compaction (MET-568)
+## Context compaction
 
 The live loop manages its context window deterministically, in four layers:
 
@@ -445,7 +443,7 @@ is exactly backwards. Instead:
 
 - every **native** tool is kept (few, curated, session-critical — e.g.
   `chat.set_project_scope` and the skill layer);
-- three more classes are protected the same way (FORGE-94), before the
+- three more classes are protected the same way, before the
   round-robin runs: any tool `search_tools` has **pinned**
   (`ToolRegistry.pin`/`pinned_names`); any tool whose name ends
   `_open_session` — a structural dependency for every other tool its own
@@ -459,7 +457,7 @@ is exactly backwards. Instead:
   added, still sorted into the same dropped tail (a large adapter's own
   alphabetical tail is exactly where the round-robin's global budget ran
   out);
-- **companion groups** (FORGE-518) are kept together: if any of
+- **companion groups** are kept together: if any of
   `twin.stage_work_product_file`, `freecad.import_step`,
   `freecad.export_model`, `twin.commit_geometry`, `freecad.open_session` or
   `freecad.close_session` is kept, so are the rest of its group
@@ -471,7 +469,7 @@ is exactly backwards. Instead:
   adapters leave over, so the cap bites them first;
 - the drop is **loud** — `tool_schemas_truncated` logs the limit, counts, and
   the dropped tool names, and `chat_tools_dropped` repeats them at info,
-  once per distinct drop set within a turn (FORGE-518).
+  once per distinct drop set within a turn.
 
 Capping is a safety net, not a substitute for choosing. A deployment near the
 limit should narrow the tool set deliberately (the dashboard's tool selector
@@ -492,7 +490,7 @@ declares via `tools_required`, so a mechanical-only phase never sees
 `kicad.*`/`spice.*` schemas at all. `domains=None` (the default) registers
 everything, unchanged from before this existed.
 
-Plain project-scoped chat (FORGE-300) derives its own `domains` signal from
+Plain project-scoped chat derives its own `domains` signal from
 the project itself, no new field or migration required: the disciplines its
 recorded work products already evidence (a `cad_model` implies mechanical, a
 `schematic` implies electronics, ...) unioned with a keyword scan of the
@@ -513,7 +511,7 @@ next step. Its handler is built before `build_agent_runtime` constructs the
 mutable cell (`runtime_cell["runtime"]`, populated right after
 `build_agent_runtime` returns) rather than closing over it directly.
 
-**"Registered" isn't the same as "in the schema" (FORGE-94).** A tool
+**"Registered" isn't the same as "in the schema".** A tool
 already present in the `ToolRegistry` — because an earlier `search_tools`
 call added it, or it was in scope all along — is only reported as "already
 available," never re-registered. But *registered* and *sent to the
@@ -532,12 +530,12 @@ When a harness turn raises, the route emits a `notify_error` SSE event
 carrying the exception text *before* `agent.done`. Without it the client saw
 typing, then `agent.done`, then nothing — which the forge TUI reports as
 `(no reply — the agent produced no output)`, with the real cause visible only
-in gateway logs. `notify_error` had existed unused since MET-219 while the TUI
+in gateway logs. `notify_error` had existed unused while the TUI
 already handled the event; only the call site was missing. The error
 `ChatMessageRecord` the route returns does not close this gap on its own — the
 TUI renders streamed assistant deltas, not the returned record.
 
-## Tool-call hardening (MET-569)
+## Tool-call hardening
 
 Four properties the tool-calling loop enforces, so a model's mistake costs a
 message rather than an invocation:
@@ -616,7 +614,7 @@ ephemeral workspace. The gate is a static precondition; the per-call human
 decision for the same tools remains the separate "ask" tier
 (`requires_approval`).
 
-**Skill-layer tools too (FORGE-97).** A skill like `generate_cad` persists a
+**Skill-layer tools too.** A skill like `generate_cad` persists a
 work product into the Twin internally — via
 `domain_agents.shared.commit_geometry.commit_geometry`, a direct
 `McpBridge.invoke("twin.commit_geometry", ...)` call — not as a separately
@@ -626,13 +624,13 @@ commits the exact same kind of node, never did. `api_gateway/chat/skill_tools.
 py`'s `_tool_for_registration` now gates any skill whose Pydantic input model
 declares a `commit` field the same way — `required_gates=(GATE_TWIN_WRITE,)`,
 `requires_approval=True` — schema-driven rather than a per-skill name list,
-matching FORGE-81/82's `_declares_project_id` precedent, so
+matching the `_declares_project_id` precedent, so
 `generate_enclosure`/`create_assembly`/`generate_cad_ir` (today) and any
 future commit-capable skill are covered automatically. Deliberately static,
 like every other gate here: a call that happens to pass `commit=False` still
 pauses — a false-positive prompt is a minor cost, not a silent bypass.
 
-### Validate before pausing for approval (FORGE-222)
+### Validate before pausing for approval
 
 `HarnessRuntime.call_tool` runs the declared-schema check
 (`orchestrator.harness.validation.validate_arguments`) BEFORE checking
@@ -645,7 +643,7 @@ Design IR documents approved one at a time, most then failing validation).
 and keeps it a safe standalone entrypoint for other callers) — this only
 moves *when* the very first check runs.
 
-### Approval UI for the "ask" tier (FORGE-33)
+### Approval UI for the "ask" tier
 
 `requires_approval` (`twin.commit_geometry`, `twin.record_decision`,
 `project.create/update/delete`) pauses the run server-side
@@ -654,7 +652,7 @@ moves *when* the very first check runs.
 `tool.approval_requested` SSE event (`run_id`, `tool`, `arguments`) on the
 same `/v1/chat/threads/{id}/stream` the turn is already using. The resolution
 endpoint (`GET`/`POST /v1/chat/tool_approvals[/{run_id}]`) was real from the
-start, but until FORGE-33 no client consumed either — a paused call had no
+start, but originally no client consumed either — a paused call had no
 UI anywhere and always hit the deny-by-default timeout
 (`chat_approval_timeout_seconds`, 1800s default).
 
@@ -676,7 +674,7 @@ Two clients now do:
 Neither client changed the backend — the SSE event and REST endpoint were
 already complete; the gap was entirely "no consumer."
 
-### Approval tier in design-flow phase turns (FORGE-490)
+### Approval tier in design-flow phase turns
 
 The in-process hold above only works where something can answer it: the gateway,
 which serves `/v1/chat/tool_approvals`. A design-flow phase turn runs on the
@@ -705,7 +703,7 @@ itself reachable at startup; a worker never does) logs
 `metaforge_unreachable_approval_hold_total`; the `ApprovalHoldWithNoApprover`
 alert fires on any increase.
 
-### Tool-approval durability (FORGE-89)
+### Tool-approval durability
 
 `api_gateway/chat/tool_approvals.py`'s `InMemoryRunStore` was process-local
 only — a gateway restart silently dropped any approval record, pending or
@@ -718,7 +716,7 @@ override via `METAFORGE_TOOL_APPROVALS_LEDGER_PATH`), wired in
 behind the same `METAFORGE_RUNS_LEDGER_DISABLE` flag.
 
 This deliberately does **not** mirror design-flow's `init_run_ledger()`,
-which rehydrates non-terminal runs as resumable (and, since FORGE-605,
+which rehydrates non-terminal runs as resumable (and, since,
 finished runs as read-only history, so the runs list survives a restart;
 the reconcile loop and the reaper skip terminal runs): a design-flow run's phase
 executor can genuinely pick back up after a restart, but the chat turn that
@@ -729,7 +727,7 @@ restored `awaiting_approval` row is marked `failed` with an
 instead of `awaiting_approval` — the record persists for audit/history, but
 nothing implies it is still actionable.
 
-### Post-turn grounding guard (FORGE-98)
+### Post-turn grounding guard
 
 A chat agent can claim a design action was performed with **zero tool
 calls** that turn — confirmed live: a turn made no tool calls at all (no
@@ -761,22 +759,22 @@ agent reported "150mm x 150mm x 20mm... created with the specified
 features" anyway). Promoting `evals/judge.py`'s own LLM-graded `grounding`
 transcript dimension into a live per-turn check would catch that class too,
 at the cost of an extra judged model call per turn — tracked separately
-(FORGE-104), not folded in here.
+, not folded in here.
 
-### Claim-specific grounding (FORGE-520)
+### Claim-specific grounding
 
-The FORGE-98 check passes any turn with one successful tool call, so it
+The grounding check passes any turn with one successful tool call, so it
 missed a live failure: a turn made many successful FreeCAD session calls
 (`import_step`, `create_assembly`, `export_model`), never called
 `twin.commit_geometry`, then replied that the assembly was saved and quoted
 `assembly_4` (a FreeCAD session object id) as its node id. The same function
-now runs two more deterministic checks after the FORGE-98 one, each with its
+now runs two more deterministic checks after that one, each with its
 own banner from `orchestrator/design_flow/grounding.py`. Neither adds a model
 call.
 
 | Check | Fires when | Banner |
 |-------|-----------|--------|
-| No tool call (FORGE-98) | a completion verb and no successful tool call at all | `UNGROUNDED_BANNER` (the reply gets only this one) |
+| No tool call | a completion verb and no successful tool call at all | `UNGROUNDED_BANNER` (the reply gets only this one) |
 | Twin write | the reply claims a twin write and no twin write call succeeded this turn | `NO_TWIN_COMMIT_BANNER`: "No twin commit happened this turn..." |
 | Node id | the reply quotes a node id no successful tool call this turn returned | `UNVERIFIED_NODE_ID_BANNER` plus the ids |
 
@@ -812,7 +810,7 @@ warning with its `kind` and increments
 the `ChatUngroundedClaimsSustained` alert fires when one kind passes 5 in 30
 minutes.
 
-## Prompt caching (FORGE-478)
+## Prompt caching
 
 Providers cache by exact prefix, so every harness request is laid out as a
 stable prefix followed by the volatile suffix, and the prefix is kept
@@ -839,7 +837,7 @@ The layout lives in `orchestrator/harness/providers/caching.py`:
 - Nothing time- or id-dependent may enter the prefix. Anything that varies per
   step belongs in the suffix.
 
-Cached tokens are reported through the FORGE-476 accounting
+Cached tokens are reported through the usage accounting
 (`providers/usage.py`): Anthropic `cache_read_input_tokens` and OpenAI
 `prompt_tokens_details.cached_tokens` land in `cached_input_tokens`, priced at
 the model's `cached_input` rate. Compare `cached_input_tokens` to

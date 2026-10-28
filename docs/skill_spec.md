@@ -570,7 +570,7 @@ Phase 1 includes 12 skills across 4 agents (3 skills per agent):
 | `run_circuit_sim` | SPICE circuit simulation (DC/AC/transient) | `spice.simulate` |
 | `compare_results` | Compare simulation results against reference | (pure logic) |
 
-### Industrial Design Agent (`domain_agents/industrial_design/`, Phase 2, FORGE-633)
+### Industrial Design Agent (`domain_agents/industrial_design/`, Phase 2)
 
 Added after this Phase 1 catalog; all three are pure logic over sourced inputs, with a missing value or limit reported as unknown.
 

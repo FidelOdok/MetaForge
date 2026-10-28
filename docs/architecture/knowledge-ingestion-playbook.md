@@ -1,7 +1,6 @@
 # Knowledge Ingestion Playbook
 
-> **Status:** Living document. P1.13 / P1.14 baseline (MET-307, MET-336,
-> MET-346). Update in place when the contract changes.
+> **Status:** Living document. P1.13 / P1.14 baseline. Update in place when the contract changes.
 
 ## Audience
 
@@ -144,7 +143,7 @@ runs against a labeled fixture; add 1–2 queries for the new type to
 }
 ```
 
-The retrieval evaluator (MET-326) records precision/recall to
+The retrieval evaluator records precision/recall to
 `metaforge_retrieval_*` histograms — if your new corpus regresses
 mean precision >10% vs the 24h baseline, the
 `RetrievalPrecisionRegression` alert fires automatically.
@@ -231,7 +230,7 @@ before relaxing the floor.
 
 The `filters` argument on `knowledge_search` (and on the underlying
 `KnowledgeService.search`) is pinned to a small, unambiguous contract
-(MET-417, KB-SRC-014). Adding a new metadata key to your ingest
+(KB-SRC-014). Adding a new metadata key to your ingest
 payload makes it filterable with no further wiring — but the
 semantics are fixed and must not be re-litigated per caller.
 
@@ -254,7 +253,7 @@ semantics are fixed and must not be re-litigated per caller.
   `$.metadata.<key>` (the `extra` dict you passed to `ingest`).
 - **Allowed value types: `str` / `int` / `bool` / `None`.** Composite
   values (`dict`, `list`) are rejected at the adapter boundary with the
-  MET-385 `invalid_input` error envelope, listing the offending field
+  `invalid_input` error envelope, listing the offending field
   and type. `None` matches null / missing metadata; `bool` round-trips
   literally without coercing to `0` / `1`.
 - **Pushed down to SQL on the pgvector path.** Filters become
@@ -269,8 +268,8 @@ semantics are fixed and must not be re-litigated per caller.
   carry PII, project names, or actor handles.
 
 Want a new filter? Just stamp the key into `metadata={…}` at ingest.
-No code change required. If you need a non-equality operator, file a
-Linear issue against MET-417 — that's a contract change, not a config
+No code change required. If you need a non-equality operator, file an
+issue proposing it. That's a contract change, not a config
 toggle.
 
 ## Failure modes to know about
