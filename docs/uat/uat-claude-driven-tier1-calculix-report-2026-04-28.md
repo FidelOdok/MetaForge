@@ -1,7 +1,7 @@
 # UAT Tier-1 calculix — Claude-driven first run (2026-04-28)
 
 **Scenario set**: `tests/uat/scenarios/tier1/calculix.md` (5 scenarios)
-**Validates**: MET-337, MET-340
+**Validates**:
 **Tier**: 1 (cycle gate cadence)
 **Path**: validator surrogate
 **Surrogate driver**: `scripts/run_tier1_calculix_validator_surrogate.py`
@@ -25,7 +25,7 @@ All FAILs trace to **two real gaps in the calculix-adapter container**, both fil
 
 ## Gaps filed forward
 
-### MET-379 — calculix adapter exposes REST `/tools/<id>` instead of JSON-RPC `/mcp`
+### Calculix adapter exposes REST `/tools/<id>` instead of JSON-RPC `/mcp`
 
 The cadquery adapter responds to `POST /mcp` with JSON-RPC `tool/list` / `tool/call`. The calculix adapter has only:
 
@@ -39,7 +39,7 @@ So when `metaforge.mcp` boots with `METAFORGE_ADAPTER_CALCULIX_URL=http://localh
 
 This is the **central architectural failure** — the unified server's promise to route MCP calls across all containerised adapters depends on every adapter exposing the same `/mcp` JSON-RPC endpoint that cadquery does. P1.
 
-### MET-380 — calculix adapter silently disables `validate_mesh` + `run_thermal` when ccx binary missing
+### Calculix adapter silently disables `validate_mesh` + `run_thermal` when ccx binary missing
 
 `GET /health` reports:
 ```json
@@ -55,11 +55,11 @@ Only 2 of the 4 calculix tools are exposed. `validate_mesh` and `run_thermal` ar
 ```bash
 docker compose up -d calculix-adapter
 .venv/bin/python scripts/run_tier1_calculix_validator_surrogate.py
-# Will FAIL on Scenario 1 (0 tools registered) — root cause is MET-379
+# Will FAIL on Scenario 1 (0 tools registered) — root cause is
 ```
 
 ---
 
 ## Notes on path
 
-Same surrogate pattern as Tier-1 cadquery (which now passes 14/14). The calculix gaps are in the adapter container itself, not in the unified routing — so once MET-379 lands, this surrogate should immediately surface much closer to PASS, with MET-380 as the remaining manifest-stability gap.
+Same surrogate pattern as Tier-1 cadquery (which now passes 14/14). The calculix gaps are in the adapter container itself, not in the unified routing — so once the adapter exposes the JSON-RPC `/mcp` endpoint, this surrogate should immediately surface much closer to PASS, with the silent tool disabling when the ccx binary is missing as the remaining manifest-stability gap.

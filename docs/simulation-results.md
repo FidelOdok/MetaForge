@@ -6,7 +6,7 @@ extract the outer surface of the mesh with per-vertex von Mises stress,
 displacement (as a vector) or temperature, and return it as a compact
 payload. `twin.record_document` stores that payload in MinIO on the
 `simulation_result` work product, and the dashboard draws it as a colour
-map on the mesh (FORGE-532).
+map on the mesh.
 
 Results recorded before this existed still show their numbers. They have
 no field, and every view says so with a *Field not stored* note rather
@@ -20,7 +20,7 @@ carries a `field` object beside the existing summary:
 | Key | Meaning |
 |---|---|
 | `file` | Path of `<mesh>_solved_field.json.gz` on the shared adapter workspace. Pass this to `twin.record_document` as `field_file`. |
-| `base64` | The same bytes inline, for programmatic callers. A model should not copy it between tool calls (it is truncated out of chat context; see MET-684 for why carrying blobs by hand is unsafe). |
+| `base64` | The same bytes inline, for programmatic callers. A model should not copy it between tool calls (it is truncated out of chat context, so carrying blobs by hand is unsafe). |
 | `format`, `media_type`, `encoding` | `metaforge.sim_field/1`, `application/vnd.metaforge.sim-field+json`, `gzip`. |
 | `quantities`, `ranges` | Which fields it holds (`von_mises`, `displacement_magnitude`, `temperature`) and their full-field min/max. |
 | `vertex_count`, `triangle_count`, `decimated`, `source_triangle_count` | Size of the drawn surface, and whether it was simplified. |
@@ -113,7 +113,7 @@ New `twin.record_document` arguments, all optional and valid only for
 - `analysed_geometry_node_id` (and optionally `analysed_geometry_revision`):
   the `cad_model` that was meshed. It is pinned with its revision and content
   hash, and becomes a `DERIVES_FROM` edge, so a later geometry revision can
-  mark the result stale (FORGE-527).
+  mark the result stale.
 - `load_case_spec` and `fixtures`: the boundary conditions actually solved.
   When `fixtures` is omitted it is taken from the payload's own markers.
 

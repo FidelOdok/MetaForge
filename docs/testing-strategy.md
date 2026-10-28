@@ -137,7 +137,7 @@ Each E2E file exercises a complete vertical — from the agent entry point throu
 | TestProposalEndpointsE2E | 2 | GET /v1/assistant/proposals (empty list, 404) |
 | TestFullRoundTripE2E | 2 | Submit → poll → verify (stress, full validation) |
 
-## Workflow generation and lifecycle suites (FORGE-562)
+## Workflow generation and lifecycle suites
 
 `tests/workflow/` tests the design-flow workflow in two suites, with an
 accepted workflow as the contract between them. CI runs it as its own step.
@@ -184,11 +184,10 @@ accepted workflow as the contract between them. CI runs it as its own step.
   and reads the verdict from the real run record.
 - **Known gaps** are `xfail(strict=True)` tests naming their ticket. The
   suite stays green while a gap stays visible, and the marker must come off
-  when the gap closes. The five gaps the bracket found (FORGE-569 to
-  FORGE-573) are fixed, and their tests now pass outright.
+  when the gap closes. The five gaps the bracket found are fixed, and their tests now pass outright.
 
-The bracket diagnoses correctness. The motor-driven mechanism (FORGE-567)
-and the quadruped (FORGE-568) will check that the same properties hold as
+The bracket diagnoses correctness. The motor-driven mechanism
+and the quadruped will check that the same properties hold as
 complexity grows.
 
 ## Stubbing Strategy
@@ -258,16 +257,16 @@ pytest --cov=. --cov-report=term-missing
 ruff check .
 mypy .
 
-# The skills' own tests.py, beside each handler (FORGE-560)
+# The skills' own tests.py, beside each handler
 pytest domain_agents/ -v
 ```
 
 ### Skill tests beside their handlers
 
 Each skill directory under `domain_agents/<discipline>/skills/<skill>/` has its
-own `tests.py`. Until FORGE-560 none of them ran: pytest's default
+own `tests.py`. None of them used to run: pytest's default
 `python_files` never matches `tests.py`, and `testpaths` held only `tests/`.
-Several had gone stale or empty while their handlers drifted; FORGE-561 (a
+Several had gone stale or empty while their handlers drifted; one (a
 `run_fea` skill that could never succeed) was found that way.
 
 `pyproject.toml` now adds `tests.py` to `python_files` and `domain_agents` to

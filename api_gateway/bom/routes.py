@@ -96,7 +96,7 @@ async def list_bom(project_id: str | None = None, category: str | None = None) -
     """List BOM components, optionally scoped to a project and/or filtered
     by ``category`` (case-insensitive exact match against
     ``BOMItem.specifications.category``, e.g. ``category=fastener`` for a
-    fastener list -- FORGE-294, gap G-H2).
+    fastener list, gap G-H2).
 
     Empty (``{components: [], total: 0}``) when the project has no BOM — not a
     404, so the dashboard renders a clean empty state.
@@ -167,7 +167,7 @@ async def list_hierarchical_bom(project_id: str | None = None) -> HierarchicalBo
     every "product"-kind HierarchyNode's CONTAINS tree in a project.
 
     Empty (not an error) when the project has no product hierarchy yet
-    (FORGE-260's tools haven't been used for it) -- matches the flat BOM's
+    (the hierarchy tools haven't been used for it) -- matches the flat BOM's
     own convention.
     """
     with tracer.start_as_current_span("bom.list_hierarchical") as span:

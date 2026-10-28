@@ -151,7 +151,7 @@ in any CAD viewer to confirm.
 > Run a stress analysis on `out/bracket.step` with steel-316 material,
 > 1 kN load on the top face, fixed base.
 
-Routes through `calculix.run_fea`. Captures the run via the MET-331
+Routes through `calculix.run_fea`. Captures the run via the
 `SimulationCapture` layer when wired into the gateway path.
 
 ## Install as a plugin
@@ -186,7 +186,7 @@ gateway that needs one; a local gateway started without auth does not.
 | `/metaforge:replan` | Patch a running flow, re-running only what changed |
 | `/metaforge:doctor` | Check the connection, and what is unreachable |
 
-### Hooks and agents (FORGE-539)
+### Hooks and agents
 
 The package ships two hooks and two subagents. SessionStart adds MetaForge's
 working rules to the session; PostToolUse on `flow.propose` and `flow.patch`
@@ -207,7 +207,7 @@ python scripts/build_integrations.py
 claude plugin validate --strict integrations/claude-code
 ```
 
-#### The plugin version (FORGE-657)
+#### The plugin version
 
 Claude Code decides whether an installed plugin needs updating by comparing the
 `version` in its `plugin.json`. A version that never changes means installed
@@ -237,7 +237,7 @@ than written into the source `SKILL.md` files. Those files are read as raw
 body text and injected as procedural context, so frontmatter added there
 would appear in the model's prompt as part of the procedure.
 
-Two more sources feed the package's skills (FORGE-533):
+Two more sources feed the package's skills:
 
 - **`PLUGIN.md`** beside a skill's `SKILL.md` is the detailed version written
   for an MCP client: when to use it, the profile that serves each tool, the
@@ -253,19 +253,19 @@ Two more sources feed the package's skills (FORGE-533):
   gate, and `source-engineering-values`, which finds a missing value (from
   the user, project documents, standards, past work, components and stock,
   analysis or measurement, then a stated assumption) and records it as a
-  `design_value` with its source (FORGE-586), and `manage-machines`, which
+  `design_value` with its source, and `manage-machines`, which
   records the person's machines in the machine library with a source for
   every capability and turns one into limits for ranking and DFM
-  (FORGE-451), and `quote-and-order`, which gets vendor quotes recorded in
+, and `quote-and-order`, which gets vendor quotes recorded in
   the twin and places an order only with the person's approval
-  (FORGE-427), and `manage-processes-and-materials`, which records
+, and `manage-processes-and-materials`, which records
   manufacturing processes with their rules and materials with their
-  properties, each sourced, and uses them in a flow (FORGE-451, FORGE-446).
+  properties, each sourced, and uses them in a flow.
   `mechanical-components` builds standard screws, nuts, washers and
   bearings from their standards' tables and records purchased parts with
-  their CAD licence (FORGE-449). `colour-material-finish` records a part's
+  their CAD licence. `colour-material-finish` records a part's
   colour, finish and texture as a library appearance, the colour named in
-  its colour system with a sourced screen value (FORGE-631).
+  its colour system with a sourced screen value.
   These carry their own frontmatter and ship verbatim.
 
 A test checks that every tool a shipped skill names is one the repo
@@ -277,7 +277,7 @@ do when one is missing from the client's list.
 
 ## Keeping the tool list a size Claude Code can use
 
-The plugin asks for every tool (`tool_profile` is `all`, FORGE-588). Claude
+The plugin asks for every tool (`tool_profile` is `all`). Claude
 Code defers tools behind its tool search, so a long list costs little, and a
 client-mode run needs phase, gate, CAD, simulation and value-sourcing tools
 together. If you want less in context, set `tool_profile` to a capped set, or
@@ -316,14 +316,14 @@ question is asked inside Claude Code instead, and the dashboard is only the
 fallback. Over HTTP it travels on whichever stream the session has: a
 `GET /mcp` stream if one is open, otherwise the held `tools/call`'s own
 response, which the server switches to `text/event-stream` when the call
-was sent with `Accept: application/json, text/event-stream` (FORGE-464). Claude Code never opens `GET /mcp`, so this second path is the one it uses.
+was sent with `Accept: application/json, text/event-stream`. Claude Code never opens `GET /mcp`, so this second path is the one it uses.
 The answer comes back as a POST and the tool result follows on the same
 stream. See
 [Over HTTP: which stream carries the question](../capability-matrix.md#over-http-which-stream-carries-the-question).
 
 ### Inline answers are in the ledger too
 
-Answering in Claude Code does not bypass the approval ledger (FORGE-473).
+Answering in Claude Code does not bypass the approval ledger.
 Before the question is put to you, the server writes a ledger entry for the
 held call, the same entry a dashboard hold gets, with `route: "elicitation"`,
 the requesting client (name and version), the session and the hold window.
@@ -356,7 +356,7 @@ could not be recorded. Nothing runs without an entry on record.
 ### When an inline question expires
 
 The inline prompt follows the same window rule as a dashboard hold (see the
-table below, FORGE-472). Claude Code sends no `progressToken`, so the window
+table below). Claude Code sends no `progressToken`, so the window
 is `METAFORGE_APPROVAL_HOLD_SECONDS` (default 100s), which ends before
 Claude Code's own 120s tool timeout. The prompt says how long the person
 has ("Answer within 100 seconds. After that this request expires and
@@ -380,7 +380,7 @@ would have approved has already ended without running.
 
 ### While a call waits on the dashboard
 
-A call held for the dashboard is not silent (FORGE-465). If the request
+A call held for the dashboard is not silent. If the request
 carried a `progressToken` (`params._meta.progressToken`) and the server has
 a way to reach the client for that call, it sends
 `notifications/progress` as soon as the hold exists. The message names the
@@ -437,11 +437,11 @@ within the window), `cancelled` (the hold was closed before anyone
 answered) or `not_configured` (the server holds writes but has no approval
 gate wired, so it refused rather than ran). None is worth retrying without
 a person doing something first. An approved call carries the matching
-FORGE-417 note instead: `This write was held for human approval and was
+held-for-approval note instead: `This write was held for human approval and was
 approved by ... (approval run_...) after 12.3s via dashboard.`
 
 A held call that stops waiting takes its entry off the **Approvals** page
-with it (FORGE-466). When its window closes the entry is marked
+with it. When its window closes the entry is marked
 `timed_out`; when the call is cancelled (your client disconnected, or the
 server shut down) it is marked `canceled`. If the server dies before it can
 say so, the gateway expires the entry itself 30s after the window it was
@@ -461,17 +461,17 @@ annotations still say `readOnlyHint: false`.
 
 | Tool | Why the call is not held |
 | --- | --- |
-| `session.start`, `session.log_event`, `session.complete` | record the agent's own activity, not design state (FORGE-407) |
-| `flow.propose` | the proposal it writes is itself held for a person; an intent-only call returns `needs_input` questions and writes nothing (FORGE-471) |
-| `flow.start_run` | it starts only a flow version a person has already approved; any other version is refused with `409` (FORGE-471) |
-| `flow.await_gate` | its only effect is asking the person to decide a gate in this chat; holding it first would ask them twice (FORGE-582) |
+| `session.start`, `session.log_event`, `session.complete` | record the agent's own activity, not design state |
+| `flow.propose` | the proposal it writes is itself held for a person; an intent-only call returns `needs_input` questions and writes nothing |
+| `flow.start_run` | it starts only a flow version a person has already approved; any other version is refused with `409` |
+| `flow.await_gate` | its only effect is asking the person to decide a gate in this chat; holding it first would ask them twice |
 
 So a flow proposal takes **one approval**: the one on the flow version it
 creates. Starting a run on that version, once approved, takes none.
 `run.start_design_flow` is still held, because a built-in template has no
 version approval behind it.
 
-### The design-flow worker is not held per call (FORGE-487)
+### The design-flow worker is not held per call
 
 A server-driven design-flow run makes its tool calls from the
 `design-flow-worker` process, not from your client. Without help the sidecar
@@ -495,7 +495,7 @@ This is off unless you configure it, and a valid key alone is not enough:
 A refusal comes back as a JSON-RPC error with `code` `service_scope`,
 `service_other_project` or `service_refused`, and `retryable: false`.
 
-**What a refusal does to a run (FORGE-492).** A refusal is the guardrail
+**What a refusal does to a run.** A refusal is the guardrail
 answering "not this tool", so it does not fail the phase or the run. Inside a
 model-driven phase it is returned to the model as that call's tool result
 (`status: error`, `refused: true`, the reason, and a hint to choose another
@@ -536,18 +536,18 @@ deliberately no default: unset, the feature is off and the worker log says
 ## Design flows from Claude Code
 
 The sidecar serves the design-flow tools, and they are in the `core`
-profile the plugin installs by default (FORGE-462):
+profile the plugin installs by default:
 
 | Tool | |
 | --- | --- |
 | `flow.list` | every launchable flow, with its phases and gates (read) |
-| `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (write; the version is held, not the call). Optional `template`, `operations` and `caller` apply your own tailoring with no server-side model call; the same invariants and approval apply, and an invalid operation is refused with the reason (FORGE-481) |
+| `flow.propose` | tailor a template to an intent and hold it for a person, or return `needs_input` questions to ask the user first (write; the version is held, not the call). Optional `template`, `operations` and `caller` apply your own tailoring with no server-side model call; the same invariants and approval apply, and an invalid operation is refused with the reason |
 | `flow.start_run` | start a run on a flow version a person has **approved** (write; refused unless the version is approved) |
 | `flow.status` | phase-by-phase state of one run (read) |
-| `flow.await_gate` | wait for a run's next gate and ask **you** to decide it in this chat; the agent cannot answer the prompt (FORGE-582). Its default windows (30 s for a gate, then 80 s to answer) end before Claude Code's 120 s call timeout (FORGE-589) |
-| `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back (FORGE-581). Submit with `outcome: incomplete` when the objective was not met, so the gate reads not ready (FORGE-590). If the sidecar owner set `METAFORGE_CLIENT_TASK_WRITES=on`, approving the claim once lets this session's writes for that phase run without further holds until you submit (FORGE-584) |
+| `flow.await_gate` | wait for a run's next gate and ask **you** to decide it in this chat; the agent cannot answer the prompt. Its default windows (30 s for a gate, then 80 s to answer) end before Claude Code's 120 s call timeout |
+| `phase.list_tasks`, `phase.claim`, `phase.submit` | for a run started with `intelligence: client`: list the phases waiting for this client, take one and get its brief, hand it back. Submit with `outcome: incomplete` when the objective was not met, so the gate reads not ready. If the sidecar owner set `METAFORGE_CLIENT_TASK_WRITES=on`, approving the claim once lets this session's writes for that phase run without further holds until you submit |
 | `run.start_design_flow` | start one of the built-in flows on a goal (held write) |
-| `run.get_status` | a run's state, gate reason and result (read). In `all` but not in `core`, where it gave its place to `twin.render_work_product` (FORGE-630); `flow.status` reports a run's state there |
+| `run.get_status` | a run's state, gate reason and result (read). In `all` but not in `core`, where it gave its place to `twin.render_work_product`; `flow.status` reports a run's state there |
 
 They act on the gateway's state, not the sidecar's: a flow proposed here
 is the one on the dashboard's **Approvals** page, and a run started here
@@ -634,7 +634,7 @@ The launcher is `--adapters`-aware. Either:
   registers as a no-op and `knowledge.*` tools disappear from
   `tool/list`. Boot Postgres (`docker compose up -d postgres`) and
   restart Claude Code.
-* No `flow.*` or `run.*` tools: the sidecar image predates FORGE-462,
+* No `flow.*` or `run.*` tools: the sidecar image predates,
   or the adapters are switched off with
   `METAFORGE_ADAPTER_DESIGN_FLOW_ENABLED=false` /
   `METAFORGE_ADAPTER_RUN_ENABLED=false` (or a `METAFORGE_ADAPTERS` list
@@ -649,7 +649,7 @@ before returning. If searches still come back empty:
 * Confirm the embedding model loaded (the launcher logs
   `embedder_warmup_complete` in stderr). First boot can take ~30s
   while sentence-transformers downloads weights.
-* Check the `metaforge_retrieval_*` Prometheus histograms (MET-326)
+* Check the `metaforge_retrieval_*` Prometheus histograms
   — if `recall@k` is 0 across every query, the corpus didn't
   populate.
 
@@ -663,7 +663,7 @@ inherits the rest of the parent environment).
 
 ### Tool calls hang
 
-The MET-306 hardened bridge enforces a per-call timeout. From outside
+The hardened bridge enforces a per-call timeout. From outside
 that path (e.g. directly from Claude Code), there's no client-side
 deadline — set `--timeout` on the tool input where the schema
 exposes it, or use the MCP harness's own per-call timeout setting.
@@ -672,10 +672,10 @@ exposes it, or use the MCP harness's own per-call timeout setting.
 
 * [`mcp-config-examples.md`](mcp-config-examples.md) — full config
   reference (stdio / HTTP / SSE / auth / reverse direction).
-* `docs/integrations/codex.md` (MET-342) — Codex-specific
+* `docs/integrations/codex.md` — Codex-specific
   walkthrough for HTTP/SSE clients.
-* [MET-337](https://linear.app/metaforge/issue/MET-337) — standalone
+ — standalone
   MCP server entrypoint.
-* [MET-340](https://linear.app/metaforge/issue/MET-340) — automated
+ — automated
   end-to-end harness test that exercises this exact path on every
   CI run.

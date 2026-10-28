@@ -203,7 +203,7 @@ single `event: done` block.
   fields: `mcp_auth_denied transport=http reason=…`,
   `mcp_http_ready auth_enforced=…`, etc. Pipe into your usual log
   aggregator.
-* MET-326's retrieval-quality histograms (`metaforge_retrieval_*`)
+* The retrieval-quality histograms (`metaforge_retrieval_*`)
   surface tool-call quality when knowledge tools are exercised; the
   same dashboard applies whether the calls came over stdio, HTTP, or
   SSE.
@@ -214,7 +214,7 @@ single `event: done` block.
 `scripts/build_integrations.py`). It brings the MCP server, an `AGENTS.md`
 and the same skills as the Claude Code package: the 35 engineering skills,
 shipped from each skill's detailed `PLUGIN.md`, plus the
-`intent-to-verified-design` lifecycle skill (FORGE-533). Codex has no slash
+`intent-to-verified-design` lifecycle skill. Codex has no slash
 commands, so the lifecycle rules (never use a value without a source, found
 with the `source-engineering-values` skill and recorded with it; propose
 a flow with `template` and `operations` together; stop at the approval) live
@@ -223,7 +223,7 @@ layout Codex expects.
 
 Codex has no slash commands and no plugin hooks, so each workflow (`flow`,
 `verify`, `replan`, ...) ships as a `<name>-workflow` skill, and the session
-rules live in `AGENTS.md` (FORGE-539).
+rules live in `AGENTS.md`.
 
 The plugin's `.mcp.json` points at `http://localhost:8765/mcp?profile=core`.
 Codex has no install-time settings, so to work in another discipline edit the
@@ -231,7 +231,7 @@ Codex has no install-time settings, so to work in another discipline edit the
 `simulation` for FEA, `electronics` for KiCad and sourcing, `manufacturing`
 for process selection and the DFM review (it reads the machine library),
 `client_run` to drive a client-mode run (phase tasks, gates in the chat, value
-sourcing; FORGE-588), or `all` for every tool if your Codex build handles a
+sourcing), or `all` for every tool if your Codex build handles a
 long list. Registering, discovering or sending a job to a machine
 (`library.register_machine`, `library.discover_machine`,
 `library.dispatch_job`) is only in `all`.
@@ -273,7 +273,7 @@ question is asked inside Codex instead, and the dashboard is only the
 fallback. Over HTTP it travels on whichever stream the session has: a
 `GET /mcp` stream if one is open, otherwise the held `tools/call`'s own
 response, which the server switches to `text/event-stream` when the call
-was sent with `Accept: application/json, text/event-stream` (FORGE-464).
+was sent with `Accept: application/json, text/event-stream`.
 The answer comes back as a POST and the tool result follows on the same
 stream. See
 [Over HTTP: which stream carries the question](../capability-matrix.md#over-http-which-stream-carries-the-question).
@@ -382,7 +382,7 @@ the structured details payload that came back. Common causes:
   walkthrough (stdio).
 * [`mcp-config-examples.md`](mcp-config-examples.md) — full config
   reference.
-* [MET-337](https://linear.app/metaforge/issue/MET-337) — standalone
+ — standalone
   MCP server entrypoint.
-* [MET-338](https://linear.app/metaforge/issue/MET-338) — optional
+ — optional
   API-key auth on transports.

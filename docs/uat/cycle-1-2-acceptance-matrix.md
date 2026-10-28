@@ -25,7 +25,7 @@ re-asserted briefly in the matching UAT layer for traceability.
 
 ---
 
-## Cycle 1 — Context Engineering (epic MET-312)
+## Cycle 1 — Context Engineering epic
 
 ### Layer 0 · Persistence
 

@@ -1,7 +1,7 @@
 # Unified approvals API
 
 Every human approval MetaForge asks for is reachable through one API,
-`/v1/approvals` (FORGE-506, FORGE-507). A dashboard queue, the CLI and an agent
+`/v1/approvals`. A dashboard queue, the CLI and an agent
 all list, inspect and decide through the same three routes and read the same
 normalized item, whatever the approval is about.
 
@@ -30,7 +30,7 @@ The id is `<prefix>:<native id>`. The prefix says which store holds the item;
 | Id prefix | `kind` | Source | Decided by |
 |-----------|--------|--------|------------|
 | `gate:` | `gate` | A design-flow run parked at a gate | `POST /v1/runs/{id}/approval` |
-| `tool:` | `tool_call`, `human_authority`, `flow_proposal`, `flow_version`, `flow_patch` (FORGE-539: a patch to a running flow, showing what re-runs and what is kept) | The tool-approval ledger | `POST /v1/chat/tool_approvals/{id}` |
+| `tool:` | `tool_call`, `human_authority`, `flow_proposal`, `flow_version`, `flow_patch` (a patch to a running flow, showing what re-runs and what is kept) | The tool-approval ledger | `POST /v1/chat/tool_approvals/{id}` |
 | `change:` | `design_change` | Assistant design-change proposals | `POST /v1/assistant/proposals/{id}/decide` |
 | `design_loop:` | `design_loop` | The winning candidate of a closed design loop | `POST /v1/design-loop/{id}/approve` |
 | `sketch:` | `sketch` | A design sketch work product | `POST /v1/twin/nodes/{id}/approve-sketch` |
@@ -72,7 +72,7 @@ gets the answer.
 | Status | When |
 |--------|------|
 | 404 | Unknown id. |
-| 409 | Not decidable now: already decided, expired or canceled, elicitation route, gate not ready for approve, retries or reworks used up, or the run's workflow no longer exists (only `reject` is offered then). Also an `approve` whose drafts were based on revisions that changed since (`PATCH_CONFLICT`, FORGE-525): nothing is committed and the gate stays open; `retry` rebases. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate-forge-525). |
+| 409 | Not decidable now: already decided, expired or canceled, elicitation route, gate not ready for approve, retries or reworks used up, or the run's workflow no longer exists (only `reject` is offered then). Also an `approve` whose drafts were based on revisions that changed since (`PATCH_CONFLICT`): nothing is committed and the gate stays open; `retry` rebases. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate). |
 | 422 | Decision not offered for this kind, invalid `to_phase`, or no `reason` for `reject`, `retry` or `rework`. |
 | 200 | `reject` on a gate whose workflow no longer exists: the decision is saved and there is no run left to signal. |
 | 503 | A gate decision was recorded but could not be delivered to the workflow; or committing a gate's drafts failed part-way (heads restored, approve again). |
@@ -116,17 +116,17 @@ the item is pending again at that point.
 
 A client on MCP revision `2026-07-28` cannot be sent a question mid-call:
 that revision forbids it. Its held writes and gates are asked the other way
-round (FORGE-601). The call returns the question with
+round. The call returns the question with
 `resultType: "input_required"`; the client shows it, then repeats the call
 with the answer. The approval entry, the approver record and the "dashboard
 answer wins" rule are the same as for an inline prompt. An answer can be
 used once. Details are in
-[the MCP protocol notes](mcp_spec.md#questions-returned-inside-results-forge-601).
+[the MCP protocol notes](mcp_spec.md#questions-returned-inside-results).
 
 ## Gates in the client chat
 
 A design-flow gate can be put to the person in the MCP client's own chat
-instead of the dashboard (FORGE-582). The agent calls `flow.await_gate` with a
+instead of the dashboard. The agent calls `flow.await_gate` with a
 run id. The tool waits for the run's next gate, then sends an MCP elicitation
 that the client shows to the person: the gate, what its checks found, and the
 decisions it allows right now. The person answers; the agent does not, and
@@ -139,7 +139,7 @@ cannot.
   from the authenticated MCP session, never from the form, and posts it to
   `POST /v1/approvals/gate:{run_id}/inline-decision`. It is recorded as
   verified only when that request is itself authenticated, the same rule as a
-  held tool call's inline answer (FORGE-473). With auth off it is
+  held tool call's inline answer. With auth off it is
   `local:elicitation`, unverified.
 - **No answer is not a decision.** Dismissing the prompt, declining it, or
   letting it expire leaves the gate open in the dashboard and in
@@ -149,10 +149,10 @@ cannot.
   person's answer happen inside one tool call, and Claude Code ends a call
   after 120 s. By default the tool waits up to 30 s for a gate and gives the
   person 80 s to answer, less any time spent waiting, so the call ends inside
-  110 s (FORGE-589). `wait_seconds` and `answer_seconds` override this for a
+  110 s. `wait_seconds` and `answer_seconds` override this for a
   client that allows longer calls. When nobody answers in time the gate stays
   open and the agent can call the tool again.
-- **A gate decided elsewhere says who decided it** (FORGE-695). When the gate
+- **A gate decided elsewhere says who decided it**. When the gate
   is answered in the dashboard, with `forge approvals`, or through
   `POST /v1/approvals/{id}/decision` while the tool waits, it returns
   `decided_elsewhere` with the decision record: the decision, the approver, the

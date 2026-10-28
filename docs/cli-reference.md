@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/FidelOdok/MetaForge/main/scripts/in
 ```
 
 `install.sh` is the whole installer now, not just the binary fetcher
-(FORGE-648) — without `--cli-only` it goes on to set up Docker, the stack and
+ — without `--cli-only` it goes on to set up Docker, the stack and
 your first project. It needs `bash`, not `sh`. The older `| sh -s v0.1.0`
 form still does the right thing: a bare version argument is read as
 `--cli-only --version`.
@@ -121,7 +121,7 @@ forge chat -m "what's in this project?" --project "Monitor Build Demo"
 |---|---|
 | `^T` `^R` `^B` `^N` | chat · runs · twin · new run |
 | `PageUp` / `PageDn` | Scroll the transcript |
-| `/resume` | Pick a previous session (title · scope · activity) and continue it — the transcript backfills and the server rebuilds the conversation's context per turn (MET-595). `forge --continue` / `-c` resumes the most recent session directly at launch |
+| `/resume` | Pick a previous session (title · scope · activity) and continue it — the transcript backfills and the server rebuilds the conversation's context per turn. `forge --continue` / `-c` resumes the most recent session directly at launch |
 | `/project [id\|name]` | Show the current project, or switch to one. Switching starts a **new thread** — see below. `/project none` leaves the project |
 | `/model <slug>` | Change the model for this session (persisted to `~/.forge/config.json`) |
 | `/provider <id>` | Change the provider for this session |
@@ -251,7 +251,7 @@ Precedence, highest first: an explicit CLI flag, then the
 `METAFORGE_GATEWAY_URL` env var, then the config file, then the built-in
 default.
 
-:::warning[This changed in MET-729]
+:::warning[This changed]
 
 The config file used to outrank `METAFORGE_GATEWAY_URL`. That inverted the
 usual convention — an environment variable exists to override persisted
@@ -573,7 +573,7 @@ python -m cli.forge_cli twin baseline list --project "Shelf"
 python -m cli.forge_cli twin baseline diff 4f1c... current
 ```
 
-Opt-in views over items (FORGE-526, see [Twin schema section 2.31](twin_schema.md#231-baselines-over-items-the-current-view-and-revision-compare-forge-526)); the normal flow needs none of them, because writes create revisions and gate approvals record baselines on their own.
+Opt-in views over items (see [Twin schema section 2.31](twin_schema.md#231-baselines-over-items-the-current-view-and-revision-compare)); the normal flow needs none of them, because writes create revisions and gate approvals record baselines on their own.
 
 - `history` lists every revision of one item with its status (`committed`, `draft`, `approved`, `rejected`, `abandoned`), the head marker, the run and gate, and the change reason.
 - `diff` compares two revisions. With no revisions it compares the current one with the one before it; with one, that revision with the current one. It prints the geometry delta (volume, mass, bounding box, and whether the numbers came from the STEP files or from what each revision recorded), parameter, requirement and field changes, and the records still pinned to the older revision.
@@ -597,7 +597,7 @@ python -m cli.forge_cli twin migrate e7b896cc-... --apply --reason "reviewed wit
 ```
 
 Turns a project's nodes written before items existed into items and
-revisions ([the migration](twin_schema.md#migrating-legacy-nodes-forge-529)).
+revisions ([the migration](twin_schema.md#migrating-legacy-nodes)).
 It always shows the dry run first: every proposed item with its revisions
 (node id, name, `created_at`, status, and the rule and evidence that grouped
 it), groupings flagged `[REVIEW]`, the phase-summary decisions it will mark
@@ -862,7 +862,7 @@ The Projects API surface (`/v1/projects`). `list` prints a table of id / name /
 status / work-product count (`--status` filters, e.g. to find `draft` projects to
 clean up); `delete` asks for confirmation unless `--yes` is passed.
 
-A project's status (FORGE-606):
+A project's status:
 
 | Status | Meaning | Set by |
 |---|---|---|

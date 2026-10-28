@@ -30,7 +30,7 @@ class ExportFile(BaseModel):
 class JointSpec(BaseModel):
     """One joint between two parts — the same shape FreeCAD's
     ``add_assembly_joint``/``list_joints`` already produce, so a caller can
-    pass through what MET-721 reads from a live session, or supply a saved
+    pass through what is read from a live session, or supply a saved
     joint list manually."""
 
     name: str = Field(..., min_length=1)
@@ -120,7 +120,7 @@ class RobotDescriptionPersistFields(BaseModel):
         default=True,
         description=(
             "Commit this export as a robot_description Twin work product "
-            "(default on). Set false to keep the pre-MET-740 throwaway-only "
+            "(default on). Set false to keep the earlier throwaway-only "
             "behavior."
         ),
     )

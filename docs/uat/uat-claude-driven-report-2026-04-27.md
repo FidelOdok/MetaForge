@@ -33,7 +33,7 @@ PASSED**; three FAILED with a clear environmental cause. See
 
 ### Scenario: Claude ingests a doc, searches it, then generates a CAD part
 
-**Validates:** MET-337, MET-346, MET-293, MET-335, MET-336
+**Validates:**
 **Tier:** 0
 **Verdict:** FAIL (3/6 Then-bullets passed)
 
@@ -100,7 +100,7 @@ see Linear below.
 
 ## Tracks-A vs Track-B comparison (Cycle 1 + 2 scope)
 
-* **Track A** (wire-level pytest, MET-358–367): 42 PASS, 9
+* **Track A** (wire-level pytest): 42 PASS, 9
   environment-skip, 0 FAIL — every acceptance bullet validated.
 * **Track B** (this report, Tier-0 only): 3/6 PASS, 3 FAIL with
   one real environment gap.

@@ -21,7 +21,7 @@ Everything here goes through the harness provider registry
 (`orchestrator/harness/providers/`). The provider can be OpenRouter,
 Anthropic, OpenAI, the OpenAI Codex subscription, Gemini, Bedrock or Ollama.
 A role can be routed to its own `provider:model` (see
-[Per-role model routing](robust-harness-design.md#per-role-model-routing-forge-477)).
+[Per-role model routing](robust-harness-design.md#per-role-model-routing)).
 Each call is recorded in the usage ledger under its role.
 
 | Area | Code | Role | What the model does |
@@ -76,7 +76,7 @@ is different. Each phase is carried out by a phase brain on the harness
 model, so a run needs a working harness provider for as long as it runs.
 
 A run started in **client mode** (`intelligence: client`, see
-[client intelligence mode](../architecture.md#client-intelligence-mode-and-gates-in-the-chat-forge-581-forge-582))
+[client intelligence mode](../architecture.md#client-intelligence-mode-and-gates-in-the-chat))
 calls no model for its phases at all: each phase is posted as a task, and the
 connected client does it with its own model and hands it back. Gates are then
 answered by the person in the client's chat. Such a run needs no harness

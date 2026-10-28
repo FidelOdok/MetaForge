@@ -759,7 +759,7 @@ async def propose_flow(
 ) -> FlowProposalView | FlowNeedsInputView:
     """Tailor a template to a project's intent, and hold it for a human.
 
-    The response carries an ``approvalId``, not a run. FORGE-398's rule is
+    The response carries an ``approvalId``, not a run. The rule is
     that nothing starts before approval, and the way to make that true is for
     the endpoint that generates a flow to have no ability to start one.
 

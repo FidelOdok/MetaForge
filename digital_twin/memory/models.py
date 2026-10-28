@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 class ConfidenceTier(StrEnum):
     """Provenance tier for a memory record.
 
-    Aligned with MET-462 property-extraction tiers so the same vocabulary
+    Aligned with the property-extraction tiers so the same vocabulary
     flows from L1 extraction through to L3 reasoning:
 
     * ``VERBATIM`` — copied directly from a structured event field (1.0)

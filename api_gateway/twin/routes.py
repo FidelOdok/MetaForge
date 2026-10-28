@@ -1104,9 +1104,8 @@ async def update_assembly_joints(
 
     Unlike the export panel, this does NOT require a live FreeCAD session or
     re-running an export -- it works on any already-committed node, any
-    time, which is the whole point (FORGE-245's own fix only got joints
-    persisted onto the node at commit time; this is what makes them
-    editable afterward).
+    time, which is the whole point (joints are persisted onto the node at commit time; this is what
+    makes them editable afterward).
     """
     wp = await _twin.get_work_product(node_id)
     if wp is None:

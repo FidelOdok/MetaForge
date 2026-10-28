@@ -121,7 +121,7 @@ request = ContextAssemblyRequest(
 ## Conflict-detection fields
 
 The mechanical agent populates these `metadata` keys on its ingested
-content so `ConflictDetector` (MET-322) can compare across sources:
+content so `ConflictDetector` can compare across sources:
 
 | Field      | Value example         | Severity (default) |
 | ---------- | --------------------- | ------------------ |

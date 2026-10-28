@@ -102,7 +102,7 @@ agreement.
 | Twin nodes   | `BOM` (pivot), `Component`, `Schematic`, `PCB`                                    |
 | Knowledge    | `DESIGN_DECISION` (selection rationale), `COMPONENT` (alternates)                 |
 
-This skill **leans on `ConflictDetector`** (MET-322): a BOM/schematic
+This skill **leans on `ConflictDetector`**: a BOM/schematic
 MPN mismatch surfaces as a `blocking` conflict and the agent must
 refuse to release the BOM until the user resolves it.
 
@@ -136,7 +136,7 @@ extraction time so `ConflictDetector` can compare across sources:
 
 The most common real-world break is schematic vs BOM disagreement on
 `mpn` (a substitution applied to the BOM that never made it into the
-schematic). MET-322 makes that a hard fail.
+schematic). The conflict detector makes that a hard fail.
 
 ## Staleness expectations
 
@@ -152,7 +152,7 @@ Recommended thresholds:
 - **`0.3`** for production cut-over — only the freshest data; suspect
   anything older than ~15 days.
 
-`MET-329` (supplier quote ingestion, P1.14) refreshes
+Supplier quote ingestion (P1.14) refreshes
 `COMPONENT`-typed entries automatically; setting
 `staleness_threshold=0.3` after that lands gives the agent a
 near-real-time view of pricing and stock.
@@ -163,5 +163,5 @@ near-real-time view of pricing and stock.
 - [Mechanical Agent context spec](mechanical-context-spec.md) —
   mirror format for the ME side.
 - `digital_twin/context/role_scope.py` — code that enforces this map.
-- `digital_twin/context/conflicts.py` — MET-322 detector + severity
+- `digital_twin/context/conflicts.py` — conflict detector + severity
   table.

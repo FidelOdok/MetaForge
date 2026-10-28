@@ -36,7 +36,7 @@ A fragment task becomes a phase with no gate, carrying:
 | outputs | Twin items it writes, declared as `outputs:` in the fragment. Each becomes a deliverable slot with a fixed item key (`VAL-HEAT-LOAD-W`) |
 | `records` | Record types it must leave (`simulation_result`, `design_decision`), which are required at the stage gate |
 | `checks` | Acceptance criteria: `value <op> number [unit]`, or `value <op> other_value`, so a limit can come from a sourced record and is never written into a fragment |
-| `capabilities` | Tool ids it needs. A missing, unreachable or unserved tool is a **blocking** capability gap on that task. The task's phase always carries these tools in its allowlist, kept like deliverable tools whatever its discipline profiles hold, on both engines (FORGE-672) |
+| `capabilities` | Tool ids it needs. A missing, unreachable or unserved tool is a **blocking** capability gap on that task. The task's phase always carries these tools in its allowlist, kept like deliverable tools whatever its discipline profiles hold, on both engines |
 
 All of these fields are left out of the frozen content hash when empty
 (`orchestrator/design_flow/frozen.py`). `orchestrator/design_flow/contract.py`
@@ -62,12 +62,12 @@ The fragments shipped today:
 |---|---|
 | `thermal_v1` | heat-load estimation → cooling architecture → heat-transfer analysis (`calculix.run_thermal`) → temperature verification |
 | `electronics_v1` | component selection → power budget (`power.check_budget`) → schematic ERC on the person's own KiCad schematic (checked, not edited; `pcb_v1` generates a new one) → circuit simulation (`spice.run_simulation`) |
-| `packaging_v1` | board material selection → RSC dieline (`packaging.rsc_dieline`) → manufacturing check against the converter's rules → compression strength (`packaging.box_compression`, a McKee estimate) → drop testing, recorded as evidence from a physical test (FORGE-672) |
-| `mobile_robot_v1` | locomotion selection → energy closure (a coupled block: mass roll-up, drive sizing with `robot.size_drive`, battery sizing) → kinematics (`robot.diff_drive_kinematics`) → dynamics in simulation (`gazebo.run_simulation`) → navigation testing (FORGE-671) |
-| `aircraft_v1` | configuration → wing sizing for the stall speed at MTOW (`aircraft.wing_sizing`) → layout (tail volume, CG) → power closure (a coupled block: mass roll-up, cruise aerodynamics with `aircraft.cruise_performance`, battery sizing with `aircraft.electric_endurance`) → trim and static stability (`aircraft.trim_stability`) → flight simulation (FORGE-670) |
-| `firmware_v1` | pin map from the schematic (`kicad.get_pin_mapping`) → RTOS configuration → build (`firmware.build`) → static analysis (`firmware.static_check`) → emulated boot (`firmware.run_emulated` on Renode or Espressif QEMU) (FORGE-676) |
-| `power_v1` | power architecture (the tree from source to every load, recorded with its datasheet figures) → regulator thermal (`power.check_budget`: junction margin, regulator dissipation, `electronics_power_w`) → battery runtime (`power.runtime`) → load-step transient (`spice.run_simulation`) (FORGE-682) |
-| `pcb_v1` | schematic generated from the circuit (`kicad.generate_schematic`: ERC and a netlist match) → board (`kicad.generate_pcb`) → routing (`kicad.autoroute_pcb`: unrouted, DRC and schematic parity) → fabrication outputs (gerbers with every copper layer, drill, placement, BOM) → 3D board (`kicad.export_3d`, `kicad.render_pcb`) (FORGE-685) |
+| `packaging_v1` | board material selection → RSC dieline (`packaging.rsc_dieline`) → manufacturing check against the converter's rules → compression strength (`packaging.box_compression`, a McKee estimate) → drop testing, recorded as evidence from a physical test |
+| `mobile_robot_v1` | locomotion selection → energy closure (a coupled block: mass roll-up, drive sizing with `robot.size_drive`, battery sizing) → kinematics (`robot.diff_drive_kinematics`) → dynamics in simulation (`gazebo.run_simulation`) → navigation testing |
+| `aircraft_v1` | configuration → wing sizing for the stall speed at MTOW (`aircraft.wing_sizing`) → layout (tail volume, CG) → power closure (a coupled block: mass roll-up, cruise aerodynamics with `aircraft.cruise_performance`, battery sizing with `aircraft.electric_endurance`) → trim and static stability (`aircraft.trim_stability`) → flight simulation |
+| `firmware_v1` | pin map from the schematic (`kicad.get_pin_mapping`) → RTOS configuration → build (`firmware.build`) → static analysis (`firmware.static_check`) → emulated boot (`firmware.run_emulated` on Renode or Espressif QEMU) |
+| `power_v1` | power architecture (the tree from source to every load, recorded with its datasheet figures) → regulator thermal (`power.check_budget`: junction margin, regulator dissipation, `electronics_power_w`) → battery runtime (`power.runtime`) → load-step transient (`spice.run_simulation`) |
+| `pcb_v1` | schematic generated from the circuit (`kicad.generate_schematic`: ERC and a netlist match) → board (`kicad.generate_pcb`) → routing (`kicad.autoroute_pcb`: unrouted, DRC and schematic parity) → fabrication outputs (gerbers with every copper layer, drill, placement, BOM) → 3D board (`kicad.export_3d`, `kicad.render_pcb`) |
 
 `electronics_v1` writes `power_dissipation_w`, which `thermal_v1` reads, so
 composing the two feeds the heat load from the power budget.
@@ -92,7 +92,7 @@ lift slopes and a tail-volume neutral point. Its flight simulation names
 blocking capability gap until one does. Its avionics load is
 `electronics_power_w`: a requirement on its own, or the power design's
 figure when `power_v1` is composed, so a regulator change re-sizes the
-battery (FORGE-682; it was `avionics_power_w` before 1.1.0).
+battery (it was `avionics_power_w` before 1.1.0).
 
 `power_v1` is the board's power design. The rail load budget stays
 `electronics_v1`'s (`rail_load_margin_pct`); this fragment adds what that
@@ -118,24 +118,24 @@ result: ERC, the netlist match, KiCad's own unconnected-item count (never
 the router's), DRC with schematic parity, the copper layers without a
 gerber, the paste (stencil) layers the assembly needs without a gerber
 (`missing_paste_gerbers`, from `kicad.export_gerber`'s `paste_layers`, since
-FORGE-703 and version 1.4.0), the placed BOM lines with no manufacturer part number
-(`bom_lines_without_mpn`, from `kicad.export_bom`, since FORGE-694 and
+version 1.4.0), the placed BOM lines with no manufacturer part number
+(`bom_lines_without_mpn`, from `kicad.export_bom`, since
 version 1.2.0; passives count), the parts drawn with another part's symbol
 whose pinout check is not recorded (`unconfirmed_symbol_substitutions`, since
-FORGE-699 and version 1.3.0: ERC passes on the stand-in's own pins, so only a
+version 1.3.0: ERC passes on the stand-in's own pins, so only a
 person comparing the datasheet can confirm them), and the footprints without
 a 3D model, each `== 0`. Its ERC value is
 `generated_erc_error_count`, kept apart from `electronics_v1`'s
 `erc_error_count` on the person's own schematic. All its tasks sit in the
 design stage, so it composes with every spine; `design_v1` has no
-manufacturing stage. Since FORGE-687 (version 1.1.0) the schematic, the
+manufacturing stage. Since version 1.1.0 the schematic, the
 routed board, the gerber set and the placement file are work products in
 the twin, kept by `twin.record_design_files` and required at the gate
 (`schematic`, `pcb_layout`, `gerber`, `pick_and_place`, beside the BOM and
 the STEP `cad_model`). Each is linked `GENERATED_FROM` what it was made
 from, BOM to schematic to board to gerbers and placement, so the thread
 from a part choice to the files a fab receives is in the graph, and a
-schematic or board carries SVG previews for the dashboard. Since FORGE-705
+schematic or board carries SVG previews for the dashboard. Since
 (version 1.5.0) a stage recorded with no `source_node_ids` is linked to the
 project's one current record of the stage before it, and the board STEP from
 `kicad.export_3d` to the routed board; the 3D board task gates on
@@ -151,14 +151,14 @@ flash and RAM limits (`max_flash_pct`, `max_ram_pct`) are inputs from the
 requirements. Every firmware result is a tool run on the real toolchain in
 the firmware adapter: a build that does not link records an error and no
 size, so its size checks are no data, and a board neither emulator models
-leaves the boot unrecorded rather than passed. Since FORGE-705 (version
-1.2.0) the build task also gates on `unlinked_firmware_thread_stages == 0`,
+leaves the boot unrecorded rather than passed. Since version
+1.2.0 the build task also gates on `unlinked_firmware_thread_stages == 0`,
 so the pin map and the firmware source end linked to the schematic and the
 pin map; a firmware-only project with no schematic is reported, not counted. Its end-to-end test runs the
 generated FreeRTOS app's real recorded results: a 160 KB heap overflows the
 STM32F407's RAM by 34592 bytes, the V&V gate is not ready, the configuration
 is reworked to 16 KB, and the build fits at 12.7 % of RAM and boots. Since
-FORGE-687 (version 1.1.0) the pin map and the built project are work
+version 1.1.0 the pin map and the built project are work
 products too: the pin map (`pinmap`) generated from the schematic, and the
 PlatformIO project with its `firmware.elf` (`firmware_source`) generated from
 the pin map, both kept by `twin.record_design_files`.
@@ -230,8 +230,8 @@ Both engines evaluate the checks:
 
 The gateway reads design values through `TwinDesignValueReader`, which returns
 the latest `design_value` record per name. The twin refuses to record a value
-without a source (FORGE-586). Revisions a gate rejected, or that a run
-abandoned (FORGE-525), are skipped. A run's own open drafts are kept, because
+without a source. Revisions a gate rejected, or that a run
+abandoned, are skipped. A run's own open drafts are kept, because
 they are what its gate reviews.
 
 ## Optimisation

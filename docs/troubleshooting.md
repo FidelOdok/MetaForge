@@ -85,7 +85,7 @@ invalid`, regardless of query or filters.
 encoded-JSON metadata blob the read paths parse. The known writer of
 such rows is **lightrag-hku 1.5.x**, which basenames `file_path` on
 write (keeps only the part after the last `/`) — `pyproject.toml` pins
-`lightrag-hku>=1.4,<1.5` for exactly this reason (MET-577). One bad row
+`lightrag-hku>=1.4,<1.5` for exactly this reason. One bad row
 used to make every `file_path::jsonb` cast in the workspace fatal.
 
 **Behaviour now:** the casting queries prefilter to JSON-shaped rows
@@ -161,7 +161,7 @@ usually your active shell or IDE.
 `'tool_name' is required and must be a string` (or similar) for
 every spec-compliant call.
 
-**Cause:** This was MET-420 — the unified MCP server was dropping
+**Cause:** This was a bug where the unified MCP server was dropping
 the `arguments` payload on `tools/call` for the standard MCP
 shape. The fix landed in PR #181.
 
@@ -313,7 +313,7 @@ Reaching for `OTEL_SDK_DISABLED` when you only meant "don't export" is
 the trap: it also makes the SDK hand out no-op tracers, which silently
 breaks any test that asserts on span attributes.
 
-## The MCP sidecar is serving old code (FORGE-411)
+## The MCP sidecar is serving old code
 
 Symptoms read like a *smaller deployment*, not like staleness: an older
 protocol version in the `initialize` result, tools missing from
@@ -327,7 +327,7 @@ differently:
 | Service | How it loads code | A `git checkout` on the host |
 |---------|-------------------|------------------------------|
 | `gateway` | uvicorn's reloader supervises it (`--reload`) | picked up within seconds |
-| `mcp-http` | calls `uvicorn.Server.serve()` in the bootstrap's own event loop, so there is no reloader to supervise it (MET-477 G3) | **ignored** until the container restarts |
+| `mcp-http` | calls `uvicorn.Server.serve()` in the bootstrap's own event loop, so there is no reloader to supervise it | **ignored** until the container restarts |
 
 So the sidecar needs restarting on deploy. It is not a rebuild:
 
@@ -383,7 +383,7 @@ error while interpolating services.postgres.environment.POSTGRES_PASSWORD:
 required variable POSTGRES_PASSWORD is missing a value
 ```
 
-**This is deliberate (FORGE-556, FORGE-558).** These credentials used to have
+**This is deliberate.** These credentials used to have
 working defaults — `metaforge`, `minioadmin`, `temporal` — committed to this
 public repository since the first compose commit. Every MetaForge install
 therefore shared passwords that any reader of the repository already knew, on
@@ -393,7 +393,7 @@ services that publish host ports by default:
 |---|---|---|---|
 | `POSTGRES_PASSWORD` | `metaforge` | Postgres | `5432` |
 | `NEO4J_PASSWORD` | `metaforge` | Neo4j | `7474`, `7687` |
-| `MINIO_SECRET_KEY` | `minioadmin` | object store (`object-store`, SeaweedFS since FORGE-577) | `9000` |
+| `MINIO_SECRET_KEY` | `minioadmin` | object store (`object-store`, SeaweedFS) | `9000` |
 | `TEMPORAL_POSTGRES_PASSWORD` | `temporal` | Temporal's database | not published |
 | `GRAFANA_PASSWORD` | `metaforge` | Grafana | `3001`, `--profile observability` |
 
@@ -433,7 +433,7 @@ until each service is rotated in place, or its volume is deleted and the stack
 recreated from scratch (which destroys the data in it).
 
 The object store is the exception: it takes `MINIO_ACCESS_KEY` /
-`MINIO_SECRET_KEY` from the environment on every start (FORGE-577), so a
+`MINIO_SECRET_KEY` from the environment on every start, so a
 changed secret takes effect when the stack restarts, for the store and for the
 services that use it alike.
 

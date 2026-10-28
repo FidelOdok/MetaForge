@@ -1,7 +1,7 @@
 ---
 title: Gateway authentication
 # The page moved from cloud.md when the hosted provider moved to its own
-# repository (FORGE-540). The URL is pinned so that every link published
+# repository. The URL is pinned so that every link published
 # before the move still resolves -- docs-site/tests/routes.test.mjs checks it.
 slug: /deployment/cloud
 ---

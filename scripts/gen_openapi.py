@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -39,10 +40,46 @@ from api_gateway.server import create_app  # noqa: E402  (import after logging.d
 OUTPUT = REPO_ROOT / "docs" / "reference" / "openapi.json"
 
 
+_ID = r"(?:FORGE|MET)-\d+"
+_IDS = rf"{_ID}(?:\s*(?:,|/|and|&|;)\s*(?:(?:FORGE|MET)-)?\d+)*"
+# The reference is public: tracker ids in a docstring are for maintainers, so the
+# published spec drops them. "(FORGE-1)" goes whole; "(FORGE-1, spec section 20)"
+# keeps what follows the id.
+_PUBLIC_SCRUBS = (
+    (re.compile(rf"[ \t]*\(\s*(?:follow-up to )?{_IDS}\s*\)"), ""),
+    (re.compile(rf"\(\s*{_IDS}\s*[,;:]\s+"), "("),
+    (re.compile(rf"[ \t]*\({_IDS} follow-up\)"), ""),
+    (re.compile(rf",\s*{_IDS}\)"), ")"),
+    (re.compile(rf"\s+--\s+{_ID}(?:,\s*gap G-\w+)?\s+--"), ""),
+    (re.compile(rf"(^|\n)([ \t]*){_ID}(?:\s*\(gap G-\w+\))?:\s+"), r"\1\2"),
+)
+
+
+def scrub_task_ids(text: str) -> str:
+    for pattern, replacement in _PUBLIC_SCRUBS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _scrub(node: object) -> object:
+    if isinstance(node, dict):
+        return {
+            key: scrub_task_ids(value)
+            if key in ("description", "summary") and isinstance(value, str)
+            else _scrub(value)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_scrub(item) for item in node]
+    return node
+
+
 def build_spec() -> dict:
     """Generate the OpenAPI schema from the FastAPI app (no server start)."""
     app = create_app()
-    return app.openapi()
+    spec = _scrub(app.openapi())
+    assert isinstance(spec, dict)
+    return spec
 
 
 def serialize(spec: dict) -> str:

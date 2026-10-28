@@ -32,7 +32,7 @@ across iterations.
    stops with a final report.
 4. **Aborts and marks `⏸️`** if the item carries
    `Requires human decision: true`. Reports which decision and stops.
-5. **Creates branch** `feat/met-<id>-<short-slug>` from `main`.
+5. **Creates branch** `feat/<id>-<short-slug>` from `main`.
 6. **Spawns a sub-agent** (Agent tool, `subagent_type: general-purpose`,
    fresh context) with the item's spec, files-to-touch, tests, and
    acceptance criteria. The sub-agent does the actual work.
@@ -105,41 +105,41 @@ Status legend: ⏳ pending · 🔧 in progress · ✅ done (PR open) ·
 
 | ID | Title | MET | Effort | Deps | Status | Branch | PR | Notes |
 |---|---|---|---|---|---|---|---|---|
-| L1-A1 | Project isolation enforcement | MET-401 | M | — | ✅ | feat/met-401-knowledge-project-isolation | [#163](https://github.com/FidelOdok/MetaForge/pull/163) | 13 passed, 2 skipped (no PG); minor: also touched test_context_assembler.py |
-| L1-A2 | Hybrid-search reranker | MET-335 | M | — | ✅ | feat/met-335-knowledge-reranker | [#164](https://github.com/FidelOdok/MetaForge/pull/164) | 20 passed; mypy: 2 pre-existing errors on api_gateway/server.py noted, not introduced |
-| L1-A3 | PDF parser shipped | MET-399 | S | — | ✅ | feat/met-399-pdf-ingest-wiring | [#165](https://github.com/FidelOdok/MetaForge/pull/165) | wired pdfplumber path; HP-INGEST-03 promoted; 20 passed, 8 skipped (no PG) |
-| L1-A4 | CSV row-level chunker | MET-340 | M | — | ✅ | feat/met-340-csv-row-chunker | [#166](https://github.com/FidelOdok/MetaForge/pull/166) | chunk_csv() + ingest detection; 8 unit tests + 28 passed |
-| L1-A5 | Workspace separation enforced | MET-346 | M | — | ✅ | (policy pin) | — | Pinned: keep gateway and LightRAG-UI workspaces SEPARATE per ADR-010 Phase-1 (engineer dogfood). Already enforced in code (gateway uses `lightrag` namespace; UI uses `lightrag_ui`). Phase-2 integration via L1-E2 instead. |
-| L1-A6 | Re-ingest after edit retires stale | MET-307 | S | — | ✅ | feat/met-307-supersede-on-edit | [#167](https://github.com/FidelOdok/MetaForge/pull/167) | sha256-based supersede; 28 passed, 11 skipped (no PG) |
-| L1-A7 | Latency SLO instrumentation | MET-401 | S | L1-D2 | ✅ | feat/met-401-knowledge-latency-slo | [#194](https://github.com/FidelOdok/MetaForge/pull/194) | metaforge_knowledge_search_duration_seconds + p95 alert; 7 tests; metric prefix pinned per platform convention |
-| L1-A8 | `list_sources()` Protocol method | MET-415 | S | — | ✅ | feat/met-415-list-sources | [#168](https://github.com/FidelOdok/MetaForge/pull/168) | 11 unit tests; SQL targets lightrag_vdb_chunks (real LightRAG storage) |
-| L1-B1 | `metaforge://knowledge/sources` resource | MET-384 | S | L1-A8 | ✅ | feat/met-384-knowledge-resources | [#169](https://github.com/FidelOdok/MetaForge/pull/169) | both URIs registered; 6 unit tests + 53 passed |
-| L1-B2 | Streaming progress on multi-file ingest | MET-388 | M | — | ✅ | feat/met-388-knowledge-progress | [#170](https://github.com/FidelOdok/MetaForge/pull/170) | multi-file batch + supports_progress on ToolManifest; 6 tests; 246 passed broader |
-| L1-B3 | Per-call context propagation | MET-387 | S | — | ✅ | feat/met-387-context-propagation | [#171](https://github.com/FidelOdok/MetaForge/pull/171) | actor_id forwarding + OTel span attrs; 7 tests, 60 passed |
-| L1-B4 | Malformed knowledge_type → MET-385 envelope | MET-385 | XS | — | ✅ | fix/met-385-knowledge-type-envelope | [#172](https://github.com/FidelOdok/MetaForge/pull/172) | enum validation at adapter layer; 13 tests, 65 passed |
-| L1-B5 | Compound filter semantics pinned | MET-417 | XS | — | ✅ | feat/met-417-compound-filters | [#173](https://github.com/FidelOdok/MetaForge/pull/173) | AND-across-keys equality; str/int/bool/None values; dict/list rejected; 10 tests, 75 passed |
-| L1-C1 | `forge sources list/show/delete` | MET-411 | S | L1-A8, L1-B1 | ✅ | feat/met-411-forge-sources-cli | [#174](https://github.com/FidelOdok/MetaForge/pull/174) | CLI + REST passthrough; 20 new tests, 240 forge/knowledge passing |
-| L1-C2 | CLI error reporting on bad input | MET-411 | XS | — | ✅ | fix/met-411-forge-ingest-errors | [#175](https://github.com/FidelOdok/MetaForge/pull/175) | nonexistent/empty/binary/permission paths handled; 8 new tests, 101 passed |
-| L1-C3 | CLI PDF walker integration | MET-399 | XS | L1-A3 | ✅ | feat/met-399-cli-pdf-walker | [#176](https://github.com/FidelOdok/MetaForge/pull/176) | 5 integration tests; sub-agent stalled at PR-create step, outer-context recovery |
-| L1-D1 | Phase-1 UI shared-workspace alignment | MET-346 | S | — | ✅ | (policy pin) | — | Pinned: matches L1-A5 — Phase-1 stays SEPARATE; LightRAG-UI uses Ollama (default), gateway uses sentence-transformers (default). Cross-workspace bridging deferred to Phase-2. |
-| L1-D2 | MET-346 adoption checklist green | MET-346 | S | L1-D1 | ✅ | chore/met-346-adoption-checklist | [#192](https://github.com/FidelOdok/MetaForge/pull/192) | 5 items marked [x] with evidence pointers; run report committed |
-| L1-D3 | Phase-1 docs final pass | MET-346 | XS | L1-D2 | ✅ | docs/met-346-phase-1-final | [#195](https://github.com/FidelOdok/MetaForge/pull/195) | status → Phase 1 (adopted); Migration-to-Phase-2 section added |
+| L1-A1 | Project isolation enforcement | - | M | — | ✅ | feat/knowledge-project-isolation | [#163](https://github.com/FidelOdok/MetaForge/pull/163) | 13 passed, 2 skipped (no PG); minor: also touched test_context_assembler.py |
+| L1-A2 | Hybrid-search reranker | - | M | — | ✅ | feat/knowledge-reranker | [#164](https://github.com/FidelOdok/MetaForge/pull/164) | 20 passed; mypy: 2 pre-existing errors on api_gateway/server.py noted, not introduced |
+| L1-A3 | PDF parser shipped | - | S | — | ✅ | feat/pdf-ingest-wiring | [#165](https://github.com/FidelOdok/MetaForge/pull/165) | wired pdfplumber path; HP-INGEST-03 promoted; 20 passed, 8 skipped (no PG) |
+| L1-A4 | CSV row-level chunker | - | M | — | ✅ | feat/csv-row-chunker | [#166](https://github.com/FidelOdok/MetaForge/pull/166) | chunk_csv() + ingest detection; 8 unit tests + 28 passed |
+| L1-A5 | Workspace separation enforced | - | M | — | ✅ | (policy pin) | — | Pinned: keep gateway and LightRAG-UI workspaces SEPARATE per ADR-010 Phase-1 (engineer dogfood). Already enforced in code (gateway uses `lightrag` namespace; UI uses `lightrag_ui`). Phase-2 integration via L1-E2 instead. |
+| L1-A6 | Re-ingest after edit retires stale | - | S | — | ✅ | feat/supersede-on-edit | [#167](https://github.com/FidelOdok/MetaForge/pull/167) | sha256-based supersede; 28 passed, 11 skipped (no PG) |
+| L1-A7 | Latency SLO instrumentation | - | S | L1-D2 | ✅ | feat/knowledge-latency-slo | [#194](https://github.com/FidelOdok/MetaForge/pull/194) | metaforge_knowledge_search_duration_seconds + p95 alert; 7 tests; metric prefix pinned per platform convention |
+| L1-A8 | `list_sources()` Protocol method | - | S | — | ✅ | feat/list-sources | [#168](https://github.com/FidelOdok/MetaForge/pull/168) | 11 unit tests; SQL targets lightrag_vdb_chunks (real LightRAG storage) |
+| L1-B1 | `metaforge://knowledge/sources` resource | - | S | L1-A8 | ✅ | feat/knowledge-resources | [#169](https://github.com/FidelOdok/MetaForge/pull/169) | both URIs registered; 6 unit tests + 53 passed |
+| L1-B2 | Streaming progress on multi-file ingest | - | M | — | ✅ | feat/knowledge-progress | [#170](https://github.com/FidelOdok/MetaForge/pull/170) | multi-file batch + supports_progress on ToolManifest; 6 tests; 246 passed broader |
+| L1-B3 | Per-call context propagation | - | S | — | ✅ | feat/context-propagation | [#171](https://github.com/FidelOdok/MetaForge/pull/171) | actor_id forwarding + OTel span attrs; 7 tests, 60 passed |
+| L1-B4 | Malformed knowledge_type → error envelope | - | XS | — | ✅ | fix/knowledge-type-envelope | [#172](https://github.com/FidelOdok/MetaForge/pull/172) | enum validation at adapter layer; 13 tests, 65 passed |
+| L1-B5 | Compound filter semantics pinned | - | XS | — | ✅ | feat/compound-filters | [#173](https://github.com/FidelOdok/MetaForge/pull/173) | AND-across-keys equality; str/int/bool/None values; dict/list rejected; 10 tests, 75 passed |
+| L1-C1 | `forge sources list/show/delete` | - | S | L1-A8, L1-B1 | ✅ | feat/forge-sources-cli | [#174](https://github.com/FidelOdok/MetaForge/pull/174) | CLI + REST passthrough; 20 new tests, 240 forge/knowledge passing |
+| L1-C2 | CLI error reporting on bad input | - | XS | — | ✅ | fix/forge-ingest-errors | [#175](https://github.com/FidelOdok/MetaForge/pull/175) | nonexistent/empty/binary/permission paths handled; 8 new tests, 101 passed |
+| L1-C3 | CLI PDF walker integration | - | XS | L1-A3 | ✅ | feat/cli-pdf-walker | [#176](https://github.com/FidelOdok/MetaForge/pull/176) | 5 integration tests; sub-agent stalled at PR-create step, outer-context recovery |
+| L1-D1 | Phase-1 UI shared-workspace alignment | - | S | — | ✅ | (policy pin) | — | Pinned: matches L1-A5 — Phase-1 stays SEPARATE; LightRAG-UI uses Ollama (default), gateway uses sentence-transformers (default). Cross-workspace bridging deferred to Phase-2. |
+| L1-D2 | Adoption checklist green | - | S | L1-D1 | ✅ | chore/adoption-checklist | [#192](https://github.com/FidelOdok/MetaForge/pull/192) | 5 items marked [x] with evidence pointers; run report committed |
+| L1-D3 | Phase-1 docs final pass | - | XS | L1-D2 | ✅ | docs/phase-1-final | [#195](https://github.com/FidelOdok/MetaForge/pull/195) | status → Phase 1 (adopted); Migration-to-Phase-2 section added |
 | L1-E1 | ADR-010 Phase-2 spec finalized | new | S | — | ✅ | (policy pin) | — | Pinned v1 scope: SOURCES TABLE only (L1-E2). Search bar (L1-E3) and graph embed (L1-E4) deferred to v2. Sidebar relabel (L1-E5) included. Drill-in deferred. |
-| L1-E2 | `/knowledge` page — sources table | new | M | L1-B1, L1-E1 | ✅ | feat/met-409-knowledge-sources-page | [#193](https://github.com/FidelOdok/MetaForge/pull/193) | 4 vitest specs; tsc PASS; sort + chip filter + empty state + drill-in stub |
+| L1-E2 | `/knowledge` page — sources table | new | M | L1-B1, L1-E1 | ✅ | feat/knowledge-sources-page | [#193](https://github.com/FidelOdok/MetaForge/pull/193) | 4 vitest specs; tsc PASS; sort + chip filter + empty state + drill-in stub |
 | L1-E3 | `/knowledge` page — search bar | new | M | L1-E2 | 🚫 | — | — | DEFERRED to v2 per L1-E1 pin (PR #191) |
 | L1-E4 | `/knowledge` page — graph embed | new | L | L1-E2, L1-B1 | 🚫 | — | — | DEFERRED to v2 per L1-E1 pin (PR #191) |
 | L1-E5 | Sidebar relabel | new | XS | L1-E2 | ✅ | chore/dashboard-sidebar-knowledge-relabel | [#196](https://github.com/FidelOdok/MetaForge/pull/196) | Sidebar split (Files/folder + Knowledge/psychology); Topbar SEGMENT_LABELS updated; 128 tests pass |
-| L1-F1 | Author 26 NEW kb-test-plan rows | MET-410 | L | — | ✅ | (parent of F1a–F1g) | (PRs #177, #178, #179, #180, #181, #182, #183) | all 7 sub-iterations merged |
-| L1-F1a | full-capability.md (7 scenarios) | MET-410 | S | — | ✅ | test/met-410-full-capability | [#177](https://github.com/FidelOdok/MetaForge/pull/177) | 7 scenarios; master plan Verdicts flipped for 4 already-implemented rows |
-| L1-F1b | cli-error-paths.md (2 scenarios) | MET-410 | XS | — | ✅ | test/met-410-cli-errors | [#178](https://github.com/FidelOdok/MetaForge/pull/178) | KB-CLI-005, KB-CLI-006 already ✅ from L1-C2; just adds executable scenarios |
-| L1-F1c | error-envelope-probe.md extend (7) | MET-410 | S | — | ✅ | test/met-410-error-envelope-extend | [#179](https://github.com/FidelOdok/MetaForge/pull/179) | 7 scenarios; 3 Verdicts flipped (KB-ING-010, KB-RES-004, KB-SRC-014); 4 await impl |
-| L1-F1d | streaming-progress-probe.md (3) | MET-410 | S | — | ✅ | test/met-410-streaming-progress-probe | [#180](https://github.com/FidelOdok/MetaForge/pull/180) | 3 scenarios; Verdicts flipped (KB-PRG-001..003); all backed by L1-B2 |
-| L1-F1e | observability-knowledge-probe.md (3) | MET-410 | S | — | ✅ | test/met-410-observability-knowledge | [#181](https://github.com/FidelOdok/MetaForge/pull/181) | 3 scenarios w/ PromQL+LogQL; KB-CTX-003 flipped ✅; OBS-002/003 await impl |
-| L1-F1f | event-ingest.md (3) | MET-410 | S | — | ✅ | test/met-410-event-ingest | [#182](https://github.com/FidelOdok/MetaForge/pull/182) | 3 Kafka-gated scenarios; report BLOCKED if broker absent |
-| L1-F1g | retrieval.md extend (2) | MET-410 | XS | — | ✅ | test/met-410-retrieval-extend | [#183](https://github.com/FidelOdok/MetaForge/pull/183) | HP-RETR-11/12; KB-SRC-012, KB-CTX-004 flipped ✅ |
-| L1-F2 | Real-content corpus expansion | MET-340 | M | — | ✅ | test/met-340-corpus-expansion | [#184](https://github.com/FidelOdok/MetaForge/pull/184) | 8 parts, 80 scenarios; STM32H723/ESP32/nRF52840/LM2596/MCP2515 added; 3 URL workarounds (MCP2515 to revJ, nRF52840 via web.archive, STM32 via curl headers) |
-| L1-F3 | Dual-project isolation integration test | MET-401 | S | L1-A1 | ✅ | test/met-401-project-isolation + fix/met-401-project-scoped-delete-supersede | [#186](https://github.com/FidelOdok/MetaForge/pull/186) + [#190](https://github.com/FidelOdok/MetaForge/pull/190) | 4 tests; #190 also ships the production fix that #186's sub-agent identified |
-| L1-F4 | Citation round-trip integration test | MET-389 | S | — | ✅ | test/met-389-citation-roundtrip | [#188](https://github.com/FidelOdok/MetaForge/pull/188) | 4 cases (h2/h1-h2/chunk_index/metadata); 13 passed, 12 skipped (no PG) |
+| L1-F1 | Author 26 NEW kb-test-plan rows | - | L | — | ✅ | (parent of F1a–F1g) | (PRs #177, #178, #179, #180, #181, #182, #183) | all 7 sub-iterations merged |
+| L1-F1a | full-capability.md (7 scenarios) | - | S | — | ✅ | test/full-capability | [#177](https://github.com/FidelOdok/MetaForge/pull/177) | 7 scenarios; master plan Verdicts flipped for 4 already-implemented rows |
+| L1-F1b | cli-error-paths.md (2 scenarios) | - | XS | — | ✅ | test/cli-errors | [#178](https://github.com/FidelOdok/MetaForge/pull/178) | KB-CLI-005, KB-CLI-006 already ✅ from L1-C2; just adds executable scenarios |
+| L1-F1c | error-envelope-probe.md extend (7) | - | S | — | ✅ | test/error-envelope-extend | [#179](https://github.com/FidelOdok/MetaForge/pull/179) | 7 scenarios; 3 Verdicts flipped (KB-ING-010, KB-RES-004, KB-SRC-014); 4 await impl |
+| L1-F1d | streaming-progress-probe.md (3) | - | S | — | ✅ | test/streaming-progress-probe | [#180](https://github.com/FidelOdok/MetaForge/pull/180) | 3 scenarios; Verdicts flipped (KB-PRG-001..003); all backed by L1-B2 |
+| L1-F1e | observability-knowledge-probe.md (3) | - | S | — | ✅ | test/observability-knowledge | [#181](https://github.com/FidelOdok/MetaForge/pull/181) | 3 scenarios w/ PromQL+LogQL; KB-CTX-003 flipped ✅; OBS-002/003 await impl |
+| L1-F1f | event-ingest.md (3) | - | S | — | ✅ | test/event-ingest | [#182](https://github.com/FidelOdok/MetaForge/pull/182) | 3 Kafka-gated scenarios; report BLOCKED if broker absent |
+| L1-F1g | retrieval.md extend (2) | - | XS | — | ✅ | test/retrieval-extend | [#183](https://github.com/FidelOdok/MetaForge/pull/183) | HP-RETR-11/12; KB-SRC-012, KB-CTX-004 flipped ✅ |
+| L1-F2 | Real-content corpus expansion | - | M | — | ✅ | test/corpus-expansion | [#184](https://github.com/FidelOdok/MetaForge/pull/184) | 8 parts, 80 scenarios; STM32H723/ESP32/nRF52840/LM2596/MCP2515 added; 3 URL workarounds (MCP2515 to revJ, nRF52840 via web.archive, STM32 via curl headers) |
+| L1-F3 | Dual-project isolation integration test | - | S | L1-A1 | ✅ | test/project-isolation + fix/project-scoped-delete-supersede | [#186](https://github.com/FidelOdok/MetaForge/pull/186) + [#190](https://github.com/FidelOdok/MetaForge/pull/190) | 4 tests; #190 also ships the production fix that #186's sub-agent identified |
+| L1-F4 | Citation round-trip integration test | - | S | — | ✅ | test/citation-roundtrip | [#188](https://github.com/FidelOdok/MetaForge/pull/188) | 4 cases (h2/h1-h2/chunk_index/metadata); 13 passed, 12 skipped (no PG) |
 | L1-F5 | Neo4j ↔ in-memory parity test | new | S | — | ✅ | test/met-knowledge-graph-parity | [#189](https://github.com/FidelOdok/MetaForge/pull/189) | 5 parametrized cases × 2 backends; in-memory PASS, Neo4j SKIP (no driver/server) |
 
 **Total: 29 items.** 3 blocked on human decision (L1-A5, L1-D1, L1-E1).
@@ -155,7 +155,7 @@ reader.
 
 ### L1-A1 — Project isolation enforcement
 
-**MET:** MET-401 · **Effort:** M · **Branch:** `feat/met-401-knowledge-project-isolation`
+**Effort:** M · **Branch:** `feat/knowledge-project-isolation`
 
 **Background.** TODO at `digital_twin/knowledge/lightrag_service.py:235–276`
 notes that `project_id` is captured but not used to scope ingest or
@@ -192,13 +192,13 @@ search. Without scoping, project A's docs leak into project B searches.
 - New integration test PASS.
 - Existing tests still PASS.
 - TODO comment at `lightrag_service.py:235–276` removed.
-- PR title: `feat(knowledge): project isolation enforcement (MET-401)`.
+- PR title: `feat(knowledge): project isolation enforcement`.
 
 ---
 
 ### L1-A2 — Hybrid-search reranker
 
-**MET:** MET-335 · **Effort:** M · **Branch:** `feat/met-335-knowledge-reranker`
+**Effort:** M · **Branch:** `feat/knowledge-reranker`
 
 **Background.** HP-RETR-06 in `tier1/retrieval.md` asserts the reranker
 improves the top result; today it's marked SKIP because no reranker is
@@ -231,13 +231,13 @@ wired.
 **Done when:**
 - Unit test PASS.
 - HP-RETR-06 updated to executable PASS-on-rerank-enabled environment.
-- PR title: `feat(knowledge): hybrid-search reranker (MET-335)`.
+- PR title: `feat(knowledge): hybrid-search reranker`.
 
 ---
 
 ### L1-A3 — PDF parser wiring verified
 
-**MET:** MET-399 · **Effort:** S · **Branch:** `feat/met-399-pdf-ingest-wiring`
+**Effort:** S · **Branch:** `feat/pdf-ingest-wiring`
 
 **Background.** `pyproject.toml` declares `raganything>=1.2` in the
 `[knowledge]` extra and the CLI sends raw PDF bytes via latin-1
@@ -266,13 +266,13 @@ Verify the path actually works end-to-end.
 **Done when:**
 - Integration test PASS.
 - KB-CLI-003 in `kb-test-plan.md` updated.
-- PR title: `feat(knowledge): verify PDF ingest end-to-end (MET-399)`.
+- PR title: `feat(knowledge): verify PDF ingest end-to-end`.
 
 ---
 
 ### L1-A4 — CSV row-level chunker
 
-**MET:** MET-340 · **Effort:** M · **Branch:** `feat/met-340-csv-row-chunker`
+**Effort:** M · **Branch:** `feat/csv-row-chunker`
 
 **Background.** HP-INGEST-04 expects each CSV row to become a
 searchable chunk so engineers can hit a BOM by MPN. Today CSV ingest
@@ -300,7 +300,7 @@ falls back to one-chunk-per-file.
 
 **Done when:**
 - Unit test PASS.
-- PR title: `feat(knowledge): CSV row-level chunker (MET-340)`.
+- PR title: `feat(knowledge): CSV row-level chunker`.
 
 ---
 
@@ -314,7 +314,7 @@ See `docs/integrations/lightrag-ui.md` and the Phase-1/Phase-2 split.
 
 ### L1-A6 — Re-ingest after edit retires stale fragments
 
-**MET:** MET-307 · **Effort:** S · **Branch:** `feat/met-307-supersede-on-edit`
+**Effort:** S · **Branch:** `feat/supersede-on-edit`
 
 **Background.** Today identical re-ingest at the same source_path is
 dedup'd (HP-INGEST-06 covers this). When content actually changes —
@@ -342,13 +342,13 @@ the engineer edited the file — the old chunks must be retired.
 **Done when:**
 - Integration test PASS.
 - KB-ING-009 in `kb-test-plan.md` flips to ✅.
-- PR title: `feat(knowledge): supersede stale fragments on edit (MET-307)`.
+- PR title: `feat(knowledge): supersede stale fragments on edit`.
 
 ---
 
 ### L1-A7 — Latency SLO instrumentation
 
-**MET:** MET-401 · **Effort:** S · **Deps:** L1-D2 · **Branch:** `feat/met-401-knowledge-latency-slo`
+**Effort:** S · **Deps:** L1-D2 · **Branch:** `feat/knowledge-latency-slo`
 
 **Background.** HP-RETR-08 wants `p95 < 200 ms` on a 1k-doc corpus.
 Today wall-clock is captured but not gated against a Prometheus
@@ -375,13 +375,13 @@ histogram.
 **Done when:**
 - Unit test PASS.
 - Alert rule lands in `observability/alerting/rules.yaml`.
-- PR title: `feat(observability): knowledge search latency SLO (MET-401)`.
+- PR title: `feat(observability): knowledge search latency SLO`.
 
 ---
 
 ### L1-A8 — `list_sources()` Protocol method
 
-**MET:** MET-415 (file new if missing) · **Effort:** S · **Branch:** `feat/met-415-list-sources`
+**Effort:** S · **Branch:** `feat/list-sources`
 
 **Background.** Today `KnowledgeService` exposes ingest/search/delete
 but no listing. The `list()` primitive exists on the legacy
@@ -428,13 +428,13 @@ surface it via the Protocol so REST + MCP can call it.
 
 **Done when:**
 - Unit test PASS.
-- PR title: `feat(knowledge): list_sources() Protocol method (MET-415)`.
+- PR title: `feat(knowledge): list_sources() Protocol method`.
 
 ---
 
 ### L1-B1 — `metaforge://knowledge/sources` MCP resource
 
-**MET:** MET-384 · **Effort:** S · **Deps:** L1-A8 · **Branch:** `feat/met-384-knowledge-resources`
+**Effort:** S · **Deps:** L1-A8 · **Branch:** `feat/knowledge-resources`
 
 **Background.** HP-INGEST-01 already asserts `metaforge://knowledge/sources`
 returns a list. KB-RES-001..004 in `kb-test-plan.md` track this. Today
@@ -455,20 +455,20 @@ the resource is documented but never registered.
 **Tests:**
 - `tests/unit/test_knowledge_resources.py`: list returns the URI;
   read on each URI returns the documented schema; read on unknown
-  source id returns `not_found` envelope (MET-385).
+  source id returns `not_found` envelope.
 
 **Done when:**
 - Unit test PASS.
 - HP-INGEST-01 step 2 PASS against the implementation.
-- PR title: `feat(mcp): knowledge sources resource surface (MET-384)`.
+- PR title: `feat(mcp): knowledge sources resource surface`.
 
 ---
 
 ### L1-B2 — Streaming progress on multi-file ingest
 
-**MET:** MET-388 · **Effort:** M · **Branch:** `feat/met-388-knowledge-progress`
+**Effort:** M · **Branch:** `feat/knowledge-progress`
 
-**Background.** MET-388 protocol surface shipped in commit cc0db58 but
+**Background.** The progress protocol surface shipped in commit cc0db58 but
 the knowledge tool isn't emitting yet.
 
 **Files:**
@@ -491,13 +491,13 @@ the knowledge tool isn't emitting yet.
 **Done when:**
 - Integration test PASS.
 - KB-PRG-001..003 flip to ✅ in `kb-test-plan.md`.
-- PR title: `feat(mcp): streaming progress on knowledge ingest (MET-388)`.
+- PR title: `feat(mcp): streaming progress on knowledge ingest`.
 
 ---
 
 ### L1-B3 — Per-call context propagation
 
-**MET:** MET-387 · **Effort:** S · **Branch:** `feat/met-387-context-propagation`
+**Effort:** S · **Branch:** `feat/context-propagation`
 
 **Background.** `current_context()` already exists at
 `mcp_core/context.py:124–162` but the knowledge handlers don't read
@@ -522,13 +522,13 @@ it.
 **Done when:**
 - Unit test PASS.
 - KB-CTX-003 / KB-CTX-004 in `kb-test-plan.md` flip to ✅.
-- PR title: `feat(mcp): per-call context propagation in knowledge tools (MET-387)`.
+- PR title: `feat(mcp): per-call context propagation in knowledge tools`.
 
 ---
 
-### L1-B4 — Malformed `knowledge_type` returns MET-385 envelope
+### L1-B4 — Malformed `knowledge_type` returns the error envelope
 
-**MET:** MET-385 · **Effort:** XS · **Branch:** `fix/met-385-knowledge-type-envelope`
+**Effort:** XS · **Branch:** `fix/knowledge-type-envelope`
 
 **Files:**
 - `tool_registry/tools/knowledge/adapter.py`
@@ -548,13 +548,13 @@ it.
 **Done when:**
 - Unit test PASS.
 - KB-ING-010 in `kb-test-plan.md` flips to ✅.
-- PR title: `fix(mcp): malformed knowledge_type returns MET-385 envelope`.
+- PR title: `fix(mcp): malformed knowledge_type returns the error envelope`.
 
 ---
 
 ### L1-B5 — Compound filter semantics pinned
 
-**MET:** MET-417 (file new if missing) · **Effort:** XS · **Branch:** `feat/met-417-compound-filters`
+**Effort:** XS · **Branch:** `feat/compound-filters`
 
 **Background.** Today `filters={}` accepts arbitrary keys with unclear
 behavior. KB-SRC-014 in `kb-test-plan.md` asks us to pin the contract.
@@ -570,7 +570,7 @@ behavior. KB-SRC-014 in `kb-test-plan.md` asks us to pin the contract.
    passed through (matches metadata fields literally).
 2. Document the rule in the playbook.
 3. Reject filter values that are not str / int / bool / None with
-   MET-385 envelope.
+   the error envelope.
 
 **Tests:**
 - AND semantics: filters `{a: "x", b: "y"}` only return hits where
@@ -581,13 +581,13 @@ behavior. KB-SRC-014 in `kb-test-plan.md` asks us to pin the contract.
 **Done when:**
 - Unit test PASS.
 - Playbook updated.
-- PR title: `feat(mcp): pin compound-filter AND semantics (MET-417)`.
+- PR title: `feat(mcp): pin compound-filter AND semantics`.
 
 ---
 
 ### L1-C1 — `forge sources list/show/delete`
 
-**MET:** MET-411 · **Effort:** S · **Deps:** L1-A8, L1-B1 · **Branch:** `feat/met-411-forge-sources-cli`
+**Effort:** S · **Deps:** L1-A8, L1-B1 · **Branch:** `feat/forge-sources-cli`
 
 **Files:**
 - `cli/forge_cli/sources.py` (new)
@@ -606,13 +606,13 @@ behavior. KB-SRC-014 in `kb-test-plan.md` asks us to pin the contract.
 
 **Done when:**
 - Unit test PASS.
-- PR title: `feat(cli): forge sources list/show/delete (MET-411)`.
+- PR title: `feat(cli): forge sources list/show/delete`.
 
 ---
 
 ### L1-C2 — CLI error reporting on bad input
 
-**MET:** MET-411 · **Effort:** XS · **Branch:** `fix/met-411-forge-ingest-errors`
+**Effort:** XS · **Branch:** `fix/forge-ingest-errors`
 
 **Files:**
 - `cli/forge_cli/ingest.py`
@@ -633,13 +633,13 @@ behavior. KB-SRC-014 in `kb-test-plan.md` asks us to pin the contract.
 **Done when:**
 - Unit test PASS.
 - KB-CLI-005, KB-CLI-006 in `kb-test-plan.md` flip to ✅.
-- PR title: `fix(cli): actionable errors on bad ingest input (MET-411)`.
+- PR title: `fix(cli): actionable errors on bad ingest input`.
 
 ---
 
 ### L1-C3 — CLI PDF walker integration
 
-**MET:** MET-399 · **Effort:** XS · **Deps:** L1-A3 · **Branch:** `feat/met-399-cli-pdf-walker`
+**Effort:** XS · **Deps:** L1-A3 · **Branch:** `feat/cli-pdf-walker`
 
 **Files:**
 - `cli/forge_cli/ingest.py` — already accepts .pdf in
@@ -656,7 +656,7 @@ behavior. KB-SRC-014 in `kb-test-plan.md` asks us to pin the contract.
 **Done when:**
 - Integration test PASS.
 - HP-INGEST-03 in `tier1/ingest.md` BLOCKED → executable.
-- PR title: `test(cli): end-to-end PDF directory ingest (MET-399)`.
+- PR title: `test(cli): end-to-end PDF directory ingest`.
 
 ---
 
@@ -668,9 +668,9 @@ proceeding. See conversation log + `docs/integrations/lightrag-ui.md`.
 
 ---
 
-### L1-D2 — MET-346 adoption checklist green
+### L1-D2 — Adoption checklist green
 
-**MET:** MET-346 · **Effort:** S · **Deps:** L1-D1 · **Branch:** `chore/met-346-adoption-checklist`
+**Effort:** S · **Deps:** L1-D1 · **Branch:** `chore/adoption-checklist`
 
 **Files:**
 - `docs/uat/cycle3-knowledge-ssot-test-run-2026-04-30.md` (extend)
@@ -691,13 +691,13 @@ proceeding. See conversation log + `docs/integrations/lightrag-ui.md`.
 **Done when:**
 - All 5 boxes ticked in the doc.
 - Run report committed.
-- PR title: `chore(uat): MET-346 adoption checklist green`.
+- PR title: `chore(uat): adoption checklist green`.
 
 ---
 
 ### L1-D3 — Phase-1 docs final pass
 
-**MET:** MET-346 · **Effort:** XS · **Deps:** L1-D2 · **Branch:** `docs/met-346-phase-1-final`
+**Effort:** XS · **Deps:** L1-D2 · **Branch:** `docs/phase-1-final`
 
 **Files:**
 - `docs/integrations/lightrag-ui.md`
@@ -706,7 +706,7 @@ proceeding. See conversation log + `docs/integrations/lightrag-ui.md`.
 1. Promote the doc from "Phase 1 (engineer dogfood)" to "Phase 1 (adopted)".
 2. Add a "Migration to Phase 2" section pointing at L1-E1..E5.
 
-**Done when:** doc updated; PR title: `docs(integrations): Phase-1 LightRAG UI adopted (MET-346)`.
+**Done when:** doc updated; PR title: `docs(integrations): Phase-1 LightRAG UI adopted`.
 
 ---
 
@@ -721,7 +721,7 @@ search bar). Owner needs to decide which of these ship in v1.
 
 ### L1-E2 — `/knowledge` page — sources table
 
-**MET:** new (file under MET-409) · **Effort:** M · **Deps:** L1-B1, L1-E1 · **Branch:** `feat/knowledge-page-sources-table`
+**Effort:** M · **Deps:** L1-B1, L1-E1 · **Branch:** `feat/knowledge-page-sources-table`
 
 **Files:**
 - `dashboard/src/pages/KnowledgePage.tsx` (new)
@@ -822,7 +822,7 @@ treats this row as ✅ once both children are ✅.
 
 ### L1-F1 — Author 26 NEW kb-test-plan rows
 
-**MET:** MET-410 · **Effort:** L · **Multi-iteration: yes** · **Branch prefix:** `test/met-410-`
+**Effort:** L · **Multi-iteration: yes** · **Branch prefix:** `test/`
 
 The loop splits this into ≥ 5 sub-iterations along the file targets in
 `kb-test-plan.md` "Authoring queue":
@@ -843,13 +843,13 @@ and updates the master plan's Verdict column.
 **Done when (per sub):**
 - Scenarios parse via the validator agent contract.
 - Master plan §-table updated.
-- PR title: `test(uat): <sub label> scenarios (MET-410)`.
+- PR title: `test(uat): <sub label> scenarios`.
 
 ---
 
 ### L1-F2 — Real-content corpus expansion
 
-**MET:** MET-340 · **Effort:** M · **Branch:** `test/met-340-corpus-expansion`
+**Effort:** M · **Branch:** `test/corpus-expansion`
 
 **Files:**
 - `tests/fixtures/datasheets/manifest.yaml`
@@ -871,13 +871,13 @@ and updates the master plan's Verdict column.
 - `python scripts/datasheets/generate_scenarios.py` regenerates
   `tier1/datasheets-real.md` with 5 × 10 = 50 new scenarios.
 - Master plan §11 expanded.
-- PR title: `test(uat): expand datasheet corpus to 8 parts (MET-340)`.
+- PR title: `test(uat): expand datasheet corpus to 8 parts`.
 
 ---
 
 ### L1-F3 — Dual-project isolation integration test
 
-**MET:** MET-401 · **Effort:** S · **Deps:** L1-A1 · **Branch:** `test/met-401-project-isolation`
+**Effort:** S · **Deps:** L1-A1 · **Branch:** `test/project-isolation`
 
 **Files:**
 - `tests/integration/test_knowledge_project_isolation.py`
@@ -887,13 +887,13 @@ test in L1-A1) that runs against a real pgvector instance with two
 real project UUIDs.
 
 **Done when:** test PASS in CI; PR title:
-`test(integration): dual-project knowledge isolation (MET-401)`.
+`test(integration): dual-project knowledge isolation`.
 
 ---
 
 ### L1-F4 — Citation round-trip integration test
 
-**MET:** MET-389 · **Effort:** S · **Branch:** `test/met-389-citation-roundtrip`
+**Effort:** S · **Branch:** `test/citation-roundtrip`
 
 **Files:**
 - `tests/integration/test_knowledge_citation_roundtrip.py`
@@ -904,7 +904,7 @@ for a phrase from paragraph 2; assert the returned hit's
 expected from the source file.
 
 **Done when:** test PASS; PR title:
-`test(integration): citation round-trip (MET-389)`.
+`test(integration): citation round-trip`.
 
 ---
 
@@ -964,13 +964,13 @@ The user reads this section to decide what to merge / re-trigger.
 - L1-B1 (#169) `metaforge://knowledge/sources` MCP resource
 - L1-B2 (#170) streaming progress on knowledge ingest
 - L1-B3 (#171) per-call context propagation (actor_id + OTel)
-- L1-B4 (#172) malformed `knowledge_type` → MET-385 envelope
+- L1-B4 (#172) malformed `knowledge_type` → error envelope
 - L1-B5 (#173) compound-filter AND semantics pinned
 - L1-C1 (#174) `forge sources list/show/delete` CLI
 - L1-C2 (#175) actionable errors on bad ingest input
 - L1-C3 (#176) PDF directory ingest tests
 - L1-D1 (#191 plan-pin) Phase-1 UI shared-workspace alignment
-- L1-D2 (#192) MET-346 adoption checklist green
+- L1-D2 (#192) Adoption checklist green
 - L1-D3 (#195) Phase-1 LightRAG UI adopted
 - L1-E1 (#191 plan-pin) ADR-010 Phase-2 v1 scope
 - L1-E2 (#193) `/knowledge` sources table page
@@ -991,7 +991,7 @@ The user reads this section to decide what to merge / re-trigger.
 
 **PRs opened during this run:** #161, #162, #163, #164, #165, #166, #167, #168, #169, #170, #171, #172, #173, #174, #175, #176, #177, #178, #179, #180, #181, #182, #183, #184, #186, #187, #188, #189, #190, #191, #192, #193, #194, #195, #196 — **35 PRs**, of which **33 merged** at run end, **2 still open** (#186, #189).
 
-**Bonus PR:** #187 (MET-421) — wire twin and constraint adapters into MCP tool registry. Surfaced mid-loop; not part of the L1 plan but blocked Claude's MCP visibility into 6 twin/constraint tools.
+**Bonus PR:** #187 — wire twin and constraint adapters into MCP tool registry. Surfaced mid-loop; not part of the L1 plan but blocked Claude's MCP visibility into 6 twin/constraint tools.
 
 **Cron job ID** for reference: `50d5ec70` (`7,27,47 * * * *`, recurring, session-only). Cancelled with `CronDelete` at end of this run.
 

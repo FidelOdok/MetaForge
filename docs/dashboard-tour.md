@@ -101,7 +101,7 @@ Drill-in for a single project: metrics, an action row (**Start design
 run**, **Open twin & agent**, **Bill of materials**, **Baselines**) and the
 project's artifact updates, newest first.
 
-**Current items (FORGE-526).** By default the page lists one row per item
+**Current items.** By default the page lists one row per item
 at its current revision, grouped by type (Parts, Assemblies, Requirements,
 Intent, Needs, BOM, Components): its `KEY@n`, the gate and run that produced
 it, its evidence state (current, out of date, none) and its validation
@@ -282,7 +282,7 @@ drawer for asking an agent about that node.
 
 On the **Graph**, a work product is linked to more than other work
 products: to the constraints it satisfies, the intent and evidence behind
-it, the parts it contains and the baselines it belongs to (FORGE-704).
+it, the parts it contains and the baselines it belongs to.
 Work products are laid out in layers by dependency, left to right, so a
 link mostly runs to the next column; a layer of more than eight wraps into
 further columns rather than one tall stack. A link is named only when it
@@ -298,7 +298,7 @@ request fails the graph says so and shows only the work products, never
 stand-in links, and if some work products' links could not be read it
 says how many.
 
-The **Electronics** tab (FORGE-687) draws the electronics and firmware
+The **Electronics** tab draws the electronics and firmware
 thread: BOM, schematic, board, then gerbers and pick and place, and from
 the schematic the pin map and the firmware. Each stage shows the current
 revision of what is recorded, with the sheet or board preview where there
@@ -312,7 +312,7 @@ it is out of date and wants regenerating. A stage with nothing recorded
 names the tools that produce it.
 
 The Model tab shows the model standing on a visible workplane, turned by
-a Tinkercad-style turntable (FORGE-620). **Right-drag rotates,
+a Tinkercad-style turntable. **Right-drag rotates,
 middle-drag pans, the wheel zooms toward the cursor, and the left button
 is left alone for selecting parts** — so orbiting and picking never
 compete for the same gesture.
@@ -335,13 +335,13 @@ corner jumps to a face.
 
 CAD geometry is authored Z-up and the STEP converter keeps it that way,
 so the viewer turns a loaded model a quarter turn onto its feet before
-measuring it (FORGE-621) — the same correction the robot path has always
+measuring it — the same correction the robot path has always
 applied. Without it the workplane cut through the model and the camera
 turned it about an axis that wasn't its up.
 
 The workplane is one plane, carrying the grid and receiving the model's
 shadow. It used to be two surfaces half a unit apart, which z-fought as
-the camera moved and read as the floor shimmering (FORGE-623). The
+the camera moved and read as the floor shimmering. The
 camera's depth range follows the zoom rather than sitting at a fixed
 10000, so pulling back no longer pushes the scene past the far plane and
 out of sight, and shadows redraw when the geometry changes rather than on
@@ -352,18 +352,18 @@ lines, which is what keeps it still while the camera moves: a receding
 patch of floor averages its cells into a flat tint instead of aliasing
 into a crawling shimmer. Two earlier attempts shimmered for that reason
 — a procedural shader anti-aliasing its lines with screen-space
-derivatives (FORGE-34), then plain line segments with no anti-aliasing
-at all (FORGE-612). It is sized and placed from the model's own bounds,
+derivatives, then plain line segments with no anti-aliasing
+at all. It is sized and placed from the model's own bounds,
 so it sits under whatever is loaded. A robot description carries no
 bounds, so it gets no workplane rather than one at a guessed height.
 
-A node that is a revision of an item (FORGE-526) shows a **revision
+A node that is a revision of an item shows a **revision
 picker** (`KEY @n`) in the inspector Overview: picking another revision
 selects that revision's node, and the Model tab reloads it. The *History*
 tab adds the item's revision timeline and the compare view described under
 [project detail](#projectsid-project-detail).
 
-An assembly `cad_model` (one with `metadata.parts`, FORGE-511) shows an
+An assembly `cad_model` (one with `metadata.parts`) shows an
 **Assembly parts** tree in the inspector Overview and on the Assembly tab:
 each part with its material and dimensions (from its position box).
 Selecting a part highlights it in the tree and in the 3D viewer. The
@@ -376,7 +376,7 @@ the list.
 Selecting a `simulation_result` node adds an **FEA result** panel to the
 inspector: max von Mises and max displacement with their units, the
 load case that produced them, the mesh statistics and, when the run
-stored its field (FORGE-532), the 3D contour viewer described under
+stored its field, the 3D contour viewer described under
 `/sim` below. A result recorded before fields were persisted shows a
 *Field not stored* note instead of a contour. The panel links to `/sim`,
 which is where two results compare side by side.
@@ -403,7 +403,7 @@ result but the word.
 ### Work product previews
 
 One registry, `previewEngineFor` in
-`dashboard/src/components/preview/registry.ts` (FORGE-531), picks how a
+`dashboard/src/components/preview/registry.ts`, picks how a
 work product is previewed. The twin inspector, the full-screen
 **Preview** modal and the project page rows all render its answer through
 the same `PreviewHost`, so the three surfaces always agree.
@@ -416,19 +416,19 @@ extension); otherwise a per-type default applies.
 |---|---|---|
 | 3D CAD | `.step`/`.stp`/`.iges`/`.brep`/`.fcstd`, a `cad_model` with no mesh format, any assembly (`metadata.parts`) | The STEP to GLB converter route (`GET /v1/twin/nodes/{id}/model`) in the 3D viewer. In the modal an assembly also shows its part tree. |
 | 3D mesh | `.stl`, `.3mf`, `.glb`, `.gltf` | The stored file loaded directly with three.js loaders, in the main viewer and the modal. STL carries no colour, so it renders in a uniform neutral. |
-| Markdown | `.md`, and `prd`, `documentation`, `test_plan` and the other document types | Formatted Markdown (headings, lists, tables, code). A fenced block tagged `mermaid` is drawn as a diagram rather than printed as its source (FORGE-706); one that will not parse falls back to the source with a note. Raw HTML in the source shows as text, and so does any markup inside a diagram's labels — mermaid runs sanitised. |
-| PRD | a `prd` revision (`metadata.item_key` set, FORGE-528) | The derived prd from `GET /v1/twin/items/{KEY@n}/prd`: the prose plus the project's current intent, needs and a live requirement table read from the current constraint set, with the prose and constraint set revisions shown above it. Falls back to the stored prose, with a note, if the view cannot be fetched. A legacy prd with no item renders as Markdown. |
+| Markdown | `.md`, and `prd`, `documentation`, `test_plan` and the other document types | Formatted Markdown (headings, lists, tables, code). A fenced block tagged `mermaid` is drawn as a diagram rather than printed as its source; one that will not parse falls back to the source with a note. Raw HTML in the source shows as text, and so does any markup inside a diagram's labels — mermaid runs sanitised. |
+| PRD | a `prd` revision (`metadata.item_key` set) | The derived prd from `GET /v1/twin/items/{KEY@n}/prd`: the prose plus the project's current intent, needs and a live requirement table read from the current constraint set, with the prose and constraint set revisions shown above it. Falls back to the stored prose, with a note, if the view cannot be fetched. A legacy prd with no item renders as Markdown. |
 | Requirements table | `constraint_set` | One row per constraint: severity, domain, acceptance criteria, verification, binding. Falls back to Markdown if the document is not in the recorder's shape. |
 | BOM table | `bom` (`.csv`) | Line items and total quantity over the CSV table. |
 | Decision card | `design_decision` | Title, rationale, alternatives with why each was rejected, status. |
 | CSV table | `.csv`, `.tsv` | A table, capped with a "Show all" for long files. |
 | JSON tree | `.json` | A collapsible tree. Invalid JSON is shown as text with a warning. |
 | Code | `.c`, `.h`, `.cpp`, `.py` and other sources, `firmware_source`, `cad_source_script` | Highlighted source with line numbers. |
-| Design files | a `schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `pinmap` or `firmware_source` kept by `twin.record_design_files` (FORGE-687) | A schematic's sheets or a board's top side as the SVGs `kicad.export_svg` made when it was recorded; a gerber set's layers drawn by tracespace in one shared box so they line up, each one switchable; a firmware project's files one at a time with its `firmware.elf` to download; a pin map or placement file as a table. Every file is listed with a download link. |
+| Design files | a `schematic`, `pcb_layout`, `gerber`, `pick_and_place`, `pinmap` or `firmware_source` kept by `twin.record_design_files` | A schematic's sheets or a board's top side as the SVGs `kicad.export_svg` made when it was recorded; a gerber set's layers drawn by tracespace in one shared box so they line up, each one switchable; a firmware project's files one at a time with its `firmware.elf` to download; a pin map or placement file as a table. Every file is listed with a download link. |
 | KiCad viewer | `.kicad_sch`, `.kicad_pcb`, `schematic`, `pcb_layout` imported as a single file | No embeddable KiCad viewer ships as an npm package. Says so and offers the download; record the project with `twin.record_design_files` to get previews. |
 | Gerber renderer | `.gbr`, `.gtl`, `.gbl` and the other layer extensions, `.drl` | The layer drawn by tracespace. A zipped Gerber set is not unpacked. |
 | DXF viewer | `.dxf` | Lines, polylines, arcs, circles, ellipses, splines and text drawn from dxf-parser. |
-| FEA summary | `simulation_result` | The FEA result card described above, with the 3D field viewer (FORGE-532) in the inspector and the modal; project rows show the numbers only. |
+| FEA summary | `simulation_result` | The FEA result card described above, with the 3D field viewer in the inspector and the modal; project rows show the numbers only. |
 | Image, PDF, HTML sketch | `.png`/`.jpg`/`.svg`/`.webp`, `.pdf`, `.html` | As before. |
 | Robot viewer | `robot_description` | Unchanged: open it in the main 3D viewer. |
 

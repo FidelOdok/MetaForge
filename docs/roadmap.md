@@ -50,7 +50,7 @@ Finalize all specification documents before development begins. No code is writt
 
 ### Objective
 
-Deliver the first end-to-end vertical: **Mechanical Agent** (MET-8). A user can submit a CAD model, run FEA stress analysis, validate against constraints, and see results committed to the Digital Twin.
+Deliver the first end-to-end vertical: **Mechanical Agent**. A user can submit a CAD model, run FEA stress analysis, validate against constraints, and see results committed to the Digital Twin.
 
 ### Timeline: 6 months total
 
@@ -74,8 +74,8 @@ Deliver the first end-to-end vertical: **Mechanical Agent** (MET-8). A user can 
 
 | # | Discipline | Agent | Key Skills | Epic |
 |---|-----------|-------|------------|------|
-| 1 | Mechanical Engineering | Mechanical Agent | validate_stress, check_tolerances, export_mesh | MET-8 |
-| 2 | Electronics Engineering | Electronics Agent | run_erc, run_drc, export_bom | MET-9 |
+| 1 | Mechanical Engineering | Mechanical Agent | validate_stress, check_tolerances, export_mesh | - |
+| 2 | Electronics Engineering | Electronics Agent | run_erc, run_drc, export_bom | - |
 | 3 | Embedded Software/Firmware | Firmware Agent | validate_pinmap, generate_scaffold, check_memory_budget | — |
 | 4 | Simulation & Validation | Simulation Agent | run_thermal, run_circuit_sim, compare_results | — |
 | 5 | Systems Engineering | Systems Agent | check_interfaces, validate_power_budget, resolve_dependencies | — |
@@ -104,10 +104,10 @@ Deliver the first end-to-end vertical: **Mechanical Agent** (MET-8). A user can 
 
 | Epic | Scope |
 |------|-------|
-| MET-5: Digital Twin Core | Graph engine, versioning, constraints, Twin API |
-| MET-6: Skill System | Registry, loader, schema validator, MCP bridge |
-| MET-7: MCP Infrastructure | Client, wire protocol, tool registry, adapters |
-| MET-8: Mechanical Agent | Stress validation, meshing, tolerances (first vertical) |
+| Digital Twin Core | Graph engine, versioning, constraints, Twin API |
+| Skill System | Registry, loader, schema validator, MCP bridge |
+| MCP Infrastructure | Client, wire protocol, tool registry, adapters |
+| Mechanical Agent | Stress validation, meshing, tolerances (first vertical) |
 
 ---
 
@@ -148,8 +148,8 @@ Expand to 19 agents covering 19 disciplines. Add KiCad write capabilities, IDE e
 
 | Epic | Scope |
 |------|-------|
-| MET-9: Electronics Agent | ERC, DRC, power budget, KiCad write adapter |
-| MET-10: Assistant Layer | IDE extensions, approval workflow, CLI enhancements |
+| Electronics Agent | ERC, DRC, power budget, KiCad write adapter |
+| Assistant Layer | IDE extensions, approval workflow, CLI enhancements |
 
 ---
 

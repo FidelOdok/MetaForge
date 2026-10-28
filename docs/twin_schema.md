@@ -118,7 +118,7 @@ class Quantity(BaseModel):
     def from_dict(cls, data: dict) -> "Quantity": ...
 ```
 
-Currency (FORGE-515): a `Constraint.unit` that is an ISO 4217 code (`GBP`,
+Currency: a `Constraint.unit` that is an ISO 4217 code (`GBP`,
 `USD`, `EUR`) is accepted as a currency label, not a pint unit
 (`is_currency_code`). A currency limit is compared only with a value in the
 same currency (`same_currency`); a different or unknown currency is reported
@@ -147,7 +147,7 @@ each registered as their own mutually-incompatible dimension, since this
 codebase does no real foreign-exchange conversion -- cross-currency data is
 correctly rejected rather than converted at a bogus 1:1 factor.
 
-*Source: `twin_core/models/quantity.py` (FORGE-311)*
+*Source: `twin_core/models/quantity.py`*
 
 ---
 
@@ -197,7 +197,7 @@ class WorkProductType(StrEnum):
 
 The enum has grown since this list was written; `twin_core/models/enums.py`
 is the full set. One of the later additions is `RENDER = "render"`
-(FORGE-630): studio renders of a model from `twin.render_work_product`. The
+: studio renders of a model from `twin.render_work_product`. The
 first view is the node's primary blob (`format` is `png`) and the others are
 named blobs in `metadata.image_files` (served by
 `GET /v1/twin/nodes/{id}/files/{filename}`). A `GENERATED_FROM` edge points
@@ -247,14 +247,14 @@ A Constraint is a rule that must be satisfied across one or more work products. 
 | `cross_domain` | `bool` | No | Whether constraint spans multiple domains |
 | `source` | `str` | Yes | Free-form string describing origin (e.g., `"user"`, `"agent"`, `"system"`) |
 | `message` | `str` | No | Human-readable description of the constraint |
-| `acceptance_criteria` | `str` | No | What must be true for this requirement to be considered met (FORGE-312) |
-| `verification_method` | `str` | No | How it's verified (e.g. `"FEA"`, `"test"`, `"inspection"`) (FORGE-312) |
-| `metric` | `str` | No | The property this requirement is about, e.g. `"tip_deflection"` (FORGE-259) |
-| `operator` | `str` | No | Comparison against `limit` -- `"<="`/`">="`/`"=="`/`"<"`/`">"`/`"!="`. Default `"<="` (FORGE-259) |
-| `limit` | `float` | No | The numeric limit `metric` is compared to (FORGE-259) |
-| `unit` | `str` | No | Must be a unit `twin_core.models.quantity` recognizes (FORGE-259) |
-| `target_node_type` | `str` | No | The kind of node `metric` is measured on, e.g. `"cad_model"` (FORGE-259) |
-| `expected_evidence` | `str` | No | The kind of evidence that would verify this, e.g. `"simulation"` -- must be one of `twin_core.models.enums.EVIDENCE_TYPES` (FORGE-258) |
+| `acceptance_criteria` | `str` | No | What must be true for this requirement to be considered met |
+| `verification_method` | `str` | No | How it's verified (e.g. `"FEA"`, `"test"`, `"inspection"`) |
+| `metric` | `str` | No | The property this requirement is about, e.g. `"tip_deflection"` |
+| `operator` | `str` | No | Comparison against `limit` -- `"<="`/`">="`/`"=="`/`"<"`/`">"`/`"!="`. Default `"<="` |
+| `limit` | `float` | No | The numeric limit `metric` is compared to |
+| `unit` | `str` | No | Must be a unit `twin_core.models.quantity` recognizes |
+| `target_node_type` | `str` | No | The kind of node `metric` is measured on, e.g. `"cad_model"` |
+| `expected_evidence` | `str` | No | The kind of evidence that would verify this, e.g. `"simulation"` -- must be one of `twin_core.models.enums.EVIDENCE_TYPES` |
 | `last_evaluated` | `datetime` | No | When the constraint was last checked |
 | `metadata` | `dict` | No | Additional context |
 
@@ -262,9 +262,9 @@ A Constraint is a rule that must be satisfied across one or more work products. 
 keys) so `twin_core.consistency.gates`'s G7 (Verification Readiness) gate
 can check a critical requirement for both directly. Both fall back to the
 identically-named `metadata` key when empty, for requirements
-`RequirementAuthorAgent` (FORGE-55) wrote before these fields existed.
+`RequirementAuthorAgent` wrote before these fields existed.
 
-FORGE-259 (gap G-A3): `metric`/`operator`/`limit`/`unit`/`target_node_type`
+Gap G-A3: `metric`/`operator`/`limit`/`unit`/`target_node_type`
 are a structured measured-key binding -- what property this requirement is
 about, compared how, against what limit, on what kind of node -- as an
 alternative to the opaque `expression` string. All five are optional and
@@ -280,20 +280,20 @@ data), never from evaluating this expression. When present, the structured
 binding also becomes a matrix row's `limitText` (e.g. `"tip_deflection <=
 0.5mm"`), replacing the free-text `message`/`name` fallback with real,
 machine-set data. Deliberately NOT wired into `expression` evaluation
-itself, or into FORGE-315/317/320's evaluator/sensitivity/optimizer tools
+itself, or into the evaluator/sensitivity/optimizer tools
 automatically (those already take their own metric/limit kwargs directly)
 -- reading a Constraint's structured fields into those tools automatically
 is real, separable follow-up work, not this ticket's own minimal scope.
 
-The dashboard's Requirements page (section "Evidence matrix", FORGE-318)
+The dashboard's Requirements page (section "Evidence matrix")
 gained a "+ New constraint" form writing exactly this binding via a new
 `POST /v1/requirements/constraints` route (reusing
 `api_gateway.twin.constraint_recorder` directly, the same validation every
 MCP caller already goes through) -- create-only for this first cut, no
 edit.
 
-FORGE-258 (gap G-A2): `expected_evidence` closes the requirement-to-
-verification-linkage gap -- `verification_method` (FORGE-312) says *how* a
+Gap G-A2: `expected_evidence` closes the requirement-to-
+verification-linkage gap -- `verification_method` says *how* a
 requirement is verified as free text, but nothing previously said *what kind
 of evidence would actually count*. `expected_evidence` is validated against
 `twin_core.models.enums.EVIDENCE_TYPES`, the exact same set
@@ -315,7 +315,7 @@ verification it expects"). Deliberately out of scope:
 metadata convention exists anywhere in this codebase for "measurement
 method" as distinct from `verification_method`, and inventing one wasn't
 this ticket's own ask; `TraceabilityAgent`/`TraceabilityCoverage`
-(`api_gateway/requirement_intelligence/traceability.py`, FORGE-56) is a
+(`api_gateway/requirement_intelligence/traceability.py`) is a
 real, already-tested coverage engine for "requirement without verification"
 that has no REST route or dashboard consumer today -- surfacing it is
 separable follow-up work, not folded into this smaller, more literal fix.
@@ -346,13 +346,13 @@ class Constraint(NodeBase):
     message: str = ""
     acceptance_criteria: str = ""
     verification_method: str = ""
-    # FORGE-259: structured measured-key binding -- alternative to `expression`.
+    # structured measured-key binding -- alternative to `expression`.
     metric: str = ""
     operator: str = "<="
     limit: float | None = None
     unit: str = ""
     target_node_type: str = ""
-    # FORGE-258: the kind of evidence expected to verify this requirement.
+    # the kind of evidence expected to verify this requirement.
     expected_evidence: str = ""
     last_evaluated: datetime | None = None
     metadata: dict = Field(default_factory=dict)
@@ -536,7 +536,7 @@ class DeviceInstance(NodeBase):
     global_asset_id: str | None = None
 ```
 
-FORGE-321: `create_device_instance`/`get_device_instance`/`list_device_instances` CRUD (`twin_core/api.py`) and `twin.register_device_instance` (MCP tool) were added -- the model existed since before this epic but was never instantiable. See section 2.18.
+`create_device_instance`/`get_device_instance`/`list_device_instances` CRUD (`twin_core/api.py`) and `twin.register_device_instance` (MCP tool) were added -- the model existed since before this epic but was never instantiable. See section 2.18.
 
 *Source: `twin_core/models/device_instance.py`*
 
@@ -600,7 +600,7 @@ class DesignElement(NodeBase):
 
 ### 2.10 HierarchyNode
 
-A HierarchyNode is one position in a project's product hierarchy tree (product -> system -> subsystem -> assembly), added in FORGE-260 (gap G-B1). One generic node type discriminated by `kind` -- the same "common base, not eight bespoke classes" pattern `EngineeringEntity` already uses -- rather than a class per organizational level. A fabricated part or COTS component is deliberately NOT a HierarchyNode: it's the already-real `WorkProductType.CAD_MODEL` or `BOMItem` a leaf HierarchyNode links to via `REALIZED_BY`/`INSTANCE_OF`, never duplicated.
+A HierarchyNode is one position in a project's product hierarchy tree (product -> system -> subsystem -> assembly), added for gap G-B1. One generic node type discriminated by `kind` -- the same "common base, not eight bespoke classes" pattern `EngineeringEntity` already uses -- rather than a class per organizational level. A fabricated part or COTS component is deliberately NOT a HierarchyNode: it's the already-real `WorkProductType.CAD_MODEL` or `BOMItem` a leaf HierarchyNode links to via `REALIZED_BY`/`INSTANCE_OF`, never duplicated.
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
@@ -625,7 +625,7 @@ Rolled-up mass/cost are deliberately NOT cached fields here -- see `twin_core.co
 
 *Source: `twin_core/models/hierarchy_node.py`*
 
-### 2.11 InterfaceQuantity (FORGE-313)
+### 2.11 InterfaceQuantity
 
 A measurable property of an interface between two components -- e.g. "upper-arm tip deflection <= 0.5mm", owned by mechanical. Not a graph node type: `HierarchyNode`'s own design (above) never holds design content directly, and `twin.commit_system_architecture` already has a real, structured home for interfaces -- each `ArchInterface` (`{from, to, interface_type, description}`) between two named components, persisted as metadata on one `SYSTEM_ARCHITECTURE` work product. `InterfaceQuantity` is a value type embedded in that interface's own `quantities` list.
 
@@ -656,9 +656,9 @@ class InterfaceQuantity(BaseModel):
 
 *Source: `twin_core/models/interface.py`*
 
-### 2.12 Tiered Evaluator (FORGE-315)
+### 2.12 Tiered Evaluator
 
-Not a node type -- a computation, invoked via `twin.evaluate_metric` (spec §30, "prefer the minimum sufficient fidelity; escalate only when evidence quality demands it"). Only `metric="tip_deflection"` is implemented: a tier-0 closed-form cantilever-beam estimate against a CAD `WorkProduct`'s own recorded `geometry_features.properties.bounding_box` (MET-630), escalating to a real tier-2 `calculix.run_fea` call when the estimate's margin to a supplied `limit_mm` falls inside its error band.
+Not a node type -- a computation, invoked via `twin.evaluate_metric` (spec §30, "prefer the minimum sufficient fidelity; escalate only when evidence quality demands it"). Only `metric="tip_deflection"` is implemented: a tier-0 closed-form cantilever-beam estimate against a CAD `WorkProduct`'s own recorded `geometry_features.properties.bounding_box`, escalating to a real tier-2 `calculix.run_fea` call when the estimate's margin to a supplied `limit_mm` falls inside its error band.
 
 ```python
 class Tier0DeflectionResult(BaseModel):
@@ -676,17 +676,17 @@ def cantilever_tip_deflection_mm(
     """delta = F L^3 / (3 E I), I = w h^3 / 12."""
 ```
 
-The band is a fixed prior (`band_fraction` of `limit_mm`, default 0.2) -- calibrated bands from real measurement residuals are Step 11's own scope (`digital_twin/calibration/`), not this one's. Every tier's result is recorded as `twin.record_evidence`, `valid_against` the work product's current revision (FORGE-314) -- tier-0 as `evidence_type="calculation"`, tier-2 as `"simulation"`.
+The band is a fixed prior (`band_fraction` of `limit_mm`, default 0.2) -- calibrated bands from real measurement residuals are Step 11's own scope (`digital_twin/calibration/`), not this one's. Every tier's result is recorded as `twin.record_evidence`, `valid_against` the work product's current revision -- tier-0 as `evidence_type="calculation"`, tier-2 as `"simulation"`.
 
-Tier-2 escalation requires the caller to already have a generated mesh + resolved node sets (`tier2: {mesh_file, fixed_node_set, load_node_set, material, load_force_n}`) -- `twin.evaluate_metric` does not derive FEA boundary conditions on its own. Escalating with no `tier2` args returns a clear `{"attempted": false, "reason": ...}` rather than guessing node-set names for a part it's never seen a load case for (a real, currently-unsolved gap: FORGE-278/239/277 together get a *human* to point-and-click node sets into a reusable `LOAD_CASE` work product, but there is no programmatic path from "a design changed" to "correct boundary conditions" for a genuinely novel part).
+Tier-2 escalation requires the caller to already have a generated mesh + resolved node sets (`tier2: {mesh_file, fixed_node_set, load_node_set, material, load_force_n}`) -- `twin.evaluate_metric` does not derive FEA boundary conditions on its own. Escalating with no `tier2` args returns a clear `{"attempted": false, "reason": ...}` rather than guessing node-set names for a part it's never seen a load case for (a real, currently-unsolved gap: the existing tooling gets a *human* to point-and-click node sets into a reusable `LOAD_CASE` work product, but there is no programmatic path from "a design changed" to "correct boundary conditions" for a genuinely novel part).
 
 A general per-metric tier *registry* (tier 1 hand-calcs, other metrics) and an automatic "runs on every design change" hook are both deliberately out of scope for this ticket -- see `twin_core/prediction/evaluator.py`'s own module docstring for the full rationale. `InterfaceQuantity.predicted` (§2.11) already has `tier`/`evidence` fields anticipating this, but no `PREDICTED_BY` edge writer exists yet to connect a `twin.evaluate_metric` result back to an interface quantity automatically -- still a manual step.
 
 *Source: `twin_core/prediction/evaluator.py`, `api_gateway/twin/metric_evaluator.py`*
 
-### 2.13 Automatic Revalidation on ECT Commit (FORGE-316)
+### 2.13 Automatic Revalidation on ECT Commit
 
-`EngineeringChangeTransaction` (FORGE-66, `twin_core/models/engineering_change_transaction.py`) gained two fields on top of its existing state machine:
+`EngineeringChangeTransaction` (`twin_core/models/engineering_change_transaction.py`) gained two fields on top of its existing state machine:
 
 ```python
 # Plain dicts (RevalidationStep.model_dump(mode="json")), not a typed
@@ -695,17 +695,17 @@ revalidation_plan: list[dict[str, Any]] = Field(default_factory=list)
 revalidation_result: dict[str, Any] | None = None
 ```
 
-`analyze()` stores `ImpactEngine.analyse()`'s full pre-commit PREVIEW plan here (a projection -- nothing has changed yet). A successful `commit()` OVERWRITES it with the REAL plan, built from `StalenessEngine.propagate()`'s actual writes -- this is the fix for a genuine gap: FORGE-66's own `commit()` never called `StalenessEngine` at all, so no ECT-driven change ever marked anything stale for real until this. `commit()` propagates once per REVISE/SUPERSEDE/DEPRECATE/INVALIDATE operation in the patch (best-effort -- a propagation failure never fails an already-successful commit), unions the resulting `StaleMarking`s, and reuses `ImpactEngine.build_revalidation_plan` (now public, shared between the pre-commit preview and this real post-commit build) to turn them into the same `RevalidationStep` shape.
+`analyze()` stores `ImpactEngine.analyse()`'s full pre-commit PREVIEW plan here (a projection -- nothing has changed yet). A successful `commit()` OVERWRITES it with the REAL plan, built from `StalenessEngine.propagate()`'s actual writes -- this is the fix for a genuine gap: the original `commit()` never called `StalenessEngine` at all, so no ECT-driven change ever marked anything stale for real until this. `commit()` propagates once per REVISE/SUPERSEDE/DEPRECATE/INVALIDATE operation in the patch (best-effort -- a propagation failure never fails an already-successful commit), unions the resulting `StaleMarking`s, and reuses `ImpactEngine.build_revalidation_plan` (now public, shared between the pre-commit preview and this real post-commit build) to turn them into the same `RevalidationStep` shape.
 
-`twin.execute_revalidation_plan(ect_id)` (requires the ECT to be COMMITTED) is the "now actually re-run them" half: for each plan step naming a stale `engineering_entity` whose `entity_type == "evidence"` and whose `metadata["replay"]` is a `{tool_id, args}` dict, it looks `tool_id` up in an injected dispatch table and calls it again with `args` (`api_gateway/twin/revalidation.py`'s `make_revalidation_executor`). A successful replay records a NEW Evidence entity with `supersedes=<old id>` (FORGE-65's own revalidation flow -- never a mutation of the old evidence). Everything else -- a non-evidence entity the impact walk reached (e.g. a Constraint), evidence with no `replay` recipe (hand-authored, or older than this field), or a `tool_id` the caller didn't wire in -- is reported in `manual_review_needed`, never guessed at.
+`twin.execute_revalidation_plan(ect_id)` (requires the ECT to be COMMITTED) is the "now actually re-run them" half: for each plan step naming a stale `engineering_entity` whose `entity_type == "evidence"` and whose `metadata["replay"]` is a `{tool_id, args}` dict, it looks `tool_id` up in an injected dispatch table and calls it again with `args` (`api_gateway/twin/revalidation.py`'s `make_revalidation_executor`). A successful replay records a NEW Evidence entity with `supersedes=<old id>` (the revalidation flow -- never a mutation of the old evidence). Everything else -- a non-evidence entity the impact walk reached (e.g. a Constraint), evidence with no `replay` recipe (hand-authored, or older than this field), or a `tool_id` the caller didn't wire in -- is reported in `manual_review_needed`, never guessed at.
 
 `metadata["replay"]` is a new, optional, unvalidated passthrough on Evidence (`twin.record_evidence`'s `evidence_recorder.py`, stored opaquely -- this module never inspects its shape). Only a caller that actually knows how to re-invoke itself should set it; `api_gateway/twin/metric_evaluator.py` is the first (`{"tool_id": "twin.evaluate_metric", "args": {...the exact original top-level kwargs...}}`). It is NOT derived from `producer.tool`/`inputs` (those are often a descriptive Python dotted path, not an invokable MCP tool id -- guessing replayability from them would be wrong more often than right).
 
-**Deliberately out of scope** (each a separable piece, no acceptance-criterion pressure to build now): property-level impact through `Constraint.dependencies` (that field doesn't exist yet -- explicitly deferred since FORGE-312/Step 2, confirmed still true during this ticket's own scoping); a dashboard UI showing the impact graph and re-run progress (zero existing ECT-related UI surface today -- new work from scratch).
+**Deliberately out of scope** (each a separable piece, no acceptance-criterion pressure to build now): property-level impact through `Constraint.dependencies` (that field doesn't exist yet -- explicitly deferred, confirmed still true during this ticket's own scoping); a dashboard UI showing the impact graph and re-run progress (zero existing ECT-related UI surface today -- new work from scratch).
 
 *Source: `twin_core/transactions/ect.py`, `twin_core/consistency/impact.py`, `api_gateway/twin/revalidation.py`*
 
-### 2.14 Sensitivity Analysis (FORGE-317)
+### 2.14 Sensitivity Analysis
 
 Not a node type -- a computation, invoked via `twin.rank_sensitivity` (target lifecycle spec App. A "Solver" / step 15). One-at-a-time finite differences: perturb one parameter, recompute the metric, measure how far the margin (`limit - value`) moved.
 
@@ -727,17 +727,17 @@ class SensitivityRanking(BaseModel):
     rankings: list[ParameterSensitivity]   # sorted by |sensitivity| descending
 ```
 
-`metric="tip_deflection"` ranks `wall_thickness_mm` and `length_mm` against a new rectangular-hollow-tube deflection formula (`twin_core/prediction/evaluator.py`'s `hollow_tube_tip_deflection_mm`, `I = (W H^3 - (W-2t)(H-2t)^3)/12`) -- FORGE-315's own solid-beam model (`cantilever_tip_deflection_mm`) has no wall-thickness concept at all, so this is a real, scoped extension, not free. `metric="mass"` ranks `wall_thickness_mm` (continuous, `hollow_tube_mass_kg`) and a caller-supplied set of candidate materials (required since FORGE-446: library names, no default set) (categorical -- the actual margin delta from swapping material, not a derivative, since "per unit of what" means nothing for a discrete choice). Material density and elastic modulus come from the material library through `resolve_density_kg_m3`/`resolve_elastic_properties` (FORGE-446 retired FORGE-234's table) -- not a second material list.
+`metric="tip_deflection"` ranks `wall_thickness_mm` and `length_mm` against a new rectangular-hollow-tube deflection formula (`twin_core/prediction/evaluator.py`'s `hollow_tube_tip_deflection_mm`, `I = (W H^3 - (W-2t)(H-2t)^3)/12`) -- the existing solid-beam model (`cantilever_tip_deflection_mm`) has no wall-thickness concept at all, so this is a real, scoped extension, not free. `metric="mass"` ranks `wall_thickness_mm` (continuous, `hollow_tube_mass_kg`) and a caller-supplied set of candidate materials (required: library names, no default set) (categorical -- the actual margin delta from swapping material, not a derivative, since "per unit of what" means nothing for a discrete choice). Material density and elastic modulus come from the material library through `resolve_density_kg_m3`/`resolve_elastic_properties` (replacing the earlier built-in table) -- not a second material list.
 
 Every ranking is recorded as `twin.record_evidence` (`evidence_type="calculation"`), `valid_against` the work product it was computed from.
 
-**Deliberately out of scope**: a general "sweep any Design IR parameter" engine -- `twin_core/design_ir/` turned out to be a CAD-*authoring* intermediate representation (a sequence of FreeCAD/CadQuery operations), not an engineering-analysis parameter model, and the real yardstick arm's own geometry was authored via a raw `cadquery.execute_script` call rather than through Design IR at all, so there's no live Design IR document to sweep; tier 1 (torque) sensitivity (tier 1 still doesn't exist, FORGE-315's own finding, and isn't needed for either named metric here); a dashboard tornado-chart UI (zero existing chart/ranking UI anywhere in `dashboard/src/` -- same scope cut FORGE-316's own dashboard bullet already established).
+**Deliberately out of scope**: a general "sweep any Design IR parameter" engine -- `twin_core/design_ir/` turned out to be a CAD-*authoring* intermediate representation (a sequence of FreeCAD/CadQuery operations), not an engineering-analysis parameter model, and the real yardstick arm's own geometry was authored via a raw `cadquery.execute_script` call rather than through Design IR at all, so there's no live Design IR document to sweep; tier 1 (torque) sensitivity (tier 1 still doesn't exist, and isn't needed for either named metric here); a dashboard tornado-chart UI (zero existing chart/ranking UI anywhere in `dashboard/src/` -- same scope cut the dashboard bullet in the revalidation section above already established).
 
 *Source: `twin_core/prediction/sensitivity.py`, `api_gateway/twin/sensitivity.py`*
 
-### 2.15 Evidence-Backed Requirement Matrix (FORGE-318)
+### 2.15 Evidence-Backed Requirement Matrix
 
-Not a node type -- a join, computed live via `GET /v1/requirements/matrix`, over requirements (Constraint), claims (`twin_core.consistency.claims`, FORGE-65), and the Evidence those claims cite.
+Not a node type -- a join, computed live via `GET /v1/requirements/matrix`, over requirements (Constraint), claims (`twin_core.consistency.claims`), and the Evidence those claims cite.
 
 ```python
 class EvidenceSummary(BaseModel):
@@ -759,26 +759,26 @@ class RequirementMatrixRow(BaseModel):
     evidence: list[EvidenceSummary]
 ```
 
-`twin_core.consistency.claims.list_claims_for_requirement` (new) is the one piece that was genuinely missing: `evaluate_claim` (FORGE-65) only ever evaluated a single KNOWN `(artefact, requirement)` pair; the matrix needs "what claims exist for this requirement" as its own lookup, which it gets by walking `requirement_id`'s incoming `CLAIM_EDGE_KIND` edges and re-using `evaluate_claim` per match (same live-computed status, no parallel logic).
+`twin_core.consistency.claims.list_claims_for_requirement` (new) is the one piece that was genuinely missing: `evaluate_claim` only ever evaluated a single KNOWN `(artefact, requirement)` pair; the matrix needs "what claims exist for this requirement" as its own lookup, which it gets by walking `requirement_id`'s incoming `CLAIM_EDGE_KIND` edges and re-using `evaluate_claim` per match (same live-computed status, no parallel logic).
 
 Status is derived fresh on every call, same "never a stored, driftable boolean" discipline as `evaluate_claim` itself:
 
-- `no_data` -- no claim recorded against the requirement at all, and no current design record or measuring tool result states its metric. The detail says which, and names the tool call that would close it (FORGE-701), for example "run power.check_budget and record its result with twin.record_evidence, with 'total_supply_current' in it".
-- `pass` / `fail` measured from the design (FORGE-698) -- no claim, but the requirement is a `metric` + `limit` binding and the current revision of a `pcb_layout`, `schematic`, `firmware_source` or `bom` records that metric. The detail starts "measured from the design:" and names the record and the value; `artefactIds` is that record. `simulation_result` numbers are never read this way: they verify a requirement only through a claim.
-- `pass` / `fail` measured by a tool (FORGE-701) -- no claim, no design record states the metric, but a current result of a measuring tool does: `kicad.*`, `firmware.build`, `firmware.static_check`, `firmware.run_emulated`, `power.check_budget`, or `datasheet` evidence. The detail starts "measured by a tool:" and carries the basis (tool and version, typical or maximum figures, a stand-in board); `artefactIds` is that evidence. Any other tool's result (an FEA run, say) still counts only through a claim.
-- `unverified` (FORGE-701) -- a SUPPORTED claim against a `metric` + `limit` requirement, with no number for that metric in the evidence it cites, in a design record or in a measuring tool's result. Nothing was compared to the limit, so it is not a pass: the completion verdict reads it as INCONCLUSIVE and a promotion as UNCERTAIN. When a number is found the claim is graded `pass` / `fail` against it, and the detail starts "claim graded against ...".
+- `no_data` -- no claim recorded against the requirement at all, and no current design record or measuring tool result states its metric. The detail says which, and names the tool call that would close it, for example "run power.check_budget and record its result with twin.record_evidence, with 'total_supply_current' in it".
+- `pass` / `fail` measured from the design -- no claim, but the requirement is a `metric` + `limit` binding and the current revision of a `pcb_layout`, `schematic`, `firmware_source` or `bom` records that metric. The detail starts "measured from the design:" and names the record and the value; `artefactIds` is that record. `simulation_result` numbers are never read this way: they verify a requirement only through a claim.
+- `pass` / `fail` measured by a tool -- no claim, no design record states the metric, but a current result of a measuring tool does: `kicad.*`, `firmware.build`, `firmware.static_check`, `firmware.run_emulated`, `power.check_budget`, or `datasheet` evidence. The detail starts "measured by a tool:" and carries the basis (tool and version, typical or maximum figures, a stand-in board); `artefactIds` is that evidence. Any other tool's result (an FEA run, say) still counts only through a claim.
+- `unverified` -- a SUPPORTED claim against a `metric` + `limit` requirement, with no number for that metric in the evidence it cites, in a design record or in a measuring tool's result. Nothing was compared to the limit, so it is not a pass: the completion verdict reads it as INCONCLUSIVE and a promotion as UNCERTAIN. When a number is found the claim is graded `pass` / `fail` against it, and the detail starts "claim graded against ...".
 - `stale` -- a claim's cited evidence includes at least one entity whose current staleness is STALE/SUPERSEDED/INVALID, flagged even when the claim itself is still SUPPORTED by other current evidence (the ticket's own "flags stale evidence after a change" wording).
-- `fail` / `uncertain` / `pass` -- claim SUPPORTED, no stale evidence; derived from the most current evidence's own margin. Reads either evidence result shape this codebase produces: FORGE-315's tier-0/tier-2 (`value_mm`/`limit_mm`/`margin_mm`/`escalated`) or FORGE-317's sensitivity ranking (`baseline_value`/`limit`/`baseline_margin`, no `escalated` concept of its own). Negative margin is `fail`; a tier-0 result with `escalated=true` is `uncertain` (too close to call without a higher-fidelity check, FORGE-315's own semantics); otherwise `pass`. With no margin to read, a free-text requirement's claim is still a bare `pass` with a note; a `metric` + `limit` requirement's claim is graded as above or reported `unverified`.
+- `fail` / `uncertain` / `pass` -- claim SUPPORTED, no stale evidence; derived from the most current evidence's own margin. Reads either evidence result shape this codebase produces: the metric evaluator's tier-0/tier-2 (`value_mm`/`limit_mm`/`margin_mm`/`escalated`) or the sensitivity ranking's output (`baseline_value`/`limit`/`baseline_margin`, no `escalated` concept of its own). Negative margin is `fail`; a tier-0 result with `escalated=true` is `uncertain` (too close to call without a higher-fidelity check, the evaluator's own semantics); otherwise `pass`. With no margin to read, a free-text requirement's claim is still a bare `pass` with a note; a `metric` + `limit` requirement's claim is graded as above or reported `unverified`.
 
-FORGE-318 also closed a small gap in FORGE-315's own tier-2 evidence: the raw `calculix.run_fea` output had no `tier` key of its own (only inferable from `producer.tool` string matching) -- `api_gateway/twin/metric_evaluator.py` now persists `{"tier": 2, "metric": ..., **fea_result}` for tier-2 Evidence, so the matrix (and any future consumer) reads `tier` directly rather than guessing.
+The evidence matrix also closed a small gap in the metric evaluator's own tier-2 evidence: the raw `calculix.run_fea` output had no `tier` key of its own (only inferable from `producer.tool` string matching) -- `api_gateway/twin/metric_evaluator.py` now persists `{"tier": 2, "metric": ..., **fea_result}` for tier-2 Evidence, so the matrix (and any future consumer) reads `tier` directly rather than guessing.
 
-Dashboard: `RequirementsPage.tsx` gained an "Evidence matrix" section (below the existing FORGE-257 quality table, not a new page) with per-row status badges, an expandable evidence-detail row (method/tier/value/limit/margin/staleness), a client-side CSV/MD export (mirrors `BomPage.tsx`'s own `handleExportCsv` pattern -- no backend export route needed), and a Structure-tab link per row. That link is a plain `/twin` link, not a per-node deep-link: `TwinViewerPage.tsx` does support one (`?node=<hierarchy_node_id>`), but the matrix's own `artefactIds` are WorkProduct ids, not HierarchyNode ids -- no Constraint-to-HierarchyNode mapping exists yet to resolve one from the other, so this ticket does not fabricate that link; a real one is a separable follow-up.
+Dashboard: `RequirementsPage.tsx` gained an "Evidence matrix" section (below the existing requirements quality table, not a new page) with per-row status badges, an expandable evidence-detail row (method/tier/value/limit/margin/staleness), a client-side CSV/MD export (mirrors `BomPage.tsx`'s own `handleExportCsv` pattern -- no backend export route needed), and a Structure-tab link per row. That link is a plain `/twin` link, not a per-node deep-link: `TwinViewerPage.tsx` does support one (`?node=<hierarchy_node_id>`), but the matrix's own `artefactIds` are WorkProduct ids, not HierarchyNode ids -- no Constraint-to-HierarchyNode mapping exists yet to resolve one from the other, so this ticket does not fabricate that link; a real one is a separable follow-up.
 
 *Source: `twin_core/consistency/claims.py`, `api_gateway/requirement_intelligence/matrix.py`, `api_gateway/requirement_intelligence/routes.py`, `dashboard/src/pages/RequirementsPage.tsx`*
 
-### 2.16 MaturityGate (FORGE-319)
+### 2.16 MaturityGate
 
-The first place in this codebase a gate genuinely REFUSES rather than only reports. `twin_core.consistency.gates`'s G3-G8 design-flow gates are a different, pre-existing concept -- per that module's own docstring, a FAILED status only informs a human reviewer, since `enforce_consistency_gate` doesn't exist. `MaturityGate` is its own `NodeType` (not a generic `EngineeringEntity` tag) because a promotion attempt has real, structured multi-field state worth typing, the same reasoning `EngineeringChangeTransaction` (FORGE-66) already used for itself.
+The first place in this codebase a gate genuinely REFUSES rather than only reports. `twin_core.consistency.gates`'s G3-G8 design-flow gates are a different, pre-existing concept -- per that module's own docstring, a FAILED status only informs a human reviewer, since `enforce_consistency_gate` doesn't exist. `MaturityGate` is its own `NodeType` (not a generic `EngineeringEntity` tag) because a promotion attempt has real, structured multi-field state worth typing, the same reasoning `EngineeringChangeTransaction` already used for itself.
 
 ```python
 class MaturityLevel(StrEnum):
@@ -810,32 +810,32 @@ class MaturityGate(NodeBase):
     decided_by: str | None = None
     decided_at: datetime | None = None
     k: float = 1.0
-    comment: str | None = None  # FORGE-290: a human reviewer's own rationale
+    comment: str | None = None  # a human reviewer's own rationale
 ```
 
 There is deliberately no `update_maturity_gate` -- each `twin.attempt_promotion` call persists a brand-new, immutable record (whether it promoted or was refused), so "why wasn't this promoted" always has a real, queryable history instead of one mutable, driftable record.
 
-`attempt_promotion(twin, *, project_id, level, required_claim_ids, k=1.0, decided_by=None, comment=None, reject=False)` -- note `decided_by` is supplied by the *gateway* from the approval record, never passed through from a tool argument or request body (FORGE-393) (`api_gateway/requirement_intelligence/promotion.py`) reuses rather than re-derives:
+`attempt_promotion(twin, *, project_id, level, required_claim_ids, k=1.0, decided_by=None, comment=None, reject=False)` -- note `decided_by` is supplied by the *gateway* from the approval record, never passed through from a tool argument or request body (`api_gateway/requirement_intelligence/promotion.py`) reuses rather than re-derives:
 
 - **Pass/fail decision** -- §2.15's own `build_requirement_matrix` status per required requirement id. `status="pass"` maps to `PASS`; `"uncertain"`/`"stale"`/`"unverified"` to `UNCERTAIN`; `"fail"`/`"no_data"` to `FAIL`. No second margin/band computation is invented here.
-- **Waiver coverage** -- the existing `entity_type="waiver"` / `twin.approve_engineering_entity` mechanism (FORGE-73), the same `list_engineering_entities(..., entity_type="waiver")` + `authority in APPROVED_AUTHORITY` pattern `gates.py`'s own G8 `_evaluate_waivers_check` uses (that constant is now public, promoted the same way FORGE-316 promoted `ImpactEngine._build_revalidation_plan`, since this is now a second real consumer) -- but scoped per-requirement here: only a waiver whose `parent_refs` names the SPECIFIC blocked requirement id unblocks it, since G8's own check is a blanket "any waivers outstanding" scan and a mass-specific waiver must never silently unblock an unrelated requirement.
-- **Human authority** -- the person who *approved the call*, resolved by the server. This used to be a caller-supplied `decided_by` string carrying "the same agent-asserted-identity trust level every `created_by` field already carries", which was true and was the problem (FORGE-393): on this tool the string is not a label attached to a write, it **is** the write. The model filled it, so the gate recorded whatever name the model chose, and over local stdio -- where writes are exempt from approval -- that was the only authority recorded at all.
+- **Waiver coverage** -- the existing `entity_type="waiver"` / `twin.approve_engineering_entity` mechanism, the same `list_engineering_entities(..., entity_type="waiver")` + `authority in APPROVED_AUTHORITY` pattern `gates.py`'s own G8 `_evaluate_waivers_check` uses (that constant is now public, promoted the same way `ImpactEngine._build_revalidation_plan` was promoted, since this is now a second real consumer) -- but scoped per-requirement here: only a waiver whose `parent_refs` names the SPECIFIC blocked requirement id unblocks it, since G8's own check is a blanket "any waivers outstanding" scan and a mass-specific waiver must never silently unblock an unrelated requirement.
+- **Human authority** -- the person who *approved the call*, resolved by the server. This used to be a caller-supplied `decided_by` string carrying "the same agent-asserted-identity trust level every `created_by` field already carries", which was true and was the problem: on this tool the string is not a label attached to a write, it **is** the write. The model filled it, so the gate recorded whatever name the model chose, and over local stdio -- where writes are exempt from approval -- that was the only authority recorded at all.
 
-    Now: `twin.attempt_promotion` is never exempt from approval, even locally; a caller that passes `decided_by` gets an error rather than a silent drop; and the dispatcher injects the approver under a reserved key it strips from client input first, so the name cannot be forged by imitating the convention. An approval that does not identify anyone is refused rather than recorded as anonymous. `decided_by` is still recorded on EVERY attempt, promoted or not (FORGE-290).
+    Now: `twin.attempt_promotion` is never exempt from approval, even locally; a caller that passes `decided_by` gets an error rather than a silent drop; and the dispatcher injects the approver under a reserved key it strips from client input first, so the name cannot be forged by imitating the convention. An approval that does not identify anyone is refused rather than recorded as anonymous. `decided_by` is still recorded on EVERY attempt, promoted or not.
 
     On a gateway running `METAFORGE_AUTH_MODE=off` there is no verified identity, so a dashboard click records `local:dashboard` with `verified=False`. That is an honest statement of what is known. It is not the same as a name nobody ever established.
 
-FORGE-290 (gap G-G4) closes the "gates evaluate real measured data and block on 'no data'" ask two ways: the evidence-gate logic above ALREADY blocked on `no_data` since FORGE-319 shipped it (live-validated against the real arm project's `no_data` requirements as part of this ticket); what was missing was the reviewer's own **veto**. `reject=True` refuses a promotion EVEN IF every required claim is `pass`/`waived` -- the evidence gate is a necessary condition for promotion, never a sufficient one that overrides a human's own judgement. The rejecting human is the approver, taken from the approval rather than the request (FORGE-393). `comment` is a human-authored rationale, distinct from the system-derived `blocked_reason`, recorded on either outcome (a reviewer can leave context on an approval too, not only a rejection); when rejecting without an explicit comment, `blocked_reason` falls back to `f"rejected by {decided_by}"` rather than a bare `None`.
+Gap G-G4 closes the "gates evaluate real measured data and block on 'no data'" ask two ways: the evidence-gate logic above ALREADY blocked on `no_data` since the evidence gate shipped (live-validated against the real arm project's `no_data` requirements as part of this ticket); what was missing was the reviewer's own **veto**. `reject=True` refuses a promotion EVEN IF every required claim is `pass`/`waived` -- the evidence gate is a necessary condition for promotion, never a sufficient one that overrides a human's own judgement. The rejecting human is the approver, taken from the approval rather than the request. `comment` is a human-authored rationale, distinct from the system-derived `blocked_reason`, recorded on either outcome (a reviewer can leave context on an approval too, not only a rejection); when rejecting without an explicit comment, `blocked_reason` falls back to `f"rejected by {decided_by}"` rather than a bare `None`.
 
-`twin.attempt_promotion` (MCP tool, `tool_registry/tools/twin/adapter.py`) is registered only when the gateway wires in a `promotion_attempter` callable (same optional-constructor-param / conditional-registration pattern every `twin.*` tool in this epic follows). `POST /v1/promotion/attempt` and `GET /v1/promotion` (`api_gateway/promotion/routes.py`, FORGE-290) expose the same action and the (previously agent-only, unsurfaced) `twin.list_maturity_gates` read to the dashboard's new "Gate review" section on the Requirements page -- pick required claims, a maturity level and an optional comment, then Approve or Reject. There is deliberately no reviewer field to type into (FORGE-393) -- the reviewer is whoever is making the request.
+`twin.attempt_promotion` (MCP tool, `tool_registry/tools/twin/adapter.py`) is registered only when the gateway wires in a `promotion_attempter` callable (same optional-constructor-param / conditional-registration pattern every `twin.*` tool in this epic follows). `POST /v1/promotion/attempt` and `GET /v1/promotion` (`api_gateway/promotion/routes.py`) expose the same action and the (previously agent-only, unsurfaced) `twin.list_maturity_gates` read to the dashboard's new "Gate review" section on the Requirements page -- pick required claims, a maturity level and an optional comment, then Approve or Reject. There is deliberately no reviewer field to type into -- the reviewer is whoever is making the request.
 
 **Deliberately out of scope**: any change to `gates.py`'s own G3-G8 advisory posture (`enforce_consistency_gate` still does not exist -- a much larger, separate architectural change than this narrower requirement-matrix-backed gate); rollback/undo of a granted promotion (`MaturityGate` has no such semantics); retrofitting `RunDetailPage.tsx`'s unrelated design-flow `gate-review` UI (a different, pre-existing, advisory-only mechanism -- G3-G8's summary string, not this per-requirement blocking evidence gate) into this one.
 
 *Source: `twin_core/models/maturity_gate.py`, `api_gateway/requirement_intelligence/promotion.py`, `api_gateway/promotion/routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/pages/RequirementsPage.tsx`*
 
-### 2.17 Wall-Thickness Optimiser (FORGE-320)
+### 2.17 Wall-Thickness Optimiser
 
-Not a node type -- a computation, invoked via `twin.optimize_parameter` (target lifecycle spec App. A "Optimiser", step 10: minimise an objective subject to constraints). The ticket's own Jira scope says "over Design IR parameters", but FORGE-317's own scoping already found -- confirmed still true here -- that `twin_core/design_ir/` is a CAD-*authoring* op sequence, never persisted onto a committed WorkProduct (the real arm's own "Upper Arm Link" carries `metadata["authored_by"] = "cadquery.execute_script"` and an empty `geometry_features.parameters` dict), not an engineering-analysis parameter model. This optimiser instead searches `wall_thickness_mm`, the one parameter FORGE-317's own sensitivity ranking already found dominant for both deflection and mass margin, over the same hollow-rectangular-tube hand-calcs.
+Not a node type -- a computation, invoked via `twin.optimize_parameter` (target lifecycle spec App. A "Optimiser", step 10: minimise an objective subject to constraints). The ticket's own Jira scope says "over Design IR parameters", but the sensitivity work's own scoping already found -- confirmed still true here -- that `twin_core/design_ir/` is a CAD-*authoring* op sequence, never persisted onto a committed WorkProduct (the real arm's own "Upper Arm Link" carries `metadata["authored_by"] = "cadquery.execute_script"` and an empty `geometry_features.parameters` dict), not an engineering-analysis parameter model. This optimiser instead searches `wall_thickness_mm`, the one parameter the sensitivity ranking already found dominant for both deflection and mass margin, over the same hollow-rectangular-tube hand-calcs.
 
 ```python
 class CandidateEvaluation(BaseModel):
@@ -855,17 +855,17 @@ class OptimizationResult(BaseModel):
     candidates: list[CandidateEvaluation]
 ```
 
-Mass is the ticket's own stated OBJECTIVE, not a third constraint alongside SF/deflection -- the project's separate `moving_mass_budget` Constraint covers the whole assembly, not this one part in isolation, and no per-part budget allocation exists to check a share of it against (`BudgetAllocation.owner`/`.discipline` from FORGE-313 records who owns an interface quantity, not a numeric per-part mass share). Both constraints are monotonically non-decreasing in wall thickness (thicker wall -> stiffer -> lower deflection; thicker wall -> lower bending stress -> higher safety factor) for a fixed outer envelope, so the minimum-mass feasible point is exactly the smallest wall thickness where both constraints first hold -- bisection is exact here, not a heuristic, and no general nonlinear optimiser (e.g. scipy.optimize) was reached for.
+Mass is the ticket's own stated OBJECTIVE, not a third constraint alongside SF/deflection -- the project's separate `moving_mass_budget` Constraint covers the whole assembly, not this one part in isolation, and no per-part budget allocation exists to check a share of it against (`BudgetAllocation.owner`/`.discipline` (section 2.11) records who owns an interface quantity, not a numeric per-part mass share). Both constraints are monotonically non-decreasing in wall thickness (thicker wall -> stiffer -> lower deflection; thicker wall -> lower bending stress -> higher safety factor) for a fixed outer envelope, so the minimum-mass feasible point is exactly the smallest wall thickness where both constraints first hold -- bisection is exact here, not a heuristic, and no general nonlinear optimiser (e.g. scipy.optimize) was reached for.
 
-The safety-factor check is a real, new tier-0 hand-calc (`cantilever_max_bending_stress_mpa`, `sigma = M c / I` at the fixed end) -- no prior ticket in this epic computed stress at all, only deflection/mass. It needed a real yield-strength table, which didn't exist: `tool_registry/tools/cadquery/materials.py` gained `MATERIAL_YIELD_MPA` + `resolve_yield_mpa` (same name set, same "unrecognized material raises" discipline as the existing `MATERIAL_ELASTIC_MPA`/`resolve_elastic_properties`). "Confirmed by FEA" (the ticket's acceptance wording) is achievable only when a real `calculix.run_fea` mesh/load case is supplied for tier-2 escalation -- this ticket does not attempt automatic FEA boundary-condition derivation for a novel part (the same real, still-unsolved gap FORGE-315 already documented, FORGE-278/239/277).
+The safety-factor check is a real, new tier-0 hand-calc (`cantilever_max_bending_stress_mpa`, `sigma = M c / I` at the fixed end) -- no prior ticket in this epic computed stress at all, only deflection/mass. It needed a real yield-strength table, which didn't exist: `tool_registry/tools/cadquery/materials.py` gained `MATERIAL_YIELD_MPA` + `resolve_yield_mpa` (same name set, same "unrecognized material raises" discipline as the existing `MATERIAL_ELASTIC_MPA`/`resolve_elastic_properties`). "Confirmed by FEA" (the ticket's acceptance wording) is achievable only when a real `calculix.run_fea` mesh/load case is supplied for tier-2 escalation -- this ticket does not attempt automatic FEA boundary-condition derivation for a novel part (the same real, still-unsolved gap documented above).
 
-Every search is recorded as Evidence, `valid_against` the work product (FORGE-314's staleness pinning). When a feasible winner is found, it's also recorded as a Decision via the EXISTING `twin.record_decision` mechanism (MET-495, FORGE-61's own "alternatives" field) -- no new "Decision with alternatives" node type was built, since `record_decision` already is exactly that; each rejected candidate the bisection evaluated becomes one alternative, with the constraint that rejected it as its `reason_rejected`.
+Every search is recorded as Evidence, `valid_against` the work product (the staleness pinning). When a feasible winner is found, it's also recorded as a Decision via the EXISTING `twin.record_decision` mechanism (its own "alternatives" field) -- no new "Decision with alternatives" node type was built, since `record_decision` already is exactly that; each rejected candidate the bisection evaluated becomes one alternative, with the constraint that rejected it as its `reason_rejected`.
 
-**Deliberately out of scope**: proposing the winning wall thickness as an actual geometry change via ECT (`ControlledEntityKind` only supports `constraint`/`engineering_entity` today, not `work_product` -- a nontrivial, separate widening of the transaction engine itself, not a quick follow-up, same honesty precedent as FORGE-316 deferring `Constraint.dependencies`); regenerating/committing the optimised geometry (no parametrized re-authoring script exists for the real arm part -- its original `cadquery.execute_script` source was never persisted with a substitutable `wall_thickness_mm` variable); any dashboard UI (no UI surface named in this ticket's own Scope, same precedent as FORGE-315/316/317/319).
+**Deliberately out of scope**: proposing the winning wall thickness as an actual geometry change via ECT (`ControlledEntityKind` only supports `constraint`/`engineering_entity` today, not `work_product` -- a nontrivial, separate widening of the transaction engine itself, not a quick follow-up, same honesty precedent as deferring `Constraint.dependencies` above); regenerating/committing the optimised geometry (no parametrized re-authoring script exists for the real arm part -- its original `cadquery.execute_script` source was never persisted with a substitutable `wall_thickness_mm` variable); any dashboard UI (no UI surface named in this ticket's own Scope, same precedent as the earlier tools in this epic).
 
-*Source: `twin_core/prediction/optimizer.py`, `api_gateway/twin/optimizer.py`, `tool_registry/tools/cadquery/materials.py` (library figures since FORGE-446), `tool_registry/tools/twin/adapter.py`*
+*Source: `twin_core/prediction/optimizer.py`, `api_gateway/twin/optimizer.py`, `tool_registry/tools/cadquery/materials.py` (library figures), `tool_registry/tools/twin/adapter.py`*
 
-### 2.18 Realise + Learn: Device Instances, Measurements + Calibration (FORGE-321)
+### 2.18 Realise + Learn: Device Instances, Measurements + Calibration
 
 The final step of this epic. `DeviceInstance` (spec section 2.7) already existed but had no CRUD or MCP tool -- `twin.register_device_instance` fixes that, persisting a real manufactured unit and an optional `INSTANCE_OF` edge to the design revision (a WorkProduct) it was built from, when the caller has one to name. `product_id` stays a free-text identifier exactly as already documented, never assumed to be a resolvable graph ref -- a unit can be registered before or without a born-digital design record on hand.
 
@@ -879,7 +879,7 @@ async def register(
 ) -> dict
 ```
 
-`InterfaceQuantity` (section 2.11, FORGE-313) has no node id of its own -- embedded in `ArchInterface.quantities` inside a `SYSTEM_ARCHITECTURE` WorkProduct. `twin.record_measurement` appends a real `MeasuredValue` there (explicit `work_product_id`, or the project's one such document -- FORGE-313's own one-per-project assumption), and links the measuring `DeviceInstance` via a new `MEASURED_BY` edge to that WorkProduct (the edge names the document holding the quantity; the measurement's own `interface`/`metric` metadata disambiguates which one within it):
+`InterfaceQuantity` (section 2.11) has no node id of its own -- embedded in `ArchInterface.quantities` inside a `SYSTEM_ARCHITECTURE` WorkProduct. `twin.record_measurement` appends a real `MeasuredValue` there (explicit `work_product_id`, or the project's one such document -- the one-per-project assumption section 2.11 already makes), and links the measuring `DeviceInstance` via a new `MEASURED_BY` edge to that WorkProduct (the edge names the document holding the quantity; the measurement's own `interface`/`metric` metadata disambiguates which one within it):
 
 ```python
 async def record(
@@ -892,17 +892,17 @@ async def record(
 
 Residual computation needs a real predicted value. Rather than trusting a possibly-stale or absent `quantity.predicted` field, the caller supplies `predicted_value` explicitly -- e.g. from a `twin.evaluate_metric` call made just before this one, the natural, honest composition. When the quantity's own `predicted` is still unset, this call also backfills it (the first real prediction a quantity gets is whatever the caller most recently computed); an ALREADY-set `predicted` is never overwritten by a later measurement call. Omitting `predicted_value` records the measurement but skips calibration entirely -- never fabricates a predicted value to diff against.
 
-**Calibration** (`digital_twin/calibration/store.py`, no twin/MCP dependency): a residual is `predicted - measured`, persisted as Evidence (`evidence_type="inspection"`, reusing FORGE-64's mechanism, not a new node type) keyed by `(metric, tier)`. `compute_calibrated_band` turns a list of residuals for one `(metric, tier)` into `band = k * stddev(|residual|)` (`k=2.0` default) once at least 3 samples exist -- below that, returns `None` so the caller's existing fixed prior stays in force, zero regression risk. This is deliberately running-stats, not full conformal prediction: the ticket's own acceptance wording ("the residual narrows the FEA band") only needs a real dispersion estimate that tightens with more measurements, not a coverage-guaranteed interval.
+**Calibration** (`digital_twin/calibration/store.py`, no twin/MCP dependency): a residual is `predicted - measured`, persisted as Evidence (`evidence_type="inspection"`, reusing the existing Evidence mechanism, not a new node type) keyed by `(metric, tier)`. `compute_calibrated_band` turns a list of residuals for one `(metric, tier)` into `band = k * stddev(|residual|)` (`k=2.0` default) once at least 3 samples exist -- below that, returns `None` so the caller's existing fixed prior stays in force, zero regression risk. This is deliberately running-stats, not full conformal prediction: the ticket's own acceptance wording ("the residual narrows the FEA band") only needs a real dispersion estimate that tightens with more measurements, not a coverage-guaranteed interval.
 
-`twin.evaluate_metric` (FORGE-315) now takes an optional calibrated-band lookup: when a calibrated band exists for `(metric="tip_deflection", tier=0)`, it's converted to an equivalent fraction of `limit_mm` and used INSTEAD of the fixed `band_fraction=0.2` prior -- a full override once real measurement history exists, not a blend, since a real calibrated band is a strictly better estimate. The lookup scans EVERY calibration-residual Evidence entity across every project, on purpose: calibration is a prior for the NEXT project, not a per-project cache, matching the ticket's own acceptance wording ("a new project's prediction uses the calibrated band"). The response gains `band_source` (`"fixed_prior"` | `"calibrated"`) and `calibration_sample_count` so a caller can tell which was used.
+`twin.evaluate_metric` now takes an optional calibrated-band lookup: when a calibrated band exists for `(metric="tip_deflection", tier=0)`, it's converted to an equivalent fraction of `limit_mm` and used INSTEAD of the fixed `band_fraction=0.2` prior -- a full override once real measurement history exists, not a blend, since a real calibrated band is a strictly better estimate. The lookup scans EVERY calibration-residual Evidence entity across every project, on purpose: calibration is a prior for the NEXT project, not a per-project cache, matching the ticket's own acceptance wording ("a new project's prediction uses the calibrated band"). The response gains `band_source` (`"fixed_prior"` | `"calibrated"`) and `calibration_sample_count` so a caller can tell which was used.
 
-**Deliberately out of scope**: job 1 of the ticket's own Jira Scope -- committing Gerbers as WorkProducts and a `kicad-cli pcb export pos` pick-and-place adapter method -- was NOT built. The real arm yardstick project has zero PCB/electronics artifacts anywhere in its 34 work products (it's a purely mechanical demo), and the ticket's own Acceptance criterion never exercises job 1 at all (only device registration, measurement recording, and calibration). Building it against synthetic Gerber bytes would be exactly the kind of fabricated demo this epic's own discipline avoids; filed as its own deferred follow-up instead. Also deliberately out of scope: any dashboard UI (no UI surface named in this ticket's own Scope, same precedent as FORGE-315/316/317/319/320).
+**Deliberately out of scope**: job 1 of the ticket's own Jira Scope -- committing Gerbers as WorkProducts and a `kicad-cli pcb export pos` pick-and-place adapter method -- was NOT built. The real arm yardstick project has zero PCB/electronics artifacts anywhere in its 34 work products (it's a purely mechanical demo), and the ticket's own Acceptance criterion never exercises job 1 at all (only device registration, measurement recording, and calibration). Building it against synthetic Gerber bytes would be exactly the kind of fabricated demo this epic's own discipline avoids; filed as its own deferred follow-up instead. Also deliberately out of scope: any dashboard UI (no UI surface named in this ticket's own Scope, same precedent as the earlier tools in this epic).
 
 *Source: `digital_twin/calibration/store.py`, `api_gateway/twin/calibration.py`, `api_gateway/twin/device_instance_recorder.py`, `api_gateway/twin/measurement_recorder.py`, `api_gateway/twin/metric_evaluator.py`, `tool_registry/tools/twin/adapter.py`*
 
-### 2.19 DesignLoopIteration -- Closed Design Loop (FORGE-287)
+### 2.19 DesignLoopIteration -- Closed Design Loop
 
-Its own node type: one candidate value evaluated during one closed design loop run (`twin.start_design_loop`, gap G-G1, target lifecycle spec's "dual state machine: propose -> constraint engine -> commit/reject -> next iteration"). Does not reimplement the search -- composes the already-shipped `twin.optimize_parameter` (section 2.17, FORGE-320) unchanged, which already runs a real propose -> evaluate -> revise -> repeat bisection to convergence or proven infeasibility, with an iteration budget (`max_iterations`, default 60). FORGE-320's own gap was that its trace lived only inside one opaque Evidence `result` blob; this ticket persists EVERY candidate it evaluates as a real, queryable node instead.
+Its own node type: one candidate value evaluated during one closed design loop run (`twin.start_design_loop`, gap G-G1, target lifecycle spec's "dual state machine: propose -> constraint engine -> commit/reject -> next iteration"). Does not reimplement the search -- composes the already-shipped `twin.optimize_parameter` (section 2.17) unchanged, which already runs a real propose -> evaluate -> revise -> repeat bisection to convergence or proven infeasibility, with an iteration budget (`max_iterations`, default 60). That tool's own gap was that its trace lived only inside one opaque Evidence `result` blob; this ticket persists EVERY candidate it evaluates as a real, queryable node instead.
 
 ```python
 class DesignLoopIteration(NodeBase):
@@ -925,17 +925,17 @@ class DesignLoopIteration(NodeBase):
     created_at: datetime
 ```
 
-Deliberately generic field names (`parameter_name`/`parameter_value`/`metric`/`objective_value`), not wall-thickness-specific -- the search itself generalized beyond `wall_thickness_mm` (FORGE-288, gap G-G2) reusing this same node type, no schema migration needed. No `"exhausted"` status: `optimize_wall_thickness` silently accepts its best candidate within `max_iterations` rather than distinguishing "ran out of budget" from "converged" -- inventing that distinction here would claim precision the underlying algorithm doesn't have.
+Deliberately generic field names (`parameter_name`/`parameter_value`/`metric`/`objective_value`), not wall-thickness-specific -- the search itself generalized beyond `wall_thickness_mm` (gap G-G2) reusing this same node type, no schema migration needed. No `"exhausted"` status: `optimize_wall_thickness` silently accepts its best candidate within `max_iterations` rather than distinguishing "ran out of budget" from "converged" -- inventing that distinction here would claim precision the underlying algorithm doesn't have.
 
-Each candidate is linked to the prior one via `EdgeType.SUPERSEDES` (the same edge FORGE-321's revalidation flow already uses for "this is the newer replacement of that") and to the requirement(s) it was evaluated against via `EdgeType.CONSTRAINED_BY`. The winning candidate is index-identified, not value-matched: `already_feasible_at_min` -> `candidates[0]` (the lower-bound check itself was already feasible), `optimal` -> `candidates[-1]` (`winner = eval_at(hi)` is appended right before the optimizer returns) -- matching by `wall_thickness_mm` VALUE would be wrong, since the final `eval_at(hi)` can legitimately re-evaluate to the exact same float as the immediately preceding loop-appended candidate.
+Each candidate is linked to the prior one via `EdgeType.SUPERSEDES` (the same edge the revalidation flow already uses for "this is the newer replacement of that") and to the requirement(s) it was evaluated against via `EdgeType.CONSTRAINED_BY`. The winning candidate is index-identified, not value-matched: `already_feasible_at_min` -> `candidates[0]` (the lower-bound check itself was already feasible), `optimal` -> `candidates[-1]` (`winner = eval_at(hi)` is appended right before the optimizer returns) -- matching by `wall_thickness_mm` VALUE would be wrong, since the final `eval_at(hi)` can legitimately re-evaluate to the exact same float as the immediately preceding loop-appended candidate.
 
 `twin.get_design_loop(loop_id)` returns the full iteration timeline (the dashboard's "iteration timeline" requirement). `twin.approve_design_loop(loop_id, approved_by)` records a human's approval of the converged winner -- the "with a human approving at gates" half of this ticket's own yardstick line; raises when the loop never converged (no winning candidate to approve), the same honesty precedent as every other approval gate in this codebase.
 
 `POST /v1/design-loop/start`, `GET /v1/design-loop/{loop_id}`, `POST /v1/design-loop/{loop_id}/approve` expose the same three actions to the dashboard's Requirements page ("Design loop" section, below the evidence matrix) -- reusing the SAME bound optimizer instance `twin.optimize_parameter` uses, so Evidence/Decision recording isn't duplicated between the MCP tool and the REST route.
 
-**Deliberately out of scope** (see FORGE-287's own PR description for the full split): duplicate-commit guards / infeasibility heuristics beyond what the optimizer itself already returns / cost-budget policy tuning (FORGE-291); wiring gate evaluators to block the loop on evidence gaps (FORGE-290); an eval harness (FORGE-292); true multi-objective/Pareto-front search (FORGE-288's own real scope is single-objective-with-constraints, matching the ticket's own literal example -- see below). The loop mechanism runs synchronously to completion in one call (bisection converges in well under a second) rather than exposing a step-by-step "run one iteration" API -- there is no real mid-search moment a human needs to inspect; the real gate is the end-of-loop approval this ticket already builds.
+**Deliberately out of scope**: duplicate-commit guards / infeasibility heuristics beyond what the optimizer itself already returns / cost-budget policy tuning; wiring gate evaluators to block the loop on evidence gaps; an eval harness; true multi-objective/Pareto-front search (the real scope here is single-objective-with-constraints, matching the ticket's own literal example -- see below). The loop mechanism runs synchronously to completion in one call (bisection converges in well under a second) rather than exposing a step-by-step "run one iteration" API -- there is no real mid-search moment a human needs to inspect; the real gate is the end-of-loop approval this ticket already builds.
 
-#### Generalizing beyond wall_thickness_mm (FORGE-288, gap G-G2)
+#### Generalizing beyond wall_thickness_mm (gap G-G2)
 
 `make_design_loop_starter`'s own `start()` used to read `c["wall_thickness_mm"]`/`c["mass_kg"]`/`c["deflection_margin_mm"]`/`c["sf_margin"]` directly off each raw candidate dict -- real, but only ever matching `make_wall_thickness_optimizer`'s own candidate shape, contrary to `DesignLoopIteration`'s own already-generic field names. `make_design_loop_starter` gained `parameter_name`/`metric`/`candidate_mapper` (a `dict -> (parameter_value, constraints_status)` function) to make that ingestion generic, defaulting to the EXACT prior wall-thickness mapping -- every existing caller (the MCP tool, the REST route) is unaffected; the full pre-existing `TestMakeDesignLoopStarter` suite passes unchanged as the regression proof.
 
@@ -945,9 +945,9 @@ The dashboard's "objective vs iteration chart" (its own Jira wording) is a small
 
 *Source: `twin_core/models/design_loop_iteration.py`, `twin_core/prediction/optimizer.py`, `api_gateway/twin/design_loop.py`, `api_gateway/twin/optimizer.py`, `api_gateway/design_loop/routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/pages/RequirementsPage.tsx`*
 
-### 2.20 Decision records: evidence links + dashboard cards (FORGE-289, gap G-G3)
+### 2.20 Decision records: evidence links + dashboard cards (gap G-G3)
 
-`twin.record_decision` (MET-495) already persisted a `WorkProductType.DESIGN_DECISION` work product with real `alternatives` (structured option/reason-rejected pairs, never prose) and real `parent_refs` edges (FORGE-61) -- the ticket's actual gap ("Current state: Weak (decisions exist, often without evidence links)") was that nothing connected a Decision to the Evidence that backed it: the rationale string could *mention* a calculation, but no graph edge let a reader or a gate evaluator walk from one to the other.
+`twin.record_decision` already persisted a `WorkProductType.DESIGN_DECISION` work product with real `alternatives` (structured option/reason-rejected pairs, never prose) and real `parent_refs` edges -- the ticket's actual gap ("Current state: Weak (decisions exist, often without evidence links)") was that nothing connected a Decision to the Evidence that backed it: the rationale string could *mention* a calculation, but no graph edge let a reader or a gate evaluator walk from one to the other.
 
 `record_decision` gained an `evidence_refs: list[str] | None` parameter, resolved through the same `_ref_resolver.py` every other recorder in this package uses and linked via `EdgeType.SUPPORTED_BY` (previously declared, never used) -- a distinct relation from `parent_refs`' own `satisfies`, since "supported by evidence" and "satisfies a requirement" are different facts. `make_wall_thickness_optimizer`/`make_tube_height_optimizer` (section 2.17) now pass `evidence_refs=[out["evidence_node_id"]]` into their existing `decision_recorder(...)` call, so every design-loop-produced Decision links to its own Evidence for free.
 
@@ -961,29 +961,29 @@ Dashboard: a shared `DecisionList`/`DecisionCard` component (`dashboard/src/comp
 
 *Source: `api_gateway/twin/decision_recorder.py`, `api_gateway/twin/optimizer.py`, `api_gateway/twin/design_loop.py`, `api_gateway/twin/decision_routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/components/shared/DecisionList.tsx`, `dashboard/src/components/viewer/StructureView.tsx`, `dashboard/src/pages/RequirementsPage.tsx`*
 
-### 2.21 Loop quality guards: duplicate detection + iteration budget (FORGE-291, gap G-G5)
+### 2.21 Loop quality guards: duplicate detection + iteration budget (gap G-G5)
 
-The ticket bundles four things under "loop quality guards"; two were already real before this ticket. Grounding (FORGE-98, a chat-harness safeguard flagging a reply that claims a design action with zero tool calls that turn) is general and unrelated to the design loop specifically -- confirmed already shipped, untouched here. Infeasibility detection is also already real: `status="infeasible"` (section 2.19, FORGE-287) already exists and is already persisted/returned; this ticket added no new mechanism for it, only dashboard visibility (below).
+The ticket bundles four things under "loop quality guards"; two were already real before this ticket. Grounding (a chat-harness safeguard flagging a reply that claims a design action with zero tool calls that turn) is general and unrelated to the design loop specifically -- confirmed already shipped, untouched here. Infeasibility detection is also already real: `status="infeasible"` (section 2.19) already exists and is already persisted/returned; this ticket added no new mechanism for it, only dashboard visibility (below).
 
 The two real, previously-unshipped gaps were a duplicate-commit guard and iteration-budget visibility:
 
-**Duplicate-commit guard.** `DesignLoopIteration` gained `loop_inputs_hash: str | None` -- a sha256 of `{work_product_id, **optimize_kwargs}` (sorted-key JSON, `record_decision` excluded since it toggles a side effect rather than changing the search), stamped on every iteration of a run. Same MET-506 "identical inputs = the same real-world thing" precedent `decision_recorder.py` already established for Decision records, applied here since a design loop has no single work-product node of its own to hash content against. Before running the bisection, `start()` calls the new `twin.find_design_loop_by_inputs_hash(loop_inputs_hash)` (a one-line `list_nodes(node_type=DESIGN_LOOP_ITERATION, filters={"loop_inputs_hash": ..., "iteration_number": 0})`, mirroring `list_design_loop_iterations`'s own shape) -- a hit means this exact loop already ran, and `start()` returns that prior loop's already-persisted result (`{status, winner, loop_id, iteration_count, iteration_ids, duplicate: true}`) instead of spending a bisection and a whole new iteration subtree on a re-submission. The original loop's `status` (`optimal` vs. `already_feasible_at_min` vs. `infeasible`) is reconstructed from the stored iterations alone -- no winner means infeasible; a winner at `iteration_number == 0` means already-feasible-at-min; otherwise optimal -- exactly mirroring the same index-based logic `start()` already uses to mark the winner in the first place (section 2.19).
+**Duplicate-commit guard.** `DesignLoopIteration` gained `loop_inputs_hash: str | None` -- a sha256 of `{work_product_id, **optimize_kwargs}` (sorted-key JSON, `record_decision` excluded since it toggles a side effect rather than changing the search), stamped on every iteration of a run. Same "identical inputs = the same real-world thing" precedent `decision_recorder.py` already established for Decision records, applied here since a design loop has no single work-product node of its own to hash content against. Before running the bisection, `start()` calls the new `twin.find_design_loop_by_inputs_hash(loop_inputs_hash)` (a one-line `list_nodes(node_type=DESIGN_LOOP_ITERATION, filters={"loop_inputs_hash": ..., "iteration_number": 0})`, mirroring `list_design_loop_iterations`'s own shape) -- a hit means this exact loop already ran, and `start()` returns that prior loop's already-persisted result (`{status, winner, loop_id, iteration_count, iteration_ids, duplicate: true}`) instead of spending a bisection and a whole new iteration subtree on a re-submission. The original loop's `status` (`optimal` vs. `already_feasible_at_min` vs. `infeasible`) is reconstructed from the stored iterations alone -- no winner means infeasible; a winner at `iteration_number == 0` means already-feasible-at-min; otherwise optimal -- exactly mirroring the same index-based logic `start()` already uses to mark the winner in the first place (section 2.19).
 
 **Iteration-budget visibility.** `max_iterations` (the bisection's real budget, already a parameter on `twin_core.prediction.optimizer.optimize_wall_thickness`/`optimize_tube_height`, default 60) is now threaded through `api_gateway/twin/optimizer.py`'s wrapper functions and echoed back in the response alongside the already-present `iteration_count`. "Tokens" (the ticket's own dashboard wording, "Loop health panel (tokens, iterations, failures)") is dropped rather than implemented: this loop makes zero LLM calls -- pure deterministic bisection math -- so there is no real per-loop token cost to attribute; `iteration_count`/`max_iterations` is the honest, measurable budget a dashboard can actually show.
 
 Dashboard: `LoopHealthPanel` (`dashboard/src/pages/RequirementsPage.tsx`) renders in the Design Loop section right after a run -- a status pill, `iteration_count / max_iterations`, and a "duplicate of an earlier run" badge when the guard fired. Built from the mutation's own last result rather than the persisted iteration timeline, since `max_iterations`/`duplicate` are properties of one invocation, not persisted loop state -- there is nothing honest to show after a page reload.
 
-**Deliberately out of scope**: any token/cost tracking on the design loop (no real LLM calls inside it to measure); rebuilding infeasibility detection (already shipped, FORGE-287); a generic cross-tool "duplicate call" framework (scoped narrowly to the design loop, matching MET-506's own narrow, per-recorder precedent rather than inventing shared middleware).
+**Deliberately out of scope**: any token/cost tracking on the design loop (no real LLM calls inside it to measure); rebuilding infeasibility detection (already shipped); a generic cross-tool "duplicate call" framework (scoped narrowly to the design loop, matching the narrow, per-recorder precedent rather than inventing shared middleware).
 
 *Source: `twin_core/models/design_loop_iteration.py`, `twin_core/api.py`, `api_gateway/twin/design_loop.py`, `api_gateway/twin/optimizer.py`, `api_gateway/design_loop/routes.py`, `tool_registry/tools/twin/adapter.py`, `dashboard/src/pages/RequirementsPage.tsx`*
 
-### 2.22 Concept generation and trade study (FORGE-262, gap G-B2)
+### 2.22 Concept generation and trade study (gap G-B2)
 
 `twin_core.consistency.gates`'s G5 (Concept Selection) already evaluated whatever it found: "Trade study performed" is a per-decision PASS once a recorded `twin.record_decision` has a non-empty `alternatives` list -- that module's own docstring says explicitly it never builds the "Decision Agent" (target lifecycle spec section 26.12) that would GENERATE alternatives, run the trade study, and select one. This ticket is exactly that missing half, and needed almost no new machinery.
 
-**Concept generation** needed no new tool at all. A "candidate architecture" is a `concept_option` `EngineeringEntity` (a new `EngineeringEntityType` member alongside the existing `intent`/`objective`/... set, recorded via the already-generic `twin.record_engineering_entity`) -- its `metadata` carries `criteria_scores` (e.g. `{"mass_kg": 1.8, "cost_usd": 340, "risk": 3, "performance": 7}`) and `evidence_backed_criteria` (which of those keys came from a real measured source rather than an assertion). Only mass has a real measured source anywhere in this codebase today -- a committed CAD work product's own `metadata.geometry_features.properties.mass_kg`; cost has no real source (no price field exists in `tool_registry.tools.cadquery.materials`, and no live distributor lookup was wired in for this ticket), and risk/performance are inherently subjective in general. This module reports which criteria are asserted rather than pretending otherwise -- the dashboard visually distinguishes a grounded cell from an asserted one, same discipline FORGE-318's evidence matrix already uses for `no_data` vs `pass`.
+**Concept generation** needed no new tool at all. A "candidate architecture" is a `concept_option` `EngineeringEntity` (a new `EngineeringEntityType` member alongside the existing `intent`/`objective`/... set, recorded via the already-generic `twin.record_engineering_entity`) -- its `metadata` carries `criteria_scores` (e.g. `{"mass_kg": 1.8, "cost_usd": 340, "risk": 3, "performance": 7}`) and `evidence_backed_criteria` (which of those keys came from a real measured source rather than an assertion). Only mass has a real measured source anywhere in this codebase today -- a committed CAD work product's own `metadata.geometry_features.properties.mass_kg`; cost has no real source (no price field exists in `tool_registry.tools.cadquery.materials`, and no live distributor lookup was wired in for this ticket), and risk/performance are inherently subjective in general. This module reports which criteria are asserted rather than pretending otherwise -- the dashboard visually distinguishes a grounded cell from an asserted one, same discipline the evidence matrix already uses for `no_data` vs `pass`.
 
-**The trade study + selection** (`api_gateway/twin/trade_study.py`) is the one genuinely new piece. `weighted_score`/`score_concept_options` are pure functions computing `sum(weight * criteria_scores[criterion])` over the caller-supplied weights (sign encodes minimize/maximize -- a criterion to minimize needs a negative weight so a higher weighted_score always means better). `make_trade_study_selector`'s `select(...)` fetches the named `concept_option` entities, scores them, and records the selection as a real `twin.record_decision` -- reusing that mechanism completely unchanged rather than inventing a second "Decision-like" node type (same precedent FORGE-289's own docs already established). Every non-selected option becomes one real `alternatives` entry with its weighted score as `reason_rejected` -- not prose, and not empty, so G5's "Trade study performed" check now actually passes instead of reporting `NOT_EVALUATED` (confirmed live: recording two options, calling `twin.select_concept`, and re-evaluating G5 on the same project flips that exact check from `NOT_EVALUATED` to `PASS`). The Decision is also linked to the selected option via `EdgeType.GENERATED_FROM` (previously declared, reused by FORGE-289's design-loop-winner precedent for the identical "this Decision was generated from evaluating this real node" relationship) -- no new edge type either.
+**The trade study + selection** (`api_gateway/twin/trade_study.py`) is the one genuinely new piece. `weighted_score`/`score_concept_options` are pure functions computing `sum(weight * criteria_scores[criterion])` over the caller-supplied weights (sign encodes minimize/maximize -- a criterion to minimize needs a negative weight so a higher weighted_score always means better). `make_trade_study_selector`'s `select(...)` fetches the named `concept_option` entities, scores them, and records the selection as a real `twin.record_decision` -- reusing that mechanism completely unchanged rather than inventing a second "Decision-like" node type (same precedent section 2.20 already established). Every non-selected option becomes one real `alternatives` entry with its weighted score as `reason_rejected` -- not prose, and not empty, so G5's "Trade study performed" check now actually passes instead of reporting `NOT_EVALUATED` (confirmed live: recording two options, calling `twin.select_concept`, and re-evaluating G5 on the same project flips that exact check from `NOT_EVALUATED` to `PASS`). The Decision is also linked to the selected option via `EdgeType.GENERATED_FROM` (previously declared, reused by the design-loop-winner precedent for the identical "this Decision was generated from evaluating this real node" relationship) -- no new edge type either.
 
 New MCP tool `twin.select_concept` (concept GENERATION stays `twin.record_engineering_entity` with `entity_type="concept_option"` -- there is no deterministic "architecture generator" algorithm to build, and none is specified anywhere in the Planner spec). `GET /v1/trade-study/options`, `POST /v1/trade-study/options`, `POST /v1/trade-study/select` expose the same three actions to the dashboard's "Concept trade study" section (below the feature library) -- reusing the SAME bound `engineering_entity_recorder`/`concept_selector` callables `bootstrap_tool_registry` wires up, so a concept_option or Decision created via the dashboard and via an agent's own MCP call are indistinguishable afterward.
 
@@ -993,13 +993,13 @@ Dashboard: a table with criteria as rows, options as columns, an editable weight
 
 *Source: `twin_core/models/engineering_entity.py`, `api_gateway/twin/engineering_entity_recorder.py`, `api_gateway/twin/trade_study.py`, `api_gateway/trade_study/routes.py`, `tool_registry/tools/twin/adapter.py`, `tool_registry/bootstrap.py`, `mcp_core/annotations.py`, `dashboard/src/pages/RequirementsPage.tsx`*
 
-### 2.23 Requirement-driven component selection (FORGE-265, gap G-C1)
+### 2.23 Requirement-driven component selection (gap G-C1)
 
-`twin.record_component_selection` (`api_gateway/twin/component_recorder.py`, MET-436 follow-up) has always been presence-only: it persists whichever candidate part a caller already decided on as a `BOMItem`, with zero comparison against what the design actually needs -- no margin, no rationale trail, no Decision. This ticket is the missing "requirement-driven" half, in a new sibling module (`api_gateway/twin/component_selection.py`) rather than a mode bolted onto `trade_study.py`, because the comparison shape is different: a servo's rated torque clearing a required torque with margin is a per-spec threshold/pass-fail check with a real numeric distance, not `trade_study.py`'s weighted-sum score across criteria.
+`twin.record_component_selection` (`api_gateway/twin/component_recorder.py`) has always been presence-only: it persists whichever candidate part a caller already decided on as a `BOMItem`, with zero comparison against what the design actually needs -- no margin, no rationale trail, no Decision. This ticket is the missing "requirement-driven" half, in a new sibling module (`api_gateway/twin/component_selection.py`) rather than a mode bolted onto `trade_study.py`, because the comparison shape is different: a servo's rated torque clearing a required torque with margin is a per-spec threshold/pass-fail check with a real numeric distance, not `trade_study.py`'s weighted-sum score across criteria.
 
 `check_spec_margin(required, actual, op)` is a pure function comparing one real candidate spec value against one required threshold (`">="` or `"<="`); `margin` is always signed so a positive value means "passes with this much headroom" regardless of direction. `check_candidate_against_requirements(specs, required_specs)` runs it for every named requirement against one candidate's specs, reporting a missing spec as a failing, marginless check (distinguishable from "spec present but fails") rather than silently skipping it.
 
-`make_component_selector(twin, *, decision_recorder, component_recorder)`'s `select(...)` takes 2+ candidates (each an mpn + caller-asserted `specs: dict[str, float]`, e.g. `{"torque_kg_cm": 25.0}`), the `required_specs` the design needs (`{"torque_kg_cm": {"op": ">=", "value": 20.0}}`), and which `selected_mpn` was chosen. It computes every candidate's margins, records the selection as a real `twin.record_decision` -- reusing that mechanism completely unchanged (same precedent as `trade_study.py`) -- with every non-selected candidate's margin summary as its `alternatives` entry, then persists the *selected* candidate as a real `BOMItem` via the existing `component_recorder` (no new persistence path). The Decision is linked to the new BOMItem via `EdgeType.GENERATED_FROM` (same "this Decision was generated from evaluating this real node" relationship FORGE-289/FORGE-262 already established). Unlike a hard gate, a candidate that fails a requirement can still be selected -- `selected_meets_requirements` surfaces the outcome honestly rather than the tool refusing; an engineer may have a documented reason (e.g. reduced duty cycle) to accept it anyway.
+`make_component_selector(twin, *, decision_recorder, component_recorder)`'s `select(...)` takes 2+ candidates (each an mpn + caller-asserted `specs: dict[str, float]`, e.g. `{"torque_kg_cm": 25.0}`), the `required_specs` the design needs (`{"torque_kg_cm": {"op": ">=", "value": 20.0}}`), and which `selected_mpn` was chosen. It computes every candidate's margins, records the selection as a real `twin.record_decision` -- reusing that mechanism completely unchanged (same precedent as `trade_study.py`) -- with every non-selected candidate's margin summary as its `alternatives` entry, then persists the *selected* candidate as a real `BOMItem` via the existing `component_recorder` (no new persistence path). The Decision is linked to the new BOMItem via `EdgeType.GENERATED_FROM` (same "this Decision was generated from evaluating this real node" relationship sections 2.20 and 2.22 already established). Unlike a hard gate, a candidate that fails a requirement can still be selected -- `selected_meets_requirements` surfaces the outcome honestly rather than the tool refusing; an engineer may have a documented reason (e.g. reduced duty cycle) to accept it anyway.
 
 New MCP tool `twin.select_component`. `POST /v1/component-selection/select` exposes the same action to the dashboard's BOM-page "Select component" action, reusing the SAME bound `component_selector` callable `bootstrap_tool_registry` wires up. Unlike `trade_study`'s `GET`/`POST /options`, there is no candidate-listing route here -- a candidate is an mpn + specs supplied inline at selection time, not a pre-recorded graph entity to browse beforehand.
 
@@ -1009,9 +1009,9 @@ New MCP tool `twin.select_component`. `POST /v1/component-selection/select` expo
 
 *Source: `api_gateway/twin/component_selection.py`, `api_gateway/component_selection/routes.py`, `tool_registry/tools/twin/adapter.py`, `tool_registry/bootstrap.py`, `mcp_core/annotations.py`, `digital_twin/catalog/taxonomy.py`, `dashboard/src/pages/BomPage.tsx`*
 
-### 2.24 COTS parts as geometry: "replace placeholder with part" (FORGE-266, gap G-C2)
+### 2.24 COTS parts as geometry: "replace placeholder with part" (gap G-C2)
 
-`twin.record_hierarchy_node` (FORGE-260) has only ever set a HierarchyNode's `REALIZED_BY` (a `cad_model` work product) and `INSTANCE_OF` (a `BOMItem`) edges once, at node-creation time -- there was no way to attach or swap a node's real geometry afterward. This gap turned out to be the *only* genuinely missing piece: the STEP-ingestion pipeline (`POST /v1/twin/import`, MET-483 -- real bounding box/part-count extraction via the OCCT converter, already dashboard-usable via the existing `ImportZone` component), the 3D preview pipeline (`GET /v1/twin/nodes/{id}/model`, already GLB-converts any `cad_model` work product), and the hierarchical-BOM derivation that reads these exact edges (`twin_core.consistency.hierarchical_bom`, FORGE-267) all already existed and needed zero changes.
+`twin.record_hierarchy_node` has only ever set a HierarchyNode's `REALIZED_BY` (a `cad_model` work product) and `INSTANCE_OF` (a `BOMItem`) edges once, at node-creation time -- there was no way to attach or swap a node's real geometry afterward. This gap turned out to be the *only* genuinely missing piece: the STEP-ingestion pipeline (`POST /v1/twin/import` -- real bounding box/part-count extraction via the OCCT converter, already dashboard-usable via the existing `ImportZone` component), the 3D preview pipeline (`GET /v1/twin/nodes/{id}/model`, already GLB-converts any `cad_model` work product), and the hierarchical-BOM derivation that reads these exact edges (`twin_core.consistency.hierarchical_bom`) all already existed and needed zero changes.
 
 `api_gateway/twin/hierarchy_recorder.py`'s new `make_hierarchy_geometry_linker(twin)` returns `realize(*, hierarchy_node_id, work_product_id=None, bom_item_id=None)` -- at least one of `work_product_id`/`bom_item_id` is required, both may be given. For whichever is supplied, it REMOVES any existing outgoing edge of that type from the node first (`_replace_outgoing_edge`), then adds the new one -- a node always has at most one `REALIZED_BY` and at most one `INSTANCE_OF` target, never an accumulating history. Both the target work product/BOMItem and the hierarchy node itself are confirmed to exist before linking (`ValueError` otherwise). Because this reuses the exact edges `compute_hierarchy_rollup` and `compute_hierarchical_bom` already read, a node realized here shows up in both with zero further changes.
 
@@ -1019,7 +1019,7 @@ New MCP tool `twin.realize_hierarchy_node`, classified **DESTRUCTIVE** (not ADDI
 
 Dashboard: `StructureView.tsx`'s tree rows gained a "Replace placeholder"/"Replace part" action opening an inline panel with two paths -- upload a real STEP file (reuses `ImportZone` unchanged; on success, a real GLB preview renders via `GET /v1/twin/nodes/{id}/model` in a small self-contained `<Canvas>` scoped to just this panel, not the full twin-viewer's own `R3FViewer`/store, mirroring the same "own small Canvas" pattern `UrdfPreviewPanel.tsx` already uses) or pick an already-recorded `BOMItem` from the project's flat BOM (no 3D preview for this path -- a `BOMItem.cad_model_url` is a caller-asserted external link this pipeline has no fetch-and-convert path for; its own real mpn/manufacturer fields are the honest "preview" here).
 
-**Honesty note**: no real vendor STEP files exist anywhere in this repo to seed a demo with (`tool_registry/tools/occt-converter/`'s own sample assets are synthetic generator shapes, not real vendor parts) -- a live demo needs a real, genuinely-downloadable STEP file supplied at call time, same "caller-asserted real value" discipline FORGE-262/265 already established for criteria scores and datasheet specs.
+**Honesty note**: no real vendor STEP files exist anywhere in this repo to seed a demo with (`tool_registry/tools/occt-converter/`'s own sample assets are synthetic generator shapes, not real vendor parts) -- a live demo needs a real, genuinely-downloadable STEP file supplied at call time, same "caller-asserted real value" discipline sections 2.22 and 2.23 already established for criteria scores and datasheet specs.
 
 **Deliberately out of scope**: any vendor STEP-file library, scraper, or "search vendor sites for a STEP model" feature; fetching/converting an arbitrary external `cad_model_url` on demand (a `BOMItem`'s own `cad_model_url` stays a provenance link, never something this pipeline fetches); a swiftshader/headless-WebGL Playwright rendering harness (no precedent exists anywhere in this codebase to build on; the E2E test covers the pick-existing-BOMItem path, which needs no 3D rendering, and the upload+GLB-preview path is exercised by live validation instead).
 
@@ -1027,7 +1027,7 @@ Dashboard: `StructureView.tsx`'s tree rows gained a "Replace placeholder"/"Repla
 
 ---
 
-### 2.25 Robot pose presets: drag-to-pose + saved poses (FORGE-250, gap G-J4)
+### 2.25 Robot pose presets: drag-to-pose + saved poses (gap G-J4)
 
 A `robot_description` work product's `metadata` gained one new optional field:
 
@@ -1037,19 +1037,19 @@ metadata.poses: {
 }
 ```
 
-No new node type, no new MCP tool, and no new gateway route -- "Save current pose" reuses the existing generic `POST /v1/twin/nodes/{id}/iterate` revision endpoint (MET-251) exactly as-is: `metadata_updates={"poses": {...existing, <name>: <values>}}` merges one named pose into whatever's already saved (never dropping the others) and, because `/iterate` always appends a `WorkProductRevision`, the save shows up in the node's version history for free -- the same "persist + version" behavior `api_gateway/twin/routes.py`'s `update_assembly_joints` route already established for a different `robot_description` metadata field (`metadata.assembly`). `TwinNodeResponse.poses` (populated in `_wp_to_response` from `wp.metadata.get("poses")`) surfaces it back to the dashboard on every node fetch, `None` for every node type or a `robot_description` with no saved poses yet.
+No new node type, no new MCP tool, and no new gateway route -- "Save current pose" reuses the existing generic `POST /v1/twin/nodes/{id}/iterate` revision endpoint exactly as-is: `metadata_updates={"poses": {...existing, <name>: <values>}}` merges one named pose into whatever's already saved (never dropping the others) and, because `/iterate` always appends a `WorkProductRevision`, the save shows up in the node's version history for free -- the same "persist + version" behavior `api_gateway/twin/routes.py`'s `update_assembly_joints` route already established for a different `robot_description` metadata field (`metadata.assembly`). `TwinNodeResponse.poses` (populated in `_wp_to_response` from `wp.metadata.get("poses")`) surfaces it back to the dashboard on every node fetch, `None` for every node type or a `robot_description` with no saved poses yet.
 
-The three other pieces of FORGE-250 are entirely client-side, reading/writing the existing `robotJointValues` slice on `viewer-store.ts` (unchanged since MET-747/FORGE-283) rather than any new server state:
+The three other pieces are entirely client-side, reading/writing the existing `robotJointValues` slice on `viewer-store.ts` (unchanged) rather than any new server state:
 
 - **Drag-to-pose**: `dashboard/src/lib/robot-drag-controls.ts`'s `RobotPoseDragControls` subclasses `urdf-loader`'s own `PointerURDFDragControls` (raycast + joint-axis projection + URDF-limit clamping, all already implemented there) to report the resulting joint value back into the store and highlight the dragged link's meshes. Mounted by `RobotSceneContents.tsx` only while kinematic control is active (`!robotPhysicsEnabled` -- physics mode drives joints itself); an imperative `viewer-store` bridge (`setOrbitControlsEnabled`, same registration pattern as `_cameraResetFn`) suspends `<OrbitControls>` for the drag's duration so the camera doesn't orbit mid-manipulation.
 - **Built-in presets**: Zero, Home (the midpoint of each joint's exported range -- no separate canonical "home" pose exists anywhere in this codebase to read instead), Min, Max -- pure functions of the already-known joint list (`dashboard/src/lib/robot-poses.ts`), nothing to persist.
-- **Animated transitions**: a ~600ms ease-in-out interpolation (`runPoseAnimation`/`interpolatePose`/`easeInOutCubic`) driving the same `setRobotJointValue` calls a manual slider drag would, so a preset-selected pose animates in exactly like MET-747's existing kinematic-posing effect already expects.
+- **Animated transitions**: a ~600ms ease-in-out interpolation (`runPoseAnimation`/`interpolatePose`/`easeInOutCubic`) driving the same `setRobotJointValue` calls a manual slider drag would, so a preset-selected pose animates in exactly like the existing kinematic-posing effect already expects.
 
-**Deliberately out of scope** (see FORGE-250's own ticket "Out of scope (separate stories)" line, and FORGE-303's follow-up comment): inverse kinematics (dragging the end-effector, solving every upstream joint to reach it) -- no IK solver exists anywhere in this codebase, only the forward "analytic live-solve kinematics" in `api_gateway/constraint/kinematics.py`; posing from a natural-language chat command; trajectory playback (animating through a *sequence* of poses over time) -- depends on FORGE-284's not-yet-built multibody-dynamics/trajectory work, itself flagged in Jira as "not in the Phase 3 stack" per MetaForge-Planner.
+**Deliberately out of scope**: inverse kinematics (dragging the end-effector, solving every upstream joint to reach it) -- no IK solver exists anywhere in this codebase, only the forward "analytic live-solve kinematics" in `api_gateway/constraint/kinematics.py`; posing from a natural-language chat command; trajectory playback (animating through a *sequence* of poses over time) -- depends on not-yet-built multibody-dynamics/trajectory work, itself flagged in Jira as "not in the Phase 3 stack" per MetaForge-Planner.
 
 *Source: `dashboard/src/lib/robot-poses.ts`, `dashboard/src/lib/robot-drag-controls.ts`, `dashboard/src/components/viewer/RobotSceneContents.tsx`, `dashboard/src/components/viewer/RobotControlsOverlay.tsx`, `dashboard/src/components/viewer/R3FViewer.tsx`, `dashboard/src/store/viewer-store.ts`, `dashboard/src/hooks/use-twin.ts`, `dashboard/src/api/endpoints/twin.ts`, `api_gateway/twin/schemas.py`, `api_gateway/twin/routes.py`*
 
-### 2.26 Release packages: versioned snapshot + G8 gating (FORGE-299, gap G-I3)
+### 2.26 Release packages: versioned snapshot + G8 gating (gap G-I3)
 
 `release_package` is a new `EngineeringEntityType` -- a lightweight, versioned snapshot of a project's current hierarchy, BOM, evidence, and decisions, recorded through the same `twin.record_engineering_entity`-backed `engineering_entity_recorder` closure every other entity type already goes through. Its `metadata` carries only node ids (`hierarchy_node_ids`, `bom_item_ids`, `evidence_ids`, `decision_ids`, `drawing_ids`), a `diff_from_previous` count-delta object, and `gate_status` -- never a deep copy of the referenced items' content:
 
@@ -1059,7 +1059,7 @@ metadata: {
   bom_item_ids: string[]
   evidence_ids: string[]
   decision_ids: string[]
-  drawing_ids: string[]  // always [] -- FORGE-293 (2D drawings) hasn't shipped
+  drawing_ids: string[]  // always [] -- 2D drawings haven't shipped
   diff_from_previous: {
     compared_to: string | null  // prior release_package's node id, or null for the first
     hierarchy_delta: number
@@ -1071,21 +1071,21 @@ metadata: {
 }
 ```
 
-**The real gate this reuses, not duplicates.** `release_approval` (FORGE-73) and G8's `evaluate_g8_release` (`twin_core.consistency.gates`) already existed -- real, comprehensive (baseline fixed, no stale evidence, verification coverage complete, waivers approved, a `release_approval` entity approved) -- but purely informational: nothing before this ticket ever called it as anything but an advisory display value. `twin.create_release_package` (`api_gateway/twin/release_package.py`) is G8's first real consumer with teeth: it calls `evaluate_g8_release` itself (with a real `TraceabilityAgent`-backed `traceability_coverage` accessor, so the "verification complete" check can actually evaluate) and refuses to create a package -- raising with every failing check named -- unless the result is `GateStatus.PASSED`. This is additive: `api_gateway/runs/gate_eval.py`'s `TwinConsistencyGateChecker` stays purely advisory everywhere else, unchanged.
+**The real gate this reuses, not duplicates.** `release_approval` and G8's `evaluate_g8_release` (`twin_core.consistency.gates`) already existed -- real, comprehensive (baseline fixed, no stale evidence, verification coverage complete, waivers approved, a `release_approval` entity approved) -- but purely informational: nothing before this ticket ever called it as anything but an advisory display value. `twin.create_release_package` (`api_gateway/twin/release_package.py`) is G8's first real consumer with teeth: it calls `evaluate_g8_release` itself (with a real `TraceabilityAgent`-backed `traceability_coverage` accessor, so the "verification complete" check can actually evaluate) and refuses to create a package -- raising with every failing check named -- unless the result is `GateStatus.PASSED`. This is additive: `api_gateway/runs/gate_eval.py`'s `TwinConsistencyGateChecker` stays purely advisory everywhere else, unchanged.
 
 `GET /v1/releases?project_id=` lists a project's packages (oldest first), `POST /v1/releases` creates one (409 if G8 isn't passed, naming the failing checks). The dashboard's Requirements page ("Release packages" section) lists them with per-metric count deltas.
 
-**Deliberately out of scope**: drawings (empty list until FORGE-293 ships); a full structural diff between releases (a simple count delta ships instead -- no diff/comparison utility exists anywhere in `twin_core` to build a real structural diff on top of); wiring G8 into `twin.attempt_promotion`'s actual blocking gate logic (that stays the separate, already-real mechanism FORGE-290/319 built).
+**Deliberately out of scope**: drawings (empty list until 2D drawings ship); a full structural diff between releases (a simple count delta ships instead -- no diff/comparison utility exists anywhere in `twin_core` to build a real structural diff on top of); wiring G8 into `twin.attempt_promotion`'s actual blocking gate logic (that stays the separate, already-real mechanism).
 
 *Source: `api_gateway/twin/release_package.py`, `api_gateway/releases/routes.py`, `twin_core/models/engineering_entity.py`, `twin_core/consistency/gates.py`, `dashboard/src/pages/RequirementsPage.tsx`, `dashboard/src/api/endpoints/releases.ts`, `dashboard/src/hooks/use-releases.ts`*
 
-**FORGE-405 follow-up: `twin.create_baseline` (the G8 "configuration baseline fixed" check this all gates on).** `Baseline` (`twin_core/models/baseline.py`, a `BASELINE`-typed node, not an `EngineeringEntity`) was already real and built via `twin_core.transactions.baseline.create_baseline` -- but before this follow-up, nothing in `tool_registry`/`api_gateway` ever called it, so `evaluate_g8_release`'s baseline check could never actually pass on a real project. `twin.create_baseline` (`api_gateway/twin/baseline.py`) auto-discovers the project's current `Constraint`s and `EngineeringEntity`s (the only two `ControlledEntityKind`s a Baseline can pin) via the same project-scoped list calls `release_package.py` uses for its own snapshot, then atomically pins each member's current revision and advances its `authority` to `AuthorityState.BASELINED` (reusing the real optimistic-concurrency `TransactionEngine.commit` path -- a member that changed underneath the call aborts the whole baseline with no partial write). Required inputs: `project_id`, `approved_by` (non-empty list of names), `reason`; optional `name` (defaults to `"Baseline <timestamp>"`). A project with zero constraints/entities is rejected rather than producing a vacuous baseline. Multiple baselines per project are valid (each is a new pin of the then-current revisions).
+**Follow-up: `twin.create_baseline` (the G8 "configuration baseline fixed" check this all gates on).** `Baseline` (`twin_core/models/baseline.py`, a `BASELINE`-typed node, not an `EngineeringEntity`) was already real and built via `twin_core.transactions.baseline.create_baseline` -- but before this follow-up, nothing in `tool_registry`/`api_gateway` ever called it, so `evaluate_g8_release`'s baseline check could never actually pass on a real project. `twin.create_baseline` (`api_gateway/twin/baseline.py`) auto-discovers the project's current `Constraint`s and `EngineeringEntity`s (the only two `ControlledEntityKind`s a Baseline can pin) via the same project-scoped list calls `release_package.py` uses for its own snapshot, then atomically pins each member's current revision and advances its `authority` to `AuthorityState.BASELINED` (reusing the real optimistic-concurrency `TransactionEngine.commit` path -- a member that changed underneath the call aborts the whole baseline with no partial write). Required inputs: `project_id`, `approved_by` (non-empty list of names), `reason`; optional `name` (defaults to `"Baseline <timestamp>"`). A project with zero constraints/entities is rejected rather than producing a vacuous baseline. Multiple baselines per project are valid (each is a new pin of the then-current revisions).
 
 *Source: `api_gateway/twin/baseline.py`, `twin_core/transactions/baseline.py`, `twin_core/models/baseline.py`*
 
-### 2.27 Test plans: mechanical derivation from test-method requirements (FORGE-298, gap G-I2)
+### 2.27 Test plans: mechanical derivation from test-method requirements (gap G-I2)
 
-`verification_case` (an `EngineeringEntityType` already real since FORGE-45, first exercised live by FORGE-405) had no defined `metadata` convention before this ticket, unlike `release_package`/`concept_option`/`waiver`. This is its new shape, established by `twin.generate_test_plan` (`api_gateway/twin/test_plan.py`):
+`verification_case` (an `EngineeringEntityType` that was already real) had no defined `metadata` convention before this ticket, unlike `release_package`/`concept_option`/`waiver`. This is its new shape, established by `twin.generate_test_plan` (`api_gateway/twin/test_plan.py`):
 
 ```
 metadata: {
@@ -1095,7 +1095,7 @@ metadata: {
 }
 ```
 
-For every `Constraint` on a project with `verification_method == "test"` (FORGE-258/312's already-real field), `twin.generate_test_plan` mechanically derives one new `verification_case` entity from the requirement's own structured `metric`/`operator`/`limit`/`unit`/`target_node_type` fields (FORGE-259) -- pure string formatting over existing data, no new authoring/synthesis logic. This is deliberately process-generic: it works for whatever real requirements a project actually has declared `verification_method="test"`, not hardcoded to any fixed category list (the ticket's own "payload, reach, repeatability" examples are illustrative, not a closed set). Calling it twice creates a second `verification_case` per matching requirement (mirrors `release_package`'s own create-a-new-snapshot-each-call semantics).
+For every `Constraint` on a project with `verification_method == "test"` (an already-real field), `twin.generate_test_plan` mechanically derives one new `verification_case` entity from the requirement's own structured `metric`/`operator`/`limit`/`unit`/`target_node_type` fields -- pure string formatting over existing data, no new authoring/synthesis logic. This is deliberately process-generic: it works for whatever real requirements a project actually has declared `verification_method="test"`, not hardcoded to any fixed category list (the ticket's own "payload, reach, repeatability" examples are illustrative, not a closed set). Calling it twice creates a second `verification_case` per matching requirement (mirrors `release_package`'s own create-a-new-snapshot-each-call semantics).
 
 `GET /v1/testplans?project_id=` lists a project's generated entries (oldest first), `POST /v1/testplans` generates them. The dashboard's Requirements page ("Test plan" section) renders the step + acceptance value as a table.
 
@@ -1103,9 +1103,9 @@ For every `Constraint` on a project with `verification_method == "test"` (FORGE-
 
 *Source: `api_gateway/twin/test_plan.py`, `api_gateway/testplans/routes.py`, `twin_core/models/engineering_entity.py`, `twin_core/models/constraint.py`, `dashboard/src/pages/RequirementsPage.tsx`, `dashboard/src/api/endpoints/testplans.ts`, `dashboard/src/hooks/use-test-plan.ts`*
 
-### 2.28 Bring-up checklists: mechanical derivation from assembly joints (FORGE-295, gap G-H3)
+### 2.28 Bring-up checklists: mechanical derivation from assembly joints (gap G-H3)
 
-`bringup_checklist` is a new `EngineeringEntityType` -- a step-by-step assembly sequence derived from a work product's real `metadata.assembly.joints` (FORGE-271/245's `AssemblyJoint` list: `name`, `type`, `base`, `follower`, `axis`, `anchor`, `limits`). That list is flat and unordered -- there is no sequence field anywhere in this codebase -- so `twin.create_bringup_checklist` (`api_gateway/twin/bringup_checklist.py`) topologically sorts the `base`->`follower` dependency graph (a part that never appears as a `follower` is already placed; a joint becomes buildable once its `base` part is placed) into a real build order, then formats one instruction per joint. One entity holds the whole ordered checklist (not one entity per step, unlike `verification_case`'s per-requirement convention -- a checklist's steps are read together, not tracked/verified independently):
+`bringup_checklist` is a new `EngineeringEntityType` -- a step-by-step assembly sequence derived from a work product's real `metadata.assembly.joints` (the `AssemblyJoint` list: `name`, `type`, `base`, `follower`, `axis`, `anchor`, `limits`). That list is flat and unordered -- there is no sequence field anywhere in this codebase -- so `twin.create_bringup_checklist` (`api_gateway/twin/bringup_checklist.py`) topologically sorts the `base`->`follower` dependency graph (a part that never appears as a `follower` is already placed; a joint becomes buildable once its `base` part is placed) into a real build order, then formats one instruction per joint. One entity holds the whole ordered checklist (not one entity per step, unlike `verification_case`'s per-requirement convention -- a checklist's steps are read together, not tracked/verified independently):
 
 ```
 metadata: {
@@ -1126,13 +1126,13 @@ metadata: {
 
 A cyclic joint graph (some joint's `base` never becomes reachable by placing joints starting from the real root part(s)) raises a clear error rather than guessing at a partial/wrong order. Multiple independent root parts (e.g. two parallel subassemblies) are valid and supported -- that is a disconnected-but-acyclic graph, not an error.
 
-`GET /v1/bringup?work_product_id=` lists a work product's generated checklists (oldest first, filtered client-side by `metadata.work_product_id` since checklists aren't project-scoped the way test plans are -- a work product may exist before/without a project association), `POST /v1/bringup` generates one. The dashboard's Structure tab ("Bring-up checklist" panel, mirroring FORGE-273's DFM-check button placement) renders the ordered instructions as a table.
+`GET /v1/bringup?work_product_id=` lists a work product's generated checklists (oldest first, filtered client-side by `metadata.work_product_id` since checklists aren't project-scoped the way test plans are -- a work product may exist before/without a project association), `POST /v1/bringup` generates one. The dashboard's Structure tab ("Bring-up checklist" panel, mirroring the DFM-check button placement) renders the ordered instructions as a table.
 
-**Deliberately out of scope**: any 3D visualization (exploded-per-step or even a simple current-step cross-highlight) -- neither exists as reusable infrastructure in this codebase (`StructureView.tsx`'s own header comment states FORGE-261's Structure tab was "deliberately trimmed... no 3D cross-highlight"); EVT/DVT/PVT staging distinctions (one flat checklist per call, not staged variants); writing to the literal `tests/bringup.md` file in a user's `forge setup`-created project repo (a different mechanism than this Twin-graph-backed capability -- the gateway has no filesystem access pattern to that path, and this is an intentional mismatch, not a gap to bridge).
+**Deliberately out of scope**: any 3D visualization (exploded-per-step or even a simple current-step cross-highlight) -- neither exists as reusable infrastructure in this codebase (`StructureView.tsx`'s own header comment states the Structure tab was "deliberately trimmed... no 3D cross-highlight"); EVT/DVT/PVT staging distinctions (one flat checklist per call, not staged variants); writing to the literal `tests/bringup.md` file in a user's `forge setup`-created project repo (a different mechanism than this Twin-graph-backed capability -- the gateway has no filesystem access pattern to that path, and this is an intentional mismatch, not a gap to bridge).
 
 *Source: `api_gateway/twin/bringup_checklist.py`, `api_gateway/bringup/routes.py`, `twin_core/models/engineering_entity.py`, `api_gateway/twin/schemas.py` (`AssemblyJoint`)*
 
-### 2.29 Firmware scaffolds: CAN node table + header skeleton from assembly joints (FORGE-276, gap G-E3)
+### 2.29 Firmware scaffolds: CAN node table + header skeleton from assembly joints (gap G-E3)
 
 `twin.create_firmware_scaffold` (`api_gateway/twin/firmware_scaffold.py`) derives a per-joint CAN node table from the same work product `metadata.assembly.joints` section 2.28 reads, reusing its topological build order (joints are assigned a deterministic, 1-indexed CAN node ID equal to their position in that order -- a placeholder scheme, not a real hardware-specific allocation, since no target MCU or bus topology exists anywhere in this codebase to derive one from). Unlike `bringup_checklist`/`release_package`/`test_plan` (one `EngineeringEntity` holding structured metadata), this records a pair of ordinary loadable `WorkProduct`s via the generic `document_recorder` (`api_gateway/twin/document_recorder.py` -- the same facade `api_gateway/runs/fw_handlers.py`'s design-flow phase already uses for its own pinmap/firmware_source pair):
 
@@ -1141,13 +1141,13 @@ A cyclic joint graph (some joint's `base` never becomes reachable by placing joi
 
 Both are linked back to the source assembly via a `PARENT_OF` edge (`source_part_node_ids`). A cyclic joint graph raises the same `AssemblyGraphError` as section 2.28 rather than guessing at an order.
 
-`POST /v1/firmware/scaffold` (dashboard's "Firmware" panel, mirroring FORGE-295's bring-up checklist panel placement) creates one pair and returns the per-joint table for immediate display.
+`POST /v1/firmware/scaffold` (dashboard's "Firmware" panel, mirroring the bring-up checklist panel placement) creates one pair and returns the per-joint table for immediate display.
 
 **Deliberately out of scope**: real CAN bus protocol/message-format implementation (e.g. CANopen frame definitions); actual control-loop/PID logic; real GPIO/MCU-specific pin assignment beyond the CAN-ID placeholder (needs a real target-MCU selection, which doesn't exist as an input); RTOS configuration (`domain_agents/firmware`'s existing generic `configure_rtos` skill already covers this, unrelated to this joint-specific ticket); hardware-in-the-loop testing.
 
 *Source: `api_gateway/twin/firmware_scaffold.py`, `api_gateway/firmware/routes.py`, `api_gateway/twin/document_recorder.py`, `api_gateway/twin/schemas.py` (`AssemblyJoint`)*
 
-### 2.30 Items and revisions: definitions vs records (FORGE-522, FORGE-523)
+### 2.30 Items and revisions: definitions vs records
 
 The twin used to version single nodes but had no notion of "the same thing". Every run that re-authored a part created a new `cad_model` node, and the only link between generations was a `SUPERSEDES` edge added when the new node had exactly the same name as the old one. A renamed part, or any type other than geometry, got nothing: one live project held 16 `cad_model` nodes for 4 real parts.
 
@@ -1167,10 +1167,10 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `intent` | definition | `INT` | `EngineeringEntity` `intent` |
 | `stakeholder_need` | definition | `NEED` | `EngineeringEntity` `stakeholder_need` |
 | `objective` | definition | `OBJ` | `EngineeringEntity` `objective` |
-| `design_value` | definition | `VAL` | `EngineeringEntity` `design_value` (FORGE-586) |
+| `design_value` | definition | `VAL` | `EngineeringEntity` `design_value` |
 | `bom` | definition | `BOM` | `WorkProduct` `bom` (electronics BOM recorder) |
 | `component_selection` | definition | `CMP` | `BOMItem` (`twin.record_component_selection`), keyed by `role`, else manufacturer + MPN |
-| `schematic` | definition | `SCH` | `WorkProduct` `schematic`: a KiCad project's sheets (`twin.record_design_files`, FORGE-687) |
+| `schematic` | definition | `SCH` | `WorkProduct` `schematic`: a KiCad project's sheets (`twin.record_design_files`) |
 | `pcb_layout` | definition | `PCB` | `WorkProduct` `pcb_layout`: a KiCad board (`twin.record_design_files`) |
 | `gerber` | definition | `GBR` | `WorkProduct` `gerber`: a board's gerber and drill set (`twin.record_design_files`) |
 | `pick_and_place` | definition | `PNP` | `WorkProduct` `pick_and_place`: a board's placement file (`twin.record_design_files`) |
@@ -1182,7 +1182,7 @@ Every twin type is one of three kinds. The code-level registry is `twin_core/ite
 | `approval` | record | | approvals service |
 | `session` | record | | `agent_sessions` (Postgres) |
 | `run` | record | | runs / design-flow workflow |
-| `prd` | definition | `PRD` | `WorkProduct` `prd`: the prd's prose only (background, scope, non-requirements), `twin.record_document` with `document_type='prd'` (FORGE-528) |
+| `prd` | definition | `PRD` | `WorkProduct` `prd`: the prd's prose only (background, scope, non-requirements), `twin.record_document` with `document_type='prd'` |
 | `prd_view` | derived | | rendered on read by `GET /v1/twin/projects/{id}/prd`: the prd prose plus intent, needs, objectives and the current constraint set (below) |
 
 A type not in the table keeps its earlier behaviour (one node per write, no item) until it is classified. `cad_model` and `assembly` share a family, so a part that gains parts continues its own history as an assembly.
@@ -1193,9 +1193,9 @@ An `Item` node (`NodeType.ITEM`, `twin_core/models/item.py`) carries `key`, `ite
 
 | Edge | Direction | Metadata |
 |------|-----------|----------|
-| `REVISION_OF` | revision node -> Item | `revision`, `change_reason`, `run_id`, `author`, `created_at`; `adopted: true` for a pre-existing node folded in; FORGE-525: `status`, and for a run's drafts `change_set`, `phase`, `base_revision`, `prior_node_id` (below) |
+| `REVISION_OF` | revision node -> Item | `revision`, `change_reason`, `run_id`, `author`, `created_at`; `adopted: true` for a pre-existing node folded in; also `status`, and for a run's drafts `change_set`, `phase`, `base_revision`, `prior_node_id` (below) |
 | `HEAD` | Item -> current revision node | none; at most one per item, moved on every revision outside a run and on a gate approval inside one |
-| `SUPERSEDES` | revision n+1 -> revision n | unchanged meaning; staleness propagation (FORGE-314) still follows it |
+| `SUPERSEDES` | revision n+1 -> revision n | unchanged meaning; staleness propagation still follows it |
 
 Edges and properties, deliberately both. The edges keep history traversable in Cypher and let a node written before items existed join an item without touching its properties. `head_revision` / `head_node_id` on the Item mirror `HEAD`, so a head read is one node fetch (the same denormalized-mirror precedent as `Baseline.includes`). History is always read from the `REVISION_OF` edges. A revision created through the new path is also stamped at creation with `metadata.item_key`, `item_revision`, `item_type` and, when present, `change_reason`, `run_id`, `revision_author`, so a node read on its own says which revision it is.
 
@@ -1205,7 +1205,7 @@ A reference is `KEY@n` for one revision, or the bare `KEY` for the current head.
 
 No caller has to do anything new. The recorder resolves the item before any write (so a bad reference creates nothing), in this order:
 
-0. Inside a design-flow phase that declares deliverable slots of the write's type (FORGE-524), and with neither `item_key` nor `supersedes` given: the matching slot's key, used as if it were `item_key`. The slots ride on the MCP call context like `run_id`; see [deliverable slots](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys-forge-524) for how a write is matched to a slot. A write that matches none is recorded as its own item and stamped `metadata.undeclared_item: true`, `undeclared_phase` and `declared_item_keys`; a write that matched carries `metadata.flow_slot_key`.
+0. Inside a design-flow phase that declares deliverable slots of the write's type, and with neither `item_key` nor `supersedes` given: the matching slot's key, used as if it were `item_key`. The slots ride on the MCP call context like `run_id`; see [deliverable slots](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys) for how a write is matched to a slot. A write that matches none is recorded as its own item and stamped `metadata.undeclared_item: true`, `undeclared_phase` and `declared_item_keys`; a write that matched carries `metadata.flow_slot_key`.
 
 1. `item_key`, if given. A bare key revises that item's head (or names a new item if no item has that key yet). `KEY@n` additionally asserts the head is still `n`; otherwise the call fails with "`KEY` is at @m, not @n" and nothing is written. An unknown `KEY@n` is an error.
 2. `supersedes`, a node id: the item that node belongs to.
@@ -1214,17 +1214,17 @@ No caller has to do anything new. The recorder resolves the item before any writ
 
 Nothing found means a new item at revision 1. An unscoped write (no `project_id`) with neither `item_key` nor `supersedes` gets no item, the same rule the geometry `SUPERSEDES` chain always followed: with no project there is no identity to match on. Author and run come from the MCP call context (`actor_id`, and `run_id` when a design-flow run makes the call; `run_id` is null outside a run). Every definition write tool returns `item_key`, `revision` and `item_ref` (`KEY@n`); a write inside a run also returns `revision_status: "draft"`. Revision numbers are `max(last_revision, head_revision) + 1`, so a number is never handed out twice, drafts included.
 
-Reads: `GET /v1/twin/items?project_id=` lists items at their heads; `GET /v1/twin/items/{key}/revisions` returns one item's history, oldest first; the MCP tool `twin.item_history` returns the same by key or by any revision's node id. The response also has a `lessons` list: every `rejected` revision as "already tried `KEY@n`, failed because ..." (its `status_reason`), so a later run does not repeat it (FORGE-530). `GET /v1/twin/nodes` lists every node except unapproved drafts (below), and `GET /v1/twin/relationships` omits `REVISION_OF` / `HEAD` because their Item endpoints are not in the node list.
+Reads: `GET /v1/twin/items?project_id=` lists items at their heads; `GET /v1/twin/items/{key}/revisions` returns one item's history, oldest first; the MCP tool `twin.item_history` returns the same by key or by any revision's node id. The response also has a `lessons` list: every `rejected` revision as "already tried `KEY@n`, failed because ..." (its `status_reason`), so a later run does not repeat it. `GET /v1/twin/nodes` lists every node except unapproved drafts (below), and `GET /v1/twin/relationships` omits `REVISION_OF` / `HEAD` because their Item endpoints are not in the node list.
 
-Concurrent writes: two writes to one item can both plan revision n+1. Before linking, each write re-reads the item's head. The one that finds the head already moved is renumbered to the next free number and supersedes the actual head, and its node's `item_revision` stamp is corrected (`item_revision_race` logs the planned and assigned numbers). A write pinned with `KEY@n` is refused instead, with the same stale-revision error as at planning time; its node stays saved but is not a revision of the item. The re-read and the link are not one transaction, so this narrows the window rather than closing it; inside a run the base check at approval (FORGE-525, below) catches what it misses.
+Concurrent writes: two writes to one item can both plan revision n+1. Before linking, each write re-reads the item's head. The one that finds the head already moved is renumbered to the next free number and supersedes the actual head, and its node's `item_revision` stamp is corrected (`item_revision_race` logs the planned and assigned numbers). A write pinned with `KEY@n` is refused instead, with the same stale-revision error as at planning time; its node stays saved but is not a revision of the item. The re-read and the link are not one transaction, so this narrows the window rather than closing it; inside a run the base check at approval (below) catches what it misses.
 
-#### Drafts, approval and closed drafts (FORGE-525)
+#### Drafts, approval and closed drafts
 
 A definition written inside a design-flow run is a **draft** in that run's change set. The node is created as usual (stamped `metadata.change_set = <run id>` at creation) and linked by `REVISION_OF`, but `HEAD` does not move and no `SUPERSEDES` is added, so for everyone outside the run the head is still current. The run's gate decides what it becomes. Each `REVISION_OF` edge carries a `status`:
 
 | Status | Meaning | Head |
 |--------|---------|------|
-| `committed` | written outside any run (the FORGE-523 behaviour, unchanged) | moved immediately |
+| `committed` | written outside any run (the behaviour before drafts existed, unchanged) | moved immediately |
 | `draft` | written inside run `change_set`, in phase `phase`, on base revision `base_revision` | not moved |
 | `approved` | committed by the run's gate: `gate`, `decided_by`, `approved_at`; `change_reason` is the gate's reason (the agent's own is kept as `draft_change_reason`) | moved to the run's latest draft; `SUPERSEDES` added to what it replaced |
 | `rejected` | closed by a gate rejection (`status_reason`, `closed_at`) | never moved |
@@ -1238,13 +1238,13 @@ Who sees what:
 - **Everyone else** (the dashboard, other runs, `GET /v1/twin/items`, `GET /v1/twin/items/{key}/revisions` by default) sees approved heads only. Another run's open drafts are not in a history; `GET /v1/twin/nodes` leaves out open, rejected and abandoned drafts unless `include_drafts=true`; an item with no head yet is not listed. `GET /v1/twin/items/{key}/revisions?run_id=` reads as that run, drafts included.
 - **Closed drafts** (rejected, abandoned) stay in every item's history with their status and reason, and never become current.
 
-Approval is atomic and optimistic (spec sections 40 and 41): each item's head must still be the base the run drafted on, or the whole commit is refused with `PATCH_CONFLICT` and nothing moves. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate-forge-525) for the gate side.
+Approval is atomic and optimistic (spec sections 40 and 41): each item's head must still be the base the run drafted on, or the whole commit is refused with `PATCH_CONFLICT` and nothing moves. See [the run's change set](architecture/design-flow-harness.md#a-runs-change-set-drafts-until-the-gate) for the gate side.
 
-Limits of this first slice: the old revisions of a constraint set keep their `Constraint` nodes, so the constraint engine still evaluates them; the project-wide migration of today's unlinked duplicates is FORGE-529 ([below](#migrating-legacy-nodes-forge-529)).
+Limits of this first slice: the old revisions of a constraint set keep their `Constraint` nodes, so the constraint engine still evaluates them; the project-wide migration of today's unlinked duplicates is a separate migration ([below](#migrating-legacy-nodes)).
 
 Observability: `item_revision_created` / `item_revision_failed` log events, the `metaforge_twin_item_revision_total{item_type, outcome, resolved_by}` counter, and the `TwinItemRevisionLinkFailures` alert. A failed link never fails the write (the node already exists, and failing would invite a retry that duplicates it); the result carries `item_warning` instead.
 
-#### One home for requirements (FORGE-528)
+#### One home for requirements
 
 Requirements used to be stored three times: as a table in a free-standing `prd` document, as the `constraint_set`, and restated in the requirements phase's "verifiable requirements" decision. The three drifted apart. Now the **constraint set item is the only place requirement values live**, and everything else points at it by `KEY@n`:
 
@@ -1267,13 +1267,13 @@ Observability: `prd_rendered` and `prd_prose_recorded` / `prd_stray_requirement_
 
 *Source: `twin_core/items/registry.py`, `twin_core/items/service.py`, `twin_core/items/change_sets.py`, `twin_core/models/item.py`, `api_gateway/twin/item_revisions.py`, `api_gateway/twin/item_routes.py`, `api_gateway/runs/change_sets.py`, `orchestrator/design_flow/slots.py`, `api_gateway/twin/requirements_home.py`, `api_gateway/twin/prd_routes.py`*
 
-### 2.31 Baselines over items, the current view and revision compare (FORGE-526)
+### 2.31 Baselines over items, the current view and revision compare
 
 Items (section 2.30) say what each definition is now and what it was. This section is how a reader sees that without wading through every node a run ever wrote: by default the project shows its **current items only**; history, compare and baselines are opt-in views.
 
 #### Baselines pin item revisions
 
-The existing `Baseline` node (FORGE-51; `twin.create_baseline` is described in section 2.26) gains item pins rather than a parallel concept:
+The existing `Baseline` node (`twin.create_baseline` is described in section 2.26) gains item pins rather than a parallel concept:
 
 | Field | Meaning |
 |-------|---------|
@@ -1305,11 +1305,11 @@ Two paths create a baseline, and neither needs a new step from a user or an agen
 
 The item diff returns:
 
-- `geometry`: bounding box, volume and mass for `KEY@a` and `KEY@b` and their deltas. When the gateway's geometry differ is configured (FORGE-301, a real `freecad.describe_step_file` on both STEP files) it is called with the two revision nodes (it now takes an explicit `previous_work_product_id`); otherwise, or when that call fails, the measurements each revision recorded at commit (`metadata.geometry_features.properties`) are compared. `source` says which (`describe_step_file` or `recorded`). Mass is the recorded mass, else volume times the density of the recorded material when that material is known (`mass_source` says so); it is never guessed.
+- `geometry`: bounding box, volume and mass for `KEY@a` and `KEY@b` and their deltas. When the gateway's geometry differ is configured (a real `freecad.describe_step_file` on both STEP files) it is called with the two revision nodes (it now takes an explicit `previous_work_product_id`); otherwise, or when that call fails, the measurements each revision recorded at commit (`metadata.geometry_features.properties`) are compared. `source` says which (`describe_step_file` or `recorded`). Mass is the recorded mass, else volume times the density of the recorded material when that material is known (`mass_source` says so); it is never guessed.
 - `parameters`: generation parameters that changed, were added or were removed.
 - `requirements`: for a constraint set, each constraint matched by name, with its value (`operator limit unit`, else its expression) and severity before and after.
 - `fields`: other top-level scalar fields that differ (statement, title, part number, quantity), so intent, needs and BOM rows compare too.
-- `dependents`: records and baselines still pinned to `KEY@a` (an edge into that revision node, or a record whose `analysed_geometry` pin (FORGE-532) or `source_cad_model_id` names it). These are what go out of date once `b` is current.
+- `dependents`: records and baselines still pinned to `KEY@a` (an edge into that revision node, or a record whose `analysed_geometry` pin or `source_cad_model_id` names it). These are what go out of date once `b` is current.
 
 #### The current view
 
@@ -1317,7 +1317,7 @@ The item diff returns:
 
 - `items`: one row per item at its current revision: `key`, `ref` (`KEY@n`), `revision_status`, `validation_status` (from the project's linked work product for that revision: `valid`, `warning`, `error`, `unknown`), `run_id` and `gate_id` that produced it, `revision_count`, `evidence_state` and `drafts` (the open drafts of any run, for the dashboard's Working toggle). An item with drafts only has a row with no revision; it is not counted. An item that never reached a head and has no open draft (every revision rejected or abandoned) has no row; it stays in its history.
 - `groups`: current items grouped by type.
-- `records`: decisions, simulation results and evidence, listed as they are (records are never revised). A simulation result or evidence record whose analysed revision (its `depends_on_items` pins and `DEPENDS_ON` revision-pin edges, FORGE-527; a simulation result's `analysed_geometry` pin, FORGE-532; or any other edge to a revision node) is no longer current, and which names no current revision of that item, is `out_of_date`. The record's own FORGE-527 `staleness` wins when set: `revalidated` keeps it current, `stale`, `invalid` and `superseded` mark it out of date; the row carries `staleness` too. `evidence_state` on an item row is `current`, `out_of_date` or `none` accordingly.
+- `records`: decisions, simulation results and evidence, listed as they are (records are never revised). A simulation result or evidence record whose analysed revision (its `depends_on_items` pins and `DEPENDS_ON` revision-pin edges; a simulation result's `analysed_geometry` pin; or any other edge to a revision node) is no longer current, and which names no current revision of that item, is `out_of_date`. The record's own `staleness` wins when set: `revalidated` keeps it current, `stale`, `invalid` and `superseded` mark it out of date; the row carries `staleness` too. `evidence_state` on an item row is `current`, `out_of_date` or `none` accordingly.
 - `other`: linked work products that are neither a revision of an item nor a record (unclassified types such as a pinmap, derived views such as the PRD, and unsuperseded definitions written before items existed).
 - `counts` and `readiness`: computed over current items plus `other`, never over every node. Readiness is the share whose validation status is `valid`. `superseded_revisions` counts what the default view hides.
 
@@ -1327,7 +1327,7 @@ Observability: `item_baseline_created`, `item_baseline_exists`, `item_baseline_s
 
 ---
 
-### 2.31 Records pinned to revisions and stale evidence (FORGE-527) {#records-pinned-to-revisions-forge-527}
+### 2.31 Records pinned to revisions and stale evidence {#records-pinned-to-revisions}
 
 A record (section 2.30) is only valid against the definition revisions it was produced from (spec sections 20, 21 and 54). Each record now says which, and says when one of them has moved on.
 
@@ -1337,7 +1337,7 @@ When `twin.record_document` writes a `simulation_result`, `twin.record_decision`
 
 | Record | Pinned to |
 |--------|-----------|
-| `simulation_result` | first the `analysed_geometry_node_id` (FORGE-532, the node the analysis meshed and solved; its `analysed_geometry` block also gains `item_ref`, `item_key` and `item_revision`), then each `source_part_node_ids` node (and `metadata.source_cad_model_id`). Constraint sets only when `depends_on` names them: a result's numbers do not depend on requirement values, so a requirement edit does not stale it unless it verifies those requirements |
+| `simulation_result` | first the `analysed_geometry_node_id` (the node the analysis meshed and solved; its `analysed_geometry` block also gains `item_ref`, `item_key` and `item_revision`), then each `source_part_node_ids` node (and `metadata.source_cad_model_id`). Constraint sets only when `depends_on` names them: a result's numbers do not depend on requirement values, so a requirement edit does not stale it unless it verifies those requirements |
 | `evidence` | each `valid_against` entry of kind `work_product`, plus every project `constraint_set` head |
 | `design_decision` | each `parent_refs` node that is an item revision |
 
@@ -1346,9 +1346,9 @@ A node is pinned at the revision it is (`item_for_node`), so a simulation of `CA
 Stored twice, for the same reason as items:
 
 - `metadata.depends_on_items` on the record, `[{item_key, revision, item_ref, item_type, node_id}]`, and `metadata.staleness`, so the record read on its own answers "what was this for, and is it still current".
-- one `DEPENDS_ON` edge per pin, record -> the pinned revision node, with the `item_ref` and `metadata.kind = "revision_pin"`, or `"decision_basis"` for a decision (FORGE-528's name for the same edge; the staleness walk follows both). This is what makes invalidation dependency-directed and lets Cypher traverse it.
+- one `DEPENDS_ON` edge per pin, record -> the pinned revision node, with the `item_ref` and `metadata.kind = "revision_pin"`, or `"decision_basis"` for a decision (the same edge under another name; the staleness walk follows both). This is what makes invalidation dependency-directed and lets Cypher traverse it.
 
-A decision has one `depends_on` argument and one set of edges: its explicit `depends_on` refs (FORGE-528, also listed in the markdown's "Depends on" line) and any `parent_refs` that are item revisions are resolved by the same resolver, each becomes one `decision_basis` edge, and `metadata.depends_on` lists them all as `KEY@n`.
+A decision has one `depends_on` argument and one set of edges: its explicit `depends_on` refs (also listed in the markdown's "Depends on" line) and any `parent_refs` that are item revisions are resolved by the same resolver, each becomes one `decision_basis` edge, and `metadata.depends_on` lists them all as `KEY@n`.
 
 The record tools return `depends_on` (the `KEY@n` refs), `staleness` and `superseded_records`.
 
@@ -1373,21 +1373,21 @@ A record is never deleted or hidden; only the status changes, and the status wri
 - **A draft** moves no head, so it stales nothing. A re-run recorded on an open draft supersedes nothing until the gate approves it.
 - **A rejected or abandoned draft** (`close_change_set`): records pinned to it become `invalid`; records on the unchanged head are untouched.
 
-Only records with a pin edge to one of the changed item's revisions are visited (spec section 21): a new bracket revision never touches the leg's analysis. FORGE-314's `StalenessEngine.propagate` still runs alongside for constraints and engineering entities pinned through `metadata.depends_on`.
+Only records with a pin edge to one of the changed item's revisions are visited (spec section 21): a new bracket revision never touches the leg's analysis. `StalenessEngine.propagate` still runs alongside for constraints and engineering entities pinned through `metadata.depends_on`.
 
-Gates read the same flag; see [stale evidence at the gate](architecture/design-flow-harness.md#stale-evidence-at-the-gate-forge-527). `GET /v1/twin/nodes/{id}` returns `dependsOn` (`[{itemKey, revision, itemRef, itemType, nodeId}]`) and `staleness` (`{status, reason, staleFor, supersededBy}`) for a record; both are null for a definition.
+Gates read the same flag; see [stale evidence at the gate](architecture/design-flow-harness.md#stale-evidence-at-the-gate). `GET /v1/twin/nodes/{id}` returns `dependsOn` (`[{itemKey, revision, itemRef, itemType, nodeId}]`) and `staleness` (`{status, reason, staleFor, supersededBy}`) for a record; both are null for a definition.
 
 Observability: `record_pinned`, `record_superseded`, `records_marked_stale`, `records_marked_invalid`, `record_pin_edge_failed` and `record_staleness_failed` log events; the `metaforge_twin_record_staleness_total{record_type, status}` counter (`stale`, `superseded`, `invalid`, `revalidated`, plus `pin_failed` and `propagation_failed`); the `TwinRecordStalenessFailures` alert. A failure after the record or the head write is saved is logged and counted, never raised.
 
-Limits: records written before FORGE-527 carry no pins and read as `current`; a record about a record (a decision citing evidence) is not pinned through it.
+Limits: records written before pinning existed carry no pins and read as `current`; a record about a record (a decision citing evidence) is not pinned through it.
 
 *Source: `twin_core/consistency/record_pins.py`, `api_gateway/twin/record_pins.py`, `api_gateway/runs/analysis_constraints.py`, `api_gateway/runs/gate_eval.py`*
 
 ---
 
-### 2.33 Migrating legacy nodes into items (FORGE-529) {#migrating-legacy-nodes-forge-529}
+### 2.33 Migrating legacy nodes into items {#migrating-legacy-nodes}
 
-A project written before items existed (FORGE-523) holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
+A project written before items existed holds unlinked copies: the live shelf project had 16 `cad_model` nodes for 3 parts and 1 assembly, 8 constraint sets and 14 phase-summary decisions. The migration folds them into items and revisions. It is a dry run first, it applies only a plan someone reviewed, and it never deletes anything.
 
 #### Dry run, then apply
 
@@ -1413,7 +1413,7 @@ Per definition type (`intent`, `stakeholder_need`, `objective`, `prd`, `constrai
 |------|--------|
 | `existing_item` | a node already a revision stays in its item; existing items anchor the groups below |
 | `supersedes` | nodes joined by a `SUPERSEDES` edge |
-| `flow_slot` | a node carrying its run and phase (`metadata.run_id` or `change_set`, and `phase`) lands on the slot key that run's flow declared for that phase ([FORGE-524](architecture/design-flow-harness.md#deliverable-slots-carry-item-keys-forge-524)) |
+| `flow_slot` | a node carrying its run and phase (`metadata.run_id` or `change_set`, and `phase`) lands on the slot key that run's flow declared for that phase ((architecture/design-flow-harness.md#deliverable-slots-carry-item-keys)) |
 | `same_name` | the same normalised name: case, punctuation, dimensions (`220 x 120 x 12 mm`) and version words ignored, or a name that derives an existing item's key |
 | `name_similarity` | one name's meaningful words contained in the other's (`Left PETG Gusset Bracket` and `Left Vertical Triangular PETG Gusset Bracket - 220 x 120 x 12 mm`), at least 75%, **and** a jaccard overlap of at least 0.5, so a short name merely contained in a long unrelated one (`wall_shelf_board` in `Wall Shelf Assembly - plywood board with two PETG brackets`, jaccard 0.38) is not grouped. Never across opposite side words (`left` / `right`, `top` / `bottom`, ...). See [geometry evidence](#migration-geometry-evidence) below |
 | `one_per_project` | intent, constraint set, prd and bom: a project has one, so their remaining groups fold into one item (unless the project already has two or more items of that type) |
@@ -1443,7 +1443,7 @@ Applying writes edges only on definition nodes, which are never edited: `REVISIO
 #### Records
 
 * A `design_decision` titled `"<Phase> - phase summary"` (hyphen, en dash or em dash) gets `metadata.run_summary = true` and `record_kind = "run_summary"`. It stays in the twin; decision lists (the project brief, the `decisions` brief section, `GET /v1/decisions`) leave it out.
-* A `simulation_result` whose analysed geometry resolves (FORGE-532's `analysed_geometry` pin, else a `DERIVES_FROM` / `PARENT_OF` / `VALIDATES` edge to a geometry revision) is pinned the [FORGE-527](#records-pinned-to-revisions-forge-527) way: `metadata.depends_on_items`, a `DEPENDS_ON` edge with `kind: revision_pin`, and `staleness` `stale` (with `staleness_reason`, `stale_for`) when that revision is not its item's head, else `current`. From then on FORGE-527 keeps the status up to date. A result already pinned is left alone, unless this plan moves its item's head past the pinned revision.
+* A `simulation_result` whose analysed geometry resolves (its `analysed_geometry` pin, else a `DERIVES_FROM` / `PARENT_OF` / `VALIDATES` edge to a geometry revision) is pinned the [same](#records-pinned-to-revisions) way: `metadata.depends_on_items`, a `DEPENDS_ON` edge with `kind: revision_pin`, and `staleness` `stale` (with `staleness_reason`, `stale_for`) when that revision is not its item's head, else `current`. From then on revision pinning keeps the status up to date. A result already pinned is left alone, unless this plan moves its item's head past the pinned revision.
 
 Idempotent: after an apply every definition node is a revision and every record has its flag or pin, so the next dry run is empty.
 
@@ -1465,21 +1465,21 @@ Edges are directed relationships between nodes. Each edge type has defined sourc
 
 | Edge Type | Source -> Target | Description |
 |-----------|-----------------|-------------|
-| `DEPENDS_ON` | WorkProduct -> WorkProduct, or record -> revision node | WorkProduct A requires WorkProduct B (e.g., PCB depends on schematic). FORGE-527: with `metadata.kind = "revision_pin"`, a record (`simulation_result`, `design_decision`, `evidence`) is pinned to the item revision `metadata.item_ref` (section 2.31) |
+| `DEPENDS_ON` | WorkProduct -> WorkProduct, or record -> revision node | WorkProduct A requires WorkProduct B (e.g., PCB depends on schematic). With `metadata.kind = "revision_pin"`, a record (`simulation_result`, `design_decision`, `evidence`) is pinned to the item revision `metadata.item_ref` (section 2.31) |
 | `IMPLEMENTS` | WorkProduct -> WorkProduct | WorkProduct A implements the spec defined in WorkProduct B |
 | `VALIDATES` | WorkProduct -> WorkProduct | WorkProduct A (test result) validates WorkProduct B (design) |
-| `CONTAINS` | WorkProduct -> WorkProduct, or HierarchyNode -> HierarchyNode | Hierarchical composition. FORGE-260: `metadata` carries `{quantity, placement}` when nesting one product-hierarchy position inside another |
+| `CONTAINS` | WorkProduct -> WorkProduct, or HierarchyNode -> HierarchyNode | Hierarchical composition. `metadata` carries `{quantity, placement}` when nesting one product-hierarchy position inside another |
 | `VERSIONED_BY` | WorkProduct -> Version | Links an work_product to the version that last modified it |
 | `CONSTRAINED_BY` | WorkProduct -> Constraint | Constraint applies to this work_product |
 | `PRODUCED_BY` | WorkProduct -> Agent | WorkProduct was produced or modified by this agent |
 | `USES_COMPONENT` | WorkProduct -> Component | WorkProduct references this component (e.g., BOM uses resistor) |
-| `PARENT_OF` | Version -> Version (also used for WorkProduct -> WorkProduct provenance, e.g. a robot_description's source cad_model parts) | Version lineage / source-artifact provenance. FORGE-511: an assembly `cad_model` is `parent_of` each part `cad_model` it contains (`twin.commit_geometry` with `parts`); the assembly's `metadata.parts` is `[{node_id, name, material, position_bbox_mm}]` |
+| `PARENT_OF` | Version -> Version (also used for WorkProduct -> WorkProduct provenance, e.g. a robot_description's source cad_model parts) | Version lineage / source-artifact provenance. An assembly `cad_model` is `parent_of` each part `cad_model` it contains (`twin.commit_geometry` with `parts`); the assembly's `metadata.parts` is `[{node_id, name, material, position_bbox_mm}]` |
 | `CONFLICTS_WITH` | Constraint -> Constraint | Two constraints that cannot both be satisfied |
-| `REALIZED_BY` | HierarchyNode -> WorkProduct | FORGE-260: a hierarchy position's real cad_model/robot_description geometry |
-| `INSTANCE_OF` | HierarchyNode -> BOMItem, or DeviceInstance -> WorkProduct | FORGE-260: a COTS leaf position is an instance of one canonical component record. FORGE-321: a manufactured unit is an instance of the design revision it was built from |
-| `MEASURED_BY` | DeviceInstance -> WorkProduct | FORGE-321: a real-world measurement from this unit was recorded against an interface quantity embedded in this system_architecture WorkProduct |
-| `REVISION_OF` | revision node -> Item | FORGE-523: this node is revision `metadata.revision` of the item (section 2.30); FORGE-525: `metadata.status` is `committed`, `draft`, `approved`, `rejected` or `abandoned` |
-| `HEAD` | Item -> revision node | FORGE-523: the item's current revision; exactly one per item |
+| `REALIZED_BY` | HierarchyNode -> WorkProduct | A hierarchy position's real cad_model/robot_description geometry |
+| `INSTANCE_OF` | HierarchyNode -> BOMItem, or DeviceInstance -> WorkProduct | A COTS leaf position is an instance of one canonical component record. A manufactured unit is an instance of the design revision it was built from |
+| `MEASURED_BY` | DeviceInstance -> WorkProduct | A real-world measurement from this unit was recorded against an interface quantity embedded in this system_architecture WorkProduct |
+| `REVISION_OF` | revision node -> Item | This node is revision `metadata.revision` of the item (section 2.30); `metadata.status` is `committed`, `draft`, `approved`, `rejected` or `abandoned` |
+| `HEAD` | Item -> revision node | The item's current revision; exactly one per item |
 
 ### Typed Edge Models
 
@@ -1798,7 +1798,7 @@ class MergeConflict(Exception):
 
 Conflicts must be resolved manually (by a human or an agent with explicit instructions). Auto-merge is only performed for non-conflicting changes.
 
-### Two VersionEngine backends: graph for semantics, git for working history (MET-630)
+### Two VersionEngine backends: graph for semantics, git for working history
 
 `InMemoryVersionEngine` above reimplements a commit DAG, branch pointers, and three-way merge inside the graph — and since it only ever tracks opaque `content_hash` strings, it can never say more than "this work product's content changed." For CAD work products in particular, that means it can never show what changed.
 
@@ -1809,11 +1809,11 @@ Conflicts must be resolved manually (by a human or an agent with explicit instru
 
 Selection is per-project: `GitRepoRegistry` (`api_gateway/twin/git_repo_registry.py`) lazily constructs one `GitVersionEngine` per `project_id`, rooted under `METAFORGE_VERSION_GIT_ROOT/projects/<project_id>/`, so independent projects never share git history. `InMemoryVersionEngine` remains the default for graph-only/ephemeral use (dev, tests); a project only gets a real git repo when `METAFORGE_VERSION_GIT_ROOT` is configured.
 
-> **Known gap**: MetaForge projects don't yet have a dedicated filesystem workspace (a project is still Postgres metadata + a `project_id` graph attribute) — `GitRepoRegistry` partitions by `project_id` under one configured root as an interim measure, not a true per-project workspace directory (tracked as a MET-630 follow-up).
+> **Known gap**: MetaForge projects don't yet have a dedicated filesystem workspace (a project is still Postgres metadata + a `project_id` graph attribute) — `GitRepoRegistry` partitions by `project_id` under one configured root as an interim measure, not a true per-project workspace directory.
 
 A commit's `paths` argument gives a work product a *stable* location (e.g. `mechanical/cad_src/bracket.py`, derived from the part's name) rather than the default `work_products/<id>`. This matters because `geometry_recorder.py` gives every regeneration a fresh graph node id — without a stable path, each regeneration would write to a brand-new git path instead of evolving one file, and `git log`/`git diff` on "this part's history" would only ever show a single commit. `geometry_recorder.py` always passes a name-derived path for this reason.
 
-### Regenerating geometry: parameter view/edit → propose → apply (MET-630)
+### Regenerating geometry: parameter view/edit → propose → apply
 
 Closing the loop from "a parameter is stored in the graph" to "a human can change it and see it take effect":
 
@@ -1826,29 +1826,29 @@ Closing the loop from "a parameter is stored in the graph" to "a human can chang
 
   Either way, the result commits through the same `geometry_recorder` path — so the new node gets git-versioned script history, `geometry_features` metadata, *and* a `SUPERSEDES` link to the part it replaces (below).
 
-### Regeneration history in the graph: SUPERSEDES chains (MET-630)
+### Regeneration history in the graph: SUPERSEDES chains
 
 Every `commit_geometry` call — not just ones going through the apply-on-approve path — links successive generations of the *same named part* (matched by `project_id` + `name`) via a `SUPERSEDES` edge (new → old), mirroring `TwinAPI.ingest_datasheet`'s existing pattern for datasheet revisions. This applies to both the `CAD_MODEL` node and its `CAD_SOURCE_SCRIPT` node independently. Without `project_id`, there's no reliable identity to match on, so unscoped commits are never linked.
 
-### Editing a parametric feature's own parameters (FORGE-270, gap G-D2)
+### Editing a parametric feature's own parameters (gap G-D2)
 
-The `regenerate_geometry`/`script_source` flow above (MET-630) is one real editing path -- edit a *script*, propose, apply. FORGE-269's feature library (§2.19-adjacent, `generate_parametric_feature`) generates from *typed macro parameters* instead of a script, so "edit" means something more specific there: call `generate_parametric_feature` again with the SAME `name` and a CHANGED parameter value. `generate_cad_ir` (the skill every feature ultimately lowers through) gained a `parameters: dict[str, Any] | None` field, threaded straight into `twin.commit_geometry`'s own `parameters` argument (real, already part of `geometry_recorder.py`'s signature since MET-630, unused by any caller before this ticket) -- landing in the new node's `metadata.geometry_features.parameters`, alongside a `feature_type` key so a later caller knows which macro produced it. The existing content-hash dedup + same-name `SUPERSEDES` matching documented just above does the rest: no new versioning mechanism, no ECT.
+The `regenerate_geometry`/`script_source` flow above is one real editing path -- edit a *script*, propose, apply. The feature library (§2.19-adjacent, `generate_parametric_feature`) generates from *typed macro parameters* instead of a script, so "edit" means something more specific there: call `generate_parametric_feature` again with the SAME `name` and a CHANGED parameter value. `generate_cad_ir` (the skill every feature ultimately lowers through) gained a `parameters: dict[str, Any] | None` field, threaded straight into `twin.commit_geometry`'s own `parameters` argument (real, already part of `geometry_recorder.py`'s signature unused by any caller before this ticket) -- landing in the new node's `metadata.geometry_features.parameters`, alongside a `feature_type` key so a later caller knows which macro produced it. The existing content-hash dedup + same-name `SUPERSEDES` matching documented just above does the rest: no new versioning mechanism, no ECT.
 
-`GET /v1/features/{work_product_id}/diff` (`api_gateway/features/routes.py`) walks that one `SUPERSEDES` edge back and diffs the two nodes' `geometry_features.parameters`, reusing `api_gateway.twin.version_schemas.FieldDelta` for the diff shape (the same one `VersionService.diff` already uses for per-node `_revisions` diffs -- a different, per-node mechanism, not conflated with this cross-node one) rather than inventing a second. A node with no prior version -- the common case, since most work products are generated once -- answers `200` with `hasPreviousVersion: false` and an empty diff rather than a `404` (FORGE-709), matching `/v1/twin/nodes/{id}/versions`, which reports an empty history the same way; the dashboard asks for this on every node selection, so the ordinary answer must not read as an error. A `404` now means only that the node itself is unknown. The dashboard's Twin Viewer "History" tab renders it (`FeatureVersionSection`, `dashboard/src/pages/TwinViewerPage.tsx`) right alongside the existing per-node revision history, when one exists.
+`GET /v1/features/{work_product_id}/diff` (`api_gateway/features/routes.py`) walks that one `SUPERSEDES` edge back and diffs the two nodes' `geometry_features.parameters`, reusing `api_gateway.twin.version_schemas.FieldDelta` for the diff shape (the same one `VersionService.diff` already uses for per-node `_revisions` diffs -- a different, per-node mechanism, not conflated with this cross-node one) rather than inventing a second. A node with no prior version -- the common case, since most work products are generated once -- answers `200` with `hasPreviousVersion: false` and an empty diff rather than a `404`, matching `/v1/twin/nodes/{id}/versions`, which reports an empty history the same way; the dashboard asks for this on every node selection, so the ordinary answer must not read as an error. A `404` now means only that the node itself is unknown. The dashboard's Twin Viewer "History" tab renders it (`FeatureVersionSection`, `dashboard/src/pages/TwinViewerPage.tsx`) right alongside the existing per-node revision history, when one exists.
 
-**Deliberately out of scope**: widening `ControlledEntityKind` (`twin_core/transactions/patch.py`) to cover `work_product` so an edit could go through a real ECT proposal/approval cycle instead of an immediate re-commit -- the same nontrivial, separate transaction-engine widening FORGE-320 already deferred; a "propose, then apply" gate for macro-parameter edits (unlike script edits) would need it. Reviving `twin_core.versioning`'s branch/git `VersionEngine` for this -- confirmed zero consumers outside its own tests, a much larger lift than this ticket's real, minimal gap needed.
+**Deliberately out of scope**: widening `ControlledEntityKind` (`twin_core/transactions/patch.py`) to cover `work_product` so an edit could go through a real ECT proposal/approval cycle instead of an immediate re-commit -- the same nontrivial, separate transaction-engine widening already deferred in section 2.17; a "propose, then apply" gate for macro-parameter edits (unlike script edits) would need it. Reviving `twin_core.versioning`'s branch/git `VersionEngine` for this -- confirmed zero consumers outside its own tests, a much larger lift than this ticket's real, minimal gap needed.
 
-### Geometry diff across a SUPERSEDES chain (FORGE-301, gap G-J2)
+### Geometry diff across a SUPERSEDES chain (gap G-J2)
 
 `GET /v1/twin/nodes/{id}/diff` (`VersionService.diff`, above) diffs a work product's own `_revisions` -- but `/nodes/{id}/iterate` only ever merges `metadata_updates` into existing metadata, it never re-uploads a blob or changes `metadata["minio_object_key"]`. So no two *revisions* of the same node ever have different geometry; that mechanism is metadata-only by construction.
 
-`GET /v1/twin/nodes/{id}/geometry-diff` (`api_gateway/twin/geometry_diff.py`) is the real "geometry changed" case: it walks the same `SUPERSEDES` edge the feature-parameter diff above already walks, resolves BOTH nodes' actual committed STEP blobs (`digital_twin.storage.work_product_blobs.resolve_work_product_blob` -- safe here since each `SUPERSEDES`-linked node has its own independent object key, unlike a same-node revision), and calls the real `freecad.describe_step_file` on each. When a STEP export includes both named leaf parts and a top-level assembly compound (their volumes overlapping), the component with the largest volume is taken as "the whole part" -- the same ambiguity `describe_step_file`'s own docstring already documents. Returns a `volume_mm3`/`area_mm2`/`bounding_box` delta; with no prior version it returns `200` with `has_previous_version: false` and the measured fields unset (FORGE-709, same reasoning as the parameter diff above), 404s only if the node is unknown or a `SUPERSEDES` edge names a predecessor that no longer exists, and 400s if either side isn't a STEP file. No MCP tool registration (REST-only, like `manufacture_release`), so it carries none of `bootstrap_tool_registry`'s signature-drift risk.
+`GET /v1/twin/nodes/{id}/geometry-diff` (`api_gateway/twin/geometry_diff.py`) is the real "geometry changed" case: it walks the same `SUPERSEDES` edge the feature-parameter diff above already walks, resolves BOTH nodes' actual committed STEP blobs (`digital_twin.storage.work_product_blobs.resolve_work_product_blob` -- safe here since each `SUPERSEDES`-linked node has its own independent object key, unlike a same-node revision), and calls the real `freecad.describe_step_file` on each. When a STEP export includes both named leaf parts and a top-level assembly compound (their volumes overlapping), the component with the largest volume is taken as "the whole part" -- the same ambiguity `describe_step_file`'s own docstring already documents. Returns a `volume_mm3`/`area_mm2`/`bounding_box` delta; with no prior version it returns `200` with `has_previous_version: false` and the measured fields unset (same reasoning as the parameter diff above), 404s only if the node is unknown or a `SUPERSEDES` edge names a predecessor that no longer exists, and 400s if either side isn't a STEP file. No MCP tool registration (REST-only, like `manufacture_release`), so it carries none of `bootstrap_tool_registry`'s signature-drift risk.
 
-**Deliberately out of scope**: a true volumetric/mesh boolean diff visualization (a 3D "added/removed volume" highlight) -- no boolean-diff utility exists anywhere in this codebase (confirmed independently during FORGE-273/282/294's own scoping), the same class of gap as those tickets' deferred 3D-result visualizations; a numeric delta is shipped instead.
+**Deliberately out of scope**: a true volumetric/mesh boolean diff visualization (a 3D "added/removed volume" highlight) -- no boolean-diff utility exists anywhere in this codebase (confirmed independently during scoping), the same class of gap as the other deferred 3D-result visualizations; a numeric delta is shipped instead.
 
 ---
 
-### Engineering values and their sources (FORGE-586)
+### Engineering values and their sources
 
 A `design_value` `EngineeringEntity` is one engineering value (a table
 height, a tube section, a top thickness) together with where it came from.
@@ -2297,7 +2297,7 @@ The Twin schema will evolve across phases. Schema changes follow these rules:
 
 ### Phase 1 Schema
 
-Phase 1 implements the full schema defined in this document. The following node types and edge types are required for the mechanical vertical (MET-8):
+Phase 1 implements the full schema defined in this document. The following node types and edge types are required for the mechanical vertical:
 
 - **Nodes**: WorkProduct (CAD_MODEL, SIMULATION_RESULT), Constraint, Version, Component, Agent
 - **Edges**: DEPENDS_ON, CONSTRAINED_BY, PRODUCED_BY, VERSIONED_BY, USES_COMPONENT
@@ -2310,8 +2310,8 @@ Phase 1 implements the full schema defined in this document. The following node 
 
 ### Phase 2 AAS Additions
 
-- `BOMItem` node type with `global_asset_id` and `supplier` properties (MET-160, MET-161)
-- `DesignElement` node type with AAS-aligned `parameters` keys (MET-162)
+- `BOMItem` node type with `global_asset_id` and `supplier` properties
+- `DesignElement` node type with AAS-aligned `parameters` keys
 - `TwinModel` node type with `global_asset_id` for product-level twin identification
 - `DeviceInstance` node type with `global_asset_id` for serial-number-level tracking
 
@@ -2346,8 +2346,8 @@ The `global_asset_id` property on `BOMItem`, `DeviceInstance`, and `TwinModel` f
 | `reachCompliance` | Enum | Digital Nameplate | `"compliant"` / `"not-assessed"` |
 | `customsTariffNumber` | String | Digital Nameplate | `"8542.31"` |
 | `weightGrams` | Float | Technical Data | `2.5` |
-| `powerDissipationW` | Float | Technical Data | `4.5` (FORGE-282: an actuator/component's known continuous power dissipation, watts — `calculix.run_thermal` has no Twin access itself, so the caller reads this key and passes the raw wattage as `power_dissipation_w`) |
-| `draw_w` / `draw_peak_w` / `draw_average_w` / `output_w` | Float | Technical Data | `331.2` (FORGE-390/275: real power the hierarchy rollup — `twin_core.consistency.hierarchy_rollup.compute_hierarchy_rollup` — reads off `WorkProduct.metadata` (via REALIZED_BY) or `BOMItem.specifications` (via INSTANCE_OF) to compute peak/average draw, output work, and derived dissipation per hierarchy branch. Snake_case, not this table's usual camelCase — these are the literal keys the rollup code reads, and documentation follows the real code rather than a convention it doesn't use. `draw_w` alone counts as both peak and average if a caller hasn't distinguished them; `output_w` omitted defaults dissipation to the full draw, recorded as a tracked `PowerAssumption` rather than applied silently) |
+| `powerDissipationW` | Float | Technical Data | `4.5` (an actuator/component's known continuous power dissipation, watts — `calculix.run_thermal` has no Twin access itself, so the caller reads this key and passes the raw wattage as `power_dissipation_w`) |
+| `draw_w` / `draw_peak_w` / `draw_average_w` / `output_w` | Float | Technical Data | `331.2` (real power the hierarchy rollup — `twin_core.consistency.hierarchy_rollup.compute_hierarchy_rollup` — reads off `WorkProduct.metadata` (via REALIZED_BY) or `BOMItem.specifications` (via INSTANCE_OF) to compute peak/average draw, output work, and derived dissipation per hierarchy branch. Snake_case, not this table's usual camelCase — these are the literal keys the rollup code reads, and documentation follows the real code rather than a convention it doesn't use. `draw_w` alone counts as both peak and average if a caller hasn't distinguished them; `output_w` omitted defaults dissipation to the full draw, recorded as a tracked `PowerAssumption` rather than applied silently) |
 
 ### A.3 `DesignElement.parameters` Recommended Keys
 

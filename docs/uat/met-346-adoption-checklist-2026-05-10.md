@@ -1,10 +1,10 @@
-# MET-346 adoption checklist run report — 2026-05-10
+# Adoption checklist run report — 2026-05-10
 
-**Item:** L1-D2 · **Branch:** `chore/met-346-adoption-checklist` ·
-**Linear:** [MET-346](https://linear.app/metaforge/issue/MET-346) ·
+**Item:** L1-D2 · **Branch:** `chore/adoption-checklist` ·
+**Linear:* ·
 **Spec:** `docs/plans/l1-implementation.md` (item L1-D2)
 
-This report verifies the five MET-346 adoption-checklist items in
+This report verifies the five adoption-checklist items in
 [`docs/integrations/lightrag-ui.md`](../integrations/lightrag-ui.md) by
 mapping each criterion to the automated test coverage that already
 landed in `main`. Live LightRAG-UI boot verification (via
@@ -31,10 +31,10 @@ below resolves cleanly to the existing test coverage.
 - [`tests/uat/scenarios/tier1/ingest.md`](../../tests/uat/scenarios/tier1/ingest.md)
   — HP-INGEST-01..10, ten happy-path scenarios covering:
   single markdown via CLI, recursive directory walk, PDF parser
-  (HP-INGEST-03, MET-399), row-level CSV chunking
-  (HP-INGEST-04, MET-340), supersede on re-ingest
-  (HP-INGEST-08, MET-307), and event-driven ingest
-  (HP-INGEST-10, MET-336).
+  (HP-INGEST-03), row-level CSV chunking
+  (HP-INGEST-04), supersede on re-ingest
+  (HP-INGEST-08), and event-driven ingest
+  (HP-INGEST-10).
 - L1-A3 (PR [#165](https://github.com/FidelOdok/MetaForge/pull/165))
   wired the pdfplumber path for PDF ingest.
 - L1-A4 (PR [#166](https://github.com/FidelOdok/MetaForge/pull/166))
