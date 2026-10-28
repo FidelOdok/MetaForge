@@ -104,7 +104,14 @@ function Tabs({ items, active, onPick }: { items: string[]; active: string; onPi
 }
 
 function Sheets({ node, files, mode }: { node: TwinNode; files: DesignFiles; mode: PreviewMode }) {
-  const [active, setActive] = useState(files.previews[0] ?? '');
+  // FORGE-710: which sheet is picked has to be derived from the node in hand,
+  // not just seeded from it. Selecting a node whose data react-query already
+  // holds re-renders this component instead of remounting it, so a plain
+  // useState initialiser keeps the sheet picked for the PREVIOUS node -- and
+  // the url is built from the new node's id with that old path, which 404s
+  // and leaves the browser showing the alt text.
+  const [picked, setPicked] = useState<string | null>(null);
+  const active = picked !== null && files.previews.includes(picked) ? picked : (files.previews[0] ?? '');
   if (!files.previews.length) {
     return (
       <Note>
@@ -116,7 +123,7 @@ function Sheets({ node, files, mode }: { node: TwinNode; files: DesignFiles; mod
   const url = nodeNamedFileUrl(node.id, active);
   return (
     <div data-testid="design-sheets">
-      <Tabs items={files.previews} active={active} onPick={setActive} />
+      <Tabs items={files.previews} active={active} onPick={setPicked} />
       <a href={url} target="_blank" rel="noreferrer" title="Open full size">
         <img
           src={url}
@@ -155,6 +162,10 @@ function GerberStack({ node, files, mode }: { node: TwinNode; files: DesignFiles
 
   useEffect(() => {
     let cancelled = false;
+    // FORGE-710: drop the layers already drawn before fetching this node's,
+    // or a switch between two gerber sets shows the previous board until the
+    // new one finishes drawing.
+    setDrawn(null);
     Promise.all(
       drawable.map(async (l): Promise<DrawnLayer> => {
         try {
@@ -239,7 +250,11 @@ const CODE_LANG: Record<string, string> = { c: 'c', h: 'c', cpp: 'cpp', hpp: 'cp
 function FirmwareProject({ node, files, mode }: { node: TwinNode; files: DesignFiles; mode: PreviewMode }) {
   const outputs = new Set(files.buildOutputs);
   const sources = files.files.map((f) => f.path).filter((p) => !outputs.has(p));
-  const [active, setActive] = useState(sources[0] ?? null);
+  // FORGE-710: same hazard as Sheets above -- moving between two firmware
+  // nodes without a remount would otherwise read the previous project's path
+  // out of the new node.
+  const [picked, setPicked] = useState<string | null>(null);
+  const active = picked !== null && sources.includes(picked) ? picked : (sources[0] ?? null);
   const file = useNamedText(node.id, active);
   const ext = (active ?? '').split('.').pop()?.toLowerCase() ?? '';
   return (
@@ -249,7 +264,7 @@ function FirmwareProject({ node, files, mode }: { node: TwinNode; files: DesignF
           <li key={p}>
             <button
               type="button"
-              onClick={() => setActive(p)}
+              onClick={() => setPicked(p)}
               style={{
                 background: p === active ? PC.orangeFaint : 'transparent',
                 color: PC.onSurface,

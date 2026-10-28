@@ -21,9 +21,9 @@ import { DesignFilesView } from '../engines/DesignFilesView';
 
 const mockFetch = vi.mocked(fetchNodeNamedFileText);
 
-function node(wp_type: string, designFiles: Partial<DesignFiles>): TwinNode {
+function node(wp_type: string, designFiles: Partial<DesignFiles>, id = 'wp-1'): TwinNode {
   return {
-    id: 'wp-1',
+    id,
     name: 'Drone FC',
     type: 'work_product',
     domain: 'electronics',
@@ -55,6 +55,47 @@ describe('DesignFilesView (FORGE-687)', () => {
     expect(img).toHaveAttribute('src', '/api/v1/twin/nodes/wp-1/files/preview/fc.svg');
     fireEvent.click(screen.getByRole('tab', { name: 'fc-power.svg' }));
     expect(screen.getByRole('img')).toHaveAttribute('src', '/api/v1/twin/nodes/wp-1/files/preview/fc-power.svg');
+  });
+
+  it('picks a sheet belonging to the node in hand when the view is reused', () => {
+    // FORGE-710: selecting a node whose data react-query already holds
+    // re-renders this view rather than remounting it. The sheet picked for
+    // the previous node must not survive into the new one's url, or the
+    // image 404s and the browser shows its alt text instead.
+    const { rerender } = render(
+      <DesignFilesView
+        node={node('pcb_layout', { previews: ['preview/fc-pcb.svg'] }, 'pcb-node')}
+        mode="panel"
+      />,
+    );
+    expect(screen.getByRole('img')).toHaveAttribute(
+      'src',
+      '/api/v1/twin/nodes/pcb-node/files/preview/fc-pcb.svg',
+    );
+
+    rerender(
+      <DesignFilesView
+        node={node('schematic', { previews: ['preview/fc.svg'] }, 'sch-node')}
+        mode="panel"
+      />,
+    );
+    expect(screen.getByRole('img')).toHaveAttribute(
+      'src',
+      '/api/v1/twin/nodes/sch-node/files/preview/fc.svg',
+    );
+  });
+
+  it('keeps a chosen sheet across a re-render when the node still has it', () => {
+    const sheets = { previews: ['preview/fc.svg', 'preview/fc-power.svg'] };
+    const { rerender } = render(
+      <DesignFilesView node={node('schematic', sheets)} mode="panel" />,
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'fc-power.svg' }));
+    rerender(<DesignFilesView node={node('schematic', sheets)} mode="panel" />);
+    expect(screen.getByRole('img')).toHaveAttribute(
+      'src',
+      '/api/v1/twin/nodes/wp-1/files/preview/fc-power.svg',
+    );
   });
 
   it('says why a board has no preview', () => {
