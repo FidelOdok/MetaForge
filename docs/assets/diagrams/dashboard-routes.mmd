@@ -1,0 +1,34 @@
+flowchart LR
+    home(["/"]) --> projects
+
+    subgraph work["Work"]
+        direction TB
+        projects["/projects<br/>/projects/:id"]
+        runs["/runs · /runs/new<br/>/runs/:id"]
+        flows["/flows/edit<br/>/flows/fragments"]
+        approvals["/approvals"]
+        sessions["/sessions<br/>/sessions/:id"]
+    end
+
+    subgraph design["Design data"]
+        direction TB
+        twin["/twin"]
+        req["/requirements"]
+        bom["/bom"]
+        sim["/sim"]
+        files["/files"]
+    end
+
+    subgraph know["Knowledge and checks"]
+        direction TB
+        knowledge["/knowledge<br/>/knowledge/sources/:id"]
+        compliance["/compliance"]
+        evals["/evals"]
+    end
+
+    settings["/settings"]
+
+    projects --> runs --> approvals
+    runs --> twin
+    sessions -.-> twin
+    home --> settings

@@ -2,7 +2,7 @@
 
 > **Status:** Phase 1 (v0.1). One section per route. Boot the app
 > with `docker compose up gateway dashboard` then open
-> `http://localhost:5173`. Layout sketches are ASCII. Last verified
+> `http://localhost:3000`. Layout sketches are ASCII. Last verified
 > against `dashboard/src/App.tsx` on 2026-09-24.
 
 ## Look and feel
@@ -45,41 +45,7 @@ Every route below has a sidebar entry. Two entries run the other way —
 rail but have no section here yet. The default landing page is
 `/projects`; unknown paths show a *Page not found* screen.
 
-```mermaid
-flowchart LR
-    home(["/ → /projects"])
-    proj["/projects"]
-    projDetail["/projects/:id"]
-    sess["/sessions"]
-    sessDetail["/sessions/:id"]
-    runs["/runs"]
-    runNew["/runs/new"]
-    runDetail["/runs/:id"]
-    appr["/approvals"]
-    bom["/bom"]
-    twin["/twin"]
-    files["/files"]
-    know["/knowledge"]
-    srcDetail["/knowledge/sources/:id"]
-    comp["/compliance"]
-    settings["/settings"]
-
-    home --> proj
-    proj --> projDetail
-    home --> sess
-    sess --> sessDetail
-    home --> runs
-    runs --> runNew
-    runs --> runDetail
-    home --> appr
-    home --> bom
-    home --> twin
-    home --> files
-    home --> know
-    know --> srcDetail
-    home --> comp
-    home --> settings
-```
+![Map of the dashboard's routes in three groups, Work, Design data and Knowledge and checks, plus settings](assets/diagrams/dashboard-routes.png)
 
 ## `/projects`: project workspace
 

@@ -1,10 +1,10 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { dirname, extname, join, normalize } from 'node:path';
+import { dirname, extname, join, normalize, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -33,8 +33,32 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BUILD = join(HERE, '..', 'build');
 
-/** Every page that contains a ```mermaid fence, as a built URL path. */
-const PAGES = ['/', '/getting-started/', '/architecture/', '/dashboard-tour/', '/project-structure/'];
+const DOCS = join(HERE, '..', '..', 'docs');
+
+/**
+ * Every page that contains a ```mermaid fence, as a built URL path.
+ *
+ * Found by reading docs/, not listed by hand: a list goes stale in both
+ * directions. The README and the docs now draw their diagrams as PNGs
+ * (docs/assets/diagrams), so this is currently empty, but the site still
+ * renders a mermaid fence and this is what keeps one from clipping its labels
+ * the day someone writes one.
+ */
+function pagesWithMermaid(dir = DOCS) {
+  const found = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...pagesWithMermaid(path));
+    } else if (/\.mdx?$/.test(entry.name) && /^```mermaid/m.test(readFileSync(path, 'utf8'))) {
+      const route = relative(DOCS, path).replace(/\.mdx?$/, '').replace(/(^|\/)index$/, '');
+      found.push(route ? `/${route}/` : '/');
+    }
+  }
+  return found;
+}
+
+const PAGES = pagesWithMermaid();
 
 const CHROME =
   process.env.CHROME_PATH ??
@@ -265,6 +289,7 @@ async function measure(path) {
 }
 
 before(async () => {
+  if (!PAGES.length) return; // nothing to draw, so nothing to measure
   assert.ok(
     existsSync(join(BUILD, 'index.html')),
     'no build/ — run `npm run build` before `npm test`',
@@ -311,5 +336,11 @@ for (const path of PAGES) {
       `${path}: mermaid labels are being clipped — something in the article ` +
         `stylesheet is changing text metrics inside .docusaurus-mermaid-container`,
     );
+  });
+}
+
+if (!PAGES.length) {
+  test('no page uses a mermaid fence, so there is no diagram to measure', () => {
+    assert.deepEqual(PAGES, []);
   });
 }

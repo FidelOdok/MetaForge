@@ -1,0 +1,18 @@
+flowchart LR
+    subgraph local["On your machine or server (stays there)"]
+        direction TB
+        app["MetaForge<br/>gateway · agents · tools"]
+        stores[("Postgres · Neo4j<br/>object store · Kafka<br/>Temporal · logs")]
+        app <--> stores
+    end
+
+    subgraph optional["Only if you configure them"]
+        direction TB
+        llm["Model provider<br/>Anthropic · OpenAI<br/>OpenRouter · Codex"]
+        search["Brave Search"]
+        parts["Part distributors<br/>Digi-Key · Mouser · Nexar<br/>Farnell · Arrow"]
+    end
+
+    app -->|"prompts, project context,<br/>tool results"| llm
+    app -->|"search queries"| search
+    app -->|"part numbers"| parts

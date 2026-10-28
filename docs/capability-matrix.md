@@ -1572,7 +1572,7 @@ always the vacuous-pass default.
 ## Dashboard routes (14)
 
 Served by Vite under `dashboard/` — boot with
-`docker compose up gateway dashboard` and open `localhost:5173`.
+`docker compose up gateway dashboard` and open `localhost:3000`.
 
 | Path | Purpose | Backed by |
 |---|---|---|

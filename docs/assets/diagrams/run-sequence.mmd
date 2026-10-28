@@ -1,0 +1,24 @@
+sequenceDiagram
+    actor You
+    participant UI as forge CLI or dashboard
+    participant GW as Gateway
+    participant W as Design-flow worker (Temporal)
+    participant A as Agent
+    participant T as Tools (MCP)
+    participant TW as Digital twin
+
+    You->>UI: forge design "a goal"
+    UI->>GW: POST /v1/runs
+    GW->>W: start the workflow
+    loop each phase of the flow
+        W->>A: run the phase
+        A->>T: call tools
+        T-->>A: results
+        A->>TW: record drafts
+        W->>GW: open the gate
+        GW-->>You: review on Approvals or in the CLI
+        You->>GW: approve, retry, rework or reject
+        GW->>TW: approved drafts become the baseline
+    end
+    W-->>GW: run complete
+    GW-->>UI: results and the run record
