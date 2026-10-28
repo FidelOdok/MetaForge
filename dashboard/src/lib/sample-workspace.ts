@@ -1450,6 +1450,7 @@ const SAMPLE_REVISIONS = [
 // uses) -- every other sample node correctly has none (404/null).
 const SAMPLE_GEOMETRY_DIFF = {
   current_work_product_id: 'sample-enclosure',
+  has_previous_version: true,
   previous_work_product_id: 'sample-enclosure-v2',
   current_volume_mm3: 48200,
   previous_volume_mm3: 51500,
@@ -1523,7 +1524,12 @@ function route(
       };
     }
     if (path.endsWith('/geometry-diff') && path.startsWith('/twin/nodes/')) {
-      if (segment(path, 3) !== 'sample-enclosure') return undefined;
+      // FORGE-709: a node with no predecessor answers 200 with the
+      // discriminant false, exactly as the real gateway now does, rather
+      // than the 404 this used to stand in for.
+      if (segment(path, 3) !== 'sample-enclosure') {
+        return { current_work_product_id: segment(path, 3), has_previous_version: false };
+      }
       return SAMPLE_GEOMETRY_DIFF;
     }
     if (path === '/twin/interference-check') {
@@ -1544,10 +1550,13 @@ function route(
     if (path.endsWith('/diff') && path.startsWith('/features/')) {
       // FORGE-270 (gap G-D2): the sample enclosure is the only node with an
       // illustrative SUPERSEDES-linked prior version -- every other sample
-      // node correctly has none (404 in the real API, null here).
-      if (segment(path, 2) !== 'sample-enclosure') return undefined;
+      // node correctly has none, which FORGE-709 reports as an empty 200.
+      if (segment(path, 2) !== 'sample-enclosure') {
+        return { currentWorkProductId: segment(path, 2), hasPreviousVersion: false };
+      }
       return {
         currentWorkProductId: 'sample-enclosure',
+        hasPreviousVersion: true,
         previousWorkProductId: 'sample-enclosure-v2',
         changed: { wall_mm: { from_value: 3, to_value: 2 } },
         added: {},

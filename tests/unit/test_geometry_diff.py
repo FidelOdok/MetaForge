@@ -88,10 +88,17 @@ class TestGeometryDiff:
         with pytest.raises(ValueError, match="invalid work_product_id"):
             await diff(work_product_id="not-a-uuid")
 
-    async def test_no_supersedes_edge_raises_lookup_error(self, twin: InMemoryTwinAPI) -> None:
+    async def test_no_supersedes_edge_raises_no_previous_version(
+        self, twin: InMemoryTwinAPI
+    ) -> None:
+        """FORGE-709: a distinct LookupError subclass, so the route can tell
+        the ordinary "never superseded" answer (an empty 200) from a real
+        dangling-predecessor failure (a 404)."""
+        from api_gateway.twin.geometry_diff import NoPreviousVersion
+
         wp = await _seed_wp(twin)
         diff = make_geometry_diff(twin, blob_stager=_FakeBlobStager(), mcp_bridge=_FakeBridge({}))
-        with pytest.raises(LookupError, match="no prior version"):
+        with pytest.raises(NoPreviousVersion, match="no prior version"):
             await diff(work_product_id=str(wp.id))
 
     async def test_non_step_current_format_raises(self, twin: InMemoryTwinAPI) -> None:

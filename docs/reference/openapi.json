@@ -4100,9 +4100,11 @@
         "type": "object"
       },
       "FeatureDiffResponse": {
+        "description": "``hasPreviousVersion`` is false for a work product that has never been\nsuperseded -- almost all of them. That is the ordinary answer, not an\nerror, so it comes back as an empty 200 (FORGE-709), matching\n``/twin/nodes/{id}/versions``, which reports an empty history the same\nway. A 404 from this route now means only that the node is unknown.",
         "properties": {
           "added": {
             "additionalProperties": true,
+            "default": {},
             "title": "Added",
             "type": "object"
           },
@@ -4110,6 +4112,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/FieldDelta"
             },
+            "default": {},
             "title": "Changed",
             "type": "object"
           },
@@ -4117,22 +4120,31 @@
             "title": "Currentworkproductid",
             "type": "string"
           },
+          "hasPreviousVersion": {
+            "default": true,
+            "title": "Haspreviousversion",
+            "type": "boolean"
+          },
           "previousWorkProductId": {
-            "title": "Previousworkproductid",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previousworkproductid"
           },
           "removed": {
             "additionalProperties": true,
+            "default": {},
             "title": "Removed",
             "type": "object"
           }
         },
         "required": [
-          "currentWorkProductId",
-          "previousWorkProductId",
-          "changed",
-          "added",
-          "removed"
+          "currentWorkProductId"
         ],
         "title": "FeatureDiffResponse",
         "type": "object"
@@ -5355,62 +5367,121 @@
         "type": "object"
       },
       "GeometryDiffResponse": {
-        "description": "Real volume/area/bounding-box delta vs. a SUPERSEDES predecessor\n(FORGE-301) -- distinct from ``RevisionDiff`` above, which diffs one\nnode's own metadata revisions and never sees geometry changes.",
+        "description": "Real volume/area/bounding-box delta vs. a SUPERSEDES predecessor\n(FORGE-301) -- distinct from ``RevisionDiff`` above, which diffs one\nnode's own metadata revisions and never sees geometry changes.\n\n``has_previous_version`` is false for a work product that has never\nbeen superseded, which is almost all of them: that is an ordinary\nanswer, not an error, so the route returns it as a 200 with the\nmeasured fields left unset (FORGE-709), the same way\n``/nodes/{id}/versions`` answers an empty history with ``200`` and an\nempty list rather than a 404.",
         "properties": {
           "area_delta_mm2": {
-            "title": "Area Delta Mm2",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Delta Mm2"
           },
           "current_area_mm2": {
-            "title": "Current Area Mm2",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Area Mm2"
           },
           "current_bounding_box": {
-            "additionalProperties": true,
-            "title": "Current Bounding Box",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Bounding Box"
           },
           "current_volume_mm3": {
-            "title": "Current Volume Mm3",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Volume Mm3"
           },
           "current_work_product_id": {
             "title": "Current Work Product Id",
             "type": "string"
           },
+          "has_previous_version": {
+            "default": true,
+            "title": "Has Previous Version",
+            "type": "boolean"
+          },
           "previous_area_mm2": {
-            "title": "Previous Area Mm2",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Area Mm2"
           },
           "previous_bounding_box": {
-            "additionalProperties": true,
-            "title": "Previous Bounding Box",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Bounding Box"
           },
           "previous_volume_mm3": {
-            "title": "Previous Volume Mm3",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Volume Mm3"
           },
           "previous_work_product_id": {
-            "title": "Previous Work Product Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Work Product Id"
           },
           "volume_delta_mm3": {
-            "title": "Volume Delta Mm3",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Delta Mm3"
           }
         },
         "required": [
-          "current_work_product_id",
-          "previous_work_product_id",
-          "current_volume_mm3",
-          "previous_volume_mm3",
-          "volume_delta_mm3",
-          "current_area_mm2",
-          "previous_area_mm2",
-          "area_delta_mm2",
-          "current_bounding_box",
-          "previous_bounding_box"
+          "current_work_product_id"
         ],
         "title": "GeometryDiffResponse",
         "type": "object"
@@ -5541,7 +5612,6 @@
             "type": "number"
           },
           "version": {
-            "default": "0.1.0",
             "title": "Version",
             "type": "string"
           }
@@ -14944,7 +15014,7 @@
   "info": {
     "description": "HTTP/WebSocket front door for the MetaForge platform",
     "title": "MetaForge Gateway",
-    "version": "0.1.0"
+    "version": "0.0.0+unknown"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -24638,7 +24708,7 @@
     },
     "/v1/twin/nodes/{node_id}/geometry-diff": {
       "get": {
-        "description": "Diff a work product's real geometry against its SUPERSEDES predecessor.\n\nUnlike ``/diff`` above (a metadata-revision diff on the SAME node --\n``/iterate`` never changes the underlying blob, so no two revisions of one\nnode ever have different geometry), this walks the real SUPERSEDES edge a\nre-committed, same-named CAD_MODEL gets (``api_gateway.twin.geometry_\nrecorder``) and compares the two NODES' actual STEP files.",
+        "description": "Diff a work product's real geometry against its SUPERSEDES predecessor.\n\nUnlike ``/diff`` above (a metadata-revision diff on the SAME node --\n``/iterate`` never changes the underlying blob, so no two revisions of one\nnode ever have different geometry), this walks the real SUPERSEDES edge a\nre-committed, same-named CAD_MODEL gets (``api_gateway.twin.geometry_\nrecorder``) and compares the two NODES' actual STEP files.\n\nA node that has never been superseded gets a 200 saying so rather than\na 404 (FORGE-709): the dashboard asks this for every selected node, so\nthe common answer must not read as an error in the console or in\ntelemetry. A 404 here now means only that the node itself is unknown.",
         "operationId": "diff_geometry_v1_twin_nodes__node_id__geometry_diff_get",
         "parameters": [
           {

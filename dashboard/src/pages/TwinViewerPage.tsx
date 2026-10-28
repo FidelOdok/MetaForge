@@ -854,13 +854,13 @@ function RevisionDiffView({
  * and a changed parameter value, which api_gateway.twin.geometry_recorder
  * already links to its predecessor via a real SUPERSEDES edge. This renders
  * that edge's parameter diff when one exists -- most work products have
- * none (created once, never re-generated), so `null` is the common,
- * expected answer, not a loading/error state.
+ * none (created once, never re-generated), so hasPreviousVersion false is
+ * the common, expected answer, not a loading/error state.
  */
 function FeatureVersionSection({ nodeId }: { nodeId: string }) {
   const { data: diff, isLoading } = useFeatureDiff(nodeId);
 
-  if (isLoading || !diff) return null;
+  if (isLoading || !diff || !diff.hasPreviousVersion) return null;
 
   const changedKeys = Object.keys(diff.changed);
   const addedKeys = Object.keys(diff.added);
@@ -914,14 +914,14 @@ function FeatureVersionSection({ nodeId }: { nodeId: string }) {
  * SUPERSEDES edge between two separate nodes (the same edge
  * FeatureVersionSection's parameter diff already walks) -- this renders the
  * real volume/area/bounding-box delta between this node's actual committed
- * STEP file and its predecessor's. `null` (no prior version) is the common,
- * expected answer, not a loading/error state -- same convention as
- * FeatureVersionSection.
+ * STEP file and its predecessor's. No prior version is the common, expected
+ * answer -- a 200 with has_previous_version false since FORGE-709, not a
+ * loading/error state -- same convention as FeatureVersionSection.
  */
 function GeometryDiffSection({ nodeId }: { nodeId: string }) {
   const { data: diff, isLoading } = useGeometryDiff(nodeId);
 
-  if (isLoading || !diff) return null;
+  if (isLoading || !diff || !diff.has_previous_version) return null;
 
   const volumeUp = diff.volume_delta_mm3 >= 0;
   const areaUp = diff.area_delta_mm2 >= 0;

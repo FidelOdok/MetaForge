@@ -8,8 +8,9 @@ export function useGenerateFeature() {
   });
 }
 
-/** FORGE-270 (gap G-D2): null for most work products (no prior version) --
- * that's the expected, common answer, not a loading/error state. */
+/** FORGE-270 (gap G-D2): most work products have no prior version. Since
+ * FORGE-709 that comes back as a 200 carrying hasPreviousVersion false --
+ * the expected, common answer, not a loading/error state. */
 export function useFeatureDiff(workProductId: string | undefined) {
   return useQuery({
     queryKey: ['features', 'diff', workProductId ?? ''] as const,

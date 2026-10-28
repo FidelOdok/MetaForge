@@ -34,6 +34,7 @@ from api_gateway.twin.file_link import (
     link_store,
     sync_linked_file,
 )
+from api_gateway.twin.geometry_diff import NoPreviousVersion
 from api_gateway.twin.import_schemas import ImportWorkProductResponse
 from api_gateway.twin.import_service import (
     ALLOWED_EXTENSIONS,
@@ -1159,6 +1160,11 @@ async def diff_geometry(node_id: str) -> GeometryDiffResponse:
     node ever have different geometry), this walks the real SUPERSEDES edge a
     re-committed, same-named CAD_MODEL gets (``api_gateway.twin.geometry_
     recorder``) and compares the two NODES' actual STEP files.
+
+    A node that has never been superseded gets a 200 saying so rather than
+    a 404 (FORGE-709): the dashboard asks this for every selected node, so
+    the common answer must not read as an error in the console or in
+    telemetry. A 404 here now means only that the node itself is unknown.
     """
     if _geometry_diff is None:
         raise HTTPException(status_code=503, detail="geometry diff is not configured")
@@ -1166,6 +1172,9 @@ async def diff_geometry(node_id: str) -> GeometryDiffResponse:
         span.set_attribute("twin.node_id", node_id)
         try:
             result = await _geometry_diff(work_product_id=node_id)
+        except NoPreviousVersion:
+            span.set_attribute("twin.has_previous_version", False)
+            return GeometryDiffResponse(current_work_product_id=node_id, has_previous_version=False)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

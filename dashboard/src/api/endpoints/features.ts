@@ -15,14 +15,12 @@ export async function generateFeature(
   return data;
 }
 
-/** FORGE-270: a 404 (no prior version -- most work products) is an
- * expected, common answer, not an error -- returns null rather than
- * propagating, unlike generateFeature's own create-action errors above. */
-export async function getFeatureDiff(workProductId: string): Promise<FeatureDiff | null> {
-  try {
-    const { data } = await apiClient.get<FeatureDiff>(`/features/${workProductId}/diff`);
-    return data;
-  } catch {
-    return null;
-  }
+/** FORGE-270: no prior version is the common answer for most work products.
+ * FORGE-709: the gateway says so with a 200 carrying hasPreviousVersion
+ * false, so this no longer swallows a 404 -- a real failure propagates like
+ * generateFeature's own errors above, and the ordinary answer no longer
+ * reaches the error log. */
+export async function getFeatureDiff(workProductId: string): Promise<FeatureDiff> {
+  const { data } = await apiClient.get<FeatureDiff>(`/features/${workProductId}/diff`);
+  return data;
 }

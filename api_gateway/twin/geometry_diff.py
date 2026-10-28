@@ -46,6 +46,17 @@ tracer = get_tracer("api_gateway.twin.geometry_diff")
 _SUPPORTED_SOURCE_FORMATS = {"step", "stp"}
 
 
+class NoPreviousVersion(LookupError):
+    """The work product exists but has never been superseded (FORGE-709).
+
+    A ``LookupError`` subclass so every existing ``except LookupError``
+    still catches it, but distinguishable from "the predecessor the edge
+    names has gone", which is a real integrity failure. The former is the
+    ordinary answer for almost every node and the route reports it as an
+    empty 200; only the latter is a 404.
+    """
+
+
 def _representative_component(components: list[dict[str, Any]], *, label: str) -> dict[str, Any]:
     """Pick the single component that best represents "the whole part".
 
@@ -99,7 +110,7 @@ def make_geometry_diff(twin: Any, *, blob_stager: Any, mcp_bridge: Any) -> Any:
                     current_id, direction="outgoing", edge_type=EdgeType.SUPERSEDES
                 )
                 if not edges:
-                    raise LookupError(
+                    raise NoPreviousVersion(
                         f"work product {work_product_id} has no prior version (no SUPERSEDES edge)"
                     )
                 previous_id = edges[0].target_id

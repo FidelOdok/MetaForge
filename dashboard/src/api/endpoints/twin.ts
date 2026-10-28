@@ -289,10 +289,18 @@ export async function getRevisionDiff(
 /** Real volume/area/bounding-box delta between a work product and its
  * SUPERSEDES predecessor (FORGE-301) -- unlike ``RevisionDiff`` above,
  * this compares two DIFFERENT nodes' actual STEP geometry, since
- * ``/iterate`` never changes a node's own blob. ``null`` (a 404) is the
- * expected, common answer for a work product with no prior version. */
-export interface GeometryDiff {
+ * ``/iterate`` never changes a node's own blob. A work product with no
+ * prior version -- the common case -- answers 200 with
+ * ``has_previous_version`` false rather than a 404 (FORGE-709), so the
+ * ordinary answer never reaches the error log. */
+export interface NoGeometryDiff {
   current_work_product_id: string;
+  has_previous_version: false;
+}
+
+export interface GeometryDiffResult {
+  current_work_product_id: string;
+  has_previous_version: true;
   previous_work_product_id: string;
   current_volume_mm3: number;
   previous_volume_mm3: number;
@@ -304,13 +312,11 @@ export interface GeometryDiff {
   previous_bounding_box: Record<string, number>;
 }
 
-export async function getGeometryDiff(nodeId: string): Promise<GeometryDiff | null> {
-  try {
-    const { data } = await apiClient.get<GeometryDiff>(`/twin/nodes/${nodeId}/geometry-diff`);
-    return data;
-  } catch {
-    return null;
-  }
+export type GeometryDiff = GeometryDiffResult | NoGeometryDiff;
+
+export async function getGeometryDiff(nodeId: string): Promise<GeometryDiff> {
+  const { data } = await apiClient.get<GeometryDiff>(`/twin/nodes/${nodeId}/geometry-diff`);
+  return data;
 }
 
 // ── Work-product file download / open / preview (MET-483) ───────────────────
