@@ -1,6 +1,6 @@
 {
   "name": "metaforge",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "description": "Engineer hardware against a digital twin: requirements, CAD, simulation and evidence, with writes held for human approval.",
   "author": {
     "name": "MetaForge",

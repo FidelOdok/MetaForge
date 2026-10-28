@@ -439,16 +439,14 @@ class TestMarketplace:
         assert catalog["owner"]["name"]
         assert catalog["plugins"]
 
-    def test_it_lists_the_open_core_packages_and_not_the_hosted_one(self) -> None:
-        """Two packages, not three. `metaforge-cloud` is still built, but
-        all it adds to `metaforge` is the hosted gateway's address, and this
-        catalog is what someone installing MetaForge itself reads -- listing
-        it offered the hosted product as a third way to install open core."""
+    def test_it_lists_all_three_packages_until_the_hosted_one_moves(self) -> None:
+        """`metaforge-cloud` belongs to the hosted service and FORGE-707 moves
+        it to a marketplace in the Cloud repo. Until that is published it is
+        listed here: a package served from nowhere is one nobody can install."""
         from scripts.build_integrations import CLOUD_PLUGIN_NAME, LOCAL_PLUGIN_NAME, PLUGIN_NAME
 
         names = {p["name"] for p in self._catalog()["plugins"]}
-        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME}
-        assert CLOUD_PLUGIN_NAME not in names
+        assert names == {PLUGIN_NAME, LOCAL_PLUGIN_NAME, CLOUD_PLUGIN_NAME}
 
     def test_each_source_is_a_relative_path_that_exists(self) -> None:
         """A relative source resolves from the marketplace root, and must
@@ -938,16 +936,14 @@ class TestCloudPackage:
         ).read_text()
 
     def test_the_readme_says_where_it_comes_from_and_how_to_sign_in(self, root: Path) -> None:
-        """It used to print `/plugin install metaforge-cloud`. That command
-        cannot work now the catalog does not carry the package, and a
-        documented install path with nothing behind it is worse than none,
-        so the README says where it does come from instead."""
+        """The install command it prints has to work, so it names the
+        marketplace that carries the package today."""
         from scripts.build_integrations import CLOUD_PLUGIN_NAME
 
         readme = (root / "README.md").read_text(encoding="utf-8")
-        assert f"/plugin install {CLOUD_PLUGIN_NAME}" not in readme
-        assert "not** listed in the `FidelOdok/MetaForge` marketplace" in readme
-        assert "metaforge.uk" in readme
+        assert "/plugin marketplace add FidelOdok/MetaForge" in readme
+        assert f"/plugin install {CLOUD_PLUGIN_NAME}" in readme
+        assert "FORGE-707" in readme
         assert "/mcp" in readme
         assert "METAFORGE_OAUTH_LOGIN_SECRET" in readme
 
