@@ -561,9 +561,7 @@ class TestRealStage:
         # Y up in millimetres: the 12 cm height of the Z-up stage is the GLB's Y.
         assert glb.extents[1] == pytest.approx(120.0, abs=1e-3)
         colours = {
-            tuple(c[:3])
-            for g in glb.geometry.values()
-            for c in g.visual.face_colors.tolist()
+            tuple(c[:3]) for g in glb.geometry.values() for c in g.visual.face_colors.tolist()
         }
         assert colours == {(51, 102, 204), (255, 0, 0)}  # display colour, subset material
         assert out["preview"]["mesh_count"] == 2
