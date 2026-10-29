@@ -784,6 +784,49 @@ class MetricsRegistry:
         labels=["result", "reloads"],
     )
 
+    # ── Host watchdog (FORGE-713) ──────────────────────────────────────
+
+    WATCHDOG_CHECKS_TOTAL = MetricDefinition(
+        name="metaforge_watchdog_checks_total",
+        type="counter",
+        description=(
+            "Watchdog check passes completed. A heartbeat: when it stops "
+            "rising, nothing is watching the host (FORGE-713)."
+        ),
+        labels=[],
+    )
+    WATCHDOG_RESTARTS_TOTAL = MetricDefinition(
+        name="metaforge_watchdog_restarts_total",
+        type="counter",
+        description=(
+            "Containers the watchdog restarted or chose not to, by compose "
+            "service, reason (unhealthy, twin_in_memory) and outcome "
+            "(restarted, suppressed, failed) (FORGE-713)"
+        ),
+        labels=["service", "reason", "outcome"],
+    )
+    WATCHDOG_UNHEALTHY_CONTAINERS = MetricDefinition(
+        name="metaforge_watchdog_unhealthy_containers",
+        type="gauge",
+        description="Stack containers Docker reports unhealthy at the last check (FORGE-713)",
+        labels=[],
+    )
+    WATCHDOG_TWIN_IN_MEMORY = MetricDefinition(
+        name="metaforge_watchdog_twin_in_memory",
+        type="gauge",
+        description=(
+            "1 when the gateway's /health says the twin runs in memory although "
+            "Neo4j is configured, so persisted nodes are invisible (FORGE-713)"
+        ),
+        labels=[],
+    )
+    HOST_MEMORY_AVAILABLE_BYTES = MetricDefinition(
+        name="metaforge_host_memory_available_bytes",
+        type="gauge",
+        description="MemAvailable of the host running the stack, from /proc/meminfo (FORGE-713)",
+        labels=[],
+    )
+
     # ── Class methods for grouped access ───────────────────────────────
 
     @classmethod
@@ -805,7 +848,19 @@ class MetricsRegistry:
             + cls.mcp_metrics()
             + cls.design_flow_metrics()
             + cls.sim_field_metrics()
+            + cls.watchdog_metrics()
         )
+
+    @classmethod
+    def watchdog_metrics(cls) -> list[MetricDefinition]:
+        """Host watchdog metrics (FORGE-713)."""
+        return [
+            cls.WATCHDOG_CHECKS_TOTAL,
+            cls.WATCHDOG_RESTARTS_TOTAL,
+            cls.WATCHDOG_UNHEALTHY_CONTAINERS,
+            cls.WATCHDOG_TWIN_IN_MEMORY,
+            cls.HOST_MEMORY_AVAILABLE_BYTES,
+        ]
 
     @classmethod
     def sim_field_metrics(cls) -> list[MetricDefinition]:
@@ -1001,6 +1056,7 @@ class MetricsCollector:
     def __init__(self, meter: Any | None = None) -> None:
         self._meter = meter
         self._instruments: dict[str, Any] = {}
+        self._gauge_values: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}
 
     @property
     def is_recording(self) -> bool:
@@ -1710,6 +1766,37 @@ class MetricsCollector:
         counter = self._instruments.get(MetricsRegistry.ITERATION_GATE_UNATTENDED_TOTAL.name)
         if counter is not None:
             counter.add(1, attributes={"outcome": outcome, "agent_code": agent_code})
+
+    # ── Host watchdog (FORGE-713) ──────────────────────────────────────
+
+    def _set_gauge(self, name: str, value: float, attributes: dict[str, str] | None = None) -> None:
+        """Set an up-down-counter gauge to an absolute value by adding the delta."""
+        gauge = self._instruments.get(name)
+        if gauge is None:
+            return
+        key = (name, tuple(sorted((attributes or {}).items())))
+        last = self._gauge_values.get(key, 0.0)
+        if value != last:
+            gauge.add(value - last, attributes=attributes or {})
+            self._gauge_values[key] = value
+
+    def record_watchdog_check(
+        self, *, unhealthy: int, twin_in_memory: bool, memory_available: int | None
+    ) -> None:
+        """Record one watchdog pass: the heartbeat plus the state it saw."""
+        counter = self._instruments.get(MetricsRegistry.WATCHDOG_CHECKS_TOTAL.name)
+        if counter is not None:
+            counter.add(1)
+        self._set_gauge(MetricsRegistry.WATCHDOG_UNHEALTHY_CONTAINERS.name, unhealthy)
+        self._set_gauge(MetricsRegistry.WATCHDOG_TWIN_IN_MEMORY.name, 1 if twin_in_memory else 0)
+        if memory_available is not None:
+            self._set_gauge(MetricsRegistry.HOST_MEMORY_AVAILABLE_BYTES.name, memory_available)
+
+    def record_watchdog_restart(self, service: str, reason: str, outcome: str) -> None:
+        """Record a restart the watchdog made, suppressed, or failed to make."""
+        counter = self._instruments.get(MetricsRegistry.WATCHDOG_RESTARTS_TOTAL.name)
+        if counter is not None:
+            counter.add(1, attributes={"service": service, "reason": reason, "outcome": outcome})
 
 
 def collector_for(component: str) -> MetricsCollector:
