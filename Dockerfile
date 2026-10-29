@@ -21,7 +21,11 @@ COPY pyproject.toml README.md LICENSE NOTICE ./
 # ``temporalio`` were absent from the image and the code fell through its
 # graceful-degradation path forever (zero Kafka topics, zero Temporal workflow
 # executions). Installing the extras is what makes the wiring reachable.
-RUN pip install --no-cache-dir ".[gateway,kafka,temporal]" \
+#
+# ``omniverse-usd`` (usd-core, trimesh, scipy; plain wheels, no GPU) is what
+# lets simready.inspect/import open a stage in the gateway and the MCP
+# sidecar (FORGE-711). Without it they raise the install hint.
+RUN pip install --no-cache-dir ".[gateway,kafka,temporal,omniverse-usd]" \
     && pip install --no-cache-dir uvicorn[standard]
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────

@@ -192,6 +192,20 @@ _ROWS: tuple[TwinTypeSpec, ...] = (
             "(twin.record_design_files, or twin.create_firmware_scaffold)."
         ),
     ),
+    # FORGE-711: a third-party part model (an NVIDIA SimReady OpenUSD package)
+    # with its preview, recorded by twin.record_design_files from what
+    # simready.import wrote. Its own family: it is bought, not authored, so a
+    # cad_model slot must not bind to it.
+    TwinTypeSpec(
+        "purchased_model",
+        TwinTypeKind.DEFINITION,
+        "work_product:cad_model",
+        key_prefix="PMD",
+        description=(
+            "A bought part's model: an OpenUSD package, its GLB preview, licence and "
+            "measured mass (twin.record_design_files after simready.import)."
+        ),
+    ),
     # -- records -----------------------------------------------------------
     TwinTypeSpec(
         "design_decision",

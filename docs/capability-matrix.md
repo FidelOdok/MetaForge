@@ -8,21 +8,22 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (123 across 20 adapters)
+## MCP tools (127 across 21 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
 `knowledge,twin,constraint,cadquery,calculix` (32 tools). FreeCAD, KiCad,
-Gazebo, the OpenUSD conversion adapter, and Isaac Sim are opt-in;
+Gazebo, the OpenUSD conversion adapter, the SimReady asset adapter, and
+Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-One hundred sixteen of the 123 are described in the table below. The seven
+One hundred twenty of the 127 are described in the table below. The seven
 that are not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 123 does carry an MCP
+they simply have no row here yet. Every one of the 127 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -38,11 +39,11 @@ capability does not exist.
 | Profile | Tools | For |
 |---|---|---|
 | `core` | 40 | Projects, sessions, twin reads, the records that are not domain-specific, and the design-flow lifecycle tools, and renders of a work product (`twin.render_work_product`; `run.get_status` made room for it, `flow.status` covers a run's state) |
-| `mechanical` | 32 | CAD authoring across both kernels, plus geometry commit and renders of what was modelled (`twin.render_work_product`) |
+| `mechanical` | 36 | CAD authoring across both kernels, plus geometry commit, renders of what was modelled (`twin.render_work_product`), and bought parts' models from NVIDIA SimReady (`simready.search`, `simready.inspect`, `simready.import`, recorded with `twin.record_design_files`) |
 | `simulation` | 34 | FEA, circuit simulation (`spice.run_simulation`), steady internal flow (`openfoam.run_internal_flow`), load cases, meshes and the evidence they produce, including `twin.record_document` to record a `simulation_result` or `load_case` |
 | `electronics` | 34 | Phase 1: schematic and board checks, fabrication exports (Gerber, drill, pick-and-place, BOM), component search, sourcing, the per-rail power budget (`power.check_budget`), circuit simulation (`spice.run_simulation`), building, checking and emulating firmware (`firmware.build`, `firmware.static_check`, `firmware.run_emulated`), and keeping the firmware project and pin map in the twin (`twin.record_design_files`). `kicad.export_netlist` and `knowledge.populate_bom` left it to keep the phases that draw on it within budget |
 | `pcb_design` | 35 | Phase 2 board design: schematic, board and routing generated from a circuit (`kicad.generate_schematic`, `kicad.generate_pcb`, `kicad.autoroute_pcb`), the board's 3D model and renders (`kicad.export_3d`, `kicad.render_pcb`), component updates (`kicad.update_components`), the checks and fabrication exports run on the result, and the schematic, board, gerbers and placement kept in the twin (`twin.record_design_files`). Kept apart from `electronics`, which would otherwise pass the 40-tool cap |
-| `robotics` | 32 | Assemblies, URDF/SDF/USD export, simulators |
+| `robotics` | 39 | Assemblies, URDF/SDF/USD export, simulators, and robot arms, grippers and cell equipment from NVIDIA SimReady with their physics (`simready.*`, `twin.record_design_files`) |
 | `mechanical_product` | 36 | A mechanical product end to end: the FreeCAD session tools (open, sketch, pad/pocket, assembly, export, close), geometry commit, component selection. No promotion tool: promotion is a human authority |
 | `manufacturing` | 38 | Choosing a process before design and the DFM review after it: web and knowledge sourcing, component search, the machine library reads (`library.list_machines`, `library.get_machine`, `library.machine_limits`), `library.process_limits` (a library process's rules as DFM limits; the chosen processes and materials are already in the flow context), vendor quotes and handoffs (`vendor.list_connectors`, `vendor.quote`, `vendor.handoffs`; ordering is not in any capped set), a rough cost estimate (`cost.estimate_manufacturing`), the geometry reads a DFM check can use (`freecad.measure`, `freecad.describe_model`, `freecad.describe_session`, `freecad.list_named_faces`, `twin.evaluate_overhang_metric`) and the records. No CAD authoring |
 | `industrial_design` | 37 | Industrial design: renders of a work product in its appearances (`twin.render_work_product`), the appearance library (`library.list_appearances`, `library.get_appearance`, `library.register_appearance`, `library.update_appearance`), the ergonomic limits (`library.list_ergonomic_limits`, `library.get_ergonomic_limit`), materials, process and machine limits for what a finish or a wall can be, model measurement (`freecad.measure`, `freecad.describe_model`, `freecad.describe_step_file`) and value sourcing for ergonomic limits (web, `knowledge.extract`). No CAD authoring: the envelope it fixes is what mechanical design draws |
@@ -512,6 +513,56 @@ every downstream simulation.
 A document that is not a URDF is refused rather than partly read:
 malformed XML, a root that is not `<robot>`, or a file with no links. An
 empty import reporting success is worse than an error.
+
+### Bought parts from NVIDIA SimReady
+
+[SimReady Central](https://huggingface.co/spaces/nvidia/simready-central) is
+NVIDIA's catalogue of OpenUSD models with physics already on them: robot
+arms and grippers from their makers, motors, racks, cooling units and
+thousands of generic props. The `simready` adapter finds them,
+checks them and puts them where the twin can keep them:
+
+1. `simready.search` reads the catalogue from the index repository
+   (`NVIDIA-Omniverse/simready-central`, one commit-pinned URL per package)
+   and each dataset's licence from its Hugging Face card.
+2. `simready.import` fetches the package's manifest, decides the licence,
+   and only then fetches the OpenUSD layers, each checked against the
+   sha256 the package lists. It measures the stage and writes a GLB preview.
+3. `twin.record_design_files` with `work_product_type="purchased_model"`
+   records that folder as a versioned `cad_model` item (`PMD-` keys). The
+   viewer shows its GLB; `mass_kg` is on the node, so a hierarchy roll-up
+   and a mass constraint read it like a measured part.
+4. `library.register_component` with the returned `library_component`
+   keeps the part for other projects. Its geometry is
+   `{usd_url, sha256, licence, package_id, attribution}`, and the library
+   refuses a USD geometry without an accepted licence.
+
+**The licence decides first.** Accepted without a person reading them:
+CC-BY-4.0, CC0-1.0, Apache-2.0, BSD-2-Clause, BSD-3-Clause and MIT
+(`twin_core/library/licences.py`). A package states its licence in up to
+four places (dataset card, manifest, `LICENSE.txt`, the USD layer's
+`asset_license`); they must agree, or the import is refused as
+inconsistent. Universal Robots' dataset (`license: other`, terms that bind
+whoever opens the file) is left out of search and refused by import.
+`simready.attribution` gives the credit lines a deliverable must carry.
+
+**What comes in, and what does not.** Only the USD layers, ~60 MB for a
+typical asset; textures (often a gigabyte) only with `include_textures`, and
+never the thumbnails or the publisher's `source_assets`. The preview keeps
+display colours, not materials. Measured in SI whatever the stage's units:
+bounding box, mass per rigid body (a body and its mesh can both carry the
+same `MassAPI` mass, so only the topmost counts), joints, contact friction
+and restitution, Wikidata labels, the physics backends the asset offers and
+its latest SimReady conformance run.
+
+**These are simulation models, not manufacturer CAD.** NVIDIA's own library
+is generic props, so their mass goes into the library as an `assumption`
+that needs review; a manufacturer's dataset is a `manufacturer_spec`. Use
+them for envelopes, mass, dynamics and context, not as geometry to machine
+against.
+
+Inspect and import need the `omniverse-usd` extra (`usd-core`, `trimesh`,
+`scipy`); search and attribution need only the network.
 
 ### Does the part actually meet the requirements
 
@@ -1399,7 +1450,7 @@ what the server will actually enforce.
 | `cost` (in-process) | `cost.estimate_manufacturing` | A rough per-unit and batch cost for CNC milling (stock volume x density x price; removed volume / removal rate x shop rate) or sheet metal (blank area x thickness x density x price; cut length / cut speed plus bends, x shop rate), with setup spread over the quantity. Every input is a figure with its source; nothing is built in or defaulted, and a missing figure leaves what needs it unknown. Always `kind: estimate` with `not_a_quote` and what it leaves out (finishing, tolerance and feature count, tooling, shipping, margin); `for_ranking` feeds `rank_manufacturing_processes`. Read-only arithmetic | unit-verified |
 | `blender` (container, Blender 5.2.2 LTS) | `blender.render` | Studio renders of a mesh model (glTF/GLB, STL, OBJ, PLY; convert STEP to GLB first) with Cycles on the CPU, headless: named views (iso, front, back, left, right, top, bottom) and a turntable of up to 36 frames, resolution, samples, perspective or orthographic, transparent background, part colour overrides in sRGB (as a hex code or colour picker gives them; converted to Blender's scene-linear values), optionally with the surface's roughness and metallic; a part name that matches nothing is reported in `unmatched_colours`; `model_up_axis` (`y`, the glTF convention, or `z`) reads a GLB written in CAD's Z-up axes, as MetaForge's STEP converter writes them; the Standard view transform shows specified colours as given. PNGs returned inline; nothing left behind. Read-only | unit-verified with a fake binary; run against real Blender 5.2.2 LTS |
 | `twin` | `twin.render_work_product` | Studio renders of a work product in the twin: a STEP part or assembly is converted to GLB by the same OCCT converter the dashboard viewer uses (so colours and part names come from the model, and the render is told the GLB is Z-up as the viewer is), a mesh (GLB, glTF, STL, OBJ, PLY) is used as is, and `blender.render` renders it with the same view, resolution, sample and colour options. `appearances` shows parts in library appearances: each is looked up with `library.get_appearance`, its sourced screen colour, render roughness and metallic go to Blender, and the render node records which appearance at which version it used (with any assumed values under `needs_review`); an unknown appearance, or a part given both a colour and an appearance, is refused before rendering. The PNGs are stored as a `render` work product linked to the model by `GENERATED_FROM`, carrying the model's content hash, in the model's project (both the node and the Projects junction); `store=false` renders without recording anything. Over the standard `tools/call` the images arrive as MCP image content (lifted out of the sidecar's `{tool_id, status, data}` result wrapper), so a harness shows them in chat, and the JSON text carries no base64. Refuses rather than falls back: an unreachable OCCT converter (its stub mesh is empty, and is dropped from the conversion cache), a format that is not a model, or storage that fails | unit-verified |
-| `twin` | `twin.record_design_files` | Keeps KiCad and firmware files the adapters wrote on the workspace as one versioned work product: `schematic` (every sheet, the project file and library tables), `pcb_layout`, `gerber` (the gerber and drill folder, each file's layer named), `pick_and_place`, `pinmap`, or `firmware_source` (a PlatformIO project's sources, with `firmware.elf/.bin/.hex` when built). Recording the same name again is that item's next revision (`SCH-`, `PCB-`, `GBR-`, `PNP-`, `PIN-`, `FW-` keys). Each file is a named blob served at `GET /v1/twin/nodes/{id}/files/{path}`; `source_node_ids` are linked `GENERATED_FROM` (BOM to schematic to board to gerbers and placement, schematic to pin map to firmware). Left out, the record is linked to the project's one current record of the stage before it (`generated_from_inferred`), and every other stage of the project still loose is linked the same way, so a schematic recorded before its BOM is linked once the BOM exists (`inferred_links`); a stage with more than one candidate is left unlinked, named in `warnings` and counted by `thread_unlinked_stages`, and a stage whose upstream is not recorded at all is named but not counted; the node is linked to its project under its own type, which is what `pcb_v1` and `firmware_v1` count as recorded. A schematic or board gets SVG previews from `kicad.export_svg`, best effort (`preview_error` says why one is missing). Reads only inside the adapter workspace | unit-verified |
+| `twin` | `twin.record_design_files` | Keeps KiCad and firmware files the adapters wrote on the workspace as one versioned work product: `schematic` (every sheet, the project file and library tables), `pcb_layout`, `gerber` (the gerber and drill folder, each file's layer named), `pick_and_place`, `pinmap`, or `firmware_source` (a PlatformIO project's sources, with `firmware.elf/.bin/.hex` when built), or `purchased_model` (the folder `simready.import` wrote: a `cad_model` whose primary file is the GLB preview, with the USD layers, licence and attribution beside it, and the licence, package digest and `mass_kg` read from its `simready.json`, never from `metadata`). Recording the same name again is that item's next revision (`SCH-`, `PCB-`, `GBR-`, `PNP-`, `PIN-`, `FW-`, `PMD-` keys). Each file is a named blob served at `GET /v1/twin/nodes/{id}/files/{path}`; `source_node_ids` are linked `GENERATED_FROM` (BOM to schematic to board to gerbers and placement, schematic to pin map to firmware). Left out, the record is linked to the project's one current record of the stage before it (`generated_from_inferred`), and every other stage of the project still loose is linked the same way, so a schematic recorded before its BOM is linked once the BOM exists (`inferred_links`); a stage with more than one candidate is left unlinked, named in `warnings` and counted by `thread_unlinked_stages`, and a stage whose upstream is not recorded at all is named but not counted; the node is linked to its project under its own type, which is what `pcb_v1` and `firmware_v1` count as recorded. A schematic or board gets SVG previews from `kicad.export_svg`, best effort (`preview_error` says why one is missing). Reads only inside the adapter workspace | unit-verified |
 | `blender` (container) | `blender.export_blend` | The model staged as a Blender scene (lights, camera, colours) saved as a .blend, returned inline, for a designer to open in Blender. Read-only | unit-verified; run against real Blender 5.2.2 LTS |
 | `power` (in-process) | `power.check_budget` | Static worst-case power budget per supply rail. The caller gives every rail (voltage, `source_kind` supply/ldo/switching, rated output, `input_rail`, `efficiency` for a switching regulator, `quiescent_ma` for an LDO) and every load (`current_ma` or `power_mw`, with its source), plus the derating rule. Regulator input current is carried upstream (LDO: output plus quiescent; switching: Vout x Iout / (efficiency x Vin)). A figure not given is unknown and never assumed: a rail that depends on one is `not_established`, unless its known load already exceeds the allowance, which fails. Read-only arithmetic; on the `electronics` profile. With each regulator's `theta_ja_c_per_w` and `tj_max_c` and the request's `ambient_c`, it also returns each regulator's dissipation (LDO `(Vin - Vout) * Iout + Vin * Iq`, switching `Pout * (1/eta - 1)`), junction temperature `Ta + P * theta_JA`, margin to Tj max and a separate `thermal_verdict`: a hot LDO fails thermally while its rail still passes its load budget, and a regulator with no thermal figures is not_established. Backs the `check_power_budget` skill, which both electronics agents used to answer "not yet implemented" | unit-verified |
 | `power` (in-process) | `power.runtime` | Battery runtime: usable energy (`capacity_wh`, or `capacity_mah` x `nominal_voltage_v`, times `usable_fraction`) over the average load at the battery terminals; the rated capacity a `required_runtime_h` needs; and the peak current against the battery's continuous rating. Every figure is `{value, source}`; a missing one is not_established. Read-only arithmetic on the `electronics` profile | unit-verified |
@@ -1469,6 +1520,10 @@ what the server will actually enforce.
 | `omniverse_usd` (opt-in) | `omniverse_usd.convert_glb_to_usd` | Convert a GLB (from cadquery/freecad/occt-converter) into an OpenUSD stage, preserving part names and transforms | _none yet_ |
 | `omniverse_usd` | `omniverse_usd.validate_usd_minimum` | Cheap structural viability gate on a USD stage (default prim, mesh count, metersPerUnit) before downstream simulation dispatch | _none yet_ |
 | `omniverse_usd` | `omniverse_usd.describe_stage` | Basic structural info about a USD stage (up axis, scale, prim paths, mesh count) | _none yet_ |
+| `simready` (opt-in) | `simready.search` | Find packages in NVIDIA SimReady Central by the words of their name, optionally from one publisher; each result is a commit-pinned `package_url` with its dataset licence. Packages under a licence MetaForge does not store unread are left out unless `include_unaccepted` | unit-verified |
+| `simready` | `simready.inspect` | Report one package without keeping it: the licence as the dataset, manifest, licence file and USD layer state it and whether it is accepted; then every USD layer checked against its sha256, and the stage's bounding box (m), mass per rigid body (kg), joints, contact friction and restitution, semantic labels, physics backends and SimReady conformance | unit-verified |
+| `simready` | `simready.import` | Fetch one package onto the adapter workspace under `simready/`, refused unless every licence statement agrees on an accepted licence and every file matches its sha256: the USD layers, a GLB preview (metres, Y up), `LICENSE.txt`, `ATTRIBUTION.txt` and `simready.json`, plus a `library.register_component` body. Textures only with `include_textures` | unit-verified |
+| `simready` | `simready.attribution` | The credit lines the imported parts' licences ask for, from the folders `simready.import` wrote | unit-verified |
 | `isaac_sim` (opt-in) | `isaac_sim.run_physics` | Dispatch a PhysX physics job to the `nvcr.io/nvidia/isaac-sim` container via ephemeral GPU compute; caller supplies the container command, requires `accept_eula=true` | _none yet_ |
 | `isaac_sim` | `isaac_sim.render_scene` | Dispatch an RTX render job to the same container | _none yet_ |
 | `project` (injected) | `project.create` | Create a project (rejects a case-insensitive duplicate name) | [`tier1/project.md`](https://github.com/FidelOdok/MetaForge/blob/main/tests/uat/scenarios/tier1/project.md) |

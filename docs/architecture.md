@@ -1507,6 +1507,7 @@ MetaForge/
 │       ├── spice/              # Circuit simulation
 │       ├── gazebo/             # ROS-native physics/dynamics simulation
 │       ├── omniverse_usd/      # GLB -> OpenUSD conversion
+│       ├── simready/           # NVIDIA SimReady parts: search, licence-gated import
 │       └── isaac_sim/          # PhysX physics + RTX rendering (ephemeral GPU)
 │
 ├── ide_assistants/             # Layer 7: IDE integrations

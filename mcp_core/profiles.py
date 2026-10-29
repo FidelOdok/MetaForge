@@ -146,7 +146,12 @@ PROFILES: dict[str, frozenset[str]] = {
         "freecad.generate_mesh",
         "freecad.get_properties",
         "freecad.list_named_faces",
+        # FORGE-711: bought parts' models, with mass and licence.
+        "simready.import",
+        "simready.inspect",
+        "simready.search",
         "twin.commit_geometry",
+        "twin.record_design_files",
         # FORGE-630: see what was modelled.
         "twin.render_work_product",
         "twin.stage_work_product_file",
@@ -311,6 +316,12 @@ PROFILES: dict[str, frozenset[str]] = {
         "omniverse_usd.convert_glb_to_usd",
         "omniverse_usd.describe_stage",
         "omniverse_usd.validate_usd_minimum",
+        # FORGE-711: robot arms, grippers and cell equipment with physics on.
+        "simready.attribution",
+        "simready.import",
+        "simready.inspect",
+        "simready.search",
+        "twin.record_design_files",
         # FORGE-671: a mobile robot's drive and kinematics, computed rather
         # than hand-estimated.
         "robot.diff_drive_kinematics",

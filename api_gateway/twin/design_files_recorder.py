@@ -12,6 +12,9 @@ adapter wrote on the shared workspace as one work product:
 ``pinmap``                a pin map (CSV or JSON)
 ``firmware_source``       a PlatformIO project's sources, and its build
                           output (``firmware.elf/.bin/.hex``) when present
+``purchased_model``       a bought part's model as ``simready.import``
+                          wrote it: a GLB preview, the OpenUSD layers,
+                          the licence and ``simready.json`` (FORGE-711)
 ========================  ==============================================
 
 Each is a versioned definition (registry rows ``SCH``/``PCB``/``GBR``/``PNP``/
@@ -42,6 +45,7 @@ outside it is refused.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -65,6 +69,12 @@ tracer = get_tracer("api_gateway.twin.design_files_recorder")
 #: A folder may not hold more than this many files, or this many bytes.
 MAX_FILES = 300
 MAX_BYTES = 40 * 1024 * 1024
+#: FORGE-711: a SimReady package's USD layers alone run to ~60 MB.
+MAX_BYTES_BY_KIND = {"purchased_model": 256 * 1024 * 1024}
+
+#: What simready.import writes beside the package; the recorder reads it
+#: rather than taking the licence and mass from the caller.
+SIMREADY_RECORD = "simready.json"
 
 _GERBER_SUFFIX = re.compile(r"^\.(gbr|gbrjob|drl|xln|g[a-z0-9]{1,3})$", re.IGNORECASE)
 _SOURCE_SUFFIXES = {
@@ -117,6 +127,7 @@ KINDS: dict[str, _Kind] = {
     "pick_and_place": _Kind("pick_and_place", "electronics", "csv", "electronics.design"),
     "pinmap": _Kind("pinmap", "firmware", "csv", "firmware.design"),
     "firmware_source": _Kind("firmware_source", "firmware", "c", "firmware.design"),
+    "purchased_model": _Kind("cad_model", "mechanical", "glb", "mechanical.library"),
 }
 
 
@@ -230,7 +241,31 @@ def select_files(kind: str, path: Path) -> tuple[Path, list[Path]]:
         build = folder / ".pio" / "build"
         outputs = sorted(p for p in build.glob("*/*") if p.is_file() and p.name in _BUILD_OUTPUTS)
         return folder, [main, *files, *outputs]
+    if kind == "purchased_model":
+        preview = folder / "preview.glb"
+        if not (folder / SIMREADY_RECORD).is_file() or not preview.is_file():
+            raise ValueError(
+                f"'{folder}' is not a simready.import folder (needs preview.glb and "
+                f"{SIMREADY_RECORD})"
+            )
+        rest = [p for p in _walk(folder, lambda p: True) if p != preview]
+        return folder, [preview, *rest]
     raise ValueError(f"unknown kind '{kind}'")
+
+
+def read_simready_record(folder: Path) -> dict[str, Any]:
+    """The facts simready.import measured, flattened for the node's metadata.
+
+    ``mass_kg`` sits at the top level so the hierarchy roll-up and constraint
+    expressions read it like any measured part (FORGE-100).
+    """
+    raw = json.loads((folder / SIMREADY_RECORD).read_text(encoding="utf-8"))
+    record = raw.get("record") if isinstance(raw, dict) else None
+    if not isinstance(record, dict):
+        raise ValueError(f"{SIMREADY_RECORD} has no 'record' object")
+    if not record.get("licence") or not record.get("package_sha256"):
+        raise ValueError(f"{SIMREADY_RECORD} is missing the licence or the package digest")
+    return record
 
 
 def _content_type(name: str) -> str:
@@ -241,6 +276,12 @@ def _content_type(name: str) -> str:
         return "application/octet-stream"
     if low.endswith(".csv"):
         return "text/csv"
+    if low.endswith(".glb"):
+        return "model/gltf-binary"
+    if low.endswith((".usd", ".usdc", ".usdz", ".png", ".jpg")):
+        return "application/octet-stream"
+    if low.endswith(".json"):
+        return "application/json"
     return "text/plain"
 
 
@@ -319,10 +360,12 @@ def make_design_files_recorder(
         folder, files = select_files(work_product_type, path)
         if len(files) > MAX_FILES:
             raise ValueError(f"{len(files)} files is over the {MAX_FILES}-file limit")
+        limit = MAX_BYTES_BY_KIND.get(work_product_type, MAX_BYTES)
+        total = sum(p.stat().st_size for p in files)
+        if total > limit:
+            raise ValueError(f"{total} bytes is over the {limit}-byte limit")
         payload = [(p.relative_to(folder).as_posix(), p.read_bytes()) for p in files]
-        total = sum(len(b) for _, b in payload)
-        if total > MAX_BYTES:
-            raise ValueError(f"{total} bytes is over the {MAX_BYTES}-byte limit")
+        measured = read_simready_record(folder) if work_product_type == "purchased_model" else {}
 
         plan = await plan_definition_revision(
             twin,
@@ -399,6 +442,8 @@ def make_design_files_recorder(
                 meta["build_outputs"] = [
                     rel for rel, _ in payload if Path(rel).name in _BUILD_OUTPUTS
                 ]
+            # FORGE-711: what the package itself says beats what a caller passes.
+            meta.update(measured)
             if metadata:
                 meta.update({k: v for k, v in metadata.items() if k not in meta})
             if plan is not None:
