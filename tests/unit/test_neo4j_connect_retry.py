@@ -135,3 +135,32 @@ def test_attempt_count_is_configurable(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setenv("METAFORGE_NEO4J_CONNECT_ATTEMPTS", "nonsense")
     assert neo4j_connect_attempts() == DEFAULT_NEO4J_CONNECT_ATTEMPTS
+
+
+def test_default_budget_covers_a_cold_neo4j_start():
+    # FORGE-712: after a host reboot Neo4j opened Bolt 1.6s after the gateway's
+    # ~7.5s budget ran out. The default must wait out a cold start, which is
+    # tens of seconds on a loaded host, while still ending within minutes.
+    from twin_core.api import _NEO4J_CONNECT_BACKOFF
+
+    waits = [
+        _NEO4J_CONNECT_BACKOFF[min(i, len(_NEO4J_CONNECT_BACKOFF) - 1)]
+        for i in range(DEFAULT_NEO4J_CONNECT_ATTEMPTS - 1)
+    ]
+    assert 90 <= sum(waits) <= 180
+
+
+def test_compose_gateway_requires_neo4j():
+    # FORGE-712: the compose stack ships Neo4j, so its gateway must exit (and be
+    # restarted by Docker) rather than fall back to an empty in-memory twin.
+    from pathlib import Path
+
+    import yaml
+
+    compose = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+    gateway = compose["services"]["gateway"]
+    env = dict(e.split("=", 1) for e in gateway["environment"])
+    assert env["METAFORGE_REQUIRE_NEO4J"] == "${METAFORGE_REQUIRE_NEO4J:-true}"
+    assert gateway["restart"] == "unless-stopped"

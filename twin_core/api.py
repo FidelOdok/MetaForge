@@ -39,8 +39,8 @@ from twin_core.models.work_product import WorkProduct
 from twin_core.versioning.branch import InMemoryVersionEngine, VersionEngine
 from twin_core.versioning.git_backend import GitVersionEngine
 
-DEFAULT_NEO4J_CONNECT_ATTEMPTS = 5
-"""Connect attempts before falling back (MET-710).
+DEFAULT_NEO4J_CONNECT_ATTEMPTS = 32
+"""Connect attempts before giving up (MET-710, FORGE-712).
 
 A live incident: the gateway and Neo4j restarted together, the gateway resolved
 ``neo4j`` a moment before its DNS entry existed, and it ran on the in-memory
@@ -49,8 +49,13 @@ reporting healthy. The proof that a retry is the right fix is in the same boot
 log: the *consolidation insight store*, which connects to the same URI slightly
 later in the lifespan, succeeded. The name was resolvable seconds afterwards.
 
-Five attempts with the backoff below span ~7.5s, which covers a container-DNS
-race without meaningfully delaying a boot where Neo4j is genuinely absent."""
+Five attempts (~7.5s) covered that DNS race but not a cold start. After a host
+reboot Docker restarts every container at once without honouring compose
+``depends_on``, and Neo4j opened Bolt 1.6s after the gateway had given up
+(FORGE-712), so the gateway came up on an empty in-memory twin again. With the
+backoff below, 32 attempts span just under two minutes: enough for Neo4j to
+start on a loaded host, and short enough that a gateway with Neo4j genuinely
+absent still reaches its fail-fast or fallback decision promptly."""
 
 _NEO4J_CONNECT_BACKOFF = (0.5, 1.0, 2.0, 4.0)
 

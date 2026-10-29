@@ -38,6 +38,22 @@ If you need fallback to fail loudly instead of silently, set
 in the gateway environment — the server then refuses to start
 without them.
 
+The compose stack sets `METAFORGE_REQUIRE_NEO4J=true` on the gateway
+by default (FORGE-712), because it ships Neo4j: there the in-memory
+twin is never what you want. The gateway retries the connection for
+just under two minutes (`METAFORGE_NEO4J_CONNECT_ATTEMPTS`, default
+32), which covers Neo4j's cold start after a host reboot, when Docker
+restarts every container at once without honouring `depends_on`. If
+Neo4j is still unreachable after that, the gateway exits and
+`restart: unless-stopped` brings it back until Neo4j is up. To boot
+the compose gateway without Neo4j on purpose, set
+`METAFORGE_REQUIRE_NEO4J=false` in `.env`.
+
+A gateway started with `--reload` (the dev override) does not exit
+on a startup failure, because the reloader process stays up. After a
+reboot, check that `/health` reports `twin_backend` as `neo4j
+(persistent)`, and restart the gateway if it does not.
+
 ## `knowledge.ingest` reports success but `knowledge.search` finds nothing
 
 **Symptom:** An ingest returns `chunks_indexed = N` (N > 0), yet a
