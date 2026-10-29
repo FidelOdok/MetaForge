@@ -555,11 +555,17 @@ class TestRealStage:
         assert (folder / "ATTRIBUTION.txt").read_text().startswith('"gripper_2F85_a01" by Robotiq')
         assert (folder / "LICENSE.txt").read_text() == CC_BY_TEXT
 
+        import numpy as np
         import trimesh
 
         glb = trimesh.load(folder / "preview.glb")
-        # Y up in millimetres: the 12 cm height of the Z-up stage is the GLB's Y.
-        assert glb.extents[1] == pytest.approx(120.0, abs=1e-3)
+        # Z up in millimetres, like the STEP converter: the 12 cm height of the
+        # Z-up stage is the GLB's Z, and no node carries a transform the
+        # viewer would reset.
+        assert glb.extents[2] == pytest.approx(120.0, abs=1e-3)
+        assert glb.extents[0] == pytest.approx(100.0, abs=1e-3)
+        for node in glb.graph.nodes_geometry:
+            assert glb.graph[node][0] == pytest.approx(np.eye(4))
         colours = {
             tuple(c[:3]) for g in glb.geometry.values() for c in g.visual.face_colors.tolist()
         }
