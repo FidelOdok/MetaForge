@@ -39,7 +39,7 @@ in the gateway environment — the server then refuses to start
 without them.
 
 The compose stack sets `METAFORGE_REQUIRE_NEO4J=true` on the gateway
-by default (FORGE-712), because it ships Neo4j: there the in-memory
+by default, because it ships Neo4j: there the in-memory
 twin is never what you want. The gateway retries the connection for
 just under two minutes (`METAFORGE_NEO4J_CONNECT_ATTEMPTS`, default
 32), which covers Neo4j's cold start after a host reboot, when Docker
