@@ -7,6 +7,7 @@ faked.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -102,6 +103,7 @@ class TestRegistryAndFragments:
             ("pick_and_place", "PNP"),
             ("pinmap", "PIN"),
             ("firmware_source", "FW"),
+            ("purchased_model", "PMD"),
         ],
     )
     def test_types_are_versioned_definitions(self, name: str, prefix: str) -> None:
@@ -275,6 +277,74 @@ class TestFabricationAndFirmware:
         assert wp.metadata["build_outputs"] == [".pio/build/f405/firmware.elf"]
         assert wp.metadata["flash"] == {"used_pct": 12.5}
         assert out["generated_from"] == [pins["node_id"]]
+
+
+def _simready_folder(ws: Path, *, licence: str | None = "CC-BY-4.0") -> Path:
+    """What simready.import writes (FORGE-711), without needing pxr to make it."""
+    folder = ws / "simready" / "simready_gripper-01234567"
+    (folder / "usd" / "simready_usd").mkdir(parents=True)
+    (folder / "usd" / "simready_usd" / "sm_gripper.usda").write_text("#usda 1.0")
+    (folder / "preview.glb").write_bytes(b"glTF\x02\x00\x00\x00")
+    (folder / "LICENSE.txt").write_text("Attribution 4.0 International")
+    (folder / "ATTRIBUTION.txt").write_text('"gripper" by Robotiq')
+    record = {
+        "source": "simready",
+        "asset": "gripper",
+        "licence": licence,
+        "package_sha256": "b" * 64,
+        "mass_kg": 0.9,
+        "extents_m": [0.1, 0.1, 0.12],
+        "attribution": '"gripper" by Robotiq',
+    }
+    (folder / "simready.json").write_text(json.dumps({"record": record}))
+    return folder
+
+
+class TestPurchasedModel:
+    async def test_simready_folder_is_a_cad_model_carrying_its_licence_and_mass(
+        self, twin: InMemoryTwinAPI, tmp_path: Path, stored: dict[str, bytes]
+    ) -> None:
+        _simready_folder(tmp_path)
+        links = _Links()
+        record = _recorder(twin, tmp_path, links)
+        out = await record(
+            work_product_type="purchased_model",
+            file_path="simready/simready_gripper-01234567",
+            name="Robotiq 2F-85",
+            project_id=PROJECT,
+            # A caller cannot restate the licence or the mass.
+            metadata={"licence": "Proprietary", "mass_kg": 0.1, "note": "kept"},
+        )
+        assert out["primary_file"] == "preview.glb" and out["files"] == 5
+        wp = await twin.get_work_product(UUID(out["node_id"]))
+        assert wp is not None and wp.type == WorkProductType.CAD_MODEL
+        assert wp.format == "glb" and wp.domain == "mechanical"
+        meta = wp.metadata
+        assert meta["licence"] == "CC-BY-4.0" and meta["mass_kg"] == 0.9
+        assert meta["note"] == "kept" and meta["item_key"].startswith("PMD-")
+        assert "usd/simready_usd/sm_gripper.usda" in meta["design_files"]
+        assert meta["minio_object_key"] == meta["design_files"]["preview.glb"]
+        assert links.links[0][3] == "purchased_model"
+
+    async def test_a_folder_without_a_licence_is_refused(
+        self, twin: InMemoryTwinAPI, tmp_path: Path, stored: dict[str, bytes]
+    ) -> None:
+        _simready_folder(tmp_path, licence=None)
+        with pytest.raises(ValueError, match="missing the licence"):
+            await _recorder(twin, tmp_path)(
+                work_product_type="purchased_model",
+                file_path="simready/simready_gripper-01234567",
+                name="x",
+            )
+
+    async def test_a_folder_simready_did_not_write_is_refused(
+        self, twin: InMemoryTwinAPI, tmp_path: Path
+    ) -> None:
+        _kicad_project(tmp_path)
+        with pytest.raises(ValueError, match="not a simready.import folder"):
+            await _recorder(twin, tmp_path)(
+                work_product_type="purchased_model", file_path="generated/drone-fc", name="x"
+            )
 
 
 class TestRefusals:

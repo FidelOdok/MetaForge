@@ -59,6 +59,7 @@ from typing import Any
 
 import structlog
 
+from twin_core.library.licences import ACCEPTED_LICENCES, is_accepted, normalise_licence
 from twin_core.library.machines import MACHINE_KINDS
 
 logger = structlog.get_logger(__name__)
@@ -431,7 +432,8 @@ def parse_colour(raw: Any) -> dict[str, Any]:
 
 
 def parse_geometry(raw: Any) -> dict[str, Any]:
-    """Where the part's CAD comes from: a generator and its parameters, or a STEP file."""
+    """Where the part's CAD comes from: a generator and its parameters, a STEP
+    file, or a third-party OpenUSD package."""
     if raw in (None, {}):
         return {}
     if not isinstance(raw, dict):
@@ -446,7 +448,37 @@ def parse_geometry(raw: Any) -> dict[str, Any]:
         if raw.get("licence"):
             out["licence"] = str(raw["licence"])
         return out
-    raise CatalogError("geometry needs a generator, a step_url or a step_work_product_id")
+    if raw.get("usd_url"):
+        return _usd_geometry(raw)
+    raise CatalogError(
+        "geometry needs a generator, a step_url, a step_work_product_id or a usd_url"
+    )
+
+
+def _usd_geometry(raw: dict[str, Any]) -> dict[str, Any]:
+    """A third-party OpenUSD package (FORGE-711), e.g. an NVIDIA SimReady asset.
+
+    Unlike a STEP link, the licence is required and must be one MetaForge
+    accepts: the package is downloaded and stored, so it is a copy, and a copy
+    without a usable licence is one nobody can ship. The digest pins the exact
+    package, so a later change upstream is a new entry, not a silent swap.
+    """
+    licence = normalise_licence(raw.get("licence"))
+    if not licence:
+        raise CatalogError("a usd_url geometry needs the package's licence")
+    if not is_accepted(licence):
+        raise CatalogError(
+            f"licence {licence} is not one MetaForge accepts for stored geometry "
+            f"({', '.join(sorted(ACCEPTED_LICENCES))}); a person has to read its terms"
+        )
+    sha256 = str(raw.get("sha256") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise CatalogError("a usd_url geometry needs the package's sha256")
+    out: dict[str, Any] = {"usd_url": str(raw["usd_url"]), "sha256": sha256, "licence": licence}
+    for key in ("package_id", "attribution", "preview_glb", "source"):
+        if raw.get(key):
+            out[key] = str(raw[key])
+    return out
 
 
 def parse_suppliers(raw: Any) -> list[dict[str, str]]:

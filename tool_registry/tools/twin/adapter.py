@@ -5340,7 +5340,10 @@ class TwinServer(McpToolServer):
                     "'pcb_layout' (a .kicad_pcb), 'gerber' (the export_gerber + export_drill "
                     "folder), 'pick_and_place' (export_pos file), 'pinmap' (CSV/JSON) or "
                     "'firmware_source' (a PlatformIO project folder; its build output is "
-                    "kept too). Recording the same name again is that item's next revision. "
+                    "kept too), or 'purchased_model' (the folder simready.import wrote: a "
+                    "bought part's OpenUSD package with a GLB preview; its licence, "
+                    "attribution and mass are read from the folder, not from metadata). "
+                    "Recording the same name again is that item's next revision. "
                     "source_node_ids are what it was made from (the BOM for a schematic, the "
                     "schematic for a board, the board for gerbers and placement, the pinmap "
                     "for firmware), linked GENERATED_FROM. A schematic or board also gets an "
@@ -5359,6 +5362,7 @@ class TwinServer(McpToolServer):
                                 "pick_and_place",
                                 "pinmap",
                                 "firmware_source",
+                                "purchased_model",
                             ],
                         },
                         "file_path": {

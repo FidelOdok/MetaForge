@@ -64,6 +64,11 @@ READ_ONLY: frozenset[str] = frozenset(
         "freecad.measure",
         "omniverse_usd.describe_stage",
         "omniverse_usd.validate_usd_minimum",
+        # FORGE-711: inspect downloads to a scratch folder it deletes again;
+        # nothing it writes outlives the call.
+        "simready.search",
+        "simready.inspect",
+        "simready.attribution",
         # Analysis that reads an existing result rather than producing one
         "calculix.check_mesh_convergence",
         "calculix.compute_joint_loads",
@@ -433,6 +438,9 @@ PRODUCING: frozenset[str] = frozenset(
         # only; the caller's project is copied, never modified.
         "firmware.build",
         "firmware.run_emulated",
+        # FORGE-711: a new folder under simready/ on the adapter workspace; an
+        # import of the same package replaces only its own folder.
+        "simready.import",
         "firmware.static_check",
         "gazebo.run_simulation",
         "isaac_sim.render_scene",
@@ -553,6 +561,11 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "knowledge.ingest",
         "web.fetch",
         "web.search",
+        # FORGE-711: the SimReady catalogue and packages live on GitHub and
+        # Hugging Face, and change without us.
+        "simready.search",
+        "simready.inspect",
+        "simready.import",
     }
 )
 

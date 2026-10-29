@@ -137,6 +137,15 @@ _ADAPTER_REGISTRY: dict[str, dict[str, str]] = {
         "config_module": "tool_registry.tools.omniverse_usd.config",
         "config_class": "OmniverseUsdConfig",
     },
+    # FORGE-711: NVIDIA SimReady packages. Search and attribution need only
+    # the network; inspect and import also need the 'omniverse-usd' extra and
+    # raise UsdConversionError with the install hint without it.
+    "simready": {
+        "module": "tool_registry.tools.simready.adapter",
+        "class": "SimReadyServer",
+        "config_module": "tool_registry.tools.simready.config",
+        "config_class": "SimReadyConfig",
+    },
     # MET-635/636: opt-in like freecad/kicad above -- this adapter is a
     # thin coordinator (no GPU needed itself); it dispatches to a separate
     # nvcr.io/nvidia/isaac-sim container via compute_providers.resolve_runtime().
