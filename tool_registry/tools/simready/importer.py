@@ -7,7 +7,7 @@ package:
 
 ====================  ===================================================
 ``usd/``              the package's OpenUSD layers, byte for byte
-``preview.glb``       every visible mesh, metres, Y up, for the viewer
+``preview.glb``       every visible mesh, millimetres, Y up, coloured
 ``LICENSE.txt``       the package's own licence text
 ``ATTRIBUTION.txt``   the credit line the licence asks for
 ``simready.json``     what was measured, and a ready library entry

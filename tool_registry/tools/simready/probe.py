@@ -2,7 +2,8 @@
 
 Needs the 'omniverse-usd' extra (usd-core, trimesh). Everything returned is in
 SI units whatever the stage was authored in: metres from ``metersPerUnit``,
-kilograms from ``kilogramsPerUnit``.
+kilograms from ``kilogramsPerUnit``. The GLB preview is the exception: it is
+in millimetres, the unit the twin viewer draws every other model in.
 
 SimReady assets compose their geometry as instanceable prims, so every
 traversal here includes instance proxies; a plain ``stage.Traverse()`` sees
@@ -171,11 +172,60 @@ def _triangles(counts: list[int], indices: list[int]) -> list[list[int]]:
     return faces
 
 
-def stage_to_glb(usd_path: str | Path, glb_path: str | Path) -> dict[str, Any]:
-    """Write a GLB of every visible mesh, in metres and Y up as glTF expects.
+#: Grey for a face with no material colour and no display colour.
+_NEUTRAL = (0.7, 0.7, 0.7)
 
-    A preview, not a conversion: display colours are kept, materials and
-    textures are not.
+#: The preview is drawn beside CAD the OCCT converter writes unscaled from
+#: STEP, which is millimetres; a GLB in metres shows up a thousand times small.
+_PREVIEW_MM_PER_M = 1000.0
+
+
+def _material_rgb(prim: Any) -> tuple[float, float, float] | None:
+    """The diffuse colour of the UsdPreviewSurface bound to ``prim``, if it has one."""
+    from pxr import UsdShade
+
+    material, _ = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+    if not material:
+        return None
+    shader = material.ComputeSurfaceSource()[0]
+    diffuse = shader.GetInput("diffuseColor") if shader else None
+    if not diffuse:
+        return None
+    for attr in diffuse.GetValueProducingAttributes():
+        value = attr.Get()
+        if value is not None and len(value) == 3:
+            return (float(value[0]), float(value[1]), float(value[2]))
+    return None  # a texture drives it
+
+
+def _face_colours(mesh: Any, prim: Any, counts: list[int]) -> list[tuple[float, float, float]]:
+    """One colour per triangle: subset material, else mesh material, else display colour.
+
+    SimReady parts colour themselves through materials, often one per geometry
+    subset, and leave ``displayColor`` black; reading only that drew every
+    part black.
+    """
+    from pxr import UsdGeom
+
+    display = mesh.GetDisplayColorAttr().Get()
+    base = _material_rgb(prim) or (tuple(float(c) for c in display[0]) if display else _NEUTRAL)
+    per_face = [base] * len(counts)
+    for subset in UsdGeom.Subset.GetAllGeomSubsets(mesh):
+        rgb = _material_rgb(subset.GetPrim())
+        if rgb is None:
+            continue
+        for face in subset.GetIndicesAttr().Get() or []:
+            if 0 <= face < len(per_face):
+                per_face[face] = rgb
+    # _triangles fans each n-gon into n - 2 triangles, in face order.
+    return [rgb for rgb, n in zip(per_face, counts, strict=True) for _ in range(max(n - 2, 0))]
+
+
+def stage_to_glb(usd_path: str | Path, glb_path: str | Path) -> dict[str, Any]:
+    """Write a GLB of every visible mesh, in millimetres and Y up.
+
+    A preview, not a conversion: each face keeps its material's diffuse colour
+    (or the display colour); textures, shading and physics are not carried.
     """
     Gf, Usd, UsdGeom, _ = _pxr()
     try:
@@ -191,7 +241,8 @@ def stage_to_glb(usd_path: str | Path, glb_path: str | Path) -> dict[str, Any]:
     mpu = float(UsdGeom.GetStageMetersPerUnit(stage) or 1.0)
     z_up = str(UsdGeom.GetStageUpAxis(stage)) == "Z"
     # glTF is Y up: rotate -90 degrees about X when the stage is Z up.
-    to_gltf = np.diag([mpu, mpu, mpu, 1.0])
+    scale = mpu * _PREVIEW_MM_PER_M
+    to_gltf = np.diag([scale, scale, scale, 1.0])
     if z_up:
         to_gltf = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]]) @ to_gltf
 
@@ -220,10 +271,14 @@ def stage_to_glb(usd_path: str | Path, glb_path: str | Path) -> dict[str, Any]:
         tri = trimesh.Trimesh(
             vertices=np.array(points, dtype=float), faces=np.array(faces), process=False
         )
-        colour = mesh.GetDisplayColorAttr().Get()
-        if colour:
-            rgb = [int(max(0.0, min(1.0, float(c))) * 255) for c in colour[0]]
-            tri.visual.face_colors = [*rgb, 255]
+        colours = [
+            [*(int(max(0.0, min(1.0, c)) * 255) for c in rgb), 255]
+            for rgb in _face_colours(mesh, prim, list(counts))
+        ]
+        if len({tuple(c) for c in colours}) > 1:
+            # glTF colours vertices, so a corner two colours share would blend.
+            tri.unmerge_vertices()
+        tri.visual.face_colors = colours
         name = prim.GetPath().pathString.strip("/").replace("/", "_") or f"mesh_{meshes}"
         scene.add_geometry(tri, node_name=name, geom_name=name, transform=to_gltf @ world)
         meshes += 1

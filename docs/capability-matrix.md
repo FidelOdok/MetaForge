@@ -554,8 +554,11 @@ where the licence text is published, never an empty file.
 
 **What comes in, and what does not.** Only the USD layers, ~60 MB for a
 typical asset; textures (often a gigabyte) only with `include_textures`, and
-never the thumbnails or the publisher's `source_assets`. The preview keeps
-display colours, not materials. Measured in SI whatever the stage's units:
+never the thumbnails or the publisher's `source_assets`. The preview colours
+each face with its material's diffuse colour (a geometry subset's own
+material first, then the mesh's, then `displayColor`, then grey); it carries
+no textures or shading, and is drawn in millimetres so it sits at the same
+scale as the project's STEP parts. Measured in SI whatever the stage's units:
 bounding box, mass per rigid body (a body and its mesh can both carry the
 same `MassAPI` mass, so only the topmost counts), joints, contact friction
 and restitution, Wikidata labels, the physics backends the asset offers and
@@ -1528,7 +1531,7 @@ what the server will actually enforce.
 | `omniverse_usd` | `omniverse_usd.describe_stage` | Basic structural info about a USD stage (up axis, scale, prim paths, mesh count) | _none yet_ |
 | `simready` (opt-in) | `simready.search` | Find packages in NVIDIA SimReady Central by the words of their name, optionally from one publisher; each result is a commit-pinned `package_url` with its dataset licence. Packages under a licence MetaForge does not store unread are left out unless `include_unaccepted` | unit-verified |
 | `simready` | `simready.inspect` | Report one package without keeping it: the licence as the dataset, manifest, licence file and USD layer state it and whether it is accepted; then every USD layer checked against its sha256, and the stage's bounding box (m), mass per rigid body (kg), joints, contact friction and restitution, semantic labels, physics backends and SimReady conformance | unit-verified |
-| `simready` | `simready.import` | Fetch one package onto the adapter workspace under `simready/`, refused unless every licence statement agrees on an accepted licence and every file matches its sha256: the USD layers, a GLB preview (metres, Y up), `LICENSE.txt`, `ATTRIBUTION.txt` and `simready.json`, plus a `library.register_component` body. Textures only with `include_textures` | unit-verified |
+| `simready` | `simready.import` | Fetch one package onto the adapter workspace under `simready/`, refused unless every licence statement agrees on an accepted licence and every file matches its sha256: the USD layers, a GLB preview (millimetres like the viewer's other models, Y up, each face in its material's colour), `LICENSE.txt`, `ATTRIBUTION.txt` and `simready.json`, plus a `library.register_component` body. Textures only with `include_textures` | unit-verified |
 | `simready` | `simready.attribution` | The credit lines the imported parts' licences ask for, from the folders `simready.import` wrote | unit-verified |
 | `isaac_sim` (opt-in) | `isaac_sim.run_physics` | Dispatch a PhysX physics job to the `nvcr.io/nvidia/isaac-sim` container via ephemeral GPU compute; caller supplies the container command, requires `accept_eula=true` | _none yet_ |
 | `isaac_sim` | `isaac_sim.render_scene` | Dispatch an RTX render job to the same container | _none yet_ |

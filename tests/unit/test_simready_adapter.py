@@ -455,7 +455,7 @@ class TestRegistration:
 def _stage_bytes(tmp: Path, *, layer_licence: str = "CC-BY 4.0") -> bytes:
     """A gripper: a body whose mesh repeats its MassAPI mass, a finger, a joint."""
     pytest.importorskip("pxr")
-    from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
 
     path = tmp / "build.usda"
     stage = Usd.Stage.CreateNew(str(path))
@@ -483,6 +483,18 @@ def _stage_bytes(tmp: Path, *, layer_licence: str = "CC-BY 4.0") -> bytes:
 
     box("/Root/Body", 10.0, (0, 0, 0), 0.8)
     box("/Root/Finger", 2.0, (0, 0, 10.0), 0.1)
+    # The finger's top face is red through a subset material, as SimReady
+    # parts colour themselves; the rest keeps its display colour.
+    red = UsdShade.Material.Define(stage, "/Root/Looks/red")
+    surface = UsdShade.Shader.Define(stage, "/Root/Looks/red/Surface")
+    surface.CreateIdAttr("UsdPreviewSurface")
+    surface.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(1, 0, 0))
+    red.CreateSurfaceOutput().ConnectToSource(surface.ConnectableAPI(), "surface")
+    finger = UsdGeom.Mesh(stage.GetPrimAtPath("/Root/Finger/Mesh"))
+    top = UsdGeom.Subset.CreateGeomSubset(
+        finger, "top", UsdGeom.Tokens.face, [1], UsdShade.Tokens.materialBind
+    )
+    UsdShade.MaterialBindingAPI.Apply(top.GetPrim()).Bind(red)
     joint = UsdPhysics.RevoluteJoint.Define(stage, "/Root/Joints/finger")
     joint.CreateBody0Rel().SetTargets(["/Root/Body"])
     joint.CreateBody1Rel().SetTargets(["/Root/Finger"])
@@ -546,8 +558,14 @@ class TestRealStage:
         import trimesh
 
         glb = trimesh.load(folder / "preview.glb")
-        # Y up in metres: the 12 cm height of the Z-up stage is the GLB's Y.
-        assert glb.extents[1] == pytest.approx(0.12, abs=1e-6)
+        # Y up in millimetres: the 12 cm height of the Z-up stage is the GLB's Y.
+        assert glb.extents[1] == pytest.approx(120.0, abs=1e-3)
+        colours = {
+            tuple(c[:3])
+            for g in glb.geometry.values()
+            for c in g.visual.face_colors.tolist()
+        }
+        assert colours == {(51, 102, 204), (255, 0, 0)}  # display colour, subset material
         assert out["preview"]["mesh_count"] == 2
 
         attr = await server.attribution({"folders": [out["folder"]]})
