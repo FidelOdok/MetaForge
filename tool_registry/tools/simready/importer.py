@@ -113,6 +113,33 @@ def attribution_line(record: dict[str, Any]) -> str:
     return line + " MetaForge added a GLB preview; the USD layers are unchanged."
 
 
+def licence_notice(record: dict[str, Any], licence_text: str | None) -> str:
+    """What LICENSE.txt holds: the package's own text, or a notice saying where it is.
+
+    Some packages declare a licence in their manifest, dataset card and USD
+    layer but ship no text. An empty file would read as "no licence"; a
+    reconstructed one would put words in the owner's mouth.
+    """
+    if licence_text and licence_text.strip():
+        return licence_text
+    licence = record.get("licence") or "unknown licence"
+    url = LICENCE_URLS.get(licence, "")
+    holder = record.get("author") or record.get("owner") or "the package's owner"
+    lines = [
+        f"SPDX-License-Identifier: {licence}",
+        "",
+        f"{record.get('dataset')}/{record.get('asset')} ships no licence text of its own.",
+        "It declares this licence in its packaging manifest, its dataset card and",
+        "its root USD layer.",
+        "",
+        f"Copyright holder named by the package: {holder}",
+        f"Source: {record.get('source_url')}",
+    ]
+    if url:
+        lines.append(f"Licence text: {url}")
+    return "\n".join(lines) + "\n"
+
+
 async def _licence(
     manifest: Manifest, dataset_licence: str | None, layer_licence: str | None
 ) -> Any:
@@ -296,7 +323,9 @@ async def import_package(
         record["preview_glb"] = "preview.glb"
         record["licence_obligations"] = decision.obligations
         component = component_entry(record, ref)
-        (staging / "LICENSE.txt").write_text(manifest.licence_text or "", encoding="utf-8")
+        (staging / "LICENSE.txt").write_text(
+            licence_notice(record, manifest.licence_text), encoding="utf-8"
+        )
         (staging / "ATTRIBUTION.txt").write_text(record["attribution"] + "\n", encoding="utf-8")
         (staging / "simready.json").write_text(
             json.dumps({"record": record, "library_component": component}, indent=2),
