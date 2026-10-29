@@ -530,7 +530,9 @@ checks them and puts them where the twin can keep them:
    sha256 the package lists. It measures the stage and writes a GLB preview.
 3. `twin.record_design_files` with `work_product_type="purchased_model"`
    records that folder as a versioned `cad_model` item (`PMD-` keys). The
-   viewer shows its GLB; `mass_kg` is on the node, so a hierarchy roll-up
+   3D viewer and the preview open its GLB as a mesh (the USD layers,
+   licence and attribution are its other files); `mass_kg` is on the node,
+   so a hierarchy roll-up
    and a mass constraint read it like a measured part.
 4. `library.register_component` with the returned `library_component`
    keeps the part for other projects. Its geometry is
@@ -545,6 +547,10 @@ four places (dataset card, manifest, `LICENSE.txt`, the USD layer's
 inconsistent. Universal Robots' dataset (`license: other`, terms that bind
 whoever opens the file) is left out of search and refused by import.
 `simready.attribution` gives the credit lines a deliverable must carry.
+Some packages declare their licence everywhere but ship no text (OnRobot's
+grippers, BSD-3-Clause); their `LICENSE.txt` is then a notice naming the
+SPDX identifier, the copyright holder the package names, its source and
+where the licence text is published, never an empty file.
 
 **What comes in, and what does not.** Only the USD layers, ~60 MB for a
 typical asset; textures (often a gigabyte) only with `include_textures`, and

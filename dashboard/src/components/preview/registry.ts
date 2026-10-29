@@ -177,7 +177,10 @@ export function previewEngineFor(subject: PreviewSubject): PreviewResolution {
   const wpType = str(subject.properties?.wp_type);
   const fmt = formatOf(subject);
 
-  // 1. Type beats format where the type carries the meaning.
+  // 1. Type beats format where the type carries the meaning. A design-files
+  //    node whose primary file is a mesh (an imported SimReady part's
+  //    preview.glb) is a model to look at, not a set of sheets.
+  if (subject.designFiles && MESH_FORMATS.has(fmt)) return { engine: 'mesh3d', format: fmt };
   if (subject.designFiles) return { engine: 'design', format: fmt };
   if (wpType === 'robot_description') return { engine: 'robot', format: fmt };
   if (wpType === 'simulation_result') return { engine: 'sim', format: fmt };

@@ -22,6 +22,7 @@ from tool_registry.tools.simready.importer import (
     component_entry,
     family_for,
     library_name,
+    licence_notice,
 )
 from tool_registry.tools.simready.index import words
 from tool_registry.tools.simready.licence import decide, detect_licence_text
@@ -399,6 +400,29 @@ class TestLibraryEntry:
         assert family_for(_ref(asset="motor_a01"), {}) == "motor"
         assert family_for(_ref("FANUC-CORPORATION", "CRX-10iA"), {}) == "actuator"
         assert family_for(_ref("nvidia", "table_a01"), {}) == "other"
+
+
+class TestLicenceFile:
+    def _record(self) -> dict[str, Any]:
+        return {
+            "asset": "onrobot_rg2",
+            "dataset": "onrobot/simready-grippers",
+            "owner": "onrobot",
+            "author": "OnRobot A/S",
+            "licence": "BSD-3-Clause",
+            "source_url": "https://huggingface.co/datasets/onrobot/simready-grippers/tree/x/onrobot_rg2",
+        }
+
+    def test_the_package_text_is_kept_as_it_is(self) -> None:
+        assert licence_notice(self._record(), CC_BY_TEXT) == CC_BY_TEXT
+
+    @pytest.mark.parametrize("text", [None, "", "  \n"])
+    def test_a_package_without_text_gets_a_notice_not_an_empty_file(self, text: str | None) -> None:
+        notice = licence_notice(self._record(), text)
+        assert notice.startswith("SPDX-License-Identifier: BSD-3-Clause\n")
+        assert "ships no licence text of its own" in notice
+        assert "Copyright holder named by the package: OnRobot A/S" in notice
+        assert "https://opensource.org/license/bsd-3-clause" in notice
 
 
 class TestRegistration:

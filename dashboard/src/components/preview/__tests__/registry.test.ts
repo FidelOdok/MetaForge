@@ -182,6 +182,18 @@ describe('previewEngineFor: design files (FORGE-687)', () => {
     },
   );
 
+  it('a purchased model whose primary file is a GLB opens as a 3D mesh', () => {
+    const glb = { ...files, files: [{ path: 'preview.glb' }, { path: 'usd/part.usda' }] };
+    expect(previewEngineFor({ ...wp('cad_model', 'glb'), designFiles: glb })).toEqual({
+      engine: 'mesh3d',
+      format: 'glb',
+    });
+  });
+
+  it('a mechanical design-files node with a STEP primary keeps the design-files engine', () => {
+    expect(previewEngineFor({ ...wp('cad_model', 'step'), designFiles: files }).engine).toBe('design');
+  });
+
   it('an imported schematic with no design files keeps the format route', () => {
     expect(engine('schematic', 'kicad_sch')).toBe('kicad');
   });
