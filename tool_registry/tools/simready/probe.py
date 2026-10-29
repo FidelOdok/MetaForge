@@ -3,7 +3,8 @@
 Needs the 'omniverse-usd' extra (usd-core, trimesh). Everything returned is in
 SI units whatever the stage was authored in: metres from ``metersPerUnit``,
 kilograms from ``kilogramsPerUnit``. The GLB preview is the exception: it is
-in millimetres, the unit the twin viewer draws every other model in.
+in millimetres and Z up, the way the STEP converter writes every other model
+the twin viewer draws.
 
 SimReady assets compose their geometry as instanceable prims, so every
 traversal here includes instance proxies; a plain ``stage.Traverse()`` sees
@@ -179,6 +180,10 @@ _NEUTRAL = (0.7, 0.7, 0.7)
 #: STEP, which is millimetres; a GLB in metres shows up a thousand times small.
 _PREVIEW_MM_PER_M = 1000.0
 
+#: Y up to Z up (a +90 degree turn about X): the viewer turns every GLB from
+#: the converter's Z up to its own Y up, so a Y-up preview would lie on its side.
+_Y_UP_TO_Z_UP = ((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1))
+
 
 def _material_rgb(prim: Any) -> tuple[float, float, float] | None:
     """The diffuse colour of the UsdPreviewSurface bound to ``prim``, if it has one."""
@@ -222,10 +227,13 @@ def _face_colours(mesh: Any, prim: Any, counts: list[int]) -> list[tuple[float, 
 
 
 def stage_to_glb(usd_path: str | Path, glb_path: str | Path) -> dict[str, Any]:
-    """Write a GLB of every visible mesh, in millimetres and Y up.
+    """Write a GLB of every visible mesh, in millimetres and Z up, as the STEP converter does.
 
     A preview, not a conversion: each face keeps its material's diffuse colour
     (or the display colour); textures, shading and physics are not carried.
+    Every transform is baked into the vertices and the nodes carry none: the
+    viewer drives each mesh's rotation and scale back to identity every frame
+    (its explode and gizmo), which would undo a transform kept on a node.
     """
     Gf, Usd, UsdGeom, _ = _pxr()
     try:
@@ -240,11 +248,10 @@ def stage_to_glb(usd_path: str | Path, glb_path: str | Path) -> dict[str, Any]:
         raise UsdConversionError(f"could not open {usd_path} as a USD stage")
     mpu = float(UsdGeom.GetStageMetersPerUnit(stage) or 1.0)
     z_up = str(UsdGeom.GetStageUpAxis(stage)) == "Z"
-    # glTF is Y up: rotate -90 degrees about X when the stage is Z up.
     scale = mpu * _PREVIEW_MM_PER_M
-    to_gltf = np.diag([scale, scale, scale, 1.0])
-    if z_up:
-        to_gltf = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]]) @ to_gltf
+    to_preview = np.diag([scale, scale, scale, 1.0])
+    if not z_up:
+        to_preview = np.array(_Y_UP_TO_Z_UP, dtype=float) @ to_preview
 
     scene = trimesh.Scene()
     cache = UsdGeom.XformCache(Usd.TimeCode.Default())
@@ -280,7 +287,8 @@ def stage_to_glb(usd_path: str | Path, glb_path: str | Path) -> dict[str, Any]:
             tri.unmerge_vertices()
         tri.visual.face_colors = colours
         name = prim.GetPath().pathString.strip("/").replace("/", "_") or f"mesh_{meshes}"
-        scene.add_geometry(tri, node_name=name, geom_name=name, transform=to_gltf @ world)
+        tri.apply_transform(to_preview @ world)
+        scene.add_geometry(tri, node_name=name, geom_name=name)
         meshes += 1
     if meshes == 0:
         raise UsdConversionError(f"{usd_path} has no visible mesh to preview")
