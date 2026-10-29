@@ -73,8 +73,9 @@ class TestMetricsRegistryGroupedAccess:
         # + 1 prd requirement values (FORGE-528)
         # + 2 project brief count/size (FORGE-530)
         # + 1 twin record staleness (FORGE-527)
-        # + 1 client-mode phase tasks (FORGE-581).
-        assert len(all_metrics) == 85
+        # + 1 client-mode phase tasks (FORGE-581)
+        # + 5 host watchdog (FORGE-713).
+        assert len(all_metrics) == 90
 
     def test_gateway_metrics_returns_4(self) -> None:
         assert len(MetricsRegistry.gateway_metrics()) == 4
@@ -113,6 +114,7 @@ class TestMetricsRegistryGroupedAccess:
             + len(MetricsRegistry.mcp_metrics())
             + len(MetricsRegistry.design_flow_metrics())
             + len(MetricsRegistry.sim_field_metrics())
+            + len(MetricsRegistry.watchdog_metrics())
         )
         assert len(MetricsRegistry.all_metrics()) == total
 
@@ -139,6 +141,7 @@ class TestMetricsRegistryGroupedAccess:
             MetricsRegistry.mcp_metrics(),
             MetricsRegistry.design_flow_metrics(),
             MetricsRegistry.sim_field_metrics(),
+            MetricsRegistry.watchdog_metrics(),
         ]
         grouped = {m.name for group in groups for m in group}
         registered = {m.name for m in MetricsRegistry.all_metrics()}
