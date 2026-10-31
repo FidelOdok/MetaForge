@@ -54,6 +54,30 @@ on a startup failure, because the reloader process stays up. After a
 reboot, check that `/health` reports `twin_backend` as `neo4j
 (persistent)`, and restart the gateway if it does not.
 
+## A container stays unhealthy, or the host runs out of memory
+
+**Symptom:** a service reports `unhealthy` in `docker compose ps` and
+keeps running, or the host stops answering after memory runs low.
+
+**Diagnosis:** Docker restarts a container that exits, never one that
+keeps running in a bad state, and nothing in Docker watches host memory.
+
+**Fix:** the compose stack runs a `watchdog` service for this. It
+restarts a stack container that stays unhealthy for three checks, restarts
+the gateway when its twin has fallen back to memory, and reports host
+memory available (it never kills anything for memory). Restarts are rate
+limited, so a container that fails every start raises the
+`WatchdogRestartBlocked` alert instead of being restarted in a loop.
+Check what it has done with:
+
+```bash
+docker compose logs --tail 100 watchdog
+```
+
+Its alerts, settings and the security note about the Docker socket it
+mounts are in the
+[host watchdog runbook](https://github.com/FidelOdok/MetaForge/blob/main/docs/runbooks/host-watchdog.md).
+
 ## `knowledge.ingest` reports success but `knowledge.search` finds nothing
 
 **Symptom:** An ingest returns `chunks_indexed = N` (N > 0), yet a
@@ -477,4 +501,5 @@ If the issue is:
   bug-hunter agent (`/bug-hunt`) can help triage.
 - an ops-level outage — see [`docs/runbooks/`](https://github.com/FidelOdok/MetaForge/tree/main/docs/runbooks) for
   stack-specific runbooks (`gateway-down.md`, `neo4j-unreachable.md`,
-  `kafka-consumer-stopped.md`).
+  `kafka-consumer-stopped.md`,
+  `host-watchdog.md`).

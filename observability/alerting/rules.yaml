@@ -810,3 +810,63 @@ groups:
             original bug stayed invisible. Build with
             --build-arg METAFORGE_BUILD_SHA=$(git rev-parse HEAD); CI does
             this already, so this firing means the image was built by hand.
+
+  # FORGE-713 -- host watchdog (observability/watchdog.py). The watchdog
+  # restarts what it safely can; these rules cover what it reports instead.
+  - name: metaforge_host
+    rules:
+      - alert: TwinRunningInMemory
+        expr: metaforge_watchdog_twin_in_memory == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The gateway is serving an in-memory twin"
+          description: >-
+            Neo4j is configured, but the gateway's twin fell back to memory:
+            every persisted node is invisible and anything written now is lost
+            on the next restart. The watchdog restarts the gateway after two
+            checks; firing for two minutes means the restart did not help or
+            was suppressed. Check that Neo4j is up, then restart the gateway.
+          runbook_url: "docs/runbooks/host-watchdog.md"
+
+      - alert: HostMemoryLow
+        expr: metaforge_host_memory_available_bytes < 536870912
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory available is below 512 MB"
+          description: >-
+            {{ $value | humanize1024 }}B available. A host with no swap stops
+            answering entirely when this reaches zero. The watchdog does not
+            kill anything; stop a heavy job or a service you do not need.
+          runbook_url: "docs/runbooks/host-watchdog.md"
+
+      - alert: WatchdogRestartBlocked
+        expr: >-
+          increase(metaforge_watchdog_restarts_total{outcome=~"suppressed|failed"}[30m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The watchdog could not restart {{ $labels.service }}"
+          description: >-
+            {{ $labels.service }} needed a restart ({{ $labels.reason }}) and the
+            watchdog {{ $labels.outcome }} it: it is in its cooldown, has hit the
+            hourly cap, or Docker refused. A container that keeps failing after
+            restarts needs a person; read its logs.
+          runbook_url: "docs/runbooks/host-watchdog.md"
+
+      - alert: WatchdogSilent
+        expr: absent_over_time(metaforge_watchdog_checks_total[15m])
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Nothing is watching the host"
+          description: >-
+            No watchdog check has been recorded for 15 minutes, so unhealthy
+            containers and an in-memory twin are not being caught. Check the
+            watchdog service: docker compose ps watchdog.
+          runbook_url: "docs/runbooks/host-watchdog.md"

@@ -114,7 +114,8 @@ class TestAlertingRules:
         # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
         # + 1 KB storage set-up failed at gateway start (FORGE-594).
         # + 1 browser requests refused for their Origin (FORGE-604).
-        assert len(rules) == 52
+        # + 4 host watchdog (FORGE-713).
+        assert len(rules) == 56
 
     def test_all_rules_have_required_fields(self) -> None:
         """Every alert rule must have alert, expr, for, labels.severity, annotations.summary."""
@@ -133,11 +134,12 @@ class TestAlertingRules:
 
     def test_six_critical_rules(self) -> None:
         """8 critical: 3 original + 3 fleet + 1 design-flow engine (FORGE-401)
-        + 1 approval gate without a Temporal runtime (FORGE-469)."""
+        + 1 approval gate without a Temporal runtime (FORGE-469)
+        + 1 twin running in memory (FORGE-713)."""
         data = _load_yaml(_RULES_PATH)
         rules = _all_alert_rules(data)
         critical = [r for r in rules if r["labels"]["severity"] == "critical"]
-        assert len(critical) == 8
+        assert len(critical) == 9
 
     def test_seven_warning_rules(self) -> None:
         # 17 warning: 5 original + 2 fleet + 2 retrieval-quality
@@ -172,7 +174,8 @@ class TestAlertingRules:
         # FORGE-577: the MinIO bucket-size rule is gone (no such metric).
         # + 1 KB storage set-up failed at gateway start (FORGE-594).
         # + 1 browser requests refused for their Origin (FORGE-604).
-        assert len(warnings) == 39
+        # + 3 host watchdog (FORGE-713).
+        assert len(warnings) == 42
 
     def test_critical_rule_names(self) -> None:
         """Verify the names of all critical alert rules."""
@@ -194,6 +197,8 @@ class TestAlertingRules:
                 # FORGE-469: a worker without temporalio is refusing every
                 # human gate it reaches (it used to approve them silently).
                 "ApprovalGateNoTemporalRuntime",
+                # FORGE-713: the gateway serves an empty in-memory twin.
+                "TwinRunningInMemory",
             ]
         )
 
@@ -269,6 +274,10 @@ class TestAlertingRules:
                 # FORGE-470: an iteration loop converged with no approval
                 # workflow, so it stopped BLOCKED instead of merging.
                 "IterationGateNoApprovalWorkflow",
+                # FORGE-713: host watchdog.
+                "HostMemoryLow",
+                "WatchdogRestartBlocked",
+                "WatchdogSilent",
             ]
         )
 

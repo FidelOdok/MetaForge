@@ -736,6 +736,38 @@ services:
       - storage
     restart: unless-stopped
 
+  # ── Host watchdog (FORGE-713) ───────────────────────────────────
+  # Docker restarts a container that exits, never one that keeps running in a
+  # bad state. This restarts a stack container that stays unhealthy, restarts
+  # the gateway when its twin has fallen back to memory, and reports host
+  # memory (warning only; it never kills anything). Restarts are rate limited
+  # so a container that fails every start is reported, not looped.
+  #
+  # The Docker socket is root-equivalent on the host. The watchdog only lists,
+  # inspects and restarts containers of its own compose project, but anything
+  # that can run code in this container could do more. See
+  # docs/runbooks/host-watchdog.md.
+  watchdog:
+    image: ghcr.io/fidelodok/metaforge-gateway:${METAFORGE_GATEWAY_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "observability.watchdog"]
+    environment:
+      - METAFORGE_ENV=docker
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - METAFORGE_WATCHDOG_INTERVAL=${METAFORGE_WATCHDOG_INTERVAL:-30}
+      - METAFORGE_WATCHDOG_MEMORY_WARN_MB=${METAFORGE_WATCHDOG_MEMORY_WARN_MB:-512}
+      - METAFORGE_WATCHDOG_MAX_RESTARTS_PER_HOUR=${METAFORGE_WATCHDOG_MAX_RESTARTS_PER_HOUR:-3}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # The image's HEALTHCHECK curls :8000, which this process does not serve.
+    healthcheck:
+      disable: true
+    networks:
+      - metaforge
+    restart: unless-stopped
+
   # ── SPICE Adapter (FORGE-542: ngspice circuit simulation) ──────
   # Shares adapter-workspace with kicad-adapter, so a netlist exported by
   # kicad.export_netlist can be simulated by path.
