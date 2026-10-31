@@ -343,6 +343,18 @@ phase carries it. A unit test fails when a type a template requires
 or expects, or that tailoring can add, has no hint, so a tailored deliverable can
 no longer fall back to the generic "record it into the twin" line.
 
+**A server-run phase cannot ask.** Skills and phase objectives say to ask the
+person for anything missing, which is right for an interactive client. A phase
+the server runs has no one to answer, so its prompt also says it runs
+unattended (`UNATTENDED_PHASE_RULE` in `api_gateway/runs/flow_brain.py`): instead
+of asking and stopping, it records a deferred decision with its open questions
+as the reason where the objective allows one, and otherwise decides with what it
+has and states its assumptions. The reviewer answers at the gate, and a retry
+carries the answer back. Without this, a route selection phase on a brief with
+no manufacturing context asked for the quantity, recorded nothing, asked again
+on every retry, and the run failed when the findings stopped changing.
+Client-mode runs do not use this prompt, so a connected client still asks.
+
 This makes completeness machine-enforced and quality human-judged: the machine
 guarantees the deliverable exists in the twin; the human reviews whether it's
 right.

@@ -205,6 +205,26 @@ def deliverable_hints(pid: str) -> dict[str, str]:
 
 #: FORGE-501: per-phase tool-use budget. A phase building several sketch-based
 #: parts ran out of the old hard-coded 24 before committing a cad_model.
+UNATTENDED_PHASE_RULE = (
+    "This phase runs unattended: no person reads your reply until the gate, and "
+    "nothing can answer a question while the phase runs. Where the objective or a "
+    "procedure in this prompt says to ask the person, do NOT ask and stop. Record "
+    "what you have instead: where the objective allows a deferred decision (for example a "
+    "manufacturing_route with deferred: true), record it with your open questions as "
+    "its reason; otherwise decide with the information you have and state each "
+    "assumption in the rationale. The reviewer answers at the gate, and a retry "
+    "brings their answer back to you. A reply that only asks questions records "
+    "nothing, and the gate will not pass."
+)
+"""What a server-run phase does instead of asking the person (FORGE-714).
+
+Skills and phase objectives say "ask the person for anything missing", which is
+right for an interactive client. A phase this brain runs has no one to answer:
+on a chair brief with no manufacturing context, route_selection asked for the
+quantity and materials, stopped after two steps having recorded nothing, asked
+again on every retry, and the run failed when the findings stopped changing.
+Client-mode runs do not use this prompt, so a connected client still asks."""
+
 DEFAULT_PHASE_MAX_STEPS = 24
 DEFAULT_PHASE_MAX_STEPS_HEAVY = 60
 #: Deliverables whose authoring is a long chain of CAD/solver calls.
@@ -347,6 +367,7 @@ class ReActPhaseBrain:
             f"{deliverables}\n"
             f"{items_block}"
             f"{overlay_block}"
+            f"{UNATTENDED_PHASE_RULE}\n\n"
             f"Use the available MCP tools (project, twin, CAD/FEA/EDA, knowledge) to "
             f"actually perform the work and record {expected} into the digital twin — "
             f"do not just describe it. Work efficiently: prefer one decisive tool call "
