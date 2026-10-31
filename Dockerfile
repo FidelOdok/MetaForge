@@ -2,6 +2,23 @@
 # Usage:  docker build -t metaforge-gateway .
 #         docker run -p 8000:8000 metaforge-gateway
 
+# ── Stage 0: dependency manifest ─────────────────────────────────────
+# FORGE-715: the release workflow stamps the release version into
+# pyproject.toml before building, so the file differs on every build. Copied
+# straight into the deps stage, it invalidated the dependency layer each time
+# and every release reinstalled everything (16 to 40 minutes, almost all of
+# it here). This stage writes a copy with the version pinned to 0.0.0 and an
+# empty README; COPY --from keys its cache on that content, so the deps layer
+# below is reused until the dependencies themselves change. The real version
+# is installed by the runtime stage's `pip install --no-deps .`, which is what
+# /health reads.
+FROM python:3.11-slim AS manifest
+
+WORKDIR /src
+COPY pyproject.toml ./
+COPY scripts/stamp_version.py ./
+RUN python stamp_version.py 0.0.0 --path pyproject.toml && touch README.md
+
 # ── Stage 1: dependencies ────────────────────────────────────────────
 FROM python:3.11-slim AS deps
 
@@ -12,7 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md LICENSE NOTICE ./
+COPY --from=manifest /src/pyproject.toml /src/README.md ./
+COPY LICENSE NOTICE ./
 # Install runtime + gateway database dependencies.
 #
 # ``kafka`` and ``temporal`` are included deliberately: both tiers were built

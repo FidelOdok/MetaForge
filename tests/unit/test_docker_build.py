@@ -127,3 +127,29 @@ def _matches(pattern: str, name: str) -> bool:
     from fnmatch import fnmatch
 
     return fnmatch(name, pattern) or pattern == name
+
+
+def _stage(name: str) -> str:
+    for stage in _stages(DOCKERFILE.read_text(encoding="utf-8")):
+        if re.match(rf"\S+ AS {name}\b", stage.splitlines()[0].strip(), re.IGNORECASE):
+            return stage
+    raise AssertionError(f"no '{name}' stage in the Dockerfile")
+
+
+def test_the_dependency_layer_never_sees_the_stamped_version() -> None:
+    # FORGE-715: the release workflow stamps the version into pyproject.toml
+    # before building. Copied straight into the deps stage it changed the layer
+    # every build, so every release reinstalled every dependency.
+    deps = _stage("deps")
+    assert not re.search(r"^COPY (?!--from)[^\n]*\bpyproject\.toml\b", deps, re.MULTILINE)
+    assert re.search(r"^COPY --from=manifest [^\n]*\bpyproject\.toml\b", deps, re.MULTILINE)
+    manifest = _stage("manifest")
+    assert re.search(r"stamp_version\.py 0\.0\.0\b", manifest)
+
+
+def test_the_runtime_stage_still_installs_the_stamped_package() -> None:
+    # /health reads the installed version, so the real pyproject.toml must
+    # still reach a `pip install --no-deps .`.
+    runtime = _stage("runtime")
+    assert re.search(r"^COPY (?!--from)[^\n]*\bpyproject\.toml\b", runtime, re.MULTILINE)
+    assert "pip install --no-cache-dir --no-deps ." in runtime
