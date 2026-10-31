@@ -652,7 +652,11 @@ family word is a match, a missing material is a violation). Not covered, and
 reported as not evaluated rather than passing: assembly parts without recorded
 dimensions, per-part printed-size limits (metrics containing `print`), mass,
 deflection and safety factor (these need analysis evidence, see below), and any
-metric outside the lists above. The `mech_v1` design gate (G6) now sets
+metric outside the lists above. A metric that names a load position or a spacing
+(a word such as `moment`, `lever`, `offset`, `distance`, `position`,
+`clearance`, `spacing` or `stroke`) is not a part size even when it also says
+`length` or `height`: `moment_arm_length` is where a load acts, so it is reported
+as not evaluated instead of being compared with each part's largest extent. The `mech_v1` design gate (G6) now sets
 `enforce_constraints` (template version 1.1.0), so a violation fails it.
 
 **Analysis constraints.** Deflection / displacement, stress and

@@ -22,7 +22,10 @@ Covered:
 - **Material** (``material``): the cad_model's recorded material must share a
   material family word with the one the requirement names.
 
-Not covered (reported as not evaluated, never as passing): per-part limits on
+Not covered (reported as not evaluated, never as passing): load positions and
+spacings (metrics naming a moment, lever, offset, distance, position, clearance,
+spacing and the like: ``moment_arm_length`` is where a load acts, not how long
+a part is), per-part limits on
 an assembly whose parts record no dimensions, orientation-specific axes, any
 metric outside the list above (mass, deflection, safety factor: those need
 analysis evidence, not geometry), and metrics naming ``print`` (a printed-part
@@ -52,6 +55,28 @@ _TO_MM = {"": 1.0, "mm": 1.0, "cm": 10.0, "m": 1000.0, "in": 25.4, "inch": 25.4}
 
 _SIZE_WORDS = ("envelope", "length", "width", "height", "depth", "size", "dimension")
 _THICKNESS_WORDS = ("thickness", "stock")
+
+#: FORGE-716: words that make a length a load position or a spacing, not the
+#: size of a part. ``moment_arm_length <= 0.5 m`` (where a chair's load acts)
+#: matched "length", was compared with every part's largest extent, and failed
+#: a 600 mm chair back that no correct design could shorten. Matched as whole
+#: words of the metric name, so ``moment_arm_length`` and ``load-offset`` count.
+_LOAD_POSITION_WORDS = frozenset(
+    {
+        "moment",
+        "lever",
+        "offset",
+        "eccentricity",
+        "distance",
+        "position",
+        "location",
+        "clearance",
+        "spacing",
+        "gap",
+        "stroke",
+        "travel",
+    }
+)
 
 # Words that do not identify a material family.
 _GENERIC_MATERIAL_WORDS = frozenset(
@@ -163,6 +188,11 @@ def _material_matches(required: str, recorded: str) -> bool:
     return bool(req & have)
 
 
+def is_load_position(metric: str) -> bool:
+    """True when the metric names where a load acts or a spacing, not a part size."""
+    return bool(set(re.findall(r"[a-z]+", metric.lower())) & _LOAD_POSITION_WORDS)
+
+
 def classify(metric: str) -> str | None:
     """``envelope`` | ``thickness`` | ``material`` | ``None`` (not a geometry metric)."""
     m = metric.lower()
@@ -170,6 +200,8 @@ def classify(metric: str) -> str | None:
         return None
     if "material" in m:
         return "material"
+    if is_load_position(m):
+        return None
     if any(w in m for w in _THICKNESS_WORDS):
         return "thickness"
     if any(w in m for w in _SIZE_WORDS):
@@ -246,9 +278,16 @@ def check_geometry_constraints(
         if is_currency_code(unit):
             _check_cost(constraint, models, result)
             continue
-        kind = classify(str(getattr(constraint, "metric", "") or ""))
+        metric = str(getattr(constraint, "metric", "") or "")
+        kind = classify(metric)
         limit = getattr(constraint, "limit", None)
         severity = str(getattr(getattr(constraint, "severity", ""), "value", "") or "error")
+        if kind is None and limit is not None and severity != "info" and is_load_position(metric):
+            result.not_evaluated.append(
+                f"{_label(constraint)}: says where a load acts or a spacing, not a part "
+                "size, so a bounding box cannot check it"
+            )
+            continue
         if kind is None or (kind != "material" and limit is None) or severity == "info":
             continue
         sink = result.violations if severity == "error" else result.warnings
