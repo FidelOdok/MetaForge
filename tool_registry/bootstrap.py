@@ -182,7 +182,7 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"component", "offer_resolver"}
     | {"web"}
     # Cloud adapters: an API key in place of a local tool container.
-    | {"meshy", "zoo", "tripo"}
+    | {"meshy", "zoo", "tripo", "slant3d"}
     # FORGE-544: in-process, no container, no credentials.
     | {"power"}
     # FORGE-451: the machine library, injected by the gateway or the sidecar.
@@ -1289,6 +1289,39 @@ async def bootstrap_tool_registry(
                 reason=(
                     "not in adapter_ids"
                     if adapter_ids and "tripo" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Slant 3D print quoting adapter -----
+        # Uploads an STL to the Slant 3D farm for its slicing estimate and a
+        # price. Skipped without a key, like meshy above.
+        if _is_adapter_enabled("slant3d") and (not adapter_ids or "slant3d" in adapter_ids):
+            if os.environ.get("SLANT3D_API_KEY"):
+                try:
+                    from tool_registry.tools.slant3d.client import Slant3DClient
+                    from tool_registry.tools.slant3d.mcp_adapter import Slant3DMcpServer
+
+                    server = Slant3DMcpServer(client=Slant3DClient())
+                    await registry.register_adapter(server)
+                    registered.append("slant3d")
+                    logger.info("slant3d_mcp_adapter_registered")
+                except Exception as exc:
+                    logger.error("slant3d_mcp_adapter_failed", error=str(exc))
+                    span.record_exception(exc)
+                    failed.append("slant3d")
+            else:
+                skipped.append("slant3d")
+                logger.info(
+                    "slant3d_mcp_adapter_skipped", reason="missing env vars: SLANT3D_API_KEY"
+                )
+        else:
+            skipped.append("slant3d")
+            logger.info(
+                "slant3d_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "slant3d" not in adapter_ids
                     else "disabled via config"
                 ),
             )
