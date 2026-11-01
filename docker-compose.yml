@@ -65,6 +65,8 @@ services:
       # firmware-adapter's image, which runs under the `firmware` compose
       # profile; without it a call says the adapter is not running.
       - METAFORGE_ADAPTER_FIRMWARE_URL=http://firmware-adapter:8105
+      # PrusaSlicer is only in slicer-adapter's image.
+      - METAFORGE_ADAPTER_SLICER_URL=http://slicer-adapter:8106
       - ADAPTER_WORKSPACE_DIR=/workspace
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-metaforge}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is unset. Run scripts/install.sh, which generates one, or set it in .env -- this used to default to a value published in the public repo}@postgres:5432/${POSTGRES_DB:-metaforge}
       - METAFORGE_LLM_PROVIDER=${METAFORGE_LLM_PROVIDER:-}
@@ -503,7 +505,7 @@ services:
     command: >
       python -m metaforge.mcp --transport http
       --host 0.0.0.0 --port 8765
-      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam,firmware,simready
+      --adapters knowledge,memory,cadquery,freecad,calculix,kicad,twin,project,constraint,digikey,mouser,nexar,farnell,arrow,offer_resolver,component,web,design_flow,run,power,spice,library,vendor,cost,blender,openfoam,firmware,simready,slicer
       --allow-twin-mutations
       --capture-sessions
     ports:
@@ -588,6 +590,8 @@ services:
       # firmware-adapter's image, which runs under the `firmware` compose
       # profile; without it a call says the adapter is not running.
       - METAFORGE_ADAPTER_FIRMWARE_URL=http://firmware-adapter:8105
+      # PrusaSlicer is only in slicer-adapter's image.
+      - METAFORGE_ADAPTER_SLICER_URL=http://slicer-adapter:8106
       - OCCT_CONVERTER_URL=http://occt-converter:8100
       - ADAPTER_WORKSPACE_DIR=/workspace
       # MET-495: same MinIO config as the gateway so twin.record_decision can
@@ -809,6 +813,41 @@ services:
           cpus: '2'
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8104/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - metaforge
+    restart: unless-stopped
+
+  # ── Slicer Adapter (PrusaSlicer: G-code and print estimates) ──────
+  # PrusaSlicer (AGPL) runs here as a separate program. Shares
+  # adapter-workspace with the CAD adapters, so an STL or STEP they export is
+  # sliced by path and the G-code lands beside it. The published port is
+  # loopback only; the gateway reaches the adapter over the compose network.
+  slicer-adapter:
+    build:
+      context: .
+      dockerfile: tool_registry/tools/slicer/Dockerfile
+    image: ghcr.io/fidelodok/metaforge-slicer-adapter:${METAFORGE_ADAPTER_TAG:-latest}
+    ports:
+      - "127.0.0.1:8106:8106"
+    volumes:
+      - adapter-workspace:/workspace
+    environment:
+      - METAFORGE_ENV=docker
+      - SLICER_WORK_DIR=/workspace
+      - SLICER_HTTP_PORT=8106
+      - SLICER_MAX_OPERATION_TIME=${SLICER_MAX_OPERATION_TIME:-600}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8106/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

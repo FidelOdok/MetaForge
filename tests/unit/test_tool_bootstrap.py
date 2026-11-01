@@ -97,13 +97,14 @@ class TestBootstrapToolRegistry:
         and FORGE-671 the in-process robot drive adapter for 15, and FORGE-672 the
         in-process packaging adapter for 16, and FORGE-670 the in-process aircraft
         adapter for 17, and FORGE-674/677 the firmware build/emulation adapter for 18,
-        and FORGE-711 the SimReady asset adapter for 19.
+        and FORGE-711 the SimReady asset adapter for 19, and the PrusaSlicer
+        adapter for 20.
         """
         registry = await bootstrap_tool_registry()
 
         assert isinstance(registry, ToolRegistry)
         adapters = registry.list_adapters()
-        assert len(adapters) == 19
+        assert len(adapters) == 20
         adapter_ids = {a.adapter_id for a in adapters}
         assert adapter_ids == {
             "cadquery",
@@ -125,6 +126,7 @@ class TestBootstrapToolRegistry:
             "aircraft",
             "firmware",
             "simready",
+            "slicer",
         }
 
     async def test_bootstrap_with_existing_registry(self):
@@ -132,7 +134,7 @@ class TestBootstrapToolRegistry:
         registry = ToolRegistry()
         result = await bootstrap_tool_registry(registry=registry)
         assert result is registry
-        assert len(registry.list_adapters()) == 19
+        assert len(registry.list_adapters()) == 20
 
     async def test_bootstrap_specific_adapters(self):
         """Bootstrap only registers specified adapter IDs."""
@@ -253,12 +255,13 @@ class TestBootstrapToolRegistry:
         kicad.generate_pcb and kicad.autoroute_pcb for 109. FORGE-684 adds
         kicad.export_3d, kicad.render_pcb and kicad.update_components for 112.
         FORGE-687 adds kicad.export_svg for 113. FORGE-711 adds the SimReady
-        adapter's search, inspect, import and attribution for 117.
+        adapter's search, inspect, import and attribution for 117. The PrusaSlicer
+        adapter adds slicer.slice and slicer.list_profiles for 119.
         """
         registry = await bootstrap_tool_registry()
 
         tools = registry.list_tools()
-        assert len(tools) == 117
+        assert len(tools) == 119
 
     async def test_bootstrap_capability_discovery(self):
         """Bootstrapped tools can be discovered by capability."""
