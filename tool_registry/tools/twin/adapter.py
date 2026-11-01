@@ -2699,6 +2699,17 @@ class TwinServer(McpToolServer):
                                 "known; name and material are read from each part node."
                             ),
                         },
+                        "material": {
+                            "type": "string",
+                            "description": (
+                                "FORGE-717. What this part is made of, e.g. 'oak' or "
+                                "'aluminium 6061-T6': the material chosen at the route "
+                                "gate. Stored on the node as its material, which the "
+                                "design gate's material requirement checks; a part "
+                                "committed without one fails that check. A 'material' "
+                                "inside properties is used when this is not given."
+                            ),
+                        },
                         "source_tool": {
                             "type": "string",
                             "description": (
@@ -2973,6 +2984,15 @@ class TwinServer(McpToolServer):
             if isinstance(bbox, dict):
                 flattened["bbox_mm"] = bbox
             extra_metadata.update(flattened)
+        # FORGE-717: the geometry check reads metadata["material"], and nothing
+        # here ever set it -- the flattening above dropped the "material" the
+        # freecad/cadquery result carries, and there was no argument for it -- so
+        # every agent-committed part failed a material requirement at the gate.
+        material = arguments.get("material")
+        if not (isinstance(material, str) and material.strip()) and isinstance(properties, dict):
+            material = properties.get("material")
+        if isinstance(material, str) and material.strip():
+            extra_metadata["material"] = material.strip()
         # FORGE-100/FORGE-233: the model still doesn't reliably pass
         # 'properties' on a commit-by-reference call, even though
         # freecad.export_model's own response already carried the measured
