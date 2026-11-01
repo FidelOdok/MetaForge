@@ -310,3 +310,13 @@ async def test_bootstrap_honours_the_per_adapter_toggle(monkeypatch) -> None:
     monkeypatch.setenv("METAFORGE_ADAPTER_MESHY_ENABLED", "false")
     registry = await bootstrap_tool_registry(adapter_ids=["meshy"])
     assert registry.list_adapters() == []
+
+
+def test_dashboard_chat_holds_every_credit_spending_call_for_approval() -> None:
+    from api_gateway.chat.harness_backend import _REQUIRES_APPROVAL_TOOL_IDS
+
+    for tool_id in ("meshy.text_to_3d", "meshy.image_to_3d", "meshy.refine_texture"):
+        assert tool_id in _REQUIRES_APPROVAL_TOOL_IDS
+    # Following a job and fetching its files spend nothing.
+    assert "meshy.get_task" not in _REQUIRES_APPROVAL_TOOL_IDS
+    assert "meshy.download" not in _REQUIRES_APPROVAL_TOOL_IDS

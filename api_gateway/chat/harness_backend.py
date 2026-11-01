@@ -182,6 +182,11 @@ _REQUIRES_APPROVAL_TOOL_IDS = frozenset(
         "project.create",
         "project.update",
         "project.delete",
+        # Cloud adapters: each call spends the account's paid credits, an
+        # external side effect a ticked tool box should not approve in bulk.
+        "meshy.text_to_3d",
+        "meshy.image_to_3d",
+        "meshy.refine_texture",
     }
 )
 

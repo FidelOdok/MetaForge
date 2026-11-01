@@ -4,7 +4,8 @@ Five tools, split by what each one does to the world, because that is what
 decides whether a person is asked first (``mcp_core.annotations``):
 
 - ``meshy.text_to_3d`` / ``meshy.image_to_3d`` / ``meshy.refine_texture``
-  start a job on Meshy and spend the account's credits. Held for approval.
+  start a job on Meshy and spend the account's credits. The dashboard chat
+  holds each call for approval (``_REQUIRES_APPROVAL_TOOL_IDS``).
 - ``meshy.get_task`` reads a job's status, optionally waiting for it to
   finish. Read-only, so following a job never asks.
 - ``meshy.download`` writes the finished mesh into the adapter workspace,
