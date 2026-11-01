@@ -37,6 +37,13 @@ export const CLOUD_ADAPTERS: CloudAdapter[] = [
     replaces: 'Blender / FreeCAD mesh authoring',
     envVar: 'TRIPO_API_KEY',
   },
+  {
+    id: 'slant3d',
+    name: 'Slant 3D',
+    purpose: 'Print-farm quote for an STL: price, weight, print time',
+    replaces: 'Slicer estimates and manual print quoting',
+    envVar: 'SLANT3D_API_KEY',
+  },
 ];
 
 export interface CloudAdapterStatus extends CloudAdapter {

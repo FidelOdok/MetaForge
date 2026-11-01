@@ -113,6 +113,9 @@ describe('SettingsPage', () => {
     const tripo = screen.getByTestId('cloud-adapter-tripo');
     expect(tripo).toHaveTextContent('Not configured');
     expect(tripo).toHaveTextContent('TRIPO_API_KEY');
+    const slant = screen.getByTestId('cloud-adapter-slant3d');
+    expect(slant).toHaveTextContent('Not configured');
+    expect(slant).toHaveTextContent('SLANT3D_API_KEY');
   });
 
   it('shows a cloud adapter as connected from the gateway tool list', async () => {

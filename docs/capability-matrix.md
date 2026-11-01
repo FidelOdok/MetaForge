@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (141 across 24 adapters)
+## MCP tools (145 across 25 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -18,12 +18,12 @@ Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-One hundred thirty-four of the 141 are described in the table below. The seven
+One hundred thirty-eight of the 145 are described in the table below. The seven
 that are not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 141 does carry an MCP
+they simply have no row here yet. Every one of the 145 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -1567,6 +1567,10 @@ what the server will actually enforce.
 | `tripo` | `tripo.get_task` | A job's status (`queued`, `running`, `success`, `failed`, `cancelled`, `banned`, `expired`) and progress, waiting up to `wait_seconds` (max 120). Read-only and open-world. A failed job carries Tripo's own reason; a banned one says the input broke Tripo's content policy | unit-verified |
 | `tripo` | `tripo.download` | Write a succeeded job's model to `output/tripo/<task_id>.<format>` on the adapter workspace (optionally its preview image too) and return the `file_path` and `format` for `twin.commit_geometry`. Tripo's signed URLs expire. Streams to a `.part` file and renames, capped at 300 MB | unit-verified |
 | `tripo` | `tripo.get_balance` | The account's available credits and the credits frozen for running jobs. Read-only | unit-verified |
+| `slant3d` (requires `SLANT3D_API_KEY`) | `slant3d.analyze_part` | Upload a workspace STL to the Slant 3D print farm through its presigned upload and confirm flow. Slant slices it and reports size (mm), volume (cm3), surface area, weight (g), print time (minutes), whether it needs supports and its body count. Returns a `file_id`. Free; the file is kept on the Slant account under `SLANT3D_PLATFORM_ID` or the account's first platform. STL only. Not registered when the key is unset | unit-verified |
+| `slant3d` | `slant3d.quote` | Price an analysed part on the farm in USD for a filament (default PLA black) and quantity: per unit, multi-body and oversize surcharges, total. Print cost only; shipping and tax are not included. Places no order | unit-verified |
+| `slant3d` | `slant3d.get_part` | Read an analysed part back: its metrics and any production notes from the Slant 3D team | unit-verified |
+| `slant3d` | `slant3d.list_filaments` | The farm's filaments (PLA, PETG, OPM) with id, colour and stock, filtered by material and colour | unit-verified |
 
 The KiCad exports (`export_bom`, `export_netlist`, `export_gerber`,
 `export_drill`, `export_pos`) never overwrite. With no output path
@@ -1603,6 +1607,7 @@ returning an empty result.
 | `meshy` | `MESHY_API_KEY` (`MESHY_BASE_URL` optional) | Mesh authoring in Blender / FreeCAD | unit-verified |
 | `zoo` | `ZOO_API_TOKEN` (`ZOO_BASE_URL` optional) | FreeCAD import and export of native CAD; CadQuery / FreeCAD mass properties | unit-verified |
 | `tripo` | `TRIPO_API_KEY` (`TRIPO_BASE_URL` for a China-region key) | Mesh authoring in Blender / FreeCAD; mesh format conversion | unit-verified |
+| `slant3d` | `SLANT3D_API_KEY` (`SLANT3D_PLATFORM_ID` optional) | A slicer's weight and time estimate; manual print quoting | unit-verified |
 
 Generation is asynchronous. The usual sequence is `meshy.text_to_3d` (or
 `image_to_3d`), then `meshy.get_task` until `SUCCEEDED`, then
@@ -1621,7 +1626,14 @@ Zookeeper copilot WebSocket and returns KCL source, not a STEP file.
 with two differences: `tripo.image_to_3d` takes an image already on the
 workspace (it uploads it), and `tripo.convert` turns a generated GLB into STL
 or 3MF for a printer. Tripo's keys are bound to a region; the default host is
-the global one. Planned next: print quoting and cloud slicing.
+the global one.
+
+`slant3d.*` quotes a print: `slant3d.analyze_part` on an STL (export one with
+`cadquery.export_geometry`, `zoo.convert` or `tripo.convert`), then
+`slant3d.quote` with a filament from `slant3d.list_filaments`. Placing an
+order is deliberately not wrapped: it charges the account and ships a part.
+The analysis is Slant's own slicing estimate; no hosted API returns G-code
+for an arbitrary printer.
 
 ### Chat-harness-native tools (not via the standalone MCP server)
 

@@ -127,6 +127,10 @@ READ_ONLY: frozenset[str] = frozenset(
         # Status of a Tripo job and the account's credits: GETs against Tripo.
         "tripo.get_task",
         "tripo.get_balance",
+        # Slant 3D quoting: prices and reads; places no order, spends nothing.
+        "slant3d.quote",
+        "slant3d.get_part",
+        "slant3d.list_filaments",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
         # FORGE-681: the same, for battery runtime.
@@ -470,6 +474,9 @@ PRODUCING: frozenset[str] = frozenset(
         "tripo.image_to_3d",
         "tripo.convert",
         "tripo.download",
+        # Creates a file on the Slant 3D account (and its slicing analysis);
+        # replaces nothing and costs nothing.
+        "slant3d.analyze_part",
     }
 )
 
@@ -608,6 +615,11 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "tripo.get_task",
         "tripo.download",
         "tripo.get_balance",
+        # Every Slant 3D call reaches Slant's API or its file storage.
+        "slant3d.analyze_part",
+        "slant3d.quote",
+        "slant3d.get_part",
+        "slant3d.list_filaments",
     }
 )
 
