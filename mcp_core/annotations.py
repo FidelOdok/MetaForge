@@ -124,6 +124,9 @@ READ_ONLY: frozenset[str] = frozenset(
         "meshy.get_task",
         # Measures an uploaded copy on Zoo's servers; nothing stored or written.
         "zoo.mass_properties",
+        # Status of a Tripo job and the account's credits: GETs against Tripo.
+        "tripo.get_task",
+        "tripo.get_balance",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
         # FORGE-681: the same, for battery runtime.
@@ -461,6 +464,12 @@ PRODUCING: frozenset[str] = frozenset(
         # output/zoo/<operation_id>/ on the adapter workspace.
         "zoo.convert",
         "zoo.get_conversion",
+        # Cloud mesh jobs on Tripo, held for approval like Meshy's. The
+        # download writes a new file per task id under output/tripo/.
+        "tripo.text_to_3d",
+        "tripo.image_to_3d",
+        "tripo.convert",
+        "tripo.download",
     }
 )
 
@@ -592,6 +601,13 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "zoo.convert",
         "zoo.get_conversion",
         "zoo.mass_properties",
+        # Every Tripo call reaches Tripo's API or its file host.
+        "tripo.text_to_3d",
+        "tripo.image_to_3d",
+        "tripo.convert",
+        "tripo.get_task",
+        "tripo.download",
+        "tripo.get_balance",
     }
 )
 

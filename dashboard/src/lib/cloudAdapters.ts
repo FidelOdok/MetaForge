@@ -30,6 +30,13 @@ export const CLOUD_ADAPTERS: CloudAdapter[] = [
     replaces: 'FreeCAD import and export, CadQuery measurements',
     envVar: 'ZOO_API_TOKEN',
   },
+  {
+    id: 'tripo',
+    name: 'Tripo AI',
+    purpose: 'Text or image to 3D mesh; convert to STL / 3MF',
+    replaces: 'Blender / FreeCAD mesh authoring',
+    envVar: 'TRIPO_API_KEY',
+  },
 ];
 
 export interface CloudAdapterStatus extends CloudAdapter {

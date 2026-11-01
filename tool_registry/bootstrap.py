@@ -182,7 +182,7 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"component", "offer_resolver"}
     | {"web"}
     # Cloud adapters: an API key in place of a local tool container.
-    | {"meshy", "zoo"}
+    | {"meshy", "zoo", "tripo"}
     # FORGE-544: in-process, no container, no credentials.
     | {"power"}
     # FORGE-451: the machine library, injected by the gateway or the sidecar.
@@ -1258,6 +1258,37 @@ async def bootstrap_tool_registry(
                 reason=(
                     "not in adapter_ids"
                     if adapter_ids and "zoo" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Tripo cloud mesh adapter -----
+        # Text or image to mesh, and mesh conversion to STL/3MF, on Tripo's
+        # servers. Skipped without a key, like meshy above.
+        if _is_adapter_enabled("tripo") and (not adapter_ids or "tripo" in adapter_ids):
+            if os.environ.get("TRIPO_API_KEY"):
+                try:
+                    from tool_registry.tools.tripo.client import TripoClient
+                    from tool_registry.tools.tripo.mcp_adapter import TripoMcpServer
+
+                    server = TripoMcpServer(client=TripoClient())
+                    await registry.register_adapter(server)
+                    registered.append("tripo")
+                    logger.info("tripo_mcp_adapter_registered")
+                except Exception as exc:
+                    logger.error("tripo_mcp_adapter_failed", error=str(exc))
+                    span.record_exception(exc)
+                    failed.append("tripo")
+            else:
+                skipped.append("tripo")
+                logger.info("tripo_mcp_adapter_skipped", reason="missing env vars: TRIPO_API_KEY")
+        else:
+            skipped.append("tripo")
+            logger.info(
+                "tripo_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "tripo" not in adapter_ids
                     else "disabled via config"
                 ),
             )
