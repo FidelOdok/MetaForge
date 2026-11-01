@@ -321,18 +321,50 @@ async def test_set_credential_oauth_raises_when_persist_fails(store_path: Path) 
         routes.save_credentials = orig
 
 
-def test_require_admin_token(monkeypatch: pytest.MonkeyPatch) -> None:
+def _request(host: str, headers: dict[str, str] | None = None):
+    from starlette.requests import Request
+
+    raw = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
+    return Request({"type": "http", "client": (host, 51234), "headers": raw})
+
+
+def test_require_admin_without_token_allows_only_direct_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from fastapi import HTTPException
 
     from api_gateway.harness import routes
 
-    # No token configured → allowed (dev).
     monkeypatch.delenv("METAFORGE_HARNESS_ADMIN_TOKEN", raising=False)
-    routes._require_admin(None)
+    routes._require_admin(_request("127.0.0.1"), None)
+    routes._require_admin(_request("::1"), None)
 
-    # Token configured → header must match.
+    # Another machine, or a container on the compose network.
+    for host in ("192.168.1.20", "172.18.0.5", "100.101.102.103"):
+        with pytest.raises(HTTPException) as ei:
+            routes._require_admin(_request(host), None)
+        assert ei.value.status_code == 401
+        assert "METAFORGE_HARNESS_ADMIN_TOKEN" in ei.value.detail
+
+    # A tunnel or reverse proxy on the same host: the peer is loopback, but the
+    # caller is not, so it is refused.
+    for header in ("X-Forwarded-For", "Forwarded", "CF-Connecting-IP", "X-Real-IP"):
+        with pytest.raises(HTTPException):
+            routes._require_admin(_request("127.0.0.1", {header: "203.0.113.9"}), None)
+
+
+def test_require_admin_with_token_checks_the_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi import HTTPException
+
+    from api_gateway.harness import routes
+
     monkeypatch.setenv("METAFORGE_HARNESS_ADMIN_TOKEN", "s3cret")
-    routes._require_admin("s3cret")
-    with pytest.raises(HTTPException) as ei:
-        routes._require_admin("wrong")
-    assert ei.value.status_code == 401
+    routes._require_admin(_request("203.0.113.9"), "s3cret")
+    for supplied in ("wrong", "", None, "s3cret-and-more"):
+        with pytest.raises(HTTPException) as ei:
+            routes._require_admin(_request("203.0.113.9"), supplied)
+        assert ei.value.status_code == 401
+
+    # A configured token is required even from loopback.
+    with pytest.raises(HTTPException):
+        routes._require_admin(_request("127.0.0.1"), None)

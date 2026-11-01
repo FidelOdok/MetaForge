@@ -622,7 +622,8 @@ if [ "$MODE" = "usage" ]; then
   set_if_blank POSTGRES_DB "metaforge"
   set_if_blank METAFORGE_MCP_API_KEY "$(rand_secret)"
   # Gates POST/DELETE /v1/harness/credentials and PUT /v1/harness/selection.
-  # Left unset, those endpoints are open with a logged warning.
+  # Left unset, they accept only direct requests from the gateway's own
+  # machine, which shuts out the dashboard (it reaches the gateway via proxy).
   set_if_blank METAFORGE_HARNESS_ADMIN_TOKEN "$(rand_secret)"
   ok "Generated strong secrets for any credential left at its default"
   chmod 600 .env

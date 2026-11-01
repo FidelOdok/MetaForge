@@ -103,10 +103,10 @@ services:
       - METAFORGE_RUNS_LEDGER_DISABLE=${METAFORGE_RUNS_LEDGER_DISABLE:-off}
       # Gates the credential-write endpoints (POST/DELETE /v1/harness/credentials,
       # PUT /v1/harness/selection — see api_gateway/harness/routes.py::_require_admin).
-      # Unset (dev default) leaves them open with a logged warning; set this on
-      # any shared box so `forge auth login`/`use`/`logout` require a matching
-      # X-MetaForge-Admin header. Was never forwarded here — same gap as
-      # METAFORGE_CHAT_MAX_STEPS above.
+      # Unset, they accept only a direct loopback caller, which the dashboard
+      # (behind its proxy) never is; set it so the dashboard and
+      # `forge auth login`/`use`/`logout` can write with a matching
+      # X-MetaForge-Admin header. install.sh generates one.
       - METAFORGE_HARNESS_ADMIN_TOKEN=${METAFORGE_HARNESS_ADMIN_TOKEN:-}
       - METAFORGE_ROTATION_STRATEGY=${METAFORGE_ROTATION_STRATEGY:-round_robin}
       # This deployment's externally-reachable base URL (read by

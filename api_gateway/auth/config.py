@@ -14,9 +14,10 @@ The whole point of this module is the transition between those two, and the one
 rule that matters is: **a gateway that was meant to be authenticated must never
 silently end up open.**
 
-That failure mode is not hypothetical here. The gateway already carries four
-fail-open paths — ``_require_admin`` returns silently when its token is unset
-(``api_gateway/harness/routes.py``), ``mcp_core.auth.verify_api_key`` returns
+That failure mode is not hypothetical here. The gateway carried four
+fail-open paths. ``_require_admin`` used to return silently when its token was
+unset (``api_gateway/harness/routes.py``); it now admits only a direct loopback
+caller. ``mcp_core.auth.verify_api_key`` returns
 "open_mode" when no key is configured, and unscoped MCP calls are granted *full*
 access rather than none. Each was a reasonable local-dev convenience. Together
 they are a pattern, and the pattern is what this module refuses to extend.

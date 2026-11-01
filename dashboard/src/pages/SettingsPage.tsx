@@ -190,7 +190,7 @@ function ProvidersPanel() {
                   autoComplete="off"
                   spellCheck={false}
                   disabled={busy}
-                  placeholder="Only if the gateway sets METAFORGE_HARNESS_ADMIN_TOKEN"
+                  placeholder="The gateway's METAFORGE_HARNESS_ADMIN_TOKEN"
                   aria-describedby="admin-help"
                 />
               </label>
