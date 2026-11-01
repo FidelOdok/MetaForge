@@ -309,7 +309,9 @@ forge auth list
 Active-selection precedence: an explicit `chat --provider/--model` flag → the
 `auth use` selection stored on the gateway → the gateway's `METAFORGE_LLM_*`
 env. If the gateway sets `METAFORGE_HARNESS_ADMIN_TOKEN`, the CLI sends it
-automatically (from the same env var) so writes are authorized.
+automatically (from the same env var) so writes are authorized. Without it,
+the gateway accepts these writes only from a CLI on its own machine talking
+to it directly over loopback.
 
 ### `chat` — interactive assistant REPL {#chat-interactive-assistant-repl}
 
@@ -903,7 +905,7 @@ python -m cli.forge_cli --format json sources list | jq '.sources[].sourcePath'
 | Var | Used by | Purpose |
 |---|---|---|
 | `METAFORGE_GATEWAY_URL` | every command | Base URL for the gateway |
-| `METAFORGE_HARNESS_ADMIN_TOKEN` | `auth` (client + gateway) | If set on the gateway, credential writes require it; the CLI sends the matching value from this env var |
+| `METAFORGE_HARNESS_ADMIN_TOKEN` | `auth` (client + gateway) | Credential writes require it; unset, the gateway accepts them only from a direct loopback caller. The CLI sends the matching value from this env var |
 | `METAFORGE_AUTH_TOKEN` | `approvals` | Bearer token sent with approvals requests when set |
 | `METAFORGE_APPROVAL_AGENT` + `METAFORGE_APPROVAL_ON_BEHALF_OF` | `approvals` | When both are set, requests use surface `agent` and name the agent and the user it acts for (sent as `X-MetaForge-Agent` and `X-MetaForge-On-Behalf-Of`) |
 | `METAFORGE_INGEST_TIMEOUT` | `ingest` | Override the default 300 s timeout |

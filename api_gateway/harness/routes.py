@@ -16,12 +16,13 @@ All read-only and best-effort — a provider's model API being down never 500s.
 
 from __future__ import annotations
 
+import hmac
 import os
 from pathlib import Path
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from orchestrator.harness.providers import registry
@@ -333,17 +334,51 @@ async def list_tools() -> list[ToolInfo]:
 # Credential + selection writes (`forge auth login` / `use` / `logout`)
 #
 # These accept SECRETS. When METAFORGE_HARNESS_ADMIN_TOKEN is set they require a
-# matching `X-MetaForge-Admin` header; otherwise (dev) they're allowed but log a
-# warning. Production MUST set the token (or front the gateway with auth).
+# matching `X-MetaForge-Admin` header. Unset, only a direct loopback caller (the
+# gateway's own machine, no proxy in between) may write; everyone else gets a
+# 401 telling them to set the token. This used to fail open for any caller.
 # ---------------------------------------------------------------------------
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
-def _require_admin(x_metaforge_admin: str | None = Header(default=None)) -> None:
+# Present when a proxy relayed the request: the peer is then the proxy, not the
+# caller, so a loopback peer proves nothing (a tunnel on the same host).
+_FORWARDING_HEADERS = (
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-real-ip",
+    "cf-connecting-ip",
+    "true-client-ip",
+)
+
+
+def _is_direct_loopback(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    if host not in _LOOPBACK_HOSTS:
+        return False
+    return not any(h in request.headers for h in _FORWARDING_HEADERS)
+
+
+def _require_admin(request: Request, x_metaforge_admin: str | None = Header(default=None)) -> None:
     token = os.environ.get("METAFORGE_HARNESS_ADMIN_TOKEN", "").strip()
     if not token:
-        logger.warning("harness_credential_write_unauthenticated")
-        return
-    if (x_metaforge_admin or "").strip() != token:
+        if _is_direct_loopback(request):
+            return
+        logger.warning(
+            "harness_credential_write_refused",
+            reason="no_admin_token",
+            client=request.client.host if request.client else None,
+        )
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "credential writes need METAFORGE_HARNESS_ADMIN_TOKEN set on the gateway "
+                "(only direct requests from the gateway's own machine are allowed without it)"
+            ),
+        )
+    supplied = (x_metaforge_admin or "").strip()
+    if not hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8")):
         raise HTTPException(status_code=401, detail="invalid or missing X-MetaForge-Admin token")
 
 

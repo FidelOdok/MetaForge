@@ -103,10 +103,10 @@ services:
       - METAFORGE_RUNS_LEDGER_DISABLE=${METAFORGE_RUNS_LEDGER_DISABLE:-off}
       # Gates the credential-write endpoints (POST/DELETE /v1/harness/credentials,
       # PUT /v1/harness/selection — see api_gateway/harness/routes.py::_require_admin).
-      # Unset (dev default) leaves them open with a logged warning; set this on
-      # any shared box so `forge auth login`/`use`/`logout` require a matching
-      # X-MetaForge-Admin header. Was never forwarded here — same gap as
-      # METAFORGE_CHAT_MAX_STEPS above.
+      # Unset, they accept only a direct loopback caller, which the dashboard
+      # (behind its proxy) never is; set it so the dashboard and
+      # `forge auth login`/`use`/`logout` can write with a matching
+      # X-MetaForge-Admin header. install.sh generates one.
       - METAFORGE_HARNESS_ADMIN_TOKEN=${METAFORGE_HARNESS_ADMIN_TOKEN:-}
       - METAFORGE_ROTATION_STRATEGY=${METAFORGE_ROTATION_STRATEGY:-round_robin}
       # This deployment's externally-reachable base URL (read by
@@ -146,6 +146,14 @@ services:
       # keys above: without this, web.search / web.fetch are not registered
       # at all rather than registered-but-always-empty.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      # Cloud adapters: an API key in place of a local tool container.
+      # Unset, that adapter's tools are not registered.
+      - MESHY_API_KEY=${MESHY_API_KEY:-}
+      - ZOO_API_TOKEN=${ZOO_API_TOKEN:-}
+      - TRIPO_API_KEY=${TRIPO_API_KEY:-}
+      - TRIPO_BASE_URL=${TRIPO_BASE_URL:-}
+      - SLANT3D_API_KEY=${SLANT3D_API_KEY:-}
+      - SLANT3D_PLATFORM_ID=${SLANT3D_PLATFORM_ID:-}
     volumes:
       # Read-write (MET-612): boolean-cut staging writes input STEP files here
       # for the adapter containers to read by the same absolute path.
@@ -552,6 +560,13 @@ services:
       # sidecar never did, so the web adapter always skipped with
       # "missing env vars: BRAVE_API_KEY" here regardless of .env.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      # Cloud adapters, same passthrough as the gateway above.
+      - MESHY_API_KEY=${MESHY_API_KEY:-}
+      - ZOO_API_TOKEN=${ZOO_API_TOKEN:-}
+      - TRIPO_API_KEY=${TRIPO_API_KEY:-}
+      - TRIPO_BASE_URL=${TRIPO_BASE_URL:-}
+      - SLANT3D_API_KEY=${SLANT3D_API_KEY:-}
+      - SLANT3D_PLATFORM_ID=${SLANT3D_PLATFORM_ID:-}
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
       # MET-478 follow-up: without this, kicad.* tools ran in-process inside

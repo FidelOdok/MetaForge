@@ -3,13 +3,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 import { useGatewayForm } from '../hooks/use-gateway-form';
-import { useHarnessModels, useHarnessProviders } from '../hooks/use-harness';
+import { useHarnessModels, useHarnessProviders, useHarnessTools } from '../hooks/use-harness';
 import {
   removeProviderKey,
   saveProviderKey,
   selectProviderModel,
 } from '../api/endpoints/harness-credentials';
 import { apiBase, getGatewayBase, subscribeGatewayBase } from '../lib/gatewayConfig';
+import { cloudAdapterStatus } from '../lib/cloudAdapters';
 
 const C = {
   onSurface: 'var(--mf-c-e2e2eb)',
@@ -189,7 +190,7 @@ function ProvidersPanel() {
                   autoComplete="off"
                   spellCheck={false}
                   disabled={busy}
-                  placeholder="Only if the gateway sets METAFORGE_HARNESS_ADMIN_TOKEN"
+                  placeholder="The gateway's METAFORGE_HARNESS_ADMIN_TOKEN"
                   aria-describedby="admin-help"
                 />
               </label>
@@ -309,6 +310,62 @@ function ProvidersPanel() {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
+// ── "Cloud adapters" panel ──────────────────────────────────────────────────
+
+function CloudAdaptersPanel() {
+  const tools = useHarnessTools();
+  const adapters = cloudAdapterStatus(tools.data ?? []);
+
+  return (
+    <section className="account-panel" aria-labelledby="cloud-adapters-heading">
+      <p className="account-eyebrow">CLOUD ADAPTERS</p>
+      <h2 id="cloud-adapters-heading">Cloud tools in place of local containers</h2>
+      <p>
+        A gateway with a cloud adapter key runs that work on the provider&apos;s servers, so it
+        needs no local tool container for it. Keys are set in the gateway&apos;s environment, and an
+        adapter without one is not offered to agents at all.
+      </p>
+
+      {tools.isPending && <p role="status">Loading tools…</p>}
+      {tools.isError && (
+        <p role="alert">
+          Connect your gateway above to see which cloud adapters it has.{' '}
+          <button type="button" className="text-action" onClick={() => tools.refetch()}>
+            Retry
+          </button>
+        </p>
+      )}
+
+      {tools.data && (
+        <ul aria-label="Cloud adapters" style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+          {adapters.map((a) => (
+            <li
+              key={a.id}
+              data-testid={`cloud-adapter-${a.id}`}
+              style={{ ...GLASS, padding: 14, display: 'grid', gap: 4 }}
+            >
+              <div className="flex items-center gap-2">
+                <strong style={{ color: C.onSurface }}>{a.name}</strong>
+                <span style={{ fontSize: 13, color: a.connected ? C.success : C.onSurfaceVariant }}>
+                  {a.connected ? `Connected · ${a.toolCount} tools` : 'Not configured'}
+                </span>
+              </div>
+              <span style={{ fontSize: 14, color: C.onSurfaceVariant }}>
+                {a.purpose}. Replaces {a.replaces}.
+              </span>
+              {!a.connected && (
+                <span style={{ fontSize: 13, color: C.onSurfaceVariant }}>
+                  Set <code>{a.envVar}</code> on the gateway and restart it.
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function SettingsPage() {
   const toast = useToast();
   // Shared with the first-run onboarding screen so the two forms cannot
@@ -347,7 +404,7 @@ export function SettingsPage() {
       <header className="mb-6">
         <h1 style={{ fontSize: 30, fontWeight: 600, color: C.onSurface }}>Settings</h1>
         <p style={{ fontSize: 14, color: C.onSurfaceVariant, marginTop: 4 }}>
-          Manage your gateway and AI providers.
+          Manage your gateway, AI providers and cloud adapters.
         </p>
       </header>
 
@@ -489,6 +546,8 @@ export function SettingsPage() {
       </section>
 
       <ProvidersPanel />
+
+      <CloudAdaptersPanel />
 
       <section style={{ ...GLASS, padding: 20, marginTop: 16 }} aria-labelledby="expose-heading">
         <div className="flex items-center gap-2">

@@ -120,6 +120,17 @@ READ_ONLY: frozenset[str] = frozenset(
         "memory.retrieve_similar_experience",
         "web.fetch",
         "web.search",
+        # Status of a Meshy job: a GET against Meshy, nothing spent or written.
+        "meshy.get_task",
+        # Measures an uploaded copy on Zoo's servers; nothing stored or written.
+        "zoo.mass_properties",
+        # Status of a Tripo job and the account's credits: GETs against Tripo.
+        "tripo.get_task",
+        "tripo.get_balance",
+        # Slant 3D quoting: prices and reads; places no order, spends nothing.
+        "slant3d.quote",
+        "slant3d.get_part",
+        "slant3d.list_filaments",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
         # FORGE-681: the same, for battery runtime.
@@ -445,6 +456,27 @@ PRODUCING: frozenset[str] = frozenset(
         "gazebo.run_simulation",
         "isaac_sim.render_scene",
         "isaac_sim.run_physics",
+        # Cloud mesh jobs. Each create spends the account's Meshy credits, so
+        # it is a write held for approval; it adds a remote job and changes
+        # nothing that exists. The download writes a new file per task id
+        # under output/meshy/ on the adapter workspace.
+        "meshy.text_to_3d",
+        "meshy.image_to_3d",
+        "meshy.refine_texture",
+        "meshy.download",
+        # Cloud CAD conversion: writes the converted file(s) under
+        # output/zoo/<operation_id>/ on the adapter workspace.
+        "zoo.convert",
+        "zoo.get_conversion",
+        # Cloud mesh jobs on Tripo, held for approval like Meshy's. The
+        # download writes a new file per task id under output/tripo/.
+        "tripo.text_to_3d",
+        "tripo.image_to_3d",
+        "tripo.convert",
+        "tripo.download",
+        # Creates a file on the Slant 3D account (and its slicing analysis);
+        # replaces nothing and costs nothing.
+        "slant3d.analyze_part",
     }
 )
 
@@ -566,6 +598,28 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "simready.search",
         "simready.inspect",
         "simready.import",
+        # Every Meshy call reaches Meshy's API or its file host.
+        "meshy.text_to_3d",
+        "meshy.image_to_3d",
+        "meshy.refine_texture",
+        "meshy.get_task",
+        "meshy.download",
+        # Every Zoo call uploads the file to Zoo's API.
+        "zoo.convert",
+        "zoo.get_conversion",
+        "zoo.mass_properties",
+        # Every Tripo call reaches Tripo's API or its file host.
+        "tripo.text_to_3d",
+        "tripo.image_to_3d",
+        "tripo.convert",
+        "tripo.get_task",
+        "tripo.download",
+        "tripo.get_balance",
+        # Every Slant 3D call reaches Slant's API or its file storage.
+        "slant3d.analyze_part",
+        "slant3d.quote",
+        "slant3d.get_part",
+        "slant3d.list_filaments",
     }
 )
 

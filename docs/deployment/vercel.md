@@ -96,7 +96,8 @@ with authentication switched on refuses that wildcard — see
 :::danger[A default gateway has no authentication on its data routes]
 
 With `METAFORGE_AUTH_MODE=off`, which is the default, only the harness
-credential routes are guarded — by `METAFORGE_HARNESS_ADMIN_TOKEN`. Everything
+credential routes are guarded, by `METAFORGE_HARNESS_ADMIN_TOKEN` (unset, they
+accept only direct loopback callers). Everything
 else (the digital twin, projects, chat, file download) is open to anything that
 can reach the port. Combined with `allow_origins=["*"]`, a gateway on a public
 address is readable and writable by anyone who finds it.
