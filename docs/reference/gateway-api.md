@@ -52,4 +52,8 @@ Providers are plug-ins, so `auth_mode` is not a closed set of values: it is
 `off`, or whatever that gateway has installed.
 
 The harness credential routes are separate, and are guarded by
-`METAFORGE_HARNESS_ADMIN_TOKEN` in both modes.
+`METAFORGE_HARNESS_ADMIN_TOKEN` in both modes: callers send it as the
+`X-MetaForge-Admin` header. With the token unset, those routes accept only a
+direct request from the gateway's own machine (a loopback peer with no proxy
+forwarding headers) and return `401` to everyone else, including the
+dashboard, which reaches the gateway through its proxy.

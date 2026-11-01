@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (132 across 22 adapters)
+## MCP tools (145 across 25 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -18,12 +18,12 @@ Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-One hundred twenty-five of the 132 are described in the table below. The seven
+One hundred thirty-eight of the 145 are described in the table below. The seven
 that are not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 132 does carry an MCP
+they simply have no row here yet. Every one of the 145 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -1558,6 +1558,19 @@ what the server will actually enforce.
 | `meshy` | `meshy.refine_texture` | Texture a succeeded `text_to_3d` preview; a new task with its own id. Spends credits, so held for approval like `text_to_3d` | unit-verified |
 | `meshy` | `meshy.get_task` | A job's status (`PENDING`, `IN_PROGRESS`, `SUCCEEDED`, `FAILED`, `CANCELED`), progress and available formats, waiting up to `wait_seconds` (max 120) for it to finish. Read-only and open-world, so following a job never asks. A failed job carries Meshy's own reason | unit-verified |
 | `meshy` | `meshy.download` | Write a succeeded job's mesh files to `output/meshy/<task_id>.<format>` on the adapter workspace and return each `file_path`, which `twin.commit_geometry(file_path=..., format=...)` stores as a work product. Meshy's signed URLs expire within days, so this is the step that makes the mesh versioned. Streams to a `.part` file and renames, capped at 200 MB | unit-verified |
+| `zoo` (requires `ZOO_API_TOKEN`) | `zoo.convert` | Upload a workspace file to Zoo's cloud API and write the converted file(s) to `output/zoo/<operation_id>/`. Reads STEP, SolidWorks (`.sldprt`), CATIA, NX, Creo, Inventor, Parasolid, ACIS, STL, OBJ, PLY, FBX and glTF; writes STEP, STL, GLB, glTF, OBJ, PLY or FBX. The input format comes from the suffix or `src_format` (required for `.prt`). Returns a `file_path` for `twin.commit_geometry`. A file over 25 MB is queued and returns an `operation_id`. A mesh converted to STEP is flagged as a faceted solid. Not registered when the token is unset | unit-verified |
+| `zoo` | `zoo.get_conversion` | Follow a queued `zoo.convert` by `operation_id`, waiting up to `wait_seconds` (max 120); writes the files once it completes. A failed conversion carries Zoo's own reason | unit-verified |
+| `zoo` | `zoo.mass_properties` | Volume, surface area, centre of mass and bounding box of a workspace file, plus mass when `material_density` (kg/m^3) is given, all in one `length_unit` (default mm). Read-only and open-world: the file is uploaded, nothing is written. Zoo assumes the file is at true scale, which an STL cannot state | unit-verified |
+| `tripo` (requires `TRIPO_API_KEY`) | `tripo.text_to_3d` | Start a Tripo AI cloud job (v3 API) that turns a text prompt into a GLB mesh. Returns a `task_id` at once. Spends Tripo credits, which Tripo freezes at once and deducts only if the job succeeds, so the dashboard chat holds each call for approval and MCP clients see a non-read-only, open-world tool. `auto_size` scales the result to real-world metres; without it the size is arbitrary. The description steers dimensioned parts to `cadquery.*` / `freecad.*`. Not registered when the key is unset | unit-verified |
+| `tripo` | `tripo.image_to_3d` | Same, from one reference image: a PNG, JPEG or WebP on the adapter workspace (`file_path`, uploaded to Tripo first, max 20 MB) or a public `https://` URL. Held for approval | unit-verified |
+| `tripo` | `tripo.convert` | Convert a succeeded Tripo generation (`task_id`) or a workspace GLB, glTF, FBX, OBJ or STL (`file_path`, uploaded first, max 150 MB) to STL, 3MF, OBJ, FBX, glTF or USDZ, optionally decimating (`face_limit`) or flattening the underside for a print bed. A new task. Spends credits, so held for approval. Native CAD goes to `zoo.convert` | unit-verified |
+| `tripo` | `tripo.get_task` | A job's status (`queued`, `running`, `success`, `failed`, `cancelled`, `banned`, `expired`) and progress, waiting up to `wait_seconds` (max 120). Read-only and open-world. A failed job carries Tripo's own reason; a banned one says the input broke Tripo's content policy | unit-verified |
+| `tripo` | `tripo.download` | Write a succeeded job's model to `output/tripo/<task_id>.<format>` on the adapter workspace (optionally its preview image too) and return the `file_path` and `format` for `twin.commit_geometry`. Tripo's signed URLs expire. Streams to a `.part` file and renames, capped at 300 MB | unit-verified |
+| `tripo` | `tripo.get_balance` | The account's available credits and the credits frozen for running jobs. Read-only | unit-verified |
+| `slant3d` (requires `SLANT3D_API_KEY`) | `slant3d.analyze_part` | Upload a workspace STL to the Slant 3D print farm through its presigned upload and confirm flow. Slant slices it and reports size (mm), volume (cm3), surface area, weight (g), print time (minutes), whether it needs supports and its body count. Returns a `file_id`. Free; the file is kept on the Slant account under `SLANT3D_PLATFORM_ID` or the account's first platform. STL only. Not registered when the key is unset | unit-verified |
+| `slant3d` | `slant3d.quote` | Price an analysed part on the farm in USD for a filament (default PLA black) and quantity: per unit, multi-body and oversize surcharges, total. Print cost only; shipping and tax are not included. Places no order | unit-verified |
+| `slant3d` | `slant3d.get_part` | Read an analysed part back: its metrics and any production notes from the Slant 3D team | unit-verified |
+| `slant3d` | `slant3d.list_filaments` | The farm's filaments (PLA, PETG, OPM) with id, colour and stock, filtered by material and colour | unit-verified |
 
 The KiCad exports (`export_bom`, `export_netlist`, `export_gerber`,
 `export_drill`, `export_pos`) never overwrite. With no output path
@@ -1592,6 +1605,9 @@ returning an empty result.
 | Adapter | Key | Stands in for | Status |
 |---------|-----|---------------|--------|
 | `meshy` | `MESHY_API_KEY` (`MESHY_BASE_URL` optional) | Mesh authoring in Blender / FreeCAD | unit-verified |
+| `zoo` | `ZOO_API_TOKEN` (`ZOO_BASE_URL` optional) | FreeCAD import and export of native CAD; CadQuery / FreeCAD mass properties | unit-verified |
+| `tripo` | `TRIPO_API_KEY` (`TRIPO_BASE_URL` for a China-region key) | Mesh authoring in Blender / FreeCAD; mesh format conversion | unit-verified |
+| `slant3d` | `SLANT3D_API_KEY` (`SLANT3D_PLATFORM_ID` optional) | A slicer's weight and time estimate; manual print quoting | unit-verified |
 
 Generation is asynchronous. The usual sequence is `meshy.text_to_3d` (or
 `image_to_3d`), then `meshy.get_task` until `SUCCEEDED`, then
@@ -1599,8 +1615,25 @@ Generation is asynchronous. The usual sequence is `meshy.text_to_3d` (or
 `file_path` and `format`. The dashboard's Settings page lists each cloud
 adapter as connected or not configured, read from the gateway's own
 `GET /v1/harness/tools` list; the key itself is set in the gateway's
-environment, not in the browser. Planned next: Tripo AI and Zoo.dev
-text to CAD, then print quoting and cloud slicing.
+environment, not in the browser.
+
+`zoo.convert` brings a supplier's native part (SolidWorks, CATIA, NX, Creo,
+Inventor, Parasolid) into the twin as STEP, which the FreeCAD container
+cannot read. Zoo's text to CAD is not wrapped: it is served only over its
+Zookeeper copilot WebSocket and returns KCL source, not a STEP file.
+
+`tripo.*` follows the same create, follow, download sequence as `meshy.*`,
+with two differences: `tripo.image_to_3d` takes an image already on the
+workspace (it uploads it), and `tripo.convert` turns a generated GLB into STL
+or 3MF for a printer. Tripo's keys are bound to a region; the default host is
+the global one.
+
+`slant3d.*` quotes a print: `slant3d.analyze_part` on an STL (export one with
+`cadquery.export_geometry`, `zoo.convert` or `tripo.convert`), then
+`slant3d.quote` with a filament from `slant3d.list_filaments`. Placing an
+order is deliberately not wrapped: it charges the account and ships a part.
+The analysis is Slant's own slicing estimate; no hosted API returns G-code
+for an arbitrary printer.
 
 ### Chat-harness-native tools (not via the standalone MCP server)
 

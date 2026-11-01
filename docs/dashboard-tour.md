@@ -492,9 +492,10 @@ dashboard calling an HTTP gateway).
 **Bring your own API key.** Pick a provider, paste a key and choose the
 active model. Keys go straight to the gateway
 (`POST /v1/harness/credentials`, `PUT /v1/harness/selection`) and are
-never stored in the browser. If the gateway sets
-`METAFORGE_HARNESS_ADMIN_TOKEN`, enter it in the **Admin token** field;
-it is sent with the request and not saved.
+never stored in the browser. Enter the gateway's
+`METAFORGE_HARNESS_ADMIN_TOKEN` in the **Admin token** field; it is sent
+with the request and not saved. A gateway without the token refuses these
+changes from the dashboard (`scripts/install.sh` generates one).
 
 **Before you expose a gateway.** The gateway ships no authentication on
 its data routes; the page explains how to put it behind a private
