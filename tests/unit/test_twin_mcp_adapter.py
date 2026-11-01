@@ -1520,3 +1520,59 @@ class TestCommitGeometryPrefersStoredProperties:
         assert meta["bbox_mm"] == self._STORED["bounding_box"]
         assert meta["session_properties"]["bbox_mm"] == session["bounding_box"]
         assert received["properties"]["bounding_box"] == self._STORED["bounding_box"]
+
+
+# ---------------------------------------------------------------------------
+# twin.commit_geometry -- a part records its material (FORGE-717)
+# ---------------------------------------------------------------------------
+
+
+class TestCommitGeometryMaterial:
+    """Live on the sandbox: every part of a chair failed the design gate with
+    "records no material", even after a retry told the agent to record one.
+    The geometry check reads metadata["material"], and commit_geometry had no
+    argument for it and dropped the "material" a freecad result carries."""
+
+    @staticmethod
+    async def _commit(args: dict[str, Any]) -> dict[str, Any]:
+        received: dict[str, Any] = {}
+
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            received.update(kwargs)
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        base = {
+            "name": "Chair Seat",
+            "step_base64": base64.b64encode(b"ISO-10303-21;").decode("ascii"),
+        }
+        await srv.handle_request(_request("twin.commit_geometry", {**base, **args}))
+        return received["extra_metadata"] or {}
+
+    async def test_the_material_argument_is_stored_on_the_part(self) -> None:
+        meta = await self._commit({"material": " oak "})
+        assert meta["material"] == "oak"
+
+    async def test_a_material_in_properties_is_kept(self) -> None:
+        # The shape freecad.create_parametric returns and the tool says to pass.
+        meta = await self._commit(
+            {"properties": {"volume_mm3": 1800.0, "material": "aluminium 6061-T6"}}
+        )
+        assert meta["material"] == "aluminium 6061-T6"
+        assert meta["volume_mm3"] == 1800.0
+
+    async def test_the_argument_wins_over_properties(self) -> None:
+        meta = await self._commit({"material": "oak", "properties": {"material": "pine"}})
+        assert meta["material"] == "oak"
+
+    async def test_no_material_given_records_none(self) -> None:
+        meta = await self._commit({"properties": {"volume_mm3": 1.0, "material": "  "}})
+        assert "material" not in meta
+
+    def test_the_tool_schema_offers_material(self) -> None:
+        async def recorder(**kwargs: Any) -> dict[str, Any]:
+            return {"node_id": "node-1"}
+
+        srv = TwinServer(twin=_FakeTwin(), geometry_recorder=recorder)
+        schema = srv._tools["twin.commit_geometry"].manifest.input_schema
+        assert schema["properties"]["material"]["type"] == "string"
