@@ -182,7 +182,7 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"component", "offer_resolver"}
     | {"web"}
     # Cloud adapters: an API key in place of a local tool container.
-    | {"meshy"}
+    | {"meshy", "zoo"}
     # FORGE-544: in-process, no container, no credentials.
     | {"power"}
     # FORGE-451: the machine library, injected by the gateway or the sidecar.
@@ -1226,6 +1226,38 @@ async def bootstrap_tool_registry(
                 reason=(
                     "not in adapter_ids"
                     if adapter_ids and "meshy" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Zoo cloud CAD conversion adapter -----
+        # Converts native CAD (SolidWorks, CATIA, NX, Creo, Inventor, Parasolid)
+        # and meshes to STEP/STL/GLB and measures mass properties on Zoo's
+        # servers. Skipped without a token, like meshy above.
+        if _is_adapter_enabled("zoo") and (not adapter_ids or "zoo" in adapter_ids):
+            if os.environ.get("ZOO_API_TOKEN"):
+                try:
+                    from tool_registry.tools.zoo.client import ZooClient
+                    from tool_registry.tools.zoo.mcp_adapter import ZooMcpServer
+
+                    server = ZooMcpServer(client=ZooClient())
+                    await registry.register_adapter(server)
+                    registered.append("zoo")
+                    logger.info("zoo_mcp_adapter_registered")
+                except Exception as exc:
+                    logger.error("zoo_mcp_adapter_failed", error=str(exc))
+                    span.record_exception(exc)
+                    failed.append("zoo")
+            else:
+                skipped.append("zoo")
+                logger.info("zoo_mcp_adapter_skipped", reason="missing env vars: ZOO_API_TOKEN")
+        else:
+            skipped.append("zoo")
+            logger.info(
+                "zoo_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "zoo" not in adapter_ids
                     else "disabled via config"
                 ),
             )

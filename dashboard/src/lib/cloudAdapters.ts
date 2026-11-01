@@ -23,6 +23,13 @@ export const CLOUD_ADAPTERS: CloudAdapter[] = [
     replaces: 'Blender / FreeCAD mesh authoring',
     envVar: 'MESHY_API_KEY',
   },
+  {
+    id: 'zoo',
+    name: 'Zoo',
+    purpose: 'Convert native CAD to STEP / STL / GLB; mass properties',
+    replaces: 'FreeCAD import and export, CadQuery measurements',
+    envVar: 'ZOO_API_TOKEN',
+  },
 ];
 
 export interface CloudAdapterStatus extends CloudAdapter {

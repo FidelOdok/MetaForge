@@ -147,8 +147,9 @@ services:
       # at all rather than registered-but-always-empty.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
       # Cloud adapters: an API key in place of a local tool container.
-      # Unset, meshy.* is not registered.
+      # Unset, that adapter's tools are not registered.
       - MESHY_API_KEY=${MESHY_API_KEY:-}
+      - ZOO_API_TOKEN=${ZOO_API_TOKEN:-}
     volumes:
       # Read-write (MET-612): boolean-cut staging writes input STEP files here
       # for the adapter containers to read by the same absolute path.
@@ -557,6 +558,7 @@ services:
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
       # Cloud adapters, same passthrough as the gateway above.
       - MESHY_API_KEY=${MESHY_API_KEY:-}
+      - ZOO_API_TOKEN=${ZOO_API_TOKEN:-}
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
       # MET-478 follow-up: without this, kicad.* tools ran in-process inside

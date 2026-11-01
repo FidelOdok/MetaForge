@@ -122,6 +122,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "web.search",
         # Status of a Meshy job: a GET against Meshy, nothing spent or written.
         "meshy.get_task",
+        # Measures an uploaded copy on Zoo's servers; nothing stored or written.
+        "zoo.mass_properties",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
         # FORGE-681: the same, for battery runtime.
@@ -455,6 +457,10 @@ PRODUCING: frozenset[str] = frozenset(
         "meshy.image_to_3d",
         "meshy.refine_texture",
         "meshy.download",
+        # Cloud CAD conversion: writes the converted file(s) under
+        # output/zoo/<operation_id>/ on the adapter workspace.
+        "zoo.convert",
+        "zoo.get_conversion",
     }
 )
 
@@ -582,6 +588,10 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "meshy.refine_texture",
         "meshy.get_task",
         "meshy.download",
+        # Every Zoo call uploads the file to Zoo's API.
+        "zoo.convert",
+        "zoo.get_conversion",
+        "zoo.mass_properties",
     }
 )
 

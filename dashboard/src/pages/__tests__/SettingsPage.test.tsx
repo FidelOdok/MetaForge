@@ -107,6 +107,9 @@ describe('SettingsPage', () => {
     expect(card).toHaveTextContent('Meshy AI');
     expect(card).toHaveTextContent('Not configured');
     expect(card).toHaveTextContent('MESHY_API_KEY');
+    const zoo = screen.getByTestId('cloud-adapter-zoo');
+    expect(zoo).toHaveTextContent('Not configured');
+    expect(zoo).toHaveTextContent('ZOO_API_TOKEN');
   });
 
   it('shows a cloud adapter as connected from the gateway tool list', async () => {

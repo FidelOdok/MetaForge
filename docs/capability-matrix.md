@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (132 across 22 adapters)
+## MCP tools (135 across 23 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -18,12 +18,12 @@ Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-One hundred twenty-five of the 132 are described in the table below. The seven
+One hundred twenty-eight of the 135 are described in the table below. The seven
 that are not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 132 does carry an MCP
+they simply have no row here yet. Every one of the 135 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -1558,6 +1558,9 @@ what the server will actually enforce.
 | `meshy` | `meshy.refine_texture` | Texture a succeeded `text_to_3d` preview; a new task with its own id. Spends credits, so held for approval like `text_to_3d` | unit-verified |
 | `meshy` | `meshy.get_task` | A job's status (`PENDING`, `IN_PROGRESS`, `SUCCEEDED`, `FAILED`, `CANCELED`), progress and available formats, waiting up to `wait_seconds` (max 120) for it to finish. Read-only and open-world, so following a job never asks. A failed job carries Meshy's own reason | unit-verified |
 | `meshy` | `meshy.download` | Write a succeeded job's mesh files to `output/meshy/<task_id>.<format>` on the adapter workspace and return each `file_path`, which `twin.commit_geometry(file_path=..., format=...)` stores as a work product. Meshy's signed URLs expire within days, so this is the step that makes the mesh versioned. Streams to a `.part` file and renames, capped at 200 MB | unit-verified |
+| `zoo` (requires `ZOO_API_TOKEN`) | `zoo.convert` | Upload a workspace file to Zoo's cloud API and write the converted file(s) to `output/zoo/<operation_id>/`. Reads STEP, SolidWorks (`.sldprt`), CATIA, NX, Creo, Inventor, Parasolid, ACIS, STL, OBJ, PLY, FBX and glTF; writes STEP, STL, GLB, glTF, OBJ, PLY or FBX. The input format comes from the suffix or `src_format` (required for `.prt`). Returns a `file_path` for `twin.commit_geometry`. A file over 25 MB is queued and returns an `operation_id`. A mesh converted to STEP is flagged as a faceted solid. Not registered when the token is unset | unit-verified |
+| `zoo` | `zoo.get_conversion` | Follow a queued `zoo.convert` by `operation_id`, waiting up to `wait_seconds` (max 120); writes the files once it completes. A failed conversion carries Zoo's own reason | unit-verified |
+| `zoo` | `zoo.mass_properties` | Volume, surface area, centre of mass and bounding box of a workspace file, plus mass when `material_density` (kg/m^3) is given, all in one `length_unit` (default mm). Read-only and open-world: the file is uploaded, nothing is written. Zoo assumes the file is at true scale, which an STL cannot state | unit-verified |
 
 The KiCad exports (`export_bom`, `export_netlist`, `export_gerber`,
 `export_drill`, `export_pos`) never overwrite. With no output path
@@ -1592,6 +1595,7 @@ returning an empty result.
 | Adapter | Key | Stands in for | Status |
 |---------|-----|---------------|--------|
 | `meshy` | `MESHY_API_KEY` (`MESHY_BASE_URL` optional) | Mesh authoring in Blender / FreeCAD | unit-verified |
+| `zoo` | `ZOO_API_TOKEN` (`ZOO_BASE_URL` optional) | FreeCAD import and export of native CAD; CadQuery / FreeCAD mass properties | unit-verified |
 
 Generation is asynchronous. The usual sequence is `meshy.text_to_3d` (or
 `image_to_3d`), then `meshy.get_task` until `SUCCEEDED`, then
@@ -1599,8 +1603,13 @@ Generation is asynchronous. The usual sequence is `meshy.text_to_3d` (or
 `file_path` and `format`. The dashboard's Settings page lists each cloud
 adapter as connected or not configured, read from the gateway's own
 `GET /v1/harness/tools` list; the key itself is set in the gateway's
-environment, not in the browser. Planned next: Tripo AI and Zoo.dev
-text to CAD, then print quoting and cloud slicing.
+environment, not in the browser.
+
+`zoo.convert` brings a supplier's native part (SolidWorks, CATIA, NX, Creo,
+Inventor, Parasolid) into the twin as STEP, which the FreeCAD container
+cannot read. Zoo's text to CAD is not wrapped: it is served only over its
+Zookeeper copilot WebSocket and returns KCL source, not a STEP file. Planned
+next: Tripo AI, then print quoting and cloud slicing.
 
 ### Chat-harness-native tools (not via the standalone MCP server)
 
