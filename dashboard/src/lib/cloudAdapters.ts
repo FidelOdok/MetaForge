@@ -23,6 +23,27 @@ export const CLOUD_ADAPTERS: CloudAdapter[] = [
     replaces: 'Blender / FreeCAD mesh authoring',
     envVar: 'MESHY_API_KEY',
   },
+  {
+    id: 'zoo',
+    name: 'Zoo',
+    purpose: 'Convert native CAD to STEP / STL / GLB; mass properties',
+    replaces: 'FreeCAD import and export, CadQuery measurements',
+    envVar: 'ZOO_API_TOKEN',
+  },
+  {
+    id: 'tripo',
+    name: 'Tripo AI',
+    purpose: 'Text or image to 3D mesh; convert to STL / 3MF',
+    replaces: 'Blender / FreeCAD mesh authoring',
+    envVar: 'TRIPO_API_KEY',
+  },
+  {
+    id: 'slant3d',
+    name: 'Slant 3D',
+    purpose: 'Print-farm quote for an STL: price, weight, print time',
+    replaces: 'Slicer estimates and manual print quoting',
+    envVar: 'SLANT3D_API_KEY',
+  },
 ];
 
 export interface CloudAdapterStatus extends CloudAdapter {
