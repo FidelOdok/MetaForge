@@ -13,17 +13,19 @@ vi.mock('../../api/endpoints/harness-credentials', () => ({
 }));
 
 import { SettingsPage } from '../SettingsPage';
-import { getHarnessProviders } from '../../api/endpoints/harness';
+import { getHarnessProviders, getHarnessTools } from '../../api/endpoints/harness';
 import { saveProviderKey, selectProviderModel } from '../../api/endpoints/harness-credentials';
 import { GATEWAY_STORAGE_KEY, setGatewayBase } from '../../lib/gatewayConfig';
 
 const mockProviders = vi.mocked(getHarnessProviders);
+const mockTools = vi.mocked(getHarnessTools);
 
 describe('SettingsPage', () => {
   beforeEach(() => {
     setGatewayBase(null);
     localStorage.clear();
     vi.clearAllMocks();
+    mockTools.mockResolvedValue([]);
     mockProviders.mockResolvedValue({
       activeProvider: 'openai',
       activeModel: 'gpt-5.5',
@@ -97,5 +99,25 @@ describe('SettingsPage', () => {
     expect(
       await screen.findByText(/Connect your gateway above to load its registered providers/),
     ).toBeInTheDocument();
+  });
+
+  it('shows a cloud adapter as not configured when the gateway has none of its tools', async () => {
+    render(<SettingsPage />);
+    const card = await screen.findByTestId('cloud-adapter-meshy');
+    expect(card).toHaveTextContent('Meshy AI');
+    expect(card).toHaveTextContent('Not configured');
+    expect(card).toHaveTextContent('MESHY_API_KEY');
+  });
+
+  it('shows a cloud adapter as connected from the gateway tool list', async () => {
+    mockTools.mockResolvedValue([
+      { id: 'meshy.text_to_3d', name: 'Meshy Text to 3D', server: 'meshy', capability: null },
+      { id: 'meshy.get_task', name: 'Meshy Task Status', server: 'meshy', capability: null },
+      { id: 'web.search', name: 'Web Search', server: 'web', capability: null },
+    ]);
+    render(<SettingsPage />);
+    const card = await screen.findByTestId('cloud-adapter-meshy');
+    await waitFor(() => expect(card).toHaveTextContent('Connected · 2 tools'));
+    expect(card).not.toHaveTextContent('MESHY_API_KEY');
   });
 });

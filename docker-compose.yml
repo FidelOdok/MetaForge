@@ -146,6 +146,9 @@ services:
       # keys above: without this, web.search / web.fetch are not registered
       # at all rather than registered-but-always-empty.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      # Cloud adapters: an API key in place of a local tool container.
+      # Unset, meshy.* is not registered.
+      - MESHY_API_KEY=${MESHY_API_KEY:-}
     volumes:
       # Read-write (MET-612): boolean-cut staging writes input STEP files here
       # for the adapter containers to read by the same absolute path.
@@ -552,6 +555,8 @@ services:
       # sidecar never did, so the web adapter always skipped with
       # "missing env vars: BRAVE_API_KEY" here regardless of .env.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      # Cloud adapters, same passthrough as the gateway above.
+      - MESHY_API_KEY=${MESHY_API_KEY:-}
       - METAFORGE_ADAPTER_CADQUERY_URL=http://cadquery-adapter:8101
       - METAFORGE_ADAPTER_FREECAD_URL=http://freecad-adapter:8102
       # MET-478 follow-up: without this, kicad.* tools ran in-process inside

@@ -181,6 +181,8 @@ _RUNTIME_INJECTED_ADAPTER_IDS = frozenset(
     | {"farnell", "arrow"}
     | {"component", "offer_resolver"}
     | {"web"}
+    # Cloud adapters: an API key in place of a local tool container.
+    | {"meshy"}
     # FORGE-544: in-process, no container, no credentials.
     | {"power"}
     # FORGE-451: the machine library, injected by the gateway or the sidecar.
@@ -1191,6 +1193,39 @@ async def bootstrap_tool_registry(
                 reason=(
                     "not in adapter_ids"
                     if adapter_ids and "web" not in adapter_ids
+                    else "disabled via config"
+                ),
+            )
+
+        # ----- Meshy cloud mesh adapter -----
+        # The first cloud adapter: text or image to mesh on Meshy's servers,
+        # so a hosted gateway without the CAD containers can still produce a
+        # printable mesh. Same skip-when-unset contract as web search: a tool
+        # that can only fail with "no key" is not offered at all.
+        if _is_adapter_enabled("meshy") and (not adapter_ids or "meshy" in adapter_ids):
+            if os.environ.get("MESHY_API_KEY"):
+                try:
+                    from tool_registry.tools.meshy.client import MeshyClient
+                    from tool_registry.tools.meshy.mcp_adapter import MeshyMcpServer
+
+                    server = MeshyMcpServer(client=MeshyClient())
+                    await registry.register_adapter(server)
+                    registered.append("meshy")
+                    logger.info("meshy_mcp_adapter_registered")
+                except Exception as exc:
+                    logger.error("meshy_mcp_adapter_failed", error=str(exc))
+                    span.record_exception(exc)
+                    failed.append("meshy")
+            else:
+                skipped.append("meshy")
+                logger.info("meshy_mcp_adapter_skipped", reason="missing env vars: MESHY_API_KEY")
+        else:
+            skipped.append("meshy")
+            logger.info(
+                "meshy_mcp_adapter_skipped",
+                reason=(
+                    "not in adapter_ids"
+                    if adapter_ids and "meshy" not in adapter_ids
                     else "disabled via config"
                 ),
             )

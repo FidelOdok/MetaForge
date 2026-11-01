@@ -120,6 +120,8 @@ READ_ONLY: frozenset[str] = frozenset(
         "memory.retrieve_similar_experience",
         "web.fetch",
         "web.search",
+        # Status of a Meshy job: a GET against Meshy, nothing spent or written.
+        "meshy.get_task",
         # FORGE-544: arithmetic over the arguments; reads and writes nothing.
         "power.check_budget",
         # FORGE-681: the same, for battery runtime.
@@ -445,6 +447,14 @@ PRODUCING: frozenset[str] = frozenset(
         "gazebo.run_simulation",
         "isaac_sim.render_scene",
         "isaac_sim.run_physics",
+        # Cloud mesh jobs. Each create spends the account's Meshy credits, so
+        # it is a write held for approval; it adds a remote job and changes
+        # nothing that exists. The download writes a new file per task id
+        # under output/meshy/ on the adapter workspace.
+        "meshy.text_to_3d",
+        "meshy.image_to_3d",
+        "meshy.refine_texture",
+        "meshy.download",
     }
 )
 
@@ -566,6 +576,12 @@ OPEN_WORLD: frozenset[str] = frozenset(
         "simready.search",
         "simready.inspect",
         "simready.import",
+        # Every Meshy call reaches Meshy's API or its file host.
+        "meshy.text_to_3d",
+        "meshy.image_to_3d",
+        "meshy.refine_texture",
+        "meshy.get_task",
+        "meshy.download",
     }
 )
 

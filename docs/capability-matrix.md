@@ -8,7 +8,7 @@ If you want a feature: search this page first. If it's missing, it's
 either Phase 2/3 (see [`roadmap.md`](roadmap.md)) or genuinely not on
 the roadmap — file an issue.
 
-## MCP tools (127 across 21 adapters)
+## MCP tools (132 across 22 adapters)
 
 The standalone MCP server (`python -m metaforge.mcp --transport stdio`)
 loads adapters listed in the `METAFORGE_ADAPTERS` env var. Default is
@@ -18,12 +18,12 @@ Isaac Sim are opt-in;
 `project`, `memory`, and `session` are runtime-injected (registered
 when the gateway supplies their backend).
 
-One hundred twenty of the 127 are described in the table below. The seven
+One hundred twenty-five of the 132 are described in the table below. The seven
 that are not yet — `cadquery.validate_physics_stability`, `twin.propose_change`
 and the five `twin.commit_*` document tools
 (`compliance_checklist`, `design_sketch`, `hazard_analysis`,
 `procurement_record`, `technical_drawing`) — are registered and callable;
-they simply have no row here yet. Every one of the 127 does carry an MCP
+they simply have no row here yet. Every one of the 132 does carry an MCP
 annotation (see below), because that set is checked against the registry
 by a test rather than maintained by hand.
 
@@ -1553,6 +1553,11 @@ what the server will actually enforce.
 | `offer_resolver` (injected, no required backend) | `distributors.resolve_offers` | Fan out to whichever of Digi-Key/Mouser/Nexar/Farnell/Arrow are configured, per MPN: quantity-aware price-tier selection, MOQ-forced overbuy, stock sufficiency (never just `stock>0`), deadline-vs-cost ranking. Registers even with zero distributor credentials; "no offers found" is a normal result, not an error. There is no FX-rate source in this layer, so offers spanning more than one currency are flagged via `currency_mismatch` rather than compared as if same-currency: a caller must check each offer's own `currency` before trusting cross-offer cost ranking | live-verified (fidel-dev) |
 | `web` (requires `BRAVE_API_KEY`) | `web.search` | Ranked public-web results (title/url/snippet) via the Brave Search API — current datasheets, standards, vendor docs, errata. Not registered at all when the key is unset, so an agent never sees a tool that cannot work. A rate-limit or API failure **raises** rather than returning an empty list, so the agent can't report "no results found" for a query that was never answered; 429s are retried with backoff first | live-verified |
 | `web` | `web.fetch` | Fetch one public http(s) URL as readable text — **HTML and PDF** (datasheets, app notes, reference manuals). SSRF-guarded: private/loopback/link-local hosts refused on the initial URL **and every redirect hop**; http/https + ports 80/443 only. HTML capped at 2 MB; a PDF is read up to `max_pages` (default 30) and says so in-band when later pages were skipped, is never byte-truncated (that corrupts the xref table), and an oversize/scanned/encrypted PDF is refused with the reason. Content is returned inside an explicit untrusted-data fence. Pair with `knowledge.ingest` (`source_path=<url>`) to keep a source. A site that turns automated readers away is reported as such, not as a bare transport error: the error names the host, how it refused (a Cloudflare or Akamai challenge, no answer within the timeout, a dropped connection) and the sources that work instead (`digikey.get_product` / `mouser.get_product` for part data and a datasheet link, `knowledge.search`, or a person's own download added with `knowledge.ingest`). Measured from the sandbox: DigiKey's product pages answer 403 with a Cloudflare challenge, and www.st.com and mouser.com datasheet links never answer. web.fetch identifies itself honestly and does not try to get past either | live-verified |
+| `meshy` (requires `MESHY_API_KEY`) | `meshy.text_to_3d` | Start a Meshy AI cloud job that turns a text prompt into an untextured mesh (GLB, STL, 3MF, OBJ, FBX, USDZ). Returns a `task_id` at once. Spends Meshy credits, so it is a producing write held for approval. A mesh is triangles, not parametric CAD: the description steers dimensioned parts to `cadquery.*` / `freecad.*`. Not registered when the key is unset | unit-verified |
+| `meshy` | `meshy.image_to_3d` | Same, from one reference image given as a public `https://` URL or a `data:image/...` URI (Meshy fetches it itself, so a local path is refused before any call) | unit-verified |
+| `meshy` | `meshy.refine_texture` | Texture a succeeded `text_to_3d` preview; a new task with its own id. Spends credits | unit-verified |
+| `meshy` | `meshy.get_task` | A job's status (`PENDING`, `IN_PROGRESS`, `SUCCEEDED`, `FAILED`, `CANCELED`), progress and available formats, waiting up to `wait_seconds` (max 120) for it to finish. Read-only and open-world, so following a job never asks. A failed job carries Meshy's own reason | unit-verified |
+| `meshy` | `meshy.download` | Write a succeeded job's mesh files to `output/meshy/<task_id>.<format>` on the adapter workspace and return each `file_path`, which `twin.commit_geometry(file_path=..., format=...)` stores as a work product. Meshy's signed URLs expire within days, so this is the step that makes the mesh versioned. Streams to a `.part` file and renames, capped at 200 MB | unit-verified |
 
 The KiCad exports (`export_bom`, `export_netlist`, `export_gerber`,
 `export_drill`, `export_pos`) never overwrite. With no output path
@@ -1574,6 +1579,28 @@ three-layer model and install.
 
 See [`integrations/claude-code.md`](integrations/claude-code.md) for
 how to drive these from Claude Code.
+
+### Cloud adapters
+
+A cloud adapter is an API service that does work a local tool container
+would otherwise do, so a hosted gateway with no CAD containers can still
+produce it. Each one runs in-process in the gateway (and the MCP sidecar),
+needs only an API key, and follows the `web` contract: with no key its
+tools are not registered at all, and a failed call raises rather than
+returning an empty result.
+
+| Adapter | Key | Stands in for | Status |
+|---------|-----|---------------|--------|
+| `meshy` | `MESHY_API_KEY` (`MESHY_BASE_URL` optional) | Mesh authoring in Blender / FreeCAD | unit-verified |
+
+Generation is asynchronous. The usual sequence is `meshy.text_to_3d` (or
+`image_to_3d`), then `meshy.get_task` until `SUCCEEDED`, then
+`meshy.download`, then `twin.commit_geometry` with the returned
+`file_path` and `format`. The dashboard's Settings page lists each cloud
+adapter as connected or not configured, read from the gateway's own
+`GET /v1/harness/tools` list; the key itself is set in the gateway's
+environment, not in the browser. Planned next: Tripo AI and Zoo.dev
+text to CAD, then print quoting and cloud slicing.
 
 ### Chat-harness-native tools (not via the standalone MCP server)
 
